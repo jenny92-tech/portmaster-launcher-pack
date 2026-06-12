@@ -1,0 +1,18 @@
+# Build outputs
+build/
+dist/
+output/
+*.pck.bak
+.cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+.claude/
+__pycache__/
+*.pyc
+
+# Local artifacts that shouldn't ship
+.env
+.env.local
