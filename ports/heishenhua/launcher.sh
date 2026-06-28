@@ -34,7 +34,7 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-# ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.6) ═══════════════
+# ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.x) ═══════════════
 # bootstrap.pck 是 Godot 3 格式,必须用 frt(godot4 读不了它)→ find_godot_binary frt3。
 # frt 走 PortMaster TrimUI godot 3 标准模式:gptokeyb + hacksdl SDL2 shim,
 # 需要 $GAMEDIR/heishenhua.gptk + $GAMEDIR/hacksdl/hacksdl.aarch64.so。

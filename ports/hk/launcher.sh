@@ -36,7 +36,7 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-# ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.6) ═══════════════
+# ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.x) ═══════════════
 # bootstrap.pck 是 Godot 3 格式 (与 heishenhua 统一; Godot 4 在 MiniLoong 上起不来)。
 # frt 走 PortMaster TrimUI godot 3 标准模式:gptokeyb + hacksdl SDL2 shim,
 # 需要 $GAMEDIR/hollowknight.gptk + $GAMEDIR/hacksdl/hacksdl.aarch64.so。
