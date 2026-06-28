@@ -19,14 +19,15 @@
 # Arg $1 = which godot generation the port's bootstrap.pck needs:
 #   "godot4" (default) → tier 1 local godot.mono/godot, then tier 2 PortMaster
 #                        godot_4.x squashfs. (HK: Godot-4 pck.)
-#   "frt3"             → tier 3 PortMaster frt_3.6 squashfs only.
-#                        (heishenhua: Godot-3 pck — picking a godot4 binary
-#                        would fail to load it, so frt3 is forced.)
-# Sets GODOT_BIN, GODOT_KIND ("godot4_local"|"godot4_squash"|"frt3"|"") and
-# GODOT_RT_DIR if a squashfs got mounted. Returns 1 if nothing usable. ────
+#   "frt3"             → tier 3 PortMaster frt_3.* squashfs (highest 3.x).
+#                        (hk + heishenhua: Godot-3 pck — picking a godot4
+#                        binary would fail to load it, so frt3 is forced.)
+# Sets GODOT_BIN, GODOT_KIND ("godot4_local"|"godot4_squash"|"frt3"|""),
+# GODOT_FRT_NAME (the chosen frt binary basename, frt3 only) and GODOT_RT_DIR
+# if a squashfs got mounted. Returns 1 if nothing usable. ────
 find_godot_binary() {
   local want="${1:-godot4}"
-  GODOT_BIN=""; GODOT_KIND=""; GODOT_RT_DIR=""
+  GODOT_BIN=""; GODOT_KIND=""; GODOT_RT_DIR=""; GODOT_FRT_NAME=""
 
   if [ "$want" = "godot4" ]; then
     # Tier 1: port-local godot.mono / godot (godot 4 SDL2 fork, ~60 MB)
@@ -55,15 +56,21 @@ find_godot_binary() {
   fi
 
   if [ "$want" = "frt3" ]; then
-    # Tier 3: PortMaster libs/frt_3.6.squashfs (Godot 3.5 frt fork — KMS
-    # handhelds; needs gptokeyb + hacksdl for input)
-    if [ -f "$controlfolder/libs/frt_3.6.squashfs" ]; then
+    # Tier 3: PortMaster libs/frt_3.*.squashfs (Godot 3.x frt fork — KMS
+    # handhelds; needs gptokeyb + hacksdl for input). Pick the highest 3.x by
+    # version. Our bootstrap.pck is PCK format v1 (Godot 3), readable by ANY
+    # frt_3.x but NOT frt_4.x (format v3) — so the glob is pinned to 3.* and
+    # the binary name (e.g. frt_3.6) is derived from whichever squashfs won.
+    local squash
+    squash=$(ls "$controlfolder/libs"/frt_3.*.squashfs 2>/dev/null | sort -V | tail -1)
+    if [ -n "$squash" ]; then
+      GODOT_FRT_NAME="$(basename "$squash" .squashfs)"   # e.g. frt_3.6
       GODOT_RT_DIR="$HOME/godot"
       $ESUDO mkdir -p "$GODOT_RT_DIR"
       $ESUDO umount "$GODOT_RT_DIR" 2>/dev/null
-      $ESUDO mount "$controlfolder/libs/frt_3.6.squashfs" "$GODOT_RT_DIR"
-      GODOT_BIN="$GODOT_RT_DIR/frt_3.6"; GODOT_KIND="frt3"
-      echo "$LOG_PREFIX frt 3.6: $GODOT_BIN"
+      $ESUDO mount "$squash" "$GODOT_RT_DIR"
+      GODOT_BIN="$GODOT_RT_DIR/$GODOT_FRT_NAME"; GODOT_KIND="frt3"
+      echo "$LOG_PREFIX $GODOT_FRT_NAME: $GODOT_BIN"
       return 0
     fi
   fi
@@ -96,9 +103,9 @@ run_godot_launcher() {
       # ship $GAMEDIR/hacksdl/hacksdl.aarch64.so + $GAMEDIR/${PORT_NAME}.gptk.
       export FRT_NO_EXIT_SHORTCUTS=FRT_NO_EXIT_SHORTCUTS
       export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
-      $GPTOKEYB "frt_3.6" -c "$GAMEDIR/${PORT_NAME}.gptk" &
+      $GPTOKEYB "$GODOT_FRT_NAME" -c "$GAMEDIR/${PORT_NAME}.gptk" &
       local gptokeyb_pid=$!
-      pm_platform_helper "frt_3.6"
+      pm_platform_helper "$GODOT_FRT_NAME"
       LD_PRELOAD="$GAMEDIR/hacksdl/hacksdl.aarch64.so" HACKSDL_DEVICE_DISABLE_0=2 \
       XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
       GODOT_SILENCE_ROOT_WARNING=1 \
