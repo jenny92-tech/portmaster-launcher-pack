@@ -16,3 +16,6 @@ __pycache__/
 # Local artifacts that shouldn't ship
 .env
 .env.local
+
+/pocs
+/external

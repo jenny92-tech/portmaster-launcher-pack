@@ -1,0 +1,18 @@
+{
+  "name": "heishenhua",
+  "title": "Wukong pixel edition",
+  "engine": "Unity 2021.3 (IL2CPP)",
+  "runtime": "Bogodroid unityloader",
+  "godot_launcher": "3.5.2 (frt + hacksdl + gptokeyb)",
+  "devices": ["TrimUI Smart Pro/Brick"],
+  "language": ["zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "bootstrap_pck": "manifest.bootstrap.json",
+  "launcher_sh": "launcher.sh",
+  "gptk": "heishenhua.gptk",
+  "depends_on": [
+    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "PortMaster libs/frt_3.6.squashfs",
+    "PortMaster libs/hacksdl.aarch64.so"
+  ]
+}
