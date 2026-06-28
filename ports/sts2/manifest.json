@@ -1,0 +1,18 @@
+{
+  "name": "sts2",
+  "title": "Slay the Spire 2 (杀戮尖塔 2)",
+  "engine": "C# Godot 4.5 (mono)",
+  "runtime": "godot-sdl2 fork + Harmony patcher",
+  "godot_launcher": "4.5.1 (godot.mono SDL2 fork, bundled)",
+  "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
+  "language": ["en", "zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "bootstrap_pck": "scripts/make-bootstrap-pck.py",
+  "launcher_sh": "linux/launcher.sh",
+  "gptk": null,
+  "depends_on": [
+    "https://github.com/jenny92-tech/godot/tree/linuxbsd-sdl2",
+    "https://github.com/pardeike/Harmony"
+  ],
+  "notes": "Self-contained: ships its own godot.mono SDL2 fork (~60 MB). Has its own scripts/ for pck building because of overlay pck (Harmony assembly swap) — not yet ported to _kit/pck_builder.py."
+}

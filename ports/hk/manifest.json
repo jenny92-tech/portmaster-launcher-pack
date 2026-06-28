@@ -1,0 +1,18 @@
+{
+  "name": "hk",
+  "title": "Hollow Knight",
+  "engine": "Unity 2020 (Mono)",
+  "runtime": "Bogodroid unityloader",
+  "godot_launcher": "3.5.2 (frt + hacksdl + gptokeyb)",
+  "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
+  "language": ["en", "zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "bootstrap_pck": "manifest.bootstrap.json",
+  "launcher_sh": "launcher.sh",
+  "gptk": "hollowknight.gptk",
+  "depends_on": [
+    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "PortMaster libs/frt_3.6.squashfs",
+    "PortMaster libs/hacksdl.aarch64.so"
+  ]
+}
