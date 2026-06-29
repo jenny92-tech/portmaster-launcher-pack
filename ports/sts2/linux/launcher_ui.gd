@@ -60,7 +60,13 @@ const STRINGS := {
 	"on":               {"en": "On",                "zh": "开"},
 	"english":          {"en": "English",           "zh": "英文"},
 	"chinese":          {"en": "Chinese",           "zh": "中文"},
+	"title":            {"en": "STS2 Linux Launcher", "zh": "杀戮尖塔2 启动器"},
+	"credit_dev":       {"en": "Developer",         "zh": "游戏作者"},
+	"credit_porter":    {"en": "Porter",            "zh": "移植作者"},
 }
+
+# 署名: [翻译键, 固定名(专有名词不翻)]; 切语言只换前面的标签。
+const CREDITS := [["credit_dev", "Mega Crit"], ["credit_porter", "Bili 解腻Jenny"]]
 
 func _t(key: String) -> String:
 	var pair: Dictionary = STRINGS.get(key, {})
@@ -73,6 +79,7 @@ var _swapxy_button:  Button
 var _first_focus:    Control
 var _center:         CenterContainer
 var _ui_lang_button: Button
+var _credits:        VBoxContainer
 
 
 func _ready() -> void:
@@ -106,23 +113,9 @@ func _ready() -> void:
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(overlay)
 
-	# 左下角署名 (原工作室 + 移植作者) — 与 heishenhua 启动器同款样式
-	var credits := VBoxContainer.new()
-	credits.add_theme_constant_override("separation", 2)
-	credits.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for line in ["游戏作者: Mega Crit", "移植作者: Bili 解腻Jenny"]:
-		var lbl := Label.new()
-		lbl.text = line
-		lbl.add_theme_font_size_override("font_size", 24)
-		lbl.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
-		_apply_outline(lbl, 3)
-		credits.add_child(lbl)
-	credits.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	credits.offset_left = 18
-	credits.offset_top = -64
-	credits.offset_right = 560
-	credits.offset_bottom = -14
-	add_child(credits)
+	# 左下角署名 (标签双语, 作者名按原文保留)。
+	_credits = _build_credits()
+	add_child(_credits)
 
 	_center = CenterContainer.new()
 	_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -153,7 +146,7 @@ func _build_layout() -> VBoxContainer:
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 10)
 
-	box.add_child(_make_title("STS2 Linux Launcher"))
+	box.add_child(_make_title(_t("title")))
 	box.add_child(_make_subtitle(_t("detected") % [
 		DisplayServer.window_get_size().x, DisplayServer.window_get_size().y]))
 	box.add_child(_make_separator())
@@ -324,6 +317,36 @@ func _make_separator() -> HSeparator:
 	return sep
 
 
+# 左下角署名容器: 文本由 _refresh_credits 按当前语言填。
+func _build_credits() -> VBoxContainer:
+	var c := VBoxContainer.new()
+	c.add_theme_constant_override("separation", 2)
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for entry in CREDITS:
+		var lbl := Label.new()
+		lbl.add_theme_font_size_override("font_size", 24)
+		lbl.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+		_apply_outline(lbl, 3)
+		c.add_child(lbl)
+	c.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	c.offset_left = 18
+	c.offset_top = -64
+	c.offset_right = 560
+	c.offset_bottom = -14
+	_credits = c
+	_refresh_credits()
+	return c
+
+
+# 切语言时只更新署名标签文本 (容器留在原位)。
+func _refresh_credits() -> void:
+	if not is_instance_valid(_credits):
+		return
+	var kids := _credits.get_children()
+	for i in range(CREDITS.size()):
+		kids[i].text = _t(CREDITS[i][0]) + ": " + CREDITS[i][1]
+
+
 func _install_font() -> void:
 	var path := "res://launcher_font_zh.ttf"
 	if not FileAccess.file_exists(path):
@@ -343,6 +366,7 @@ func _on_ui_lang_toggle() -> void:
 	for child in _center.get_children():
 		child.queue_free()
 	_center.add_child(_build_layout())
+	_refresh_credits()
 	call_deferred("_grab_lang_toggle_focus")
 
 
