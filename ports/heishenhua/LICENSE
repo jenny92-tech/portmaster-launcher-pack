@@ -1,0 +1,72 @@
+像素黑神话 Launcher — License
+
+Copyright (c) 2026 jenny92-tech <jennyliu90223@gmail.com>
+
+The contents of this launcher are licensed under
+
+  Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+  (CC BY-NC-SA 4.0)
+
+You are free to:
+
+  - Share — copy and redistribute the material in any medium or format
+  - Adapt — remix, transform, and build upon the material
+
+Under the following terms:
+
+  - Attribution. You must give appropriate credit to
+      jenny92-tech (Bili 解腻Jenny) — PortMaster launcher
+      https://github.com/jenny92-tech/portmaster-launcher-pack
+    Credit must be visible in any derivative work or distribution
+    (README, About screen, splash credits, or equivalent). Removing or
+    obscuring the launcher's on-screen credits is not permitted.
+
+  - NonCommercial. You may not use the material for commercial purposes.
+    "Commercial purposes" include, but are not limited to: selling the
+    software, including it in a paid product or service, charging for
+    access, bundling with a commercial game distribution, or monetising
+    via advertising tied to its functionality.
+
+  - ShareAlike. If you remix, transform, or build upon the material, you
+    must distribute your contributions under the same license
+    (CC BY-NC-SA 4.0) or a compatible license.
+
+  - No additional restrictions. You may not apply legal terms or
+    technological measures that legally restrict others from doing
+    anything the license permits.
+
+Notices:
+
+  - The full legal text of CC BY-NC-SA 4.0 lives at
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+  - This license attaches only to original code, assets, build scripts,
+    and documentation contributed to this launcher by jenny92-tech (and
+    any future contributors who choose to license under the same terms).
+    Third-party components (frt, gptokeyb, hacksdl, fonts, the Bogodroid
+    unityloader, etc.) retain their own respective licenses; see their
+    upstream projects.
+
+────────────────────────────────────────────────────────────────────────
+
+IMPORTANT SEPARATE NOTICE — Game files are NOT covered
+
+This license grants NO rights whatsoever to the underlying game
+"黑神话悟空 像素版" (the pixel Black Myth: Wukong fan game) or to any of
+its code, assemblies, art assets, audio data, fonts, scripts,
+configuration, or compiled resource packs. The game is the original work
+of its authors and is not affiliated with this project:
+
+      游戏原作者 (game):  bili 火山哥哥
+      字体原作者 (font):  bili 林学学LinkLin
+
+All rights to the game and its assets remain with their respective
+authors.
+
+This launcher reads files from a user-supplied copy of the game at
+runtime; it does not contain, embed, or distribute any of the game's
+material. Redistribution of the game's files — including but not limited
+to libil2cpp.so, global-metadata.dat, data.unity3d, or any modified
+versions of the above — is NOT authorised by this license. Please
+respect the original authors' wishes and obtain the game from them
+directly.
