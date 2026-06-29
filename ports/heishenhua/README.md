@@ -44,7 +44,7 @@ pyftsubset 子集到 launcher 用得到的 129 个 codepoint, 16 KB。
 ```
 游戏原作者: bili 火山哥哥
 字体原作者: bili 林学学LinkLin
-移植作者:    bili 解腻解腻9
+移植作者:    bili 解腻Jenny
 ```
 
 作者名按原文保留, 不翻译。

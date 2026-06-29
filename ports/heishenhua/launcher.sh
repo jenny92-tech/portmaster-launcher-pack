@@ -67,9 +67,10 @@ if [ -f "$HSH_ENV" ]; then
   # 重建 wsm.toml 末尾的 [ui_layout] + [[il2cpp_patch]] (幂等: 先删到尾再追加)
   sed -i -e '/^\[ui_layout\]/,$d' -e '/^\[\[il2cpp_patch\]\]/,$d' "$GAMEDIR/wsm.toml"
 
-  # 隐藏安卓虚拟触摸键 (暂停/棍花/重攻击/跳跃/轻攻击/闪避); 喝酒挪到重攻击(重击)空位; 显示类保留
-  printf '\n[ui_layout]\nclass = "UI_InGame_Main"\nmethod = "Start"\nhide = [0xB8, 0xC0, 0xC8, 0xD8, 0xE0, 0xE8]\nmove_from = 0xC8\nmove_to = 0xD0\nright_margin = 70\n' >> "$GAMEDIR/wsm.toml"
-  echo "$LOG_PREFIX ui_layout: 隐藏触摸键 + 喝酒→重击位"
+  # 隐藏安卓虚拟触摸键 (暂停/棍花/重攻击/跳跃/轻攻击/闪避/电话/AK); 喝酒(葫芦)挪到重攻击(重击)空位贴右
+  # 注:精魄未解锁时游戏(F_设置技能的显示)自动隐藏其按钮,hook 单 move 名额给葫芦贴右。
+  printf '\n[ui_layout]\nclass = "UI_InGame_Main"\nmethod = "Start"\nhide = [0xB8, 0xC0, 0xC8, 0xD8, 0xE0, 0xE8, 0xF8, 0x100]\nmove_from = 0xC8\nmove_to = 0xD0\nright_margin = 70\n' >> "$GAMEDIR/wsm.toml"
+  echo "$LOG_PREFIX ui_layout: 隐藏触摸键(含电话/AK) + 喝酒→重击位"
 
   # 减伤: 承伤倍率 =(100-减伤%)/100; 1.0(正常)不写
   case "$HSH_DMG" in
