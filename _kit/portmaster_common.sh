@@ -37,15 +37,16 @@ audio_setup() {
   elif command -v pulseaudio >/dev/null 2>&1; then
     pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1
     sleep 1
-    if ! pactl list short sinks 2>/dev/null | grep -qv auto_null; then
-      pactl load-module module-alsa-sink device=default tsched=0 >/dev/null 2>&1
-      local sink
-      sink=$(pactl list short sinks 2>/dev/null | grep -v auto_null | head -1 | awk '{print $2}')
-      [ -n "$sink" ] && pactl set-default-sink "$sink" >/dev/null 2>&1
-      echo "$LOG_PREFIX pulse -> ALSA default ($sink)"
-    fi
   else
     echo "$LOG_PREFIX no pulseaudio on this CFW — direct ALSA (double-open may hang)"
+  fi
+
+  if command -v pactl >/dev/null 2>&1 && ! pactl list short sinks 2>/dev/null | grep -qv auto_null; then
+    pactl load-module module-alsa-sink device=default tsched=0 >/dev/null 2>&1
+    local sink
+    sink=$(pactl list short sinks 2>/dev/null | grep -v auto_null | head -1 | awk '{print $2}')
+    [ -n "$sink" ] && pactl set-default-sink "$sink" >/dev/null 2>&1
+    echo "$LOG_PREFIX pulse -> ALSA default ($sink)"
   fi
 }
 
