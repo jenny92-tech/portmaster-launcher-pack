@@ -1,0 +1,17 @@
+{
+  "name": "vampiresurvivors114",
+  "title": "Vampire Survivors 1.14.111",
+  "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
+  "runtime": "Bogodroid unityloader",
+  "godot_launcher": null,
+  "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
+  "language": ["en", "zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "bootstrap_pck": null,
+  "launcher_sh": "launcher.sh",
+  "gptk": null,
+  "depends_on": [
+    "https://github.com/jenny92-tech/Bogodroid (unityloader)"
+  ],
+  "notes": "Direct Unity launch. gptokeyb is intentionally disabled for the game stage so BUTTON_A/B reach Unity as Android gamepad keycodes."
+}

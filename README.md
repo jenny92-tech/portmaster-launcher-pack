@@ -12,6 +12,7 @@ to env vars and the wrapper `sh` patches the game's config and starts it.
 |---|---|---|---|---|
 | [`hk`](ports/hk) | Hollow Knight | Unity 2020 Mono | Godot 4.5 | TrimUI, MiniLoong |
 | [`heishenhua`](ports/heishenhua) | Wukong pixel edition | Unity 2021.3 IL2CPP | Godot 3.5 (frt) | TrimUI |
+| [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | Optional Godot 3/frt | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | Godot 4.5 (mono, bundled) | TrimUI, MiniLoong |
 
 All ports build their `bootstrap.pck` from `manifest.bootstrap.json` via the
