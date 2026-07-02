@@ -156,7 +156,7 @@ run_launcher_ui
 VS_ENV="$CONFDIR/godot/app_userdata/Vampire Survivors Launcher/launch_config.env"
 if [ -f "$VS_ENV" ]; then
   source "$VS_ENV"
-  echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} texmax=$VS_TEXMAX swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
+  echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
 
   if [ "$VS_WIDTH" = "auto" ]; then
     VS_WIDTH="$DISPLAY_WIDTH"; VS_HEIGHT="$DISPLAY_HEIGHT"
@@ -169,10 +169,6 @@ if [ -f "$VS_ENV" ]; then
       sed -i "s/^displayHeight=.*/displayHeight=${VS_HEIGHT}/" "$GAMEDIR/vs.toml"
       ;;
   esac
-  case "$VS_TEXMAX" in
-    0|512|768|1024) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${VS_TEXMAX}/" "$GAMEDIR/vs.toml" ;;
-  esac
-
   if [ "$VS_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$VS_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
   apply_button_remap "$GAMEDIR/vs.toml" "$A_V" "$B_V" "$X_V" "$Y_V"
@@ -188,6 +184,7 @@ fi
 sed -i "s/^glVersionOverride.*/glVersionOverride        = \"OpenGL ES 3.2 Bogodroid\"/" "$GAMEDIR/vs.toml"
 sed -i "s/^glMajorVersionOverride.*/glMajorVersionOverride   = 3/" "$GAMEDIR/vs.toml"
 sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 2/" "$GAMEDIR/vs.toml"
+sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$GAMEDIR/vs.toml"
 
 # ── 库路径 + 1GB 掌机 glibc 内存收敛 ─────────────────────────────────────
 export XDG_DATA_HOME="$CONFDIR" XDG_CONFIG_HOME="$CONFDIR"

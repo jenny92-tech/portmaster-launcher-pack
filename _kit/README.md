@@ -47,7 +47,7 @@ if find_godot_binary frt3 && [ -f "$GAMEDIR/bootstrap.pck" ]; then
 fi
 
 # ── STAGE 2: patch toml from launcher choices (per-port) + run ──
-# ... sed displayWidth/Height/textureMaxDim; apply_button_remap "$GAMEDIR/x.toml" ...
+# ... sed displayWidth/Height; apply_button_remap "$GAMEDIR/x.toml" ...
 run_unity_game x.toml
 ```
 

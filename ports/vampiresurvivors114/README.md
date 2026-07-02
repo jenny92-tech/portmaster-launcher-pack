@@ -104,6 +104,9 @@ If the UI payload is absent, the script starts with the current `vs.toml`.
 The game stage intentionally does not run `gptokeyb`; Unity receives the
 handheld buttons as Android gamepad events.
 
+The launcher always resets `textureMaxDim` to `0`. This game uses offline asset
+compression instead; runtime texture downscaling changes the apparent viewport.
+
 ## Resource Compression
 
 Do not use `textureMaxDim` as the normal optimization path for this game. It can
