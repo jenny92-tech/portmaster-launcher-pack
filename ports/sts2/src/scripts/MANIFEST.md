@@ -1,46 +1,42 @@
 # Launcher Pack Manifest
 
 This is the file inventory shipped in a stock launcher pack
-(`dist/sts2-linux-launcher-<date>.zip`). Categorized by source and
+(`dist-sts2-<date>.zip`). Categorized by source and
 license posture so anyone can verify what's distributable.
 
-The pack assembles via `./scripts/assemble-launcher-pack.sh`.
+The pack assembles via `src/scripts/assemble-launcher-pack.sh`.
 
 ## Layout
 
 ```
-sts2-linux-launcher/
-├── Roms/
-│   └── PORTS/
-│       └── Slay the Spire 2.sh              [our] launcher.sh
-└── ports/
-    └── sts2/
-        ├── godot.mono                          [our fork CI]
-        ├── bootstrap.pck                       [our build]
-        ├── port_compat.pck                     [our build]
-        ├── libsteam_api64.so                   [our stub]
-        ├── input_remap.cfg                     [our template]
-        ├── data_sts2_linuxbsd_arm64/
-        │   ├── sts2_compat.dll                 [our build]
-        │   ├── sts2.runtimeconfig.json         [our template]
-        │   ├── GodotSharp.dll                  [our fork CI]
-        │   ├── 0Harmony.dll                    [NuGet MIT]
-        │   ├── System.Private.CoreLib.dll      [Microsoft .NET 9 BCL]
-        │   ├── ... (~100 System.*.dll + *.so)  [Microsoft .NET 9 BCL]
-        │   ├── Microsoft.CSharp.dll            [Microsoft .NET 9 BCL]
-        │   ├── ... (~5 Microsoft.*.dll)        [Microsoft .NET 9 BCL]
-        │   ├── mscorlib.dll / netstandard.dll  [Microsoft .NET 9 BCL]
-        │   ├── WindowsBase.dll                 [Microsoft .NET 9 BCL]
-        │   └── System.IO.Hashing.dll           [NuGet MIT, ships with .NET 9]
-        ├── addons/
-        │   ├── fmod/libs/linux/
-        │   │   └── libGodotFmod.linux.template_release.arm64.so  [our fork CI]
-        │   ├── spine/linux/
-        │   │   └── libspine_godot.linux.template_release.arm64.so  [our fork CI]
-        │   └── sentry/
-        │       └── SentryStub.gd               [our 3-line stub]
-        └── gamedata/
-            └── README.md                       [our tutorial; user fills the dir]
+dist/
+├── Slay the Spire 2.sh                         [our] launcher.sh
+├── godot.mono                                  [our fork CI]
+├── bootstrap.pck                               [our build]
+├── port_compat.pck                             [our build]
+├── libsteam_api64.so                           [our stub]
+├── input_remap.cfg                             [our template]
+├── data_sts2_linuxbsd_arm64/
+│   ├── sts2_compat.dll                         [our build]
+│   ├── sts2.runtimeconfig.json                 [our template]
+│   ├── GodotSharp.dll                          [our fork CI]
+│   ├── 0Harmony.dll                            [NuGet MIT]
+│   ├── System.Private.CoreLib.dll              [Microsoft .NET 9 BCL]
+│   ├── ... (~100 System.*.dll + *.so)          [Microsoft .NET 9 BCL]
+│   ├── Microsoft.CSharp.dll                    [Microsoft .NET 9 BCL]
+│   ├── ... (~5 Microsoft.*.dll)                [Microsoft .NET 9 BCL]
+│   ├── mscorlib.dll / netstandard.dll          [Microsoft .NET 9 BCL]
+│   ├── WindowsBase.dll                         [Microsoft .NET 9 BCL]
+│   └── System.IO.Hashing.dll                   [NuGet MIT, ships with .NET 9]
+├── addons/
+│   ├── fmod/libs/linux/
+│   │   └── libGodotFmod.linux.template_release.arm64.so  [our fork CI]
+│   ├── spine/linux/
+│   │   └── libspine_godot.linux.template_release.arm64.so [our fork CI]
+│   └── sentry/
+│       └── SentryStub.gd                       [our stub]
+└── gamedata/
+    └── README.md                               [our tutorial; user fills the dir]
 ```
 
 ## Source / license breakdown
@@ -77,10 +73,10 @@ depends on player having a legal Steam copy.
 
 ## Verification
 
-After `./scripts/assemble-launcher-pack.sh` produces the zip:
+After `src/scripts/assemble-launcher-pack.sh` produces the zip:
 
 ```bash
-unzip -l dist/sts2-linux-launcher-*.zip | tail -1
+unzip -l dist-sts2-*.zip | tail -1
 # Expected: ~170 MB uncompressed, ~120 files
 ```
 

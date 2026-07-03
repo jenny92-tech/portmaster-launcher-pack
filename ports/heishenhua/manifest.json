@@ -7,9 +7,19 @@
   "devices": ["TrimUI Smart Pro/Brick"],
   "language": ["zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
-  "bootstrap_pck": "manifest.bootstrap.json",
-  "launcher_sh": "launcher.sh",
-  "gptk": "heishenhua.gptk",
+  "port_dir": "heishenhua",
+  "script": "[中]黑神话悟空-像素版.sh",
+  "bootstrap_pck": "src/manifest.bootstrap.json",
+  "launcher_sh": "src/launcher.sh",
+  "gptk": "src/heishenhua.gptk",
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "H_黑神话像素版[中].png"
+      ]
+    }
+  },
   "depends_on": [
     "https://github.com/jenny92-tech/Bogodroid (unityloader)",
     "PortMaster libs/frt_3.6.squashfs",

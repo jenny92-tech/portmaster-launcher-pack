@@ -10,7 +10,7 @@
 #
 # Mechanism: the launcher template carries a block
 #     #@KIT-BEGIN
-#     KIT="$(cd "$(dirname "$0")/../../_kit" && pwd)"
+#     KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 #     source "$KIT/portmaster_common.sh"
 #     source "$KIT/launcher_unity_common.sh"
 #     #@KIT-END
@@ -19,15 +19,36 @@
 # single script that runs anywhere with no _kit dependency.
 #
 # Usage:
-#   _kit/assemble.sh ports/<port>/launcher.sh [output.sh]
-#   (default output: dist/<port>.sh)
+#   _kit/assemble.sh ports/<port>/src/launcher.sh [output.sh]
+#   (default output: ports/<port>/dist/<script from manifest.json>)
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${1:?Usage: assemble.sh <ports/<port>/launcher.sh> [out.sh]}"
 [ -f "$SRC" ] || { echo "no such launcher: $SRC" >&2; exit 1; }
-PORT="$(basename "$(dirname "$SRC")")"
-OUT="${2:-$ROOT/dist/$PORT.sh}"
+SRC_DIR="$(cd "$(dirname "$SRC")" && pwd)"
+if [ "$(basename "$SRC_DIR")" = "src" ]; then
+  PORT_DIR="$(dirname "$SRC_DIR")"
+else
+  PORT_DIR="$SRC_DIR"
+fi
+PORT="$(basename "$PORT_DIR")"
+SCRIPT_NAME="$(python3 - "$PORT_DIR/manifest.json" "$PORT" <<'PY'
+import json
+import os
+import sys
+
+manifest_path, port = sys.argv[1:3]
+script = f"{port}.sh"
+if os.path.isfile(manifest_path):
+    with open(manifest_path, "r", encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    script = manifest.get("script") or manifest.get("dist", {}).get("script") or script
+print(script)
+PY
+)"
+DEFAULT_OUT="$PORT_DIR/dist/$SCRIPT_NAME"
+OUT="${2:-$DEFAULT_OUT}"
 mkdir -p "$(dirname "$OUT")"
 
 inline_kit() {

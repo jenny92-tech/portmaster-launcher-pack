@@ -7,12 +7,22 @@
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
-  "bootstrap_pck": "scripts/make-bootstrap-pck.py",
-  "launcher_sh": "linux/launcher.sh",
+  "port_dir": "sts2",
+  "script": "Slay the Spire 2.sh",
+  "bootstrap_pck": "src/scripts/make-bootstrap-pck.py",
+  "launcher_sh": "src/linux/launcher.sh",
   "gptk": null,
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "S_杀戮尖塔2[中].png"
+      ]
+    }
+  },
   "depends_on": [
     "https://github.com/jenny92-tech/godot/tree/linuxbsd-sdl2",
     "https://github.com/pardeike/Harmony"
   ],
-  "notes": "Self-contained: ships its own godot.mono SDL2 fork (~60 MB). Has its own scripts/ for pck building because of overlay pck (Harmony assembly swap) — not yet ported to _kit/pck_builder.py."
+  "notes": "Self-contained: ships its own godot.mono SDL2 fork (~60 MB). Uses src/scripts/dist-port.sh because STS2 also builds a Harmony patcher and shader overlay pck."
 }

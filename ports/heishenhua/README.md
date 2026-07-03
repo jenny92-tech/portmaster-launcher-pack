@@ -11,11 +11,12 @@ pyftsubset 子集到 launcher 用得到的 129 个 codepoint, 16 KB。
 
 | 文件 | 作用 |
 |---|---|
-| `launcher_ui.gd` | 选项 UI: 分辨率 / 画面质量 / 换 A·B / 换 X·Y。写 `launch_config.env`, 退出码 42 启动游戏。 |
-| `make-bootstrap-pck.py` | 打包 project.godot + tscn + gd + 背景 + 字体 → `build/bootstrap.pck`。无需 Godot Editor。 |
-| `assets/launcher_font_zh.ttf` | Fusion Pixel subset (从游戏 m_FontData 取的, 跟游戏内字体同源)。 |
-| `assets/launcher_bg.png` | 启动器背景图 (可换)。 |
-| `launcher.sh` | 两阶段 port script, 替代原 `[中]黑神话悟空-像素版.sh`。 |
+| `src/launcher_ui.gd` | 选项 UI: 分辨率 / 画面质量 / 换 A·B / 换 X·Y。写 `launch_config.env`, 退出码 42 启动游戏。 |
+| `src/manifest.bootstrap.json` | 打包 project.godot + tscn + gd + 背景 + 字体 → `dist/bootstrap.pck`。无需 Godot Editor。 |
+| `src/assets/launcher_font_zh.ttf` | Fusion Pixel subset (从游戏 m_FontData 取的, 跟游戏内字体同源)。 |
+| `src/assets/launcher_bg.png` | 启动器背景图 (可换)。 |
+| `src/launcher.sh` | 两阶段 port script 模板。 |
+| `dist/` | 生成后的设备文件集合。`*.sh` 推到 `Roms/PORTS/`, 其它文件推到 `Data/ports/heishenhua/`。 |
 
 ## UI 选项 → wsm.toml 映射
 
@@ -30,11 +31,17 @@ pyftsubset 子集到 launcher 用得到的 129 个 codepoint, 16 KB。
 
 ## 部署
 
-在设备的 `ports/heishenhua/` 目录:
+先生成设备包:
 
-1. 把 `build/bootstrap.pck` 复制进 port dir。
-2. 替换原 `K_*.sh` 为 `launcher.sh` (保持 PortMaster 期望的命名)。
-3. Godot 用 PortMaster 自带的 squashfs runtime。设备上验证存在: `ls $controlfolder/libs/godot*`。
+```bash
+_kit/dist_port.sh heishenhua
+```
+
+部署规则:
+
+1. 把 `dist/[中]黑神话悟空-像素版.sh` 推到设备 `Roms/PORTS/`。
+2. 把 `dist/` 里其它文件推到设备 `Data/ports/heishenhua/`。
+3. Godot 用 PortMaster 自带的 squashfs runtime。设备上验证存在: `ls $controlfolder/libs/frt_3.*.squashfs`。
 
 没有 godot / bootstrap.pck 时, launcher.sh 跳过 UI 直接跑游戏 — 删
 `bootstrap.pck` 就是安全回滚。

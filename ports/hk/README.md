@@ -7,14 +7,14 @@ runs `unityloader` with the original K_空洞骑士.sh memory defenses.
 
 ## Distribution model
 
-The port directory IS the launcher product — unityloader, hk.toml,
-launcher.sh, bootstrap.pck are all ours (unityloader is our own build).
+The `dist/` directory is the launcher product — the assembled script,
+bootstrap.pck, metadata, gptk, and hacksdl shim are copied from there.
 Only `gamedata/` holds the game's copyrighted data, which users supply
 themselves. Same split as sts2-linux-launcher's gamedata-README model:
 
 ```
 ports/hollowknight/
-├── launcher.sh, bootstrap.pck      ← this project
+├── assembled .sh, bootstrap.pck    ← dist/
 ├── unityloader, hk.toml            ← this project (Bogodroid build)
 ├── gamecontrollerdb.txt, conf/ …   ← this project / generated
 └── gamedata/                       ← USER-SUPPLIED game data, never shipped
@@ -29,10 +29,11 @@ the port dir overrides it for debugging.
 
 | File | Role |
 |---|---|
-| `launcher_ui.gd` | Options UI: resolution / graphics / A·B / X·Y. Writes `launch_config.env`, exits 42 to start. |
-| `make-bootstrap-pck.py` | Packs project.godot + tscn + gd + CJK font into `build/bootstrap.pck`. No Godot editor needed. |
-| `assets/launcher_font_zh.ttf` | LXGW WenKai Lite subset (OFL), re-subset for these UI strings (~78 KB). |
-| `launcher.sh` | The two-stage port script; replaces K_空洞骑士.sh. |
+| `src/launcher_ui.gd` | Options UI: resolution / graphics / A·B / X·Y. Writes `launch_config.env`, exits 42 to start. |
+| `src/manifest.bootstrap.json` | Packs project.godot + tscn + gd + CJK font into `dist/bootstrap.pck`. No Godot editor needed. |
+| `src/assets/launcher_font_zh.ttf` | LXGW WenKai Lite subset (OFL), re-subset for these UI strings. |
+| `src/launcher.sh` | The two-stage port script template. |
+| `dist/` | Deployable files. `*.sh` goes to `Roms/PORTS/`; everything else goes to `Data/ports/hollowknight/`. |
 
 ## Option → hk.toml mapping (all patches are idempotent seds)
 
@@ -47,13 +48,18 @@ works on both devices.
 
 ## Assembling the port
 
-In the device's `ports/hollowknight/` (the working 1G or HD pack):
+Build the dist first:
 
-1. Copy `build/bootstrap.pck` into the port dir.
-2. Replace the `K_*.sh` port script with `launcher.sh` (keep the
-   PortMaster .sh naming the CFW expects).
+```bash
+_kit/dist_port.sh hk
+```
+
+Then deploy:
+
+1. Copy `dist/[中]空洞骑士.sh` to `Roms/PORTS/` (keep the PortMaster .sh naming the CFW expects).
+2. Copy the rest of `dist/` to `Data/ports/hollowknight/`.
 3. Godot comes from the PortMaster runtime automatically. Verify the
-   squashfs exists on the device: `ls $controlfolder/libs/godot*` — if
+   squashfs exists on the device: `ls $controlfolder/libs/frt_3.*.squashfs` — if
    the CFW doesn't ship one, install a godot port once via PortMaster,
    or drop a local `godot` binary in the port dir as override.
 

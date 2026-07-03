@@ -5,7 +5,7 @@
   game's GodotSharp instance (separate ALC → null NativeFuncs → SEGV).
 
   Build: dotnet build -c Release
-  Output: linux/build/sts2_compat.dll
+  Output: dist/data_sts2_linuxbsd_arm64/sts2_compat.dll
 -->
 <Project Sdk="Microsoft.NET.Sdk">
 
@@ -18,12 +18,13 @@
     <RootNamespace>STS2LinuxLauncher</RootNamespace>
     <AssemblyName>sts2_compat</AssemblyName>
 
-    <OutDir>$(MSBuildThisFileDirectory)../../linux/build/</OutDir>
+    <OutDir>$(MSBuildProjectDirectory)/../../dist/data_sts2_linuxbsd_arm64/</OutDir>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <CompatReferenceDir Condition="'$(CompatReferenceDir)' == ''">$(MSBuildProjectDirectory)/../refs</CompatReferenceDir>
   </PropertyGroup>
 
   <ItemGroup>

@@ -15,14 +15,14 @@ Manifest is a JSON with this shape:
         { "res_path": "res://launcher_bg.png", "src_path": "assets/launcher_bg.png" },
         ...
       ],
-      "output": "build/bootstrap.pck"
+      "output": "../dist/bootstrap.pck"
     }
 
 Designed to replace the per-port make-bootstrap-pck.py copies in
 hk-launcher / heishenhua-launcher / sts2-linux-launcher. Each port now
 ships a manifest.json and calls:
 
-    python3 ../../_kit/pck_builder.py manifest.json
+    python3 _kit/pck_builder.py ports/<port>/src/manifest.bootstrap.json
 
 Usage:
     python3 _kit/pck_builder.py <manifest.json>

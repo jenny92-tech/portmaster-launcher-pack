@@ -1,0 +1,16 @@
+{
+  "id": "terraria",
+  "name": "Terraria",
+  "port_dir": "terraria",
+  "script": "T_泰拉瑞亚[中].sh",
+  "engine": "Unity 2021.3 IL2CPP / Bogodroid UnityLoader",
+  "godot_launcher": "3.5.2 (frt + hacksdl + gptokeyb)",
+  "bootstrap_pck": "src/manifest.bootstrap.json",
+  "launcher_sh": "src/launcher.sh",
+  "gptk": "src/terraria.gptk",
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png"
+    }
+  }
+}

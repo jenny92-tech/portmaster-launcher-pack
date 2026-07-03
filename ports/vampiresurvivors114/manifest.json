@@ -7,9 +7,19 @@
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
-  "bootstrap_pck": null,
-  "launcher_sh": "launcher.sh",
+  "port_dir": "vampiresurvivors114",
+  "script": "vampiresurvivors114.sh",
+  "bootstrap_pck": "src/manifest.bootstrap.json",
+  "launcher_sh": "src/launcher.sh",
   "gptk": null,
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "V_吸血鬼幸存者_114.png"
+      ]
+    }
+  },
   "depends_on": [
     "https://github.com/jenny92-tech/Bogodroid (unityloader)"
   ],

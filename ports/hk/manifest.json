@@ -7,9 +7,19 @@
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
-  "bootstrap_pck": "manifest.bootstrap.json",
-  "launcher_sh": "launcher.sh",
-  "gptk": "hollowknight.gptk",
+  "port_dir": "hollowknight",
+  "script": "[中]空洞骑士.sh",
+  "bootstrap_pck": "src/manifest.bootstrap.json",
+  "launcher_sh": "src/launcher.sh",
+  "gptk": "src/hollowknight.gptk",
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "K_空洞骑士[中].png"
+      ]
+    }
+  },
   "depends_on": [
     "https://github.com/jenny92-tech/Bogodroid (unityloader)",
     "PortMaster libs/frt_3.6.squashfs",

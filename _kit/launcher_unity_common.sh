@@ -173,6 +173,25 @@ apply_button_remap() {
 # across every Unity-loader port. Arg: $1 = toml passed to the loader. Pulls in
 # audio_setup + memory_tuning + install_exit_trap from portmaster_common.sh,
 # lowers the loader's OOM score (raises audio daemons'), then waits & finishes.
+restore_unity_handheld_input() {
+  # Loong input can be left locked/stopped if a previous experimental launcher
+  # or the loader's Start+Select fast-exit path bypasses normal teardown.
+  rm -f /tmp/lock_loong_daemon 2>/dev/null || true
+
+  local p pid exe cmd
+  for p in /proc/[0-9]*; do
+    pid="${p##*/}"
+    [ "$pid" = "$$" ] && continue
+    exe=$(readlink "$p/exe" 2>/dev/null || true)
+    cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)
+    case "$exe:$cmd" in
+      */input-event-daemon:*|*:/usr/bin/input-event-daemon*|*/loong_input:*|*:/loong/loong_input*)
+        kill -CONT "$pid" 2>/dev/null || true
+        ;;
+    esac
+  done
+}
+
 run_unity_game() {
   local toml="$1"
   export XDG_DATA_HOME="$CONFDIR"
@@ -185,6 +204,7 @@ run_unity_game() {
 
   chmod a+x "$GAMEDIR/unityloader"
   pm_platform_helper "$GAMEDIR/unityloader"
+  restore_unity_handheld_input
 
   "$GAMEDIR/unityloader" "$toml" &
   local unity_pid=$!
@@ -195,5 +215,6 @@ run_unity_game() {
   done
 
   wait "$unity_pid"
+  restore_unity_handheld_input
   pm_finish
 }

@@ -29,7 +29,7 @@ mkdir -p "$CONFDIR" "$GAMEDIR/cache"
 
 # ── shared helpers (assemble.sh inlines these into the device build) ─────
 #@KIT-BEGIN
-KIT="$(cd "$(dirname "$0")/../../_kit" && pwd)"
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END

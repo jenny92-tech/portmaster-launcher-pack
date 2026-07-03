@@ -5,9 +5,10 @@ import struct
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC_SHADERS = ROOT / "shaders" / "mobile_compat"
-OUT_PCK = ROOT / "linux" / "build" / "port_compat.pck"
+SRC_ROOT = Path(__file__).resolve().parents[1]
+PORT_ROOT = SRC_ROOT.parent
+SRC_SHADERS = SRC_ROOT / "shaders" / "mobile_compat"
+OUT_PCK = PORT_ROOT / "dist" / "port_compat.pck"
 
 MAGIC = 0x43504447  # GDPC
 FORMAT_VERSION = 3

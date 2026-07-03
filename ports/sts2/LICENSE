@@ -46,7 +46,7 @@ Notices:
   - This license attaches only to original code, assets, build scripts,
     and documentation contributed to this launcher by jenny92-tech
     (and any future contributors who choose to license under the same
-    terms). Third-party components included in external/ and tools/
+    terms). Third-party components included in src/external/ and src/tools/
     retain their own respective licenses (Apache 2.0, MIT, SIL OFL 1.1,
     Esoteric Software EULA, FMOD EULA, etc.); see the README under each
     directory.

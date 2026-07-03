@@ -15,18 +15,30 @@ to env vars and the wrapper `sh` patches the game's config and starts it.
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | Optional Godot 3/frt | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | Godot 4.5 (mono, bundled) | TrimUI, MiniLoong |
 
-All ports build their `bootstrap.pck` from `manifest.bootstrap.json` via the
+Each launcher port keeps editable inputs in `src/` and generated deploy files in
+`dist/`. Files in `dist/` are the only files that should be copied to a
+device: `*.sh` goes to `Roms/PORTS/`, everything else goes to
+`Data/ports/<port>/`.
+
+`ports/<port>/manifest.json` is internal build metadata for this repository.
+It is not a PortMaster install manifest and is not copied to `dist/`. The build
+step generates PortMaster-style `dist/port.json` from it. Port images use the
+standard filename `screenshot.png` in both the port root and `dist/`.
+
+All `_kit` ports build their `bootstrap.pck` from `src/manifest.bootstrap.json` via the
 shared [`_kit/pck_builder.py`](_kit/pck_builder.py) (Godot 3 / Godot 4 format
 auto-detected from `godot_version`). `sts2` keeps its own
-`scripts/make-bootstrap-pck.py` and `scripts/make-overlay-pck.py` for now
-because the overlay pck (Harmony assembly swap) needs extra logic the unified
-builder doesn't cover yet.
+`src/scripts/make-bootstrap-pck.py` and `src/scripts/make-overlay-pck.py`
+because the overlay pck and Harmony patcher need extra logic the unified builder
+doesn't cover.
 
-## Build a port's bootstrap pck
+## Dist a port
 
 ```bash
-python3 _kit/pck_builder.py ports/<port>/manifest.bootstrap.json
-# → ports/<port>/build/bootstrap.pck
+_kit/dist_port.sh heishenhua
+# → ports/heishenhua/dist/
+_kit/dist_port.sh sts2
+# → ports/sts2/dist/
 ```
 
 ## Shared kit
@@ -39,8 +51,12 @@ See [`_kit/README.md`](_kit/README.md) for the helpers each port can pull in:
 - `launcher_unity_common.sh` — Unity-loader layer (godot UI discovery/launch,
   button remap, run_unity_game). hk/heishenhua only, not godot ports.
 - `assemble.sh` — stitches a port's `launcher.sh` template + the `_kit` libs
-  into one self-contained device script (`dist/<port>.sh`). See `_kit/README.md`
+  into one self-contained device script inside `dist/`. See `_kit/README.md`
   for the full build → deploy recipe.
+- `dist_port.sh` — builds `src/` and copies runtime/metadata into
+  `ports/<port>/dist/`.
+- `port_json.py` — converts the repository build manifest into the PortMaster
+  `port.json` shipped in `dist/`.
 
 ## License
 

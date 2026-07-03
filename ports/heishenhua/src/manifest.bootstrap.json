@@ -3,10 +3,10 @@
   "project_godot": "project.godot",
   "bootstrap_tscn": "bootstrap.tscn",
   "files": [
-    { "res_path": "res://launcher_base.gd",    "src_path": "../../_kit/launcher_base.gd" },
+    { "res_path": "res://launcher_base.gd",    "src_path": "../../../_kit/launcher_base.gd" },
     { "res_path": "res://launcher_ui.gd",      "src_path": "launcher_ui.gd" },
     { "res_path": "res://launcher_bg.png",     "src_path": "assets/launcher_bg.png" },
     { "res_path": "res://launcher_font_zh.ttf","src_path": "assets/launcher_font_zh.ttf" }
   ],
-  "output": "build/bootstrap.pck"
+  "output": "../dist/bootstrap.pck"
 }

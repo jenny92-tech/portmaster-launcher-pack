@@ -78,10 +78,12 @@ def build_dir_entry(path, data, data_offset_relative):
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output = os.path.join(script_dir, "..", "linux", "build", "bootstrap.pck")
-    ui_gd_path = os.path.join(script_dir, "..", "linux", "launcher_ui.gd")
-    bg_png_path = os.path.join(script_dir, "..", "linux", "assets", "launcher_bg.png")
-    zh_font_path = os.path.join(script_dir, "..", "linux", "assets", "launcher_font_zh.ttf")
+    src_root = os.path.abspath(os.path.join(script_dir, ".."))
+    port_root = os.path.abspath(os.path.join(src_root, ".."))
+    output = os.path.join(port_root, "dist", "bootstrap.pck")
+    ui_gd_path = os.path.join(src_root, "linux", "launcher_ui.gd")
+    bg_png_path = os.path.join(src_root, "linux", "assets", "launcher_bg.png")
+    zh_font_path = os.path.join(src_root, "linux", "assets", "launcher_font_zh.ttf")
 
     with open(ui_gd_path, "rb") as f:
         ui_gd_bytes = f.read()

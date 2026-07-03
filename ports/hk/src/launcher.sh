@@ -28,13 +28,31 @@ cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$GAMEDIR/cache"
+HK_RUNTIME_WIDTH="$DISPLAY_WIDTH"
+HK_RUNTIME_HEIGHT="$DISPLAY_HEIGHT"
 
 # ── shared helpers (assemble.sh inlines these into the device build) ─────
 #@KIT-BEGIN
-KIT="$(cd "$(dirname "$0")/../../_kit" && pwd)"
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
+
+hk_sync_graphics_resolution() {
+  local height="$1"
+  local f
+  for f in \
+    "$GAMEDIR/GraphicsSettings.txt" \
+    "$CONFDIR/GraphicsSettings.txt" \
+    "$GAMEDIR/gamedata/GraphicsSettings.txt" \
+    "$GAMEDIR/gamedata/files/GraphicsSettings.txt"; do
+    if [ -f "$f" ]; then
+      sed -i "s/^Resolution(Height):.*/Resolution(Height):${height}/" "$f"
+      sed -i "s/^NativeDeviceResolution(DO NOT CHANGE):.*/NativeDeviceResolution(DO NOT CHANGE):${height}/" "$f"
+    fi
+  done
+  echo "$LOG_PREFIX GraphicsSettings resolution synced to height=${height}"
+}
 
 # ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.x) ═══════════════
 # bootstrap.pck 是 Godot 3 格式 (与 heishenhua 统一; Godot 4 在 MiniLoong 上起不来)。
@@ -58,6 +76,9 @@ if [ -f "$HKL_ENV" ]; then
     *)
       sed -i "s/^displayWidth=.*/displayWidth=${HKL_WIDTH}/" "$GAMEDIR/hk.toml"
       sed -i "s/^displayHeight=.*/displayHeight=${HKL_HEIGHT}/" "$GAMEDIR/hk.toml"
+      HK_RUNTIME_WIDTH="$HKL_WIDTH"
+      HK_RUNTIME_HEIGHT="$HKL_HEIGHT"
+      hk_sync_graphics_resolution "$HK_RUNTIME_HEIGHT"
       ;;
   esac
   # 画面质量 → textureMaxDim: 384/512/720/0 (低/中/高/极致, 与黑神话同参数)。
@@ -73,16 +94,14 @@ else
   echo "$LOG_PREFIX no launch_config.env — using current hk.toml"
 fi
 
-# ── Seed PlayerPrefs so HK skips its first-run video-settings onboarding,
+# ── Seed/repair PlayerPrefs so HK skips its first-run video-settings onboarding,
 # which hangs on this Android port (no touch / input on that page). VERIFIED
 # on-device by minimisation: the gate is the video keys below — the "*Set"
 # flags VidOSSet/VidBrightSet mark "video configured", the rest are the values
-# that page would set. GameLangSet, session ids, audio volumes, rumble/backers/
-# popups and GraphicsSettings.txt are all NOT needed for the skip (dropped).
-# Only write when ABSENT: the game rewrites its own prefs on exit, so this just
-# provides fresh-install defaults and never clobbers the player's settings.
+# that page would set. Existing prefs from old launcher builds may lack those
+# keys, so repair that case instead of only handling fresh installs.
 HK_PREFS="$CONFDIR/shared_prefs/com.TeamCherry.HollowKnight.v2.playerprefs.json"
-if [ ! -f "$HK_PREFS" ]; then
+hk_write_default_playerprefs() {
   mkdir -p "$CONFDIR/shared_prefs"
   cat > "$HK_PREFS" <<EOF
 {
@@ -102,8 +121,8 @@ if [ ! -f "$HK_PREFS" ]; then
     "VidTFR": 400,
     "VidVSync": 0,
     "Screenmanager Fullscreen mode": -1,
-    "Screenmanager Resolution Height": ${DISPLAY_HEIGHT},
-    "Screenmanager Resolution Width": ${DISPLAY_WIDTH},
+    "Screenmanager Resolution Height": ${HK_RUNTIME_HEIGHT},
+    "Screenmanager Resolution Width": ${HK_RUNTIME_WIDTH},
     "__UNITY_PLAYERPREFS_VERSION__": 1
   },
   "longs": {},
@@ -111,10 +130,30 @@ if [ ! -f "$HK_PREFS" ]; then
   "version": 1
 }
 EOF
-  echo "$LOG_PREFIX seeded PlayerPrefs to skip video onboarding (${DISPLAY_WIDTH}x${DISPLAY_HEIGHT})"
+}
+
+hk_video_prefs_ready() {
+  [ -f "$HK_PREFS" ] &&
+    grep -q '"VidBrightSet"[[:space:]]*:[[:space:]]*1' "$HK_PREFS" &&
+    grep -q '"VidOSSet"[[:space:]]*:[[:space:]]*1' "$HK_PREFS"
+}
+
+hk_sync_screenmanager_prefs() {
+  [ -f "$HK_PREFS" ] || return 0
+  sed -i "s/\"Screenmanager Resolution Height\"[[:space:]]*:[[:space:]]*[0-9-]*/\"Screenmanager Resolution Height\": ${HK_RUNTIME_HEIGHT}/" "$HK_PREFS"
+  sed -i "s/\"Screenmanager Resolution Width\"[[:space:]]*:[[:space:]]*[0-9-]*/\"Screenmanager Resolution Width\": ${HK_RUNTIME_WIDTH}/" "$HK_PREFS"
+}
+
+if [ ! -f "$HK_PREFS" ]; then
+  hk_write_default_playerprefs
+  echo "$LOG_PREFIX seeded PlayerPrefs to skip video onboarding (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
+elif ! hk_video_prefs_ready; then
+  hk_write_default_playerprefs
+  echo "$LOG_PREFIX repaired PlayerPrefs video gate"
 else
-  echo "$LOG_PREFIX PlayerPrefs exists — leaving player's settings untouched"
+  echo "$LOG_PREFIX PlayerPrefs video gate already set"
 fi
+hk_sync_screenmanager_prefs
 
 # ═══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game hk.toml

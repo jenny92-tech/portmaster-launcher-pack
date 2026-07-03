@@ -90,8 +90,9 @@ No launcher-side bind mount is required for `assets` or `assets/aa`.
 
 ## Launcher
 
-`launcher.sh` is self-contained and does not require shared `_kit` scripts on
-the device.
+`src/launcher.sh` is the editable template. `_kit/dist_port.sh
+vampiresurvivors114` writes the self-contained device script to
+`dist/vampiresurvivors114.sh`; the device never needs shared `_kit` scripts.
 
 If a Godot/frt launcher payload is present, it can update `vs.toml` through:
 
@@ -128,9 +129,10 @@ Copy the loader and launcher atomically:
 ```bash
 scp build-release/unityloader \
   root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.gplay.new
-scp ports/vampiresurvivors114/launcher.sh \
+_kit/dist_port.sh vampiresurvivors114
+scp ports/vampiresurvivors114/dist/vampiresurvivors114.sh \
   root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/launcher.sh.new
-scp ports/vampiresurvivors114/launcher.sh \
+scp ports/vampiresurvivors114/dist/vampiresurvivors114.sh \
   root@10.10.1.91:/mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new
 
 ssh root@10.10.1.91 'set -e
