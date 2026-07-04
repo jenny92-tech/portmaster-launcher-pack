@@ -12,6 +12,7 @@ const EXIT_START_GAME   = 42
 const EXIT_QUIT_TO_MENU = 0
 const TOGGLES = ["off", "on"]
 const ENV_FILE = "user://launch_config.env"
+const CONTACT_TEXT = "QQ 群 1047158975"
 
 # 公共 UI 文本。专有名词不翻。子类用 _port_strings() 追加/覆盖。
 const BASE_STRINGS = {
@@ -66,6 +67,7 @@ func _ready():
 
 	_credits = _build_credits()
 	add_child(_credits)
+	add_child(_build_contact_label())
 
 	_center = Control.new()
 	_center.set_anchors_and_margins_preset(Control.PRESET_WIDE)
@@ -370,6 +372,23 @@ func _refresh_credits():
 	var kids = _credits.get_children()
 	for i in range(creds.size()):
 		kids[i].text = _t(creds[i][0]) + ": " + creds[i][1]
+
+
+# ── 联系方式 (右下角) ────────────────────────────────────────────────
+func _build_contact_label():
+	var lbl = Label.new()
+	lbl.text = CONTACT_TEXT
+	lbl.align = Label.ALIGN_RIGHT
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.add_font_override("font", _font(22))
+	lbl.add_color_override("font_color", Color(1, 1, 1, 0.9))
+	_apply_outline(lbl, 3)
+	lbl.set_anchors_and_margins_preset(Control.PRESET_BOTTOM_RIGHT)
+	lbl.margin_left = -360
+	lbl.margin_top = -48
+	lbl.margin_right = -18
+	lbl.margin_bottom = -14
+	return lbl
 
 
 # ── EN / 中 切换 ─────────────────────────────────────────────────────

@@ -32,6 +32,7 @@ const QUALITIES : Array[String] = ["smooth", "balanced", "quality"]
 
 const STATE_FILE := "user://linux_launcher_state.json"
 const ENV_FILE   := "user://launch_config.env"
+const CONTACT_TEXT := "QQ 群 1047158975"
 
 var _state := {
 	"schema_version": 11,
@@ -116,6 +117,7 @@ func _ready() -> void:
 	# 左下角署名 (标签双语, 作者名按原文保留)。
 	_credits = _build_credits()
 	add_child(_credits)
+	add_child(_build_contact_label())
 
 	_center = CenterContainer.new()
 	_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -345,6 +347,23 @@ func _refresh_credits() -> void:
 	var kids := _credits.get_children()
 	for i in range(CREDITS.size()):
 		kids[i].text = _t(CREDITS[i][0]) + ": " + CREDITS[i][1]
+
+
+# 右下角联系方式。
+func _build_contact_label() -> Label:
+	var lbl := Label.new()
+	lbl.text = CONTACT_TEXT
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.add_theme_font_size_override("font_size", 22)
+	lbl.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+	_apply_outline(lbl, 3)
+	lbl.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	lbl.offset_left = -360
+	lbl.offset_top = -48
+	lbl.offset_right = -18
+	lbl.offset_bottom = -14
+	return lbl
 
 
 func _install_font() -> void:

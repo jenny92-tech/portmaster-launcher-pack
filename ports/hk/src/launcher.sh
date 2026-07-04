@@ -94,12 +94,10 @@ else
   echo "$LOG_PREFIX no launch_config.env — using current hk.toml"
 fi
 
-# ── Seed/repair PlayerPrefs so HK skips its first-run video-settings onboarding,
-# which hangs on this Android port (no touch / input on that page). VERIFIED
-# on-device by minimisation: the gate is the video keys below — the "*Set"
-# flags VidOSSet/VidBrightSet mark "video configured", the rest are the values
-# that page would set. Existing prefs from old launcher builds may lack those
-# keys, so repair that case instead of only handling fresh installs.
+# ── Seed/repair only the PlayerPrefs keys this port owns.
+# Video onboarding hangs on this Android port, so we mark that page configured.
+# Language, audio, quality, input, and other user/game preferences are left to
+# the game and must never be reset by the launcher.
 HK_PREFS="$CONFDIR/shared_prefs/com.TeamCherry.HollowKnight.v2.playerprefs.json"
 hk_write_default_playerprefs() {
   mkdir -p "$CONFDIR/shared_prefs"
@@ -111,16 +109,8 @@ hk_write_default_playerprefs() {
     "VidOSValue": 0.0
   },
   "ints": {
-    "ShaderQuality": 1,
     "VidBrightSet": 1,
-    "VidDisplay": 0,
-    "VidFC": 1,
-    "VidFullscreen": 1,
     "VidOSSet": 1,
-    "VidParticles": 1,
-    "VidTFR": 400,
-    "VidVSync": 0,
-    "Screenmanager Fullscreen mode": -1,
     "Screenmanager Resolution Height": ${HK_RUNTIME_HEIGHT},
     "Screenmanager Resolution Width": ${HK_RUNTIME_WIDTH},
     "__UNITY_PLAYERPREFS_VERSION__": 1
@@ -132,28 +122,69 @@ hk_write_default_playerprefs() {
 EOF
 }
 
-hk_video_prefs_ready() {
-  [ -f "$HK_PREFS" ] &&
-    grep -q '"VidBrightSet"[[:space:]]*:[[:space:]]*1' "$HK_PREFS" &&
-    grep -q '"VidOSSet"[[:space:]]*:[[:space:]]*1' "$HK_PREFS"
+hk_merge_playerprefs() {
+  mkdir -p "$CONFDIR/shared_prefs"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$HK_PREFS" "$HK_RUNTIME_WIDTH" "$HK_RUNTIME_HEIGHT" <<'PY'
+import json
+import os
+import sys
+import tempfile
+
+path, width, height = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        prefs = json.load(fh)
+    if not isinstance(prefs, dict):
+        prefs = {}
+except Exception:
+    prefs = {}
+
+for section in ("bools", "floats", "ints", "longs", "strings"):
+    if not isinstance(prefs.get(section), dict):
+        prefs[section] = {}
+
+prefs["floats"].update({
+    "VidBrightValue": 20.0,
+    "VidOSValue": 0.0,
+})
+prefs["ints"].update({
+    "VidBrightSet": 1,
+    "VidOSSet": 1,
+    "Screenmanager Resolution Height": height,
+    "Screenmanager Resolution Width": width,
+    "__UNITY_PLAYERPREFS_VERSION__": 1,
+})
+prefs["version"] = int(prefs.get("version") or 1)
+
+directory = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix=".playerprefs.", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(prefs, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+finally:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+PY
+    echo "$LOG_PREFIX merged PlayerPrefs onboarding gates (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
+  elif [ ! -f "$HK_PREFS" ]; then
+    hk_write_default_playerprefs
+    echo "$LOG_PREFIX seeded PlayerPrefs defaults without python3"
+  else
+    echo "$LOG_PREFIX python3 missing; keeping existing PlayerPrefs"
+  fi
 }
 
-hk_sync_screenmanager_prefs() {
-  [ -f "$HK_PREFS" ] || return 0
-  sed -i "s/\"Screenmanager Resolution Height\"[[:space:]]*:[[:space:]]*[0-9-]*/\"Screenmanager Resolution Height\": ${HK_RUNTIME_HEIGHT}/" "$HK_PREFS"
-  sed -i "s/\"Screenmanager Resolution Width\"[[:space:]]*:[[:space:]]*[0-9-]*/\"Screenmanager Resolution Width\": ${HK_RUNTIME_WIDTH}/" "$HK_PREFS"
-}
-
-if [ ! -f "$HK_PREFS" ]; then
-  hk_write_default_playerprefs
-  echo "$LOG_PREFIX seeded PlayerPrefs to skip video onboarding (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
-elif ! hk_video_prefs_ready; then
-  hk_write_default_playerprefs
-  echo "$LOG_PREFIX repaired PlayerPrefs video gate"
+if [ -f "$HK_PREFS" ]; then
+  hk_merge_playerprefs
 else
-  echo "$LOG_PREFIX PlayerPrefs video gate already set"
+  hk_write_default_playerprefs
+  echo "$LOG_PREFIX seeded PlayerPrefs to skip onboarding (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
 fi
-hk_sync_screenmanager_prefs
 
 # ═══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game hk.toml
