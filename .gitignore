@@ -4,6 +4,10 @@ dist/
 output/
 *.pck.bak
 .cache/
+*.os
+.sconsign.dblite
+godot-cpp/
+ports/*/src/godotsteam-stub/bin/
 
 # IDE / OS
 .vscode/

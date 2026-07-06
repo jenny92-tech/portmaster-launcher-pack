@@ -1,0 +1,38 @@
+#!/bin/sh
+# Minimal xdg-open replacement for Batomon on PortMaster.
+# Captures Steam OpenID URLs and rewrites the callback to the handheld IP.
+
+set -eu
+
+GAMEDIR="${GAMEDIR:-$(pwd)}"
+URL="${1:-}"
+
+mkdir -p "$GAMEDIR"
+printf '%s\n' "$URL" > "$GAMEDIR/steam_login_url.original.txt"
+
+DEVICE_IP="${BATOMON_LOGIN_HOST:-}"
+if [ -z "$DEVICE_IP" ]; then
+  DEVICE_IP="$(ip -4 addr show wlan0 2>/dev/null | awk '/inet / { print $2; exit }' | cut -d/ -f1)"
+fi
+[ -n "$DEVICE_IP" ] || DEVICE_IP="127.0.0.1"
+
+REWRITTEN="$(python3 "$GAMEDIR/bin/steam-login-url.py" "$URL" "$DEVICE_IP" 41999)"
+printf '%s\n' "$REWRITTEN" > "$GAMEDIR/steam_login_url.txt"
+
+python3 "$GAMEDIR/bin/steam-login-relay.py" "$DEVICE_IP" 41999 "$GAMEDIR/steam_login_relay.log" >/dev/null 2>&1 &
+python3 "$GAMEDIR/bin/steam-login-page.py" "$DEVICE_IP" 41998 "$GAMEDIR/steam_login_url.txt" "$GAMEDIR/steam_login_page.log" >/dev/null 2>&1 &
+
+cat > "$GAMEDIR/steam_login_readme.txt" <<EOF
+Open this URL on a phone or computer on the same Wi-Fi:
+
+$REWRITTEN
+
+The login callback is forwarded to Batomon on this handheld.
+
+You can also open this short local page:
+
+http://$DEVICE_IP:41998
+EOF
+
+echo "[Batomon] Steam login URL written to $GAMEDIR/steam_login_url.txt"
+exit 0

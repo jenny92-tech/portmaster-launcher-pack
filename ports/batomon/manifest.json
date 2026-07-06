@@ -1,0 +1,27 @@
+{
+  "name": "batomon",
+  "title": "Batomon Showdown Demo",
+  "engine": "Godot 4.3",
+  "runtime": "godot-sdl2 fork + GodotSteam arm64 + Steam API stub",
+  "godot_launcher": "4.x (bundled godot.mono SDL2 fork)",
+  "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
+  "language": ["en", "zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "batomon",
+  "script": "Batomon Showdown.sh",
+  "launcher_sh": "src/launcher.sh",
+  "portmaster": {
+    "desc": "Launcher for the Batomon Showdown demo. Game data is user supplied.",
+    "inst": "Place the prepared batomon_showdown.pck in batomon/gamedata/.",
+    "genres": ["strategy", "rpg"],
+    "rtr": false,
+    "availability": "free",
+    "image": {}
+  },
+  "depends_on": [
+    "https://github.com/jenny92-tech/godot/tree/linuxbsd-sdl2",
+    "GodotSteam Linux arm64 GDExtension",
+    "Bogodroid tools/steam_mock"
+  ],
+  "notes": "Self-contained Godot 4 launcher. The PCK must be prepared separately: decrypt/repack or build a runtime with the matching Godot script key, then patch GodotSteam for linux.arm64."
+}
