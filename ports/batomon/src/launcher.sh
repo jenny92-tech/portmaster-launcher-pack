@@ -27,8 +27,7 @@ else
 fi
 echo "[Batomon] CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 
-export LD_LIBRARY_PATH="$GAMEDIR:$GAMEDIR/addons/godotsteam/linuxarm64:/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"
-export PATH="$GAMEDIR/bin:$PATH"
+export LD_LIBRARY_PATH="$GAMEDIR:/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"
 
 if [ -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" ]; then
   USE_WAYLAND=1
@@ -58,7 +57,7 @@ fi
 GAME_PCK="$GAMEDIR/gamedata/batomon_showdown.pck"
 if [ ! -f "$GAME_PCK" ]; then
   echo "[Batomon] no game pck at $GAME_PCK"
-  echo "[Batomon] Place the prepared PCK in gamedata/, then restart."
+  echo "[Batomon] Place the original batomon_showdown.pck in gamedata/, then restart."
   pm_finish
   exit 1
 fi
@@ -67,10 +66,6 @@ if [ ! -x "$GAMEDIR/godot.mono" ]; then
   echo "[Batomon] missing executable godot.mono in $GAMEDIR"
   pm_finish
   exit 1
-fi
-
-if [ ! -f "$GAMEDIR/addons/godotsteam/linuxarm64/libgodotsteam.linux.template_release.arm64.so" ]; then
-  echo "[Batomon] missing GodotSteam arm64 library under addons/godotsteam/linuxarm64/"
 fi
 
 cat > "$GAMEDIR/override.cfg" <<'EOF'
