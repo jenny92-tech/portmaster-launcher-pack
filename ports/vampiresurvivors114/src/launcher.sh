@@ -26,7 +26,6 @@ cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$GAMEDIR/cache/UnityShaderCache"
-. "$GAMEDIR/vs114_language.sh"
 
 TRIMUI_RUNNER_PID=""
 
@@ -159,8 +158,7 @@ if [ -f "$VS_ENV" ]; then
   source "$VS_ENV"
   VS_WIDTH=auto
   VS_HEIGHT=auto
-  VS_GAME_LANG=${VS_GAME_LANG:-zh-CN}
-  echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} game_lang=$VS_GAME_LANG swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
+  echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
 
   if [ "$VS_WIDTH" = "auto" ]; then
     VS_WIDTH="$DISPLAY_WIDTH"; VS_HEIGHT="$DISPLAY_HEIGHT"
@@ -175,7 +173,6 @@ if [ -f "$VS_ENV" ]; then
   esac
   if [ "$VS_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$VS_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  vs114_apply_language "$GAMEDIR/vs.toml" "$CONFDIR" "$VS_GAME_LANG"
   apply_button_remap "$GAMEDIR/vs.toml" "$A_V" "$B_V" "$X_V" "$Y_V"
 else
   echo "$LOG_PREFIX no launch_config.env — using current vs.toml"
