@@ -14,6 +14,7 @@ to env vars and the wrapper `sh` patches the game's config and starts it.
 | [`heishenhua`](ports/heishenhua) | Wukong pixel edition | Unity 2021.3 IL2CPP | Godot 3.5 (frt) | TrimUI |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | Optional Godot 3/frt | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | Godot 4.5 (mono, bundled) | TrimUI, MiniLoong |
+| [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | Godot 4.x (mono, bundled) | TrimUI, MiniLoong |
 
 Each launcher port keeps editable inputs in `src/` and generated deploy files in
 `dist/`. Files in `dist/` are the only files that should be copied to a

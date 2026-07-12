@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-for port in heishenhua hk terraria sts2 vampiresurvivors114; do
+for port in batomon heishenhua hk terraria sts2 vampiresurvivors114; do
   license="$ROOT/ports/$port/LICENSE"
   [ -s "$license" ] || {
     echo "$port: missing LICENSE" >&2
