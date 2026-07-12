@@ -49,9 +49,16 @@ hk_sync_graphics_resolution() {
     if [ -f "$f" ]; then
       sed -i "s/^Resolution(Height):.*/Resolution(Height):${height}/" "$f"
       sed -i "s/^NativeDeviceResolution(DO NOT CHANGE):.*/NativeDeviceResolution(DO NOT CHANGE):${height}/" "$f"
+      # width-safe viewport plugin needs HK's own letterbox path off, or the
+      # two fight (game letterboxes to 16:9 while the plugin expands to 4:3)
+      if grep -q "^DisableBlackBars:" "$f"; then
+        sed -i "s/^DisableBlackBars:.*/DisableBlackBars:1/" "$f"
+      else
+        printf '%s\n' "DisableBlackBars:1" >> "$f"
+      fi
     fi
   done
-  echo "$LOG_PREFIX GraphicsSettings resolution synced to height=${height}"
+  echo "$LOG_PREFIX GraphicsSettings resolution synced to height=${height}, DisableBlackBars:1"
 }
 
 # ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.x) ═══════════════
