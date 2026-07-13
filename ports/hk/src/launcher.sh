@@ -39,7 +39,7 @@ source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
 # One toml name across all ports; legacy installs are renamed in place.
-resolve_port_toml hk.toml
+resolve_port_toml
 
 hk_sync_graphics_resolution() {
   local height="$1"

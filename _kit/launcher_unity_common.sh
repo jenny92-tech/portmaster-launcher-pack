@@ -146,24 +146,10 @@ run_launcher_ui() {
 }
 
 # ── The loader takes the toml path as argv[1] and never looks at the name, so
-# ports drifted apart: hk.toml, vs.toml, and wsm.toml — a Which-Sausage-Mate
-# leftover that terraria and heishenhua both inherited. One name lets the kit
-# own the path instead of every launcher hardcoding its own. Existing installs
-# ship the old name inside the game bundle, so migrate in place on first launch.
-# Sets PORT_TOML. Args: legacy names to migrate from. ────────────────────
+# one name across all ports lets the kit own the path. Sets PORT_TOML.
 resolve_port_toml() {
   PORT_TOML="$GAMEDIR/config.toml"
   [ -f "$PORT_TOML" ] && return 0
-
-  local legacy
-  for legacy in "$@"; do
-    if [ -f "$GAMEDIR/$legacy" ]; then
-      mv "$GAMEDIR/$legacy" "$PORT_TOML"
-      echo "$LOG_PREFIX migrated $legacy -> config.toml"
-      return 0
-    fi
-  done
-
   echo "$LOG_PREFIX no config.toml in $GAMEDIR — the loader will fail to start"
   return 1
 }
@@ -239,10 +225,10 @@ apply_button_remap() {
 # audio_setup + memory_tuning + install_exit_trap from portmaster_common.sh,
 # lowers the loader's OOM score (raises audio daemons'), then waits & finishes.
 restore_unity_handheld_input() {
-  # Loong input can be left locked/stopped if a previous experimental launcher
-  # or the loader's Start+Select fast-exit path bypasses normal teardown.
-  rm -f /tmp/lock_loong_daemon 2>/dev/null || true
-
+  # Loong input can be left stopped if a previous experimental launcher or the
+  # loader's Start+Select fast-exit path bypasses normal teardown. (/tmp/lock_loong_*
+  # is each daemon's own singleton guard, not an input lock — deleting one only
+  # broke loong_daemon's guard, so that is gone.)
   local p pid exe cmd
   for p in /proc/[0-9]*; do
     pid="${p##*/}"

@@ -4,8 +4,8 @@
 # unity_astc 管线压缩(Mode B: --max-size 1280 --block 8x8 --block-small 6x6),
 # 73 个大图重压 ASTC。用来和 1.15 交叉对比 libunity 握手死锁。
 #
-# 自包含:不 source _kit(设备上没有)。先跑 Godot/frt 启动器写分辨率,
-# 再进 unityloader。
+# 共用逻辑来自 _kit/(assemble.sh 部署时内联)。这里只保留 VS 独有的:
+# TrimUI DRM-master 抢占 + .gplay loader 选择。
 # loader 用 unityloader.gplay (BD_ENABLE_GPLAY=ON — VS 依赖 Google Play Games)。
 
 PORT_NAME="vampiresurvivors114"; LOG_PREFIX="[VS114]"
@@ -29,6 +29,14 @@ mkdir -p "$CONFDIR" "$GAMEDIR/cache/UnityShaderCache"
 
 TRIMUI_RUNNER_PID=""
 
+
+# ── shared helpers (assemble.sh inlines these into the device build) ─────
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_common.sh"
+source "$KIT/launcher_unity_common.sh"
+#@KIT-END
+
 release_frontend() {
   if [ -n "$TRIMUI_RUNNER_PID" ] && kill -0 "$TRIMUI_RUNNER_PID" 2>/dev/null; then
     echo "$LOG_PREFIX resume runtrimui.sh pid=$TRIMUI_RUNNER_PID"
@@ -51,107 +59,12 @@ acquire_display() {
   fi
 }
 
-audio_setup() {
-  if [ "$CFW_NAME" = "Loong" ]; then
-    echo "$LOG_PREFIX Loong: system audio + XDG_RUNTIME_DIR left untouched"
-    return
-  fi
-
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/xdg-${PORT_NAME}}"
-  mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null && chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null
-  if pgrep -x pulseaudio >/dev/null 2>&1 || pgrep -x pipewire-pulse >/dev/null 2>&1; then
-    echo "$LOG_PREFIX pulse/pipewire daemon already up"
-  elif command -v pulseaudio >/dev/null 2>&1; then
-    pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1
-    sleep 1
-  else
-    echo "$LOG_PREFIX no pulseaudio on this CFW - direct ALSA"
-  fi
-
-  if command -v pactl >/dev/null 2>&1 && ! pactl list short sinks 2>/dev/null | grep -qv auto_null; then
-    pactl load-module module-alsa-sink device=default tsched=0 >/dev/null 2>&1
-    sink=$(pactl list short sinks 2>/dev/null | grep -v auto_null | head -1 | awk '{print $2}')
-    [ -n "$sink" ] && pactl set-default-sink "$sink" >/dev/null 2>&1
-    echo "$LOG_PREFIX pulse -> ALSA default ($sink)"
-  fi
-}
-
 trap release_frontend EXIT INT TERM
 acquire_display
-get_controls
 
-# ── Stage 1: Godot/frt launcher UI ──────────────────────────────────────
-find_godot_binary() {
-  GODOT_BIN=""; GODOT_KIND=""; GODOT_RT_DIR=""; GODOT_FRT_NAME=""
+resolve_port_toml
 
-  local squash
-  squash=$(ls "$controlfolder/libs"/frt_3.*.squashfs 2>/dev/null | sort -V | tail -1)
-  if [ -n "$squash" ]; then
-    GODOT_FRT_NAME="$(basename "$squash" .squashfs)"
-    GODOT_RT_DIR="$HOME/godot"
-    $ESUDO mkdir -p "$GODOT_RT_DIR"
-    $ESUDO umount "$GODOT_RT_DIR" 2>/dev/null
-    $ESUDO mount "$squash" "$GODOT_RT_DIR"
-    GODOT_BIN="$GODOT_RT_DIR/$GODOT_FRT_NAME"; GODOT_KIND="frt3"
-    echo "$LOG_PREFIX $GODOT_FRT_NAME: $GODOT_BIN"
-    return 0
-  fi
-
-  echo "$LOG_PREFIX no frt_3 launcher runtime — UI will be skipped"
-  return 1
-}
-
-run_launcher_ui() {
-  local pck="$GAMEDIR/bootstrap.pck"
-  if ! find_godot_binary || [ ! -f "$pck" ]; then
-    echo "$LOG_PREFIX no launcher UI / bootstrap.pck — using current config.toml"
-    return 0
-  fi
-
-  echo "$LOG_PREFIX stage 1: launcher UI ($GODOT_BIN)"
-  export FRT_NO_EXIT_SHORTCUTS=FRT_NO_EXIT_SHORTCUTS
-  export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
-  $GPTOKEYB "$GODOT_FRT_NAME" -c "$GAMEDIR/${PORT_NAME}.gptk" &
-  local gptokeyb_pid=$!
-  pm_platform_helper "$GODOT_FRT_NAME"
-  LD_PRELOAD="$GAMEDIR/hacksdl/hacksdl.aarch64.so" HACKSDL_DEVICE_DISABLE_0=2 \
-  XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
-  GODOT_SILENCE_ROOT_WARNING=1 \
-    "$GODOT_BIN" --resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} --main-pack "$pck"
-  local launcher_exit=$?
-  kill $gptokeyb_pid 2>/dev/null; wait $gptokeyb_pid 2>/dev/null
-  [ -n "$GODOT_RT_DIR" ] && $ESUDO umount "$GODOT_RT_DIR" 2>/dev/null
-
-  echo "$LOG_PREFIX launcher exited: $launcher_exit"
-  if [ "$launcher_exit" = "0" ]; then
-    echo "$LOG_PREFIX user quit — back to menu."
-    pm_finish; exit 0
-  elif [ "$launcher_exit" != "42" ]; then
-    echo "$LOG_PREFIX launcher UI failed ($launcher_exit) — starting game anyway."
-  fi
-}
-
-apply_button_remap() {
-  local toml="$1" a="$2" b="$3" x="$4" y="$5"
-  awk -v a="$a" -v b="$b" -v x="$x" -v y="$y" '
-    /^\[input\.remap\]/ { print; inblk=1; da=db=dx=dy=0; next }
-    inblk && /^\[/ {
-      if(!da) printf "a       = \"%s\"\n", a
-      if(!db) printf "b       = \"%s\"\n", b
-      if(!dx) printf "x       = \"%s\"\n", x
-      if(!dy) printf "y       = \"%s\"\n", y
-      inblk=0
-    }
-    inblk && /^a *=/ { printf "a       = \"%s\"\n", a; da=1; next }
-    inblk && /^b *=/ { printf "b       = \"%s\"\n", b; db=1; next }
-    inblk && /^x *=/ { printf "x       = \"%s\"\n", x; dx=1; next }
-    inblk && /^y *=/ { printf "y       = \"%s\"\n", y; dy=1; next }
-    { print }
-    END { if(inblk){ if(!da)printf"a       = \"%s\"\n",a; if(!db)printf"b       = \"%s\"\n",b; if(!dx)printf"x       = \"%s\"\n",x; if(!dy)printf"y       = \"%s\"\n",y } }
-  ' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
-}
-
-run_launcher_ui
+run_launcher_ui frt3 "$GAMEDIR/bootstrap.pck"
 
 VS_ENV="$CONFDIR/godot/app_userdata/Vampire Survivors Launcher/launch_config.env"
 if [ -f "$VS_ENV" ]; then
@@ -185,9 +98,7 @@ sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
 # ── 库路径 + 1GB 掌机 glibc 内存收敛 ─────────────────────────────────────
 export XDG_DATA_HOME="$CONFDIR" XDG_CONFIG_HOME="$CONFDIR"
 export LD_LIBRARY_PATH="$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a:$LD_LIBRARY_PATH"
-export MALLOC_ARENA_MAX=2
-export MALLOC_TRIM_THRESHOLD_=131072
-export MALLOC_MMAP_THRESHOLD_=131072
+memory_tuning
 
 # Unity 6/PAD compatibility is handled in the loader.
 

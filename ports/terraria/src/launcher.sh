@@ -39,7 +39,7 @@ source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
 # One toml name across all ports; legacy installs are renamed in place.
-resolve_port_toml wsm.toml
+resolve_port_toml
 
 # ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.x) ═══════════════
 run_launcher_ui frt3 "$GAMEDIR/bootstrap.pck"

@@ -35,7 +35,7 @@ source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
 # One toml name across all ports; legacy installs are renamed in place.
-resolve_port_toml wsm.toml
+resolve_port_toml
 
 # ═══════════════ STAGE 1: launcher UI (Godot 3 / frt_3.x) ═══════════════
 # bootstrap.pck 是 Godot 3 格式,必须用 frt(godot4 读不了它)→ find_godot_binary frt3。
