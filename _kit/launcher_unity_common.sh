@@ -145,6 +145,71 @@ run_launcher_ui() {
   fi
 }
 
+# ── The loader takes the toml path as argv[1] and never looks at the name, so
+# ports drifted apart: hk.toml, vs.toml, and wsm.toml — a Which-Sausage-Mate
+# leftover that terraria and heishenhua both inherited. One name lets the kit
+# own the path instead of every launcher hardcoding its own. Existing installs
+# ship the old name inside the game bundle, so migrate in place on first launch.
+# Sets PORT_TOML. Args: legacy names to migrate from. ────────────────────
+resolve_port_toml() {
+  PORT_TOML="$GAMEDIR/config.toml"
+  [ -f "$PORT_TOML" ] && return 0
+
+  local legacy
+  for legacy in "$@"; do
+    if [ -f "$GAMEDIR/$legacy" ]; then
+      mv "$GAMEDIR/$legacy" "$PORT_TOML"
+      echo "$LOG_PREFIX migrated $legacy -> config.toml"
+      return 0
+    fi
+  done
+
+  echo "$LOG_PREFIX no config.toml in $GAMEDIR — the loader will fail to start"
+  return 1
+}
+
+# ── Resolution. The toml's [device] size is per-device runtime state, NOT a
+# shipped constant — whatever we commit is our own dev panel and is wrong for
+# everyone else. PortMaster already probes the real panel every launch
+# (device_info.txt: sdl_resolution -> DISPLAY_WIDTH/HEIGHT), so resolve on
+# EVERY launch: an explicit launcher pick wins, otherwise follow the panel.
+# Must run OUTSIDE the "launcher UI ran" branch — players whose CFW has no
+# frt_3.x squashfs never get a launch_config.env, and used to be stuck with
+# the baked-in size. Sets RES_W / RES_H. Args: $1=width $2=height, where
+# ""/"auto"/garbage all mean "follow the panel". ─────────────────────────
+resolve_display_resolution() {
+  local want_w="$1" want_h="$2"
+  RES_W=""; RES_H=""
+
+  case "$want_w:$want_h" in
+    auto:*|:*|*:) ;;
+    *[!0-9]*:*|*:*[!0-9]*) echo "$LOG_PREFIX bad resolution '${want_w}x${want_h}' — following the panel" ;;
+    *) RES_W="$want_w"; RES_H="$want_h" ;;
+  esac
+
+  if [ -n "$RES_W" ]; then
+    echo "$LOG_PREFIX resolution ${RES_W}x${RES_H} (launcher choice)"
+  else
+    RES_W="$DISPLAY_WIDTH"; RES_H="$DISPLAY_HEIGHT"
+    echo "$LOG_PREFIX resolution ${RES_W}x${RES_H} (panel, auto-detected)"
+  fi
+
+  # PortMaster itself falls back to 640x480 when sdl_resolution fails; if even
+  # that is missing (unknown CFW), don't write garbage into the toml.
+  case "$RES_W:$RES_H" in
+    *[!0-9]*:*|*:*[!0-9]*|:*|*:)
+      RES_W=640; RES_H=480
+      echo "$LOG_PREFIX no panel size from PortMaster — 640x480" ;;
+  esac
+}
+
+# Write the resolved size into the loader's toml. Arg: $1 = toml file.
+apply_display_resolution() {
+  local toml="$1"
+  sed -i "s/^displayWidth=.*/displayWidth=${RES_W}/" "$toml"
+  sed -i "s/^displayHeight=.*/displayHeight=${RES_H}/" "$toml"
+}
+
 # ── [input.remap] upsert a/b/x/y into the section (replace if present, append
 # if missing). sed can't add lines that don't exist, and a toml missing x/y
 # lines makes the swap silently dead; awk self-heals, other lines/sections

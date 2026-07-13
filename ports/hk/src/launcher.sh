@@ -1,11 +1,11 @@
 #!/bin/bash
 # PORTMASTER: hollowknight, [中]空洞骑士.sh
 # Stage 1: GDScript launcher UI (bootstrap.pck) — 分辨率 / 画面质量 / 按键布局
-# Stage 2: unityloader + hk.toml — 字段由 stage 1 的 launch_config.env sed 写入
+# Stage 2: unityloader + config.toml — 字段由 stage 1 的 launch_config.env sed 写入
 #
 # 仓库里这是个模板:共用逻辑来自 _kit/portmaster_common.sh + launcher_unity_common.sh。
 # 部署到设备时 _kit/assemble.sh 会把 KIT 块原地内联成单个自包含脚本(设备上不
-# 依赖外部 source)。下面只保留 hk 独有的 stage-1(frt3 UI)和 hk.toml 改写。
+# 依赖外部 source)。下面只保留 hk 独有的 stage-1(frt3 UI)和 config.toml 改写。
 
 PORT_NAME="hollowknight"; LOG_PREFIX="[HK]"
 
@@ -38,6 +38,9 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
+# One toml name across all ports; legacy installs are renamed in place.
+resolve_port_toml hk.toml
+
 hk_sync_graphics_resolution() {
   local height="$1"
   local f
@@ -67,39 +70,32 @@ hk_sync_graphics_resolution() {
 # 需要 $GAMEDIR/hollowknight.gptk + $GAMEDIR/hacksdl/hacksdl.aarch64.so。
 run_launcher_ui frt3 "$GAMEDIR/bootstrap.pck"
 
-# ═══════════════ STAGE 2: patch hk.toml from launcher choices ═══════════
+# ═══════════════ STAGE 2: patch config.toml from launcher choices ═══════════
 HKL_ENV="$CONFDIR/godot/app_userdata/Hollow Knight Launcher/launch_config.env"
 if [ -f "$HKL_ENV" ]; then
   source "$HKL_ENV"
   echo "$LOG_PREFIX env: ${HKL_WIDTH}x${HKL_HEIGHT} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
 
-  # "auto" = 跟随面板 (PortMaster control.txt 的 DISPLAY_WIDTH/HEIGHT)
-  if [ "$HKL_WIDTH" = "auto" ]; then
-    HKL_WIDTH="$DISPLAY_WIDTH"; HKL_HEIGHT="$DISPLAY_HEIGHT"
-    echo "$LOG_PREFIX resolution auto -> ${HKL_WIDTH}x${HKL_HEIGHT}"
-  fi
-  case "$HKL_WIDTH$HKL_HEIGHT" in
-    *[!0-9]*|"") echo "$LOG_PREFIX bad resolution in env, leaving hk.toml as-is" ;;
-    *)
-      sed -i "s/^displayWidth=.*/displayWidth=${HKL_WIDTH}/" "$GAMEDIR/hk.toml"
-      sed -i "s/^displayHeight=.*/displayHeight=${HKL_HEIGHT}/" "$GAMEDIR/hk.toml"
-      HK_RUNTIME_WIDTH="$HKL_WIDTH"
-      HK_RUNTIME_HEIGHT="$HKL_HEIGHT"
-      hk_sync_graphics_resolution "$HK_RUNTIME_HEIGHT"
-      ;;
-  esac
   # 画面质量 → textureMaxDim: 384/512/720/0 (低/中/高/极致, 与黑神话同参数)。
   case "$HKL_TEXMAX" in
-    384|512|720|0) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${HKL_TEXMAX}/" "$GAMEDIR/hk.toml" ;;
+    384|512|720|0) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${HKL_TEXMAX}/" "$PORT_TOML" ;;
   esac
 
   # [input.remap] a/b/x/y upsert (awk 自愈,见 launcher_unity_common.sh)
   if [ "$HKL_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$HKL_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  apply_button_remap "$GAMEDIR/hk.toml" "$A_V" "$B_V" "$X_V" "$Y_V"
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
 else
-  echo "$LOG_PREFIX no launch_config.env — using current hk.toml"
+  echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
+
+# Outside the env branch on purpose: without a launcher UI there is no env, and
+# the resolution must still follow this device's panel.
+resolve_display_resolution "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}"
+apply_display_resolution "$PORT_TOML"
+HK_RUNTIME_WIDTH="$RES_W"
+HK_RUNTIME_HEIGHT="$RES_H"
+hk_sync_graphics_resolution "$HK_RUNTIME_HEIGHT"
 
 # ── Seed/repair only the PlayerPrefs keys this port owns.
 # Video onboarding hangs on this Android port, so we mark that page configured.
@@ -194,4 +190,4 @@ else
 fi
 
 # ═══════════════ STAGE 2: run the game ══════════════════════════════════
-run_unity_game hk.toml
+run_unity_game "$PORT_TOML"

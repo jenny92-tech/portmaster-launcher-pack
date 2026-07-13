@@ -104,7 +104,7 @@ find_godot_binary() {
 run_launcher_ui() {
   local pck="$GAMEDIR/bootstrap.pck"
   if ! find_godot_binary || [ ! -f "$pck" ]; then
-    echo "$LOG_PREFIX no launcher UI / bootstrap.pck — using current vs.toml"
+    echo "$LOG_PREFIX no launcher UI / bootstrap.pck — using current config.toml"
     return 0
   fi
 
@@ -160,33 +160,27 @@ if [ -f "$VS_ENV" ]; then
   VS_HEIGHT=auto
   echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
 
-  if [ "$VS_WIDTH" = "auto" ]; then
-    VS_WIDTH="$DISPLAY_WIDTH"; VS_HEIGHT="$DISPLAY_HEIGHT"
-    echo "$LOG_PREFIX resolution auto -> ${VS_WIDTH}x${VS_HEIGHT}"
-  fi
-  case "$VS_WIDTH$VS_HEIGHT" in
-    *[!0-9]*|"") echo "$LOG_PREFIX bad resolution in env, keeping current vs.toml" ;;
-    *)
-      sed -i "s/^displayWidth=.*/displayWidth=${VS_WIDTH}/" "$GAMEDIR/vs.toml"
-      sed -i "s/^displayHeight=.*/displayHeight=${VS_HEIGHT}/" "$GAMEDIR/vs.toml"
-      ;;
-  esac
   if [ "$VS_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$VS_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  apply_button_remap "$GAMEDIR/vs.toml" "$A_V" "$B_V" "$X_V" "$Y_V"
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
 else
-  echo "$LOG_PREFIX no launch_config.env — using current vs.toml"
+  echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
+
+# Outside the env branch on purpose: without a launcher UI there is no env, and
+# the resolution must still follow this device's panel.
+resolve_display_resolution "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}"
+apply_display_resolution "$PORT_TOML"
 
 # Unity Loader now resolves Android base assets and Play Asset Delivery pack
 # assets internally. Keep the launcher focused on UI/config; do not bind
 # gamedata/assets or Addressables aa here.
 
 # ── Safe GL defaults ─────────────────────────────────────────────────────
-sed -i "s/^glVersionOverride.*/glVersionOverride        = \"OpenGL ES 3.2 Bogodroid\"/" "$GAMEDIR/vs.toml"
-sed -i "s/^glMajorVersionOverride.*/glMajorVersionOverride   = 3/" "$GAMEDIR/vs.toml"
-sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 2/" "$GAMEDIR/vs.toml"
-sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$GAMEDIR/vs.toml"
+sed -i "s/^glVersionOverride.*/glVersionOverride        = \"OpenGL ES 3.2 Bogodroid\"/" "$PORT_TOML"
+sed -i "s/^glMajorVersionOverride.*/glMajorVersionOverride   = 3/" "$PORT_TOML"
+sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 2/" "$PORT_TOML"
+sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
 
 # ── 库路径 + 1GB 掌机 glibc 内存收敛 ─────────────────────────────────────
 export XDG_DATA_HOME="$CONFDIR" XDG_CONFIG_HOME="$CONFDIR"
@@ -208,7 +202,7 @@ audio_setup
 pm_platform_helper "$GAMEDIR/$LOADER"
 
 # ── run ──────────────────────────────────────────────────────────────────
-"$GAMEDIR/$LOADER" vs.toml
+"$GAMEDIR/$LOADER" "$PORT_TOML"
 STATUS=$?
 echo "$LOG_PREFIX exited $STATUS"
 exit "$STATUS"
