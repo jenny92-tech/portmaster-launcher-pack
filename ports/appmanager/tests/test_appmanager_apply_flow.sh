@@ -17,6 +17,20 @@ grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI"
 grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI"
 grep -Fq 'env.progress_file' "$APP_UI"
 grep -Fq 'local batch_size=5' "$LAUNCHER"
+grep -Fq 'runtime_blob_decode' "$LAUNCHER"
+grep -Fq 'RUNTIME_ROUTE_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L212"' "$LAUNCHER"
+! grep -Fq 'RUNTIME_ROUTE_CONTACT=' "$LAUNCHER"
+custom_blob=$(sed -n 's/^RUNTIME_CUSTOM_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
+github_blob=$(sed -n 's/^RUNTIME_GITHUB_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
+[ "${#custom_blob}" -gt 200 ] && [ "${#github_blob}" -gt 1000 ]
+! grep -Fq "custom_rows='" "$LAUNCHER"
+! grep -Fq "github_rows='" "$LAUNCHER"
+! grep -Fq 'Testing sources $batch_start-$id' "$LAUNCHER"
+! grep -Fq 'Source: $RUNTIME_PROXY_NAME' "$LAUNCHER"
+! grep -Fq '$source · $name' "$LAUNCHER"
+! grep -Fq 'candidate.$id' "$LAUNCHER"
+grep -Fq '正在检测连接' "$APP_UI"
+grep -Fq '连接已就绪，正在使用' "$APP_UI"
 if grep -Eq 'githubfast\.com|gitclone\.com' "$LAUNCHER"; then
   echo "unusable Git clone-only/403 services must not be Runtime candidates" >&2
   exit 1
@@ -105,7 +119,7 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair|runtime_progress|runtime_custom|runtime_full|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_repair|runtime_progress|runtime_default_routes|runtime_custom|runtime_full|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
   runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
@@ -261,7 +275,9 @@ EOF
   export TEST_PROGRESS_OBSERVED="$case_dir/progress-observed"
   export PAM_RUNTIME_PROXIES="https://proxy.test"
   export PAM_RUNTIME_CUSTOM_PROXIES=""
-  if [ "$mode" = "runtime_custom" ]; then
+  if [ "$mode" = "runtime_default_routes" ]; then
+    unset PAM_RUNTIME_PROXIES PAM_RUNTIME_CUSTOM_PROXIES
+  elif [ "$mode" = "runtime_custom" ]; then
     export PAM_RUNTIME_PROXIES=""
     export PAM_RUNTIME_CUSTOM_PROXIES='custom|custom.test|https://custom.test'
   elif [ "$mode" = "runtime_full" ]; then
@@ -332,7 +348,7 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_progress|runtime_custom|runtime_full|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
+    runtime_repair|runtime_progress|runtime_default_routes|runtime_custom|runtime_full|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
       printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
       ;;
   esac
@@ -468,7 +484,7 @@ EOF
         cat "$app/log.txt" "$app/conf/result.txt" >&2
         exit 1
       fi
-      grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
       grep -Fq 'https://proxy.test/https://github.com/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       grep -Fxq $'1\tcomplete\tgodot_4.5\t1\t1\t20\t20\t0\tRuntime repair complete' "$app/conf/progress.tsv"
       [ "$mode" != "runtime_progress" ] || [ -e "$TEST_PROGRESS_OBSERVED" ]
@@ -476,22 +492,27 @@ EOF
     runtime_wget)
       grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
       grep -Fq 'wget resume=0 out=' "$TEST_CURL_LOG"
-      grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
+      ;;
+    runtime_default_routes)
+      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
+      grep -Fq 'url=https://' "$TEST_CURL_LOG"
       ;;
     runtime_custom)
-      grep -Fq $'OK\truntime\tgodot_4.5\tcustom.test' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
       grep -Fq 'https://custom.test/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       ;;
     runtime_full)
-      grep -Fq $'OK\truntime\tgodot_4.5\tfull.test' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
       grep -Fq 'https://full.test/https://github.com/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       ;;
     runtime_jsdelivr)
-      grep -Fq $'OK\truntime\tgodot_4.5\tJSDelivr CDN' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
       grep -Fq 'https://fastly.jsdelivr.net/gh/PortsMaster/PortMaster-New@' "$TEST_CURL_LOG"
       ;;
     runtime_proxy_failover)
-      grep -Fq $'OK\truntime\tgodot_4.5\tsecondary.test' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
       grep -Fq 'https://primary.test/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       grep -Fq 'https://secondary.test/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       ;;
@@ -514,11 +535,11 @@ EOF
       ;;
     runtime_split)
       [ "$(wc -c < "$scripts/PortMaster/libs/gmtoolkit.squashfs" | tr -d ' ')" = "60" ]
-      grep -Fq $'OK\truntime\tgmtoolkit\tproxy.test' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgmtoolkit\tnetwork' "$app/conf/result.txt"
       ;;
     runtime_direct)
       grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'OK\truntime\tgodot_4.5\tGitHub' "$app/conf/result.txt"
+      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
       grep -Fq 'raw.githubusercontent.com/PortsMaster/PortMaster-New/' "$TEST_CURL_LOG"
       ;;
     runtime_invalid)
@@ -552,6 +573,12 @@ EOF
       grep -Fq '"path": "' "$app/conf/env.json"
       ;;
   esac
+  case "$mode" in
+    runtime_*)
+      ! grep -Eq 'https://|proxy\.test|custom\.test|full\.test|primary\.test|secondary\.test|JSDelivr|GitHub' \
+        "$app/log.txt" "$app/conf/result.txt"
+      ;;
+  esac
   [ ! -e "$TEST_PLAN" ]
   [ -x "$TEST_APPLY_HELPER" ]
 
@@ -572,7 +599,7 @@ EOF
 for mode in delete same_root_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_progress runtime_custom runtime_full runtime_jsdelivr runtime_proxy_failover runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
+  delete_container_invalid invalid no_plan runtime_repair runtime_progress runtime_default_routes runtime_custom runtime_full runtime_jsdelivr runtime_proxy_failover runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
   runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"

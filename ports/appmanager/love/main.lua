@@ -82,7 +82,8 @@ local function runtime_progress()
     local index,count=tonumber(fields[4]) or 0,tonumber(fields[5]) or 0
     local current,total,speed=tonumber(fields[6]) or 0,tonumber(fields[7]) or 0,tonumber(fields[8]) or 0
     local stages={
-        preparing=L("Preparing download","准备下载"),probing=L("Testing download sources","正在测速下载源"),
+        preparing=L("Preparing download","准备下载"),probing=L("Checking connection","正在检测连接"),
+        connected=L("Connection ready","连接检测完成，正在使用"),
         downloading=L("Downloading","正在下载"),assembling=L("Joining downloaded parts","正在合并分片"),
         verifying=L("Verifying Runtime image","正在校验 Runtime"),installing=L("Installing Runtime","正在安装 Runtime"),
         finished=L("Runtime completed","当前 Runtime 已完成"),failed=L("Runtime repair failed","Runtime 修复失败"),
@@ -95,11 +96,17 @@ local function runtime_progress()
     local right
     if phase=="downloading" then
         right=speed>0 and L(human(speed).."/s",human(speed).."/秒") or L("Calculating speed…","正在计算网速…")
-    elseif phase=="probing" then right=L("Testing…","测速中…")
+    elseif phase=="probing" then right=L("Checking…","检测中…")
     else right="—" end
+    local detail=fields[9]
+    if phase=="probing" or phase=="connected" then detail=""
+    elseif phase=="downloading" then
+        detail=fields[9]=="Using local cache" and L("Using local cache","正在使用本地缓存") or
+            L("Connection ready and in use","连接已就绪，正在使用")
+    end
     return {progress=total>0 and math.max(0,math.min(1,current/total)) or 0,
         stage=L(stage.en.." · "..(type(name)=="table" and name.en or name),stage.zh.." · "..(type(name)=="table" and name.zh or name)),
-        detail=fields[9],footer_left=left,footer_right=right,phase=phase}
+        detail=detail,footer_left=left,footer_right=right,phase=phase}
 end
 
 local function provided(value)
