@@ -363,7 +363,9 @@ function kit.debug_busy()
         detail=busy_info and t(busy_info.detail or "") or "",
         progress=busy_info and tonumber(busy_info.progress) or nil,
         footer_left=busy_info and t(busy_info.footer_left or "") or "",
-        footer_right=busy_info and t(busy_info.footer_right or "") or ""}
+        footer_right=busy_info and t(busy_info.footer_right or "") or "",
+        cancellable=busy_info and type(busy_info.on_cancel)=="function" and not busy_info.cancel_disabled or false,
+        cancel_requested=busy_info and busy_info.cancel_requested==true or false}
 end
 function kit.toast(message,opts)
     opts=type(opts)=="table" and opts or {}
@@ -1441,7 +1443,8 @@ function kit.draw()
     if busy then
         love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,W,H)
         local detailed=busy_info~=nil
-        local bw=math.min(W*0.78,600); local bh=(detailed and 210 or 110)*L.cs
+        local cancellable=detailed and type(busy_info.on_cancel)=="function"
+        local bw=math.min(W*0.78,600); local bh=(detailed and (cancellable and 272 or 210) or 110)*L.cs
         local bx,by=(W-bw)/2,(H-bh)/2
         panel(bx,by,bw,bh,true,false,L.app)
         if not detailed then
@@ -1462,6 +1465,13 @@ function kit.draw()
             plain(string.format("%d%%",math.floor(progress*100+0.5)),track_x,track_y+vcen(14*L.cs,track_h),14*L.cs,{1,1,1},"center",track_w)
             plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"left",track_w)
             plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"right",track_w)
+            if cancellable then
+                local cy=by+190*L.cs; local ch=48*L.cs
+                panel(track_x,cy,track_w,ch,true,busy_info.cancel_disabled==true,L.app)
+                plain(t(busy_info.cancel_requested and (busy_info.cancelling_label or "Cancelling…") or
+                    busy_info.cancel_label or "Cancel"),track_x,cy+vcen(19*L.cs,ch),19*L.cs,
+                    busy_info.cancel_disabled and {0.55,0.55,0.57} or {1,1,1},"center",track_w)
+            end
         end
     end
 
@@ -1513,7 +1523,15 @@ end
 
 
 function kit.input(action)
-    if busy then return false end
+    if busy then
+        if action=="confirm" and busy_info and type(busy_info.on_cancel)=="function" and
+           not busy_info.cancel_disabled and not busy_info.cancel_requested then
+            busy_info.cancel_requested=true
+            busy_info.on_cancel()
+            return true
+        end
+        return false
+    end
     if dialog_state then
         if action=="up" and dialog_state.checkbox then dialog_focus=3
         elseif action=="down" and dialog_focus==3 then dialog_focus=2

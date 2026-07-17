@@ -1,6 +1,6 @@
-# Target gptokeyb a/b names are opposite to the printed face-button labels.
-# Raw a cancels and raw b confirms => physical A confirms, physical B cancels.
-a = esc
+# App Manager never assigns an implicit back action to a face-button convention.
+# Both A/B activate the focused control; Return/Cancel/Exit are explicit UI rows.
+a = enter
 b = enter
 x = esc
 y = esc

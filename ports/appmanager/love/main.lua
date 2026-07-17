@@ -7,11 +7,12 @@ local function join(parts,sep) return table.concat(parts,sep or " · ") end
 local function stem(name) return (name:gsub("%.[^.]+$","")) end
 local function shquote(value) return "'"..tostring(value):gsub("'","'\\''").."'" end
 
-local HOME,JUNK,TRASH,ENV,RUNTIME = 1,2,3,4,5
+local HOME,JUNK,TRASH,ENV,RUNTIME,MANAGE = 1,2,3,4,5,6
 local env,report,size_map,runtime_catalog = {},nil,{},{}
 local selected_home,selected_junk,selected_trash,selected_runtime = {},{},{},{}
 local confirm_plan,confirm_return = nil,HOME
 local task = nil
+local device_risk_ack,device_support_ack=false,false
 
 local function file_exists(path)
     local f=path and io.open(path,"rb")
@@ -81,7 +82,14 @@ local function runtime_progress()
     local phase,runtime=fields[2],fields[3]
     local index,count=tonumber(fields[4]) or 0,tonumber(fields[5]) or 0
     local current,total,speed=tonumber(fields[6]) or 0,tonumber(fields[7]) or 0,tonumber(fields[8]) or 0
-    local stages={
+    local portmaster=runtime=="PortMaster"
+    local stages=portmaster and {
+        preparing=L("Preparing environment repair","正在准备环境修复"),probing=L("Checking connection","正在检测连接"),
+        connected=L("Connection ready","连接检测完成，正在使用"),downloading=L("Downloading release assets","正在下载发布文件"),
+        verifying=L("Verifying release assets","正在校验发布文件"),installing=L("Installing managed core","正在安装受管理核心"),
+        failed=L("Environment repair failed","环境修复失败"),cancelled=L("Repair cancelled","修复已取消"),
+        complete=L("Installation complete","安装完成"),
+    } or {
         preparing=L("Preparing download","准备下载"),probing=L("Checking connection","正在检测连接"),
         connected=L("Connection ready","连接检测完成，正在使用"),
         downloading=L("Downloading","正在下载"),assembling=L("Joining downloaded parts","正在合并分片"),
@@ -91,8 +99,14 @@ local function runtime_progress()
     }
     local stage=stages[phase] or L("Working","处理中")
     local name=runtime~="" and runtime or L("Runtime repair","Runtime 修复")
-    local left=count>0 and L(string.format("Runtime %d/%d · %s / %s",index,count,human(current),human(total)),
-        string.format("Runtime %d/%d · %s / %s",index,count,human(current),human(total))) or ""
+    local left
+    if portmaster then
+        left=L(string.format("%d%%",total>0 and math.floor(current*100/total) or 0),
+            string.format("%d%%",total>0 and math.floor(current*100/total) or 0))
+    else
+        left=count>0 and L(string.format("Runtime %d/%d · %s / %s",index,count,human(current),human(total)),
+            string.format("Runtime %d/%d · %s / %s",index,count,human(current),human(total))) or ""
+    end
     local right
     if phase=="downloading" then
         right=speed>0 and L(human(speed).."/s",human(speed).."/秒") or L("Calculating speed…","正在计算网速…")
@@ -180,7 +194,9 @@ local function runtime_issue_count()
     return count
 end
 
-local build_home,build_junk,build_trash,build_env,build_runtime,collect_trash
+local build_home,build_junk,build_trash,build_env,build_runtime,build_manage,build_repair_gate,collect_trash
+local start_pending_validation
+local load_update_cache,update_state,start_update_check
 
 local function show_exit_dialog()
     kit.dialog({
@@ -206,10 +222,12 @@ end
 
 local function finish_task()
     kit.set_busy(false)
+    local completed_task=task
     task=nil
     if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
     local result=read_all(env.result_file or "")
-    if result and result:match("FAIL") then
+    local failed=result and result:match("FAIL")
+    if failed then
         kit.toast(L("The operation reported a failure. See log.txt.","操作有项目失败，请查看 log.txt。"),{kind="error"})
     else
         kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
@@ -217,6 +235,22 @@ local function finish_task()
     -- The helper removes plan_file only after completing its env refresh, so
     -- reloading here cannot race a half-written env.json.
     load_env(); refresh_scan()
+    if completed_task and completed_task.kind=="portmaster" then
+        if failed then
+            build_manage(); kit.goto_page(MANAGE)
+            kit.dialog({title=L("Environment repair failed","环境修复失败"),
+                message=L("No verified core was activated. Check log.txt, then retry when the connection is available.",
+                    "没有启用未经校验的核心。请查看 log.txt，并在网络可用后重试。"),
+                confirm=L("Retry later","稍后重试"),cancel=L("Back","返回"),danger=false})
+        else
+            kit.dialog({title=L("Installation complete","安装完成"),
+                message=L("PortMaster was installed and is waiting for validation. Exit Port App Manager, then reopen it to finish the check.",
+                    "PortMaster 已安装并等待校验。请退出 Port App Manager，再重新打开以完成检查。"),
+                confirm=L("Exit now","立即退出"),cancel=L("Exit","退出"),default_focus="confirm",danger=false,
+                on_confirm=kit.quit,on_cancel=kit.quit})
+        end
+        return
+    end
     if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
     else
         build_home()
@@ -226,6 +260,12 @@ local function finish_task()
     end
 end
 
+local function request_portmaster_cancel()
+    if task then task.cancel_requested=true end
+    local f=io.open(env.cancel_file or "","wb")
+    if f then f:write("cancel\n"); f:close() end
+end
+
 local function start_apply()
     if not confirm_plan or #confirm_plan==0 then return end
     if not write_plan(confirm_plan) or not env.apply_script or env.apply_script=="" then
@@ -233,7 +273,15 @@ local function start_apply()
         kit.goto_page(confirm_return); return
     end
     if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
-    if confirm_return==RUNTIME then
+    local portmaster=confirm_plan[1] and confirm_plan[1].kind=="INSTALL_PORTMASTER"
+    if portmaster then
+        if env.cancel_file and env.cancel_file~="" then os.remove(env.cancel_file) end
+        kit.set_busy(true,L("Repairing PortMaster…","正在修复 PortMaster…"),{
+            progress=0,stage=L("Starting repair","正在启动修复"),detail="",
+            footer_left="0%",footer_right=L("Calculating speed…","正在计算网速…"),
+            cancel=L("Cancel before installation","安装前取消"),
+            on_cancel=request_portmaster_cancel})
+    elseif confirm_return==RUNTIME then
         kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),{
             progress=0,stage=L("Starting repair","正在启动修复"),detail="",
             footer_left=L("Preparing…","准备中…"),footer_right=L("Calculating speed…","正在计算网速…")})
@@ -241,7 +289,8 @@ local function start_apply()
         kit.set_busy(true,L("Working…","处理中…"))
     end
     os.execute(shquote(env.apply_script).." --apply-plan >/dev/null 2>&1 &")
-    task={elapsed=0,poll=0,timeout=confirm_return==RUNTIME and 1800 or 45}
+    task={elapsed=0,poll=0,timeout=(confirm_return==RUNTIME or portmaster) and 1800 or 45,
+        kind=portmaster and "portmaster" or "operation"}
 end
 
 local function show_confirm(title,plan,labels,return_page,opts)
@@ -329,7 +378,8 @@ build_home=function(preserve_focus)
         preserve_focus=preserve_focus,
         sidebar_title=L("Quick Tools","快捷工具"),
         sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
-        header_action=button(L("Details","详情"),function() build_env(); kit.goto_page(ENV) end),
+        header_action=button(L("Environment","环境管理"),function() build_manage(); kit.goto_page(MANAGE) end,
+            {badge=update_state and update_state()=="update" and kit.badge(L("Update","可升级"),{0.62,0.64,0.69}) or nil}),
         sidebar={
         button(dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,
             {id="uninstall",disabled=empty(selected_home)}),
@@ -440,7 +490,7 @@ build_runtime=function(preserve_focus)
             {id="runtime-repair",disabled=empty(selected_runtime)}),
         button(L("Select all","全选"),function() select_all_runtime(true) end,{half=true}),
         button(L("Select none","全不选"),function() select_all_runtime(false) end,{half=true}),
-        button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"}),
+        button(L("Back","返回"),function() build_manage(); kit.goto_page(MANAGE) end,{group="bottom"}),
     }})
 end
 
@@ -609,8 +659,213 @@ build_env=function()
     end
     kit.set_page(ENV,L("Environment details","环境详情"),rows,{row_layout={mode="grid",columns=2},
         sidebar_title=L("Explanation","说明"),sidebar_details=details,sidebar={
-        button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"})
+        button(L("Back","返回"),function() build_manage(); kit.goto_page(MANAGE) end,{group="bottom"})
     }})
+end
+
+local function health_label()
+    if env.portmaster_health=="healthy" then return L("Healthy","正常") end
+    if env.portmaster_health=="damaged" then return L("Damaged","已损坏") end
+    return L("Not installed","未安装")
+end
+
+local function confirm_environment_repair(plan)
+    local healthy=env.portmaster_health=="healthy"
+    local state=update_state and update_state() or "unknown"
+    local message
+    if healthy and state=="update" then
+        message=L("The verified stable core will be updated from "..tostring(env.portmaster_version or "?").." to "..tostring(env.portmaster_latest or "?")..". Shared Runtimes and personal settings are not modified.",
+            "将把已校验稳定核心从 "..tostring(env.portmaster_version or "?").." 更新到 "..tostring(env.portmaster_latest or "?").."。共享 Runtime 和个人设置不会被修改。")
+    elseif healthy then
+        message=L("This explicitly reinstalls the maintained stable core. A newer or nonstandard local version may be replaced; continue only if that is intended. Shared Runtimes and personal settings are not modified.",
+            "这会明确重装维护版稳定核心。本地较新或非标准版本可能被替换；仅在你确实需要时继续。共享 Runtime 和个人设置不会被修改。")
+    else
+        message=L("App Manager will download this project's stable PortMaster build, verify it, and install only the managed core. Shared Runtimes and personal settings are not modified.",
+            "APP Manager 将下载本项目维护的 PortMaster 稳定版，校验后只安装受管理核心；共享 Runtime 和个人设置不会被修改。")
+    end
+    kit.dialog({
+        title=healthy and L("Update or reinstall PortMaster","更新或重装 PortMaster") or L("Repair PortMaster environment","修复 PortMaster 环境"),
+        message=message,
+        confirm=L("Continue","继续"),cancel=L("Cancel","取消"),danger=false,
+        on_confirm=function()
+            confirm_plan=plan or {{kind="INSTALL_PORTMASTER",arg="stable"}}
+            confirm_return=MANAGE
+            start_apply()
+        end,
+    })
+end
+
+local function repair_environment()
+    local class=tostring(env.device_class or "unknown-path")
+    if class=="tested" then confirm_environment_repair(); return end
+    if env.target_confirmed~="1" or not env.portmaster_target or env.portmaster_target=="" or class=="unknown-path" then
+        kit.dialog({title=L("Installation path unavailable","无法确定安装路径"),
+            message=L("App Manager cannot safely determine the PortMaster target on this device. No files will be changed.",
+                "APP Manager 无法安全确定此设备的 PortMaster 安装路径，因此不会修改任何文件。"),
+            confirm=L("Back","返回"),cancel=L("Cancel","取消"),danger=false})
+        return
+    end
+    device_risk_ack,device_support_ack=false,false
+    local function build_gate(preserve)
+        local rows={
+            kit.info(L("Device confirmation required","需要确认设备风险"),
+                class=="official-untested" and
+                    L("This device is supported by PortMaster but has not been tested with this App Manager flow.",
+                        "此设备受 PortMaster 官方支持，但尚未实测本 APP 的环境修改流程。") or
+                    L("This device is not in the maintained official model list. Confirm both warnings before continuing.",
+                        "此设备不在当前维护的官方机型列表中。继续前需分别确认两项风险。")),
+            kit.checkbox(L("I understand this will modify the PortMaster environment","我已了解此操作会修改 PortMaster 环境"),{
+                id="risk:modify",checked=device_risk_ack,on_change=function(value) device_risk_ack=value; build_gate(true) end}),
+        }
+        if class=="unsupported-known" then
+            rows[#rows+1]=kit.checkbox(L("I confirm the unsupported device and proposed path","我确认该机型未获官方支持，并确认建议路径"),{
+                id="risk:support",detail=env.portmaster_target,checked=device_support_ack,
+                on_change=function(value) device_support_ack=value; build_gate(true) end})
+        end
+        local ready=device_risk_ack and (class~="unsupported-known" or device_support_ack)
+        rows[#rows+1]=button(L("Continue to repair","继续修复"),function()
+            local plan={{kind="ACK_DEVICE_RISK",arg=class}}
+            if class=="unsupported-known" then
+                plan[#plan+1]={kind="ACK_DEVICE_SUPPORT",arg=env.portmaster_target}
+            end
+            plan[#plan+1]={kind="INSTALL_PORTMASTER",arg="stable"}
+            confirm_environment_repair(plan)
+        end,{id="risk:continue",disabled=not ready})
+        rows[#rows+1]=button(L("Back","返回"),function() build_manage(); kit.goto_page(MANAGE) end,{id="risk:back"})
+        kit.set_page(MANAGE,L("Confirm device risk","确认设备风险"),rows,
+            {preserve_focus=preserve,row_layout={mode="flow",max_columns=1,min_width=420}})
+    end
+    build_gate(false); kit.goto_page(MANAGE)
+end
+
+load_update_cache=function()
+    local text=read_all(env.update_cache_file or "")
+    if not text then return env.update_status,env.portmaster_latest end
+    local _,status,latest=text:match("^(%d+)\t([^\t\r\n]+)\t([^\r\n]*)")
+    if status then env.update_status=status; env.portmaster_latest=latest or "" end
+    return env.update_status,env.portmaster_latest
+end
+
+update_state=function()
+    load_update_cache()
+    local current=tostring(env.portmaster_version or "")
+    local latest=tostring(env.portmaster_latest or "")
+    if env.update_status~="ok" or latest=="" then return "unknown" end
+    if current==latest then return "current" end
+    if current:match("^20%d%d[%.%-]%d%d[%.%-]%d%d%-%d%d%d%d$") and
+       latest:match("^20%d%d[%.%-]%d%d[%.%-]%d%d%-%d%d%d%d$") and current<latest then return "update" end
+    return "reinstall"
+end
+
+start_update_check=function()
+    if not env.apply_script or env.apply_script=="" then
+        kit.toast(L("Update helper is unavailable.","更新助手不可用。"),{kind="error"}); return
+    end
+    if env.update_cache_file then os.remove(env.update_cache_file) end
+    env.update_status="checking"; env.portmaster_latest=""
+    kit.toast(L("Checking this project's stable release…","正在检查本项目的稳定版……"),{kind="info"})
+    os.execute(shquote(env.apply_script).." --check-pm-update-force >/dev/null 2>&1 &")
+    task={kind="update-check",elapsed=0,poll=0,timeout=35}
+end
+
+build_manage=function(preserve)
+    local state=update_state()
+    local latest=env.portmaster_latest and env.portmaster_latest~="" and env.portmaster_latest or L("Check required","需要检查")
+    local primary_label,primary_disabled
+    if env.portmaster_health~="healthy" then primary_label=L("Repair environment","修复环境")
+    elseif state=="update" then primary_label=L("Update now","立即更新")
+    elseif state=="current" then primary_label=L("Up to date","已是最新版"); primary_disabled=true
+    else primary_label=L("Reinstall","重新安装") end
+    local rows={
+        kit.section(L("PortMaster environment","PortMaster 环境"),{font_px=22}),
+        kit.textview(L("Current version","当前版本"),provided(env.portmaster_version),{id="manage:current",label_px=18,value_px=20}),
+        kit.textview(L("Latest stable","最新稳定版"),latest,{id="manage:latest",label_px=18,value_px=20}),
+        kit.textview(L("Status","状态"),health_label(),{id="manage:health",label_px=18,value_px=20,expandable=false}),
+        kit.textview(L("Device","设备"),provided(env.device_name or env.param_device),{id="manage:device",label_px=18,value_px=20}),
+        kit.textview(L("PortMaster path","PortMaster 路径"),provided(env.portmaster_target or env.controlfolder),{id="manage:path",label_px=18,value_px=20}),
+    }
+    local actions={
+        button(L("Check for updates","检查更新"),start_update_check,{id="manage:check"}),
+        button(primary_label,repair_environment,{id="manage:update",disabled=primary_disabled}),
+    }
+    if state=="current" and env.portmaster_health=="healthy" then
+        actions[#actions+1]=button(L("Reinstall current stable","重装当前稳定版"),repair_environment,{id="manage:reinstall"})
+    end
+    actions[#actions+1]=button(function()
+        local count=runtime_issue_count()
+        return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",count) or string.format("Runtime repair (%d)",count)
+    end,function() build_runtime(); kit.goto_page(RUNTIME) end,{id="manage:runtimes"})
+    actions[#actions+1]=button(L("Environment details","环境详情"),function() build_env(); kit.goto_page(ENV) end,{id="manage:details"})
+    kit.set_page(MANAGE,L("Environment Management","环境管理"),rows,
+        {preserve_focus=preserve,sidebar_title=L("Maintenance","维护"),sidebar=actions,
+            row_layout={mode="grid",columns=2}})
+end
+
+build_repair_gate=function()
+    local rows={
+        kit.info(env.portmaster_health=="damaged" and L("PortMaster is damaged","PortMaster 环境已损坏") or L("PortMaster is not installed","尚未安装 PortMaster"),
+            L("Port App Manager can still run because it carries its own UI environment. Repair PortMaster before managing ports.",
+                "Port App Manager 使用自带 UI 环境，因此仍可运行。请先修复 PortMaster，再管理游戏端口。")),
+        button(L("Open Environment Management","打开环境管理"),function() build_manage(); kit.goto_page(MANAGE) end,{id="repair:open"}),
+        button(L("Exit","退出"),show_exit_dialog,{id="repair:exit"}),
+    }
+    kit.set_page(HOME,L("Environment repair","环境修复"),rows,{row_layout={mode="flow",max_columns=1,min_width=420}})
+end
+
+local function validation_result()
+    local text=read_all(env.validation_result_file or "")
+    if not text then return nil,nil end
+    local status,detail=text:match("^1\t([^\t\r\n]+)\t([^\r\n]*)")
+    return status,detail
+end
+
+start_pending_validation=function()
+    if not env.apply_script or env.apply_script=="" then
+        kit.set_page(HOME,L("Environment validation","环境校验"),{
+            kit.info(L("Validation cannot start","无法开始校验"),
+                L("The validation helper is unavailable. Exit without modifying the pending installation.",
+                    "校验助手不可用。请退出；待校验安装不会被修改。")),
+            button(L("Exit","退出"),kit.quit,{id="validation:exit"}),
+        },{row_layout={mode="flow",max_columns=1,min_width=420}})
+        return
+    end
+    if env.validation_result_file then os.remove(env.validation_result_file) end
+    kit.set_page(HOME,L("Validating environment","正在校验环境"),{
+        kit.info(L("Checking the installed PortMaster core","正在检查已安装的 PortMaster 核心"),
+            L("App Manager is checking core files, version information, device detection and command entry points. Shared Runtimes are not inspected.",
+                "APP Manager 正在检查核心文件、版本信息、设备识别和命令入口；不会检查共享 Runtime。")),
+    },{row_layout={mode="flow",max_columns=1,min_width=420}})
+    kit.set_busy(true,L("Validating PortMaster…","正在校验 PortMaster…"),{
+        progress=0.35,stage=L("Checking the new environment","正在检查新环境"),
+        detail=L("Home remains locked until validation finishes.","校验完成前不能进入首页。"),
+        footer_left=L("Automatic validation","自动校验"),footer_right="—",cancel_disabled=true})
+    os.execute(shquote(env.apply_script).." --validate-pending >/dev/null 2>&1 &")
+    task={kind="validation",elapsed=0,poll=0,timeout=120}
+end
+
+local function finish_validation(status,detail)
+    kit.set_busy(false); task=nil
+    load_env()
+    if status=="valid" then
+        refresh_scan(); build_home(); kit.goto_page(HOME)
+        kit.toast(L("PortMaster environment validated.","PortMaster 环境校验完成。"),{kind="success"})
+    elseif status=="restored" then
+        kit.dialog({title=L("Original environment restored","已恢复原来的环境"),
+            message=L("The new core did not pass validation. The previous PortMaster environment has been restored. Please exit App Manager.",
+                "新核心未通过校验，已恢复原来的 PortMaster 环境。请退出 APP。"),
+            confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
+            on_confirm=kit.quit,on_cancel=kit.quit})
+    elseif status=="no-usable" then
+        kit.dialog({title=L("No usable environment remains","当前没有可用环境"),
+            message=L("The incomplete first installation was removed. Exit and reopen App Manager to return to Environment Repair.",
+                "未完成的首次安装已清理。请退出并重新打开 APP，返回环境修复。"),
+            confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
+            on_confirm=kit.quit,on_cancel=kit.quit})
+    else
+        kit.dialog({title=L("Validation was interrupted","校验已中断"),message=provided(detail),
+            confirm=L("Retry","重试"),cancel=L("Exit","退出"),default_focus="confirm",danger=false,
+            on_confirm=start_pending_validation,on_cancel=kit.quit})
+    end
 end
 
 local port={
@@ -619,7 +874,7 @@ local port={
     strings={working=L("Working…","处理中…")},
     on_home_cancel=show_exit_dialog,
     build_pages=function(k)
-        for i=1,5 do k.add_page(L("Loading…","正在加载…"),{k.info("Port App Manager",L("Scanning…","正在扫描…"))}) end
+        for i=1,6 do k.add_page(L("Loading…","正在加载…"),{k.info("Port App Manager",L("Scanning…","正在扫描…"))}) end
     end,
     on_load=function()
         local ok,err=load_env()
@@ -630,7 +885,17 @@ local port={
                 sidebar={button(L("Quit","退出"),show_exit_dialog,{group="bottom"})}})
             return
         end
-        refresh_scan(); build_home()
+        if file_exists(env.pending_install) then
+            start_pending_validation()
+        else
+            refresh_scan()
+        if env.portmaster_health=="healthy" then
+            build_home()
+            if env.apply_script and env.apply_script~="" then
+                os.execute(shquote(env.apply_script).." --check-pm-update >/dev/null 2>&1 &")
+            end
+        else build_repair_gate() end
+        end
         if env.apply_script and env.apply_script~="" then os.execute(shquote(env.apply_script).." --scan-sizes >/dev/null 2>&1 &") end
     end,
     update=function(dt)
@@ -638,15 +903,46 @@ local port={
         task.elapsed=task.elapsed+dt; task.poll=task.poll+dt
         if task.poll<0.25 then return end
         task.poll=0
-        if not file_exists(env.plan_file) then finish_task()
+        if task.kind=="update-check" then
+            local status=load_update_cache()
+            if status=="ok" or status=="error" then
+                task=nil; build_manage(true); kit.goto_page(MANAGE)
+                if status=="ok" then
+                    kit.toast(L("Stable release check completed.","稳定版检查完成。"),{kind="success"})
+                else kit.toast(L("Unable to check the stable release. Normal App Manager use is still available.",
+                    "无法检查稳定版；APP Manager 的其他功能仍可正常使用。"),{kind="error"}) end
+            elseif task.elapsed>(task.timeout or 35) then
+                task=nil; build_manage(true); kit.goto_page(MANAGE)
+                kit.toast(L("Update check timed out.","更新检查超时。"),{kind="error"})
+            end
+            return
+        elseif task.kind=="validation" then
+            local status,detail=validation_result()
+            if status=="valid" or status=="restored" or status=="no-usable" or status=="interrupted" then
+                finish_validation(status,detail)
+            elseif task.elapsed>(task.timeout or 120) then
+                finish_validation("interrupted",L("Validation timed out without changing the pending installation.",
+                    "校验超时，待校验安装未被修改。"))
+            end
+            return
+        elseif not file_exists(env.plan_file) then finish_task()
         elseif task.elapsed>(task.timeout or 45) then
             kit.set_busy(false); task=nil
             kit.toast(L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。"),{kind="error"})
             if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
             else build_home(); kit.goto_page(HOME) end
-        elseif confirm_return==RUNTIME then
+        elseif confirm_return==RUNTIME or task.kind=="portmaster" then
             local progress=runtime_progress()
-            if progress then kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),progress) end
+            if progress then
+                if task.kind=="portmaster" then
+                    progress.cancel=L("Cancel before installation","安装前取消")
+                    progress.on_cancel=request_portmaster_cancel
+                    progress.cancel_requested=task.cancel_requested==true
+                    progress.cancelling_label=L("Cancelling…","正在取消…")
+                    progress.cancel_disabled=progress.phase=="installing" or progress.phase=="complete"
+                    kit.set_busy(true,L("Repairing PortMaster…","正在修复 PortMaster…"),progress)
+                else kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),progress) end
+            end
         end
     end,
 }

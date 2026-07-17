@@ -57,6 +57,8 @@ grep -Fq 'kit.checkbox(display_name(script),{' "$ROOT/ports/appmanager/love/main
 grep -Fq 'on_change=' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'kit.set_busy' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'kit.toast' "$ROOT/ports/appmanager/love/main.lua"
+grep -Fq 'type(busy_info.on_cancel)=="function"' "$ROOT/_kit/love/kit.lua"
+grep -Fq 'busy_info.cancel_requested=true' "$ROOT/_kit/love/kit.lua"
 ! grep -Fq 'status_message' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'theme={kind="app"' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'sidebar_title=' "$ROOT/ports/appmanager/love/main.lua"
@@ -99,7 +101,7 @@ for retired in bootstrap.pck appmanager.gptk runtime hacksdl; do
   }
 done
 for current in love_ui/kit.lua love_ui/main.lua love_ui/scan.lua love_ui/ui.gptk love_ui/runtime_catalog.tsv; do
-  [ -f "$ROOT/ports/appmanager/dist/$current" ] || {
+  [ -f "$ROOT/ports/appmanager/dist/PortAppManager/$current" ] || {
     echo "appmanager dist: missing $current" >&2
     exit 1
   }
@@ -109,18 +111,18 @@ done
 for mapping in 'a = enter' 'b = enter' 'x = esc' 'y = esc'; do
   grep -Fxq "$mapping" "$ROOT/_kit/love/ui.gptk"
 done
-# The target firmwares expose gptokeyb a/b opposite to their printed labels.
-# These raw values make physical A confirm and physical B cancel.
-for mapping in 'a = esc' 'b = enter' 'x = esc' 'y = esc'; do
-  grep -Fxq "$mapping" "$ROOT/ports/appmanager/dist/love_ui/ui.gptk"
+# APP Manager also makes both face-button conventions activate the focused
+# explicit choice, avoiding firmware-specific physical A/B label swaps.
+for mapping in 'a = enter' 'b = enter' 'x = esc' 'y = esc'; do
+  grep -Fxq "$mapping" "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/ui.gptk"
 done
 for repeat_mapping in 'up = repeat' 'down = repeat' 'left_analog_up = repeat' \
   'left_analog_down = repeat' 'repeat_delay = 360' 'repeat_interval = 90'; do
   grep -Fxq "$repeat_mapping" "$ROOT/_kit/love/ui.gptk"
-  grep -Fxq "$repeat_mapping" "$ROOT/ports/appmanager/dist/love_ui/ui.gptk"
+  grep -Fxq "$repeat_mapping" "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/ui.gptk"
 done
-if cmp -s "$ROOT/_kit/love/ui.gptk" "$ROOT/ports/appmanager/dist/love_ui/ui.gptk"; then
-  echo "appmanager dist: expected its explicit A-confirm/B-cancel mapping" >&2
+if cmp -s "$ROOT/_kit/love/ui.gptk" "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/ui.gptk"; then
+  echo "appmanager dist: expected its explicit navigation mapping" >&2
   exit 1
 fi
 

@@ -52,6 +52,17 @@ print(value if isinstance(value, str) else "")
 PY
 )"
 
+PORTABLE_DIR="$(python3 - "$MANIFEST" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+value = manifest.get("portable_dir")
+print(value if isinstance(value, str) else "")
+PY
+)"
+
 SHOT="$(python3 - "$MANIFEST" <<'PY'
 import json
 import sys
@@ -64,6 +75,14 @@ PY
 
 rm -rf "$DIST"
 mkdir -p "$DIST"
+APP_DIST_ROOT="$DIST"
+if [ -n "$PORTABLE_DIR" ]; then
+  case "$PORTABLE_DIR" in
+    ""|.|..|/*|*/*) echo "invalid portable_dir: $PORTABLE_DIR" >&2; exit 1 ;;
+  esac
+  APP_DIST_ROOT="$DIST/$PORTABLE_DIR"
+  mkdir -p "$APP_DIST_ROOT"
+fi
 
 # love 启动器优先: 存在 love/launcher.sh.template 时它就是 stage-1(替代 frt/godot)。
 # love_ui = 共享 _kit/love/kit.lua + 本 port 的 main/conf/gptk；系统字体真实路径由启动脚本传入;
@@ -81,24 +100,31 @@ elif [ -f "$LOVE_DIR/main.lua" ] && [ -f "$SRC/launcher.sh" ]; then
 fi
 
 if [ -n "$USE_LOVE" ]; then
-  mkdir -p "$DIST/love_ui"
+  mkdir -p "$APP_DIST_ROOT/love_ui"
   # Shared LÖVE runtime layer. Ports only carry main.lua and optional overrides.
-  cp "$ROOT/_kit/love/"*.lua "$DIST/love_ui/"
-  cp "$ROOT/_kit/love/ui.gptk" "$DIST/love_ui/"
+  cp "$ROOT/_kit/love/"*.lua "$APP_DIST_ROOT/love_ui/"
+  cp "$ROOT/_kit/love/ui.gptk" "$APP_DIST_ROOT/love_ui/"
   # 通用启动器背景(品牌 Logo 在图内): 所有 love port 共享这一张。
-  [ -f "$ROOT/_kit/love/launcher_bg.png" ] && cp "$ROOT/_kit/love/launcher_bg.png" "$DIST/love_ui/"
+  [ -f "$ROOT/_kit/love/launcher_bg.png" ] && cp "$ROOT/_kit/love/launcher_bg.png" "$APP_DIST_ROOT/love_ui/"
   # Port-specific Lua modules and optional asset overrides.
-  cp "$LOVE_DIR/"*.lua "$DIST/love_ui/"
+  cp "$LOVE_DIR/"*.lua "$APP_DIST_ROOT/love_ui/"
   # Optional data catalogs consumed by a port-specific LÖVE UI and its shell
   # helper. Runtime repair uses a generated, versioned PortMaster mapping here.
   for f in "$LOVE_DIR/"*.tsv; do
-    [ -f "$f" ] && cp "$f" "$DIST/love_ui/"
+    [ -f "$f" ] && cp "$f" "$APP_DIST_ROOT/love_ui/"
   done
   for f in conf.lua ui.gptk launcher_bg.png; do
-    [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
+    [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$APP_DIST_ROOT/love_ui/"
   done
 elif [ -f "$SRC/launcher.sh" ]; then
   "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
+fi
+
+# A portable app may own native runtime, input and network assets next to its
+# UI. Keep this generic so package assembly remains deterministic and does not
+# reach into another repository or an installed PortMaster tree.
+if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
+  cp -R "$PORT_DIR/portable/." "$APP_DIST_ROOT/"
 fi
 
 # bootstrap.pck 只给 frt/godot 启动器用; love 启动器不需要, 跳过。
@@ -106,8 +132,8 @@ if [ -z "$USE_LOVE" ] && [ -n "$BOOTSTRAP_MANIFEST" ] && [ -f "$PORT_DIR/$BOOTST
   python3 "$ROOT/_kit/pck_builder.py" "$PORT_DIR/$BOOTSTRAP_MANIFEST"
 fi
 
-[ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$DIST/"
-[ -f "$PORT_DIR/README.md" ] && cp "$PORT_DIR/README.md" "$DIST/"
+[ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"
+[ -f "$PORT_DIR/README.md" ] && cp "$PORT_DIR/README.md" "$APP_DIST_ROOT/"
 if [ -n "$SHOT" ] && [ -f "$PORT_DIR/$SHOT" ]; then
   cp "$PORT_DIR/$SHOT" "$DIST/screenshot.png"
   cp "$PORT_DIR/$SHOT" "$DIST/${SCRIPT_NAME%.sh}.png"

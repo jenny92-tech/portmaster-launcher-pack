@@ -7,7 +7,18 @@ REPO_ROOT=$(cd "$ROOT/../.." && pwd)
 LAUNCHER="$ROOT/dist/APP Manager.sh"
 APP_UI="$ROOT/love/main.lua"
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+cleanup() {
+  local rc=$?
+  if [ "$rc" != 0 ]; then
+    echo "failed mode: ${CURRENT_MODE:-unknown}" >&2
+    find "$TMP/${CURRENT_MODE:-}" \( -name log.txt -o -name result.txt \) -type f 2>/dev/null | while read -r file; do
+      echo "--- $file" >&2; sed -n '1,220p' "$file" >&2
+    done
+  fi
+  rm -rf "$TMP"
+  exit "$rc"
+}
+trap cleanup EXIT
 
 # helper must remain asynchronous so the LÖVE render loop stays responsive.
 grep -Fq ' --apply-plan >/dev/null 2>&1 &' "$APP_UI"
@@ -42,6 +53,7 @@ fi
 
 make_case() {
   local mode=$1
+  CURRENT_MODE=$mode
   local case_dir="$TMP/$1"
   local scripts="$case_dir/scripts"
   local card="$case_dir/card"
@@ -49,7 +61,8 @@ make_case() {
   [ "$mode" != "same_root_delete" ] || scripts="$gamedirs"
   local app="$gamedirs/appmanager"
   mkdir -p "$scripts/PortMaster/libs" "$scripts/PortMaster/runtimes/love_11.5" \
-    "$scripts/images" "$gamedirs/GameData" "$app/conf" "$app/trash" "$app/love_ui" "$case_dir/bin"
+    "$scripts/images" "$gamedirs/GameData" "$app/conf" "$app/trash" "$app/love_ui" \
+    "$app/runtime/libs.aarch64" "$app/bin" "$app/share" "$case_dir/bin"
   cp "$LAUNCHER" "$scripts/APP Manager.sh"
   : > "$app/love_ui/main.lua"
   : > "$app/love_ui/ui.gptk"
@@ -129,10 +142,16 @@ case "$TEST_MODE" in
   no_plan) ;;
 esac
 [ "$TEST_MODE" != "renamed_launcher" ] || exit 0
+[ "$TEST_MODE" != "helper_fallback" ] || rm -f -- "$TEST_RUNNING_SOURCE"
 bash "$TEST_APPLY_HELPER" --apply-plan
 exit 0
 LOVE
   chmod +x "$scripts/PortMaster/runtimes/love_11.5/love.aarch64"
+  cp "$scripts/PortMaster/runtimes/love_11.5/love.aarch64" "$app/runtime/love.aarch64"
+  cp /usr/bin/true "$app/bin/gptokeyb"
+  : > "$app/share/gamecontrollerdb.txt"
+  : > "$app/share/cacert.pem"
+  : > "$app/share/NotoSansSC-Regular.ttf"
 
   cat > "$case_dir/mock-sudo" <<'EOF'
 #!/usr/bin/env bash
@@ -218,14 +237,12 @@ else
 fi
 EOF
   chmod +x "$case_dir/bin/curl"
+  cp "$case_dir/bin/curl" "$app/bin/curl-portable"
   if [ "$mode" = "runtime_private_curl" ]; then
-    mkdir -p "$app/conf/runtime-tools"
-    cp "$case_dir/bin/curl" "$app/conf/runtime-tools/curl"
     rm -f "$case_dir/bin/curl"
   elif [ "$mode" = "runtime_bad_private_curl" ]; then
-    mkdir -p "$app/conf/runtime-tools"
-    printf '#!/usr/bin/env bash\nexit 126\n' > "$app/conf/runtime-tools/curl"
-    chmod +x "$app/conf/runtime-tools/curl"
+    printf '#!/usr/bin/env bash\nexit 126\n' > "$app/bin/curl-portable"
+    chmod +x "$app/bin/curl-portable"
   fi
 
   cat > "$case_dir/bin/wget" <<'EOF'
@@ -250,9 +267,18 @@ else
 fi
 EOF
   chmod +x "$case_dir/bin/wget"
-  [ "$mode" != "runtime_wget" ] || rm -f "$case_dir/bin/curl"
+  [ "$mode" != "runtime_wget" ] || rm -f "$case_dir/bin/curl" "$app/bin/curl-portable"
 
   export TEST_MODE="$mode"
+  export PAM_APP_ROOT_OVERRIDE="$app"
+  export PAM_STATE_DIR_OVERRIDE="$app/conf"
+  export PAM_PORTMASTER_DIR_OVERRIDE="$scripts/PortMaster"
+  export PAM_SCRIPTS_DIR_OVERRIDE="$scripts"
+  export PAM_DIRECTORY_OVERRIDE="$gamedirs"
+  export PAM_DEVICE_CLASS_OVERRIDE=tested
+  export PAM_TARGET_CONFIRMED_OVERRIDE=1
+  export DEVICE_ARCH=aarch64
+  export ESUDO="$case_dir/mock-sudo"
   export TEST_COUNT="$case_dir/ui-count"
   export TEST_CONTROL_COUNT="$case_dir/control-count"
   export TEST_PLAN="$app/conf/plan.txt"
@@ -479,7 +505,7 @@ EOF
       [ -e "$TEST_BUCKET_ROOT/Keep.sh" ]
       [ "$(grep -Fxc $'FAIL\toperation' "$app/conf/result.txt")" = "2" ]
       ;;
-    runtime_repair|runtime_progress|runtime_private_curl|runtime_bad_private_curl)
+    runtime_repair|runtime_progress|runtime_private_curl)
       if ! grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"; then
         cat "$app/log.txt" "$app/conf/result.txt" >&2
         exit 1
@@ -489,10 +515,9 @@ EOF
       grep -Fxq $'1\tcomplete\tgodot_4.5\t1\t1\t20\t20\t0\tRuntime repair complete' "$app/conf/progress.tsv"
       [ "$mode" != "runtime_progress" ] || [ -e "$TEST_PROGRESS_OBSERVED" ]
       ;;
-    runtime_wget)
-      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq 'wget resume=0 out=' "$TEST_CURL_LOG"
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
+    runtime_bad_private_curl|runtime_wget)
+      grep -Fxq 'old-runtime' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq $'FAIL\truntime\tgodot_4.5\tno-source' "$app/conf/result.txt"
       ;;
     runtime_default_routes)
       grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
@@ -561,15 +586,15 @@ EOF
     renamed_launcher|helper_fallback)
       grep -Fq 'apply_plan()' "$TEST_APPLY_HELPER"
       grep -Fq '"apply_script": "'"$TEST_APPLY_HELPER"'"' "$app/conf/env.json"
-      grep -Fq '"display_width": "854"' "$app/conf/env.json"
-      grep -Fq '"display_height": "480"' "$app/conf/env.json"
+      grep -Fq '"display_width": "960"' "$app/conf/env.json"
+      grep -Fq '"display_height": "720"' "$app/conf/env.json"
       grep -Fq '"device_arch": "aarch64"' "$app/conf/env.json"
-      grep -Fq '"device": "test-controller"' "$app/conf/env.json"
-      grep -Fq '"param_device": "test-device"' "$app/conf/env.json"
+      grep -Fq '"device": ""' "$app/conf/env.json"
+      grep -Fq '"param_device": ""' "$app/conf/env.json"
       grep -Fq '"analog_sticks": "2"' "$app/conf/env.json"
       grep -Fq '"lowres": "N"' "$app/conf/env.json"
       grep -Fq '"cur_tty": "/dev/tty0"' "$app/conf/env.json"
-      grep -Fq '"sdl_controller_file": "/tmp/test-gamecontrollerdb.txt"' "$app/conf/env.json"
+      grep -Fq '"sdl_controller_file": "'"$app"'/share/gamecontrollerdb.txt"' "$app/conf/env.json"
       grep -Fq '"path": "' "$app/conf/env.json"
       ;;
   esac
@@ -592,8 +617,8 @@ EOF
     grep -Fq "$gamedirs/SizeProbe" "$TEST_SIZE_FILE"
   fi
   [ "$(cat "$TEST_COUNT")" = "1" ]
-  # 启动 UI 时调用一次；后台 helper 不能再触发平台启动画面/手柄初始化。
-  [ "$(cat "$TEST_CONTROL_COUNT")" = "1" ]
+  # APP-owned bootstrap never executes PortMaster control/get_controls.
+  [ ! -e "$TEST_CONTROL_COUNT" ]
 }
 
 for mode in delete same_root_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail \
