@@ -513,6 +513,10 @@ local function spatial_sidebar(dx,dy)
 end
 
 local function nearest_sidebar_for_row()
+    local row=cur()[focus_i]
+    local preferred=row and row.sidebar_target
+    local preferred_index=find_focus_identity(sidebar(),preferred)
+    if preferred_index then return preferred_index end
     if not layout or not sidebar_geometry then return nil end
     local L=layout(); local from=L.geometry and L.geometry[focus_i]
     if not from then
@@ -863,6 +867,15 @@ layout=function()
                 local function measured_height(row,width)
                     if row.kind=="section" then return 49*cs end
                     if row.kind=="list_item" then return (row.height or 50)*cs end
+                    if row.kind=="checkbox" and row.detail then
+                        local min_h=(row.height or 74)*cs
+                        local tx=70*cs; local inner_w=math.max(1,width-tx-18*cs)
+                        local label_font=body_fnt((row.label_px or 22)*cs)
+                        local detail_font=body_fnt((row.detail_px or 18)*cs)
+                        local _,detail_lines=wrapped_text(row.detail,detail_font,inner_w,row.detail_max_lines or 1)
+                        return math.max(min_h,10*cs+label_font:getHeight()+6*cs+
+                            detail_lines*detail_font:getHeight()+10*cs)
+                    end
                     if row.kind~="textview" then return rh end
                     local pad=12*cs
                     local label_px=(row.label_px or 15)*cs
@@ -1197,8 +1210,14 @@ function kit.draw()
             draw_checkbox(check_x,check_y,check_size,r.checked,focused,disabled(r))
             local tx=x+(L.app and 70 or 56)*L.cs
             if r.detail then
-                plain(t(r.label),tx,y+(L.app and 10 or 7)*L.cs,(L.app and 22 or 20)*L.cs,{1,1,1})
-                plain(t(r.detail),tx,y+(L.app and 39 or 31)*L.cs,(L.app and 18 or 14)*L.cs,{0.78,0.78,0.84})
+                local label_px=(r.label_px or (L.app and 22 or 20))*L.cs
+                local detail_px=(r.detail_px or (L.app and 18 or 14))*L.cs
+                local inner_w=math.max(1,rw-(tx-x)-(L.app and 18 or 12)*L.cs)
+                local badge=meta_badge(r); local label_w=inner_w-(badge and 76*L.cs or 0)
+                local label=clip_ellipsis(tostring(t(r.label) or ""),body_fnt(label_px),math.max(1,label_w))
+                local detail=wrapped_text(r.detail,body_fnt(detail_px),inner_w,r.detail_max_lines or 1)
+                plain(label,tx,y+(L.app and 10 or 7)*L.cs,label_px,{1,1,1},"left",math.max(1,label_w))
+                plain(detail,tx,y+(L.app and 39 or 31)*L.cs,detail_px,{0.78,0.78,0.84},"left",inner_w)
             else
                 plain(t(r.label),tx,ty,ROW_PX*L.cs,{1,1,1})
             end

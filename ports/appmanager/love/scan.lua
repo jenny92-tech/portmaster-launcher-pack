@@ -151,6 +151,25 @@ local function runtime_of(text)
     return runtimes_of(text)[1] or ""
 end
 
+-- Runtime presence alone is not enough: an interrupted/manual copy can leave a
+-- file with the canonical name that PortMaster will still try to mount.  The
+-- catalog supplies the exact upstream byte count; checking it together with
+-- the SquashFS magic is cheap (seek does not read the whole image) and catches
+-- the partial/corrupt files that Runtime repair can safely replace.
+local function runtime_file_health(path,expected_bytes)
+    local f=path and io.open(path,"rb")
+    if not f then return "missing",0 end
+    local magic=f:read(4) or ""
+    local bytes=f:seek("end") or 0
+    f:close()
+    if magic~="hsqs" then return "invalid_magic",bytes end
+    expected_bytes=tonumber(expected_bytes)
+    if expected_bytes and expected_bytes>0 and bytes~=expected_bytes then
+        return "size_mismatch",bytes
+    end
+    return "healthy",bytes
+end
+
 local function stem(name) return (name:gsub("%.[^.]+$","")) end
 
 function scan.run(env)
@@ -203,5 +222,7 @@ end
 
 scan.read=read
 scan.basename=basename
-scan._test={port_dir_of=port_dir_of,mentions=mentions,runtime_of=runtime_of,runtimes_of=runtimes_of,collect_vars=collect_vars,expand=expand}
+scan.runtime_file_health=runtime_file_health
+scan._test={port_dir_of=port_dir_of,mentions=mentions,runtime_of=runtime_of,runtimes_of=runtimes_of,
+    runtime_file_health=runtime_file_health,collect_vars=collect_vars,expand=expand}
 return scan

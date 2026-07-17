@@ -452,7 +452,16 @@ runtime_has_magic() {
 runtime_prepare_downloader() {
   local candidate tool_dir tool_tmp
   [ -z "${RUNTIME_DOWNLOADER:-}" ] || return 0
-  if [ -z "${PAM_RUNTIME_WGET:-}" ] && command -v curl >/dev/null 2>&1; then
+  candidate="$CONFDIR/runtime-tools/curl"
+  if [ -z "${PAM_RUNTIME_WGET:-}" ] && [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
+    RUNTIME_CURL="$candidate"
+    RUNTIME_DOWNLOADER="curl"
+    return 0
+  fi
+  candidate=$(command -v curl 2>/dev/null || true)
+  if [ -z "${PAM_RUNTIME_WGET:-}" ] && [ -n "$candidate" ] && [ -x "$candidate" ] &&
+     "$candidate" --version >/dev/null 2>&1; then
+    RUNTIME_CURL="$candidate"
     RUNTIME_DOWNLOADER="curl"
     return 0
   fi
@@ -490,7 +499,7 @@ runtime_probe_url() {
   : > "$out" || return 1
   runtime_prepare_downloader || return 1
   if [ "$RUNTIME_DOWNLOADER" = "curl" ]; then
-    curl -fsSL --connect-timeout 3 --max-time 5 --range 0-3 "$url" 2>/dev/null | head -c 4 > "$out"
+    "$RUNTIME_CURL" -fsSL --connect-timeout 3 --max-time 5 --range 0-3 "$url" 2>/dev/null | head -c 4 > "$out"
   elif [ "$RUNTIME_DOWNLOADER" = "wget" ]; then
     if command -v timeout >/dev/null 2>&1; then
       timeout 5 "$RUNTIME_WGET" -q -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
@@ -508,9 +517,9 @@ runtime_fetch_url() {
   runtime_prepare_downloader || return 1
   if [ "$RUNTIME_DOWNLOADER" = "curl" ]; then
     if [ "$resume" = "1" ]; then
-      curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url"
+      "$RUNTIME_CURL" -fL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url"
     else
-      curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
+      "$RUNTIME_CURL" -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
     fi
   elif [ "$RUNTIME_DOWNLOADER" = "wget" ]; then
     if [ "$resume" = "1" ]; then

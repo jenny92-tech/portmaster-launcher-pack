@@ -28,9 +28,12 @@ Lua 只负责只读扫描、选择和生成 `conf/plan.txt`。移动、恢复和
 `launcher.sh --apply-plan` 在 `$ESUDO` 下执行；Shell 会重新验证所有路径边界，不能
 由 UI 绕过。
 
-首页“残留清理”下方提供“Runtime 修复”。页面列出全部被 SH 明确声明的 Runtime，
-并显示依赖它的游戏数量；`controlfolder/libs/<name>.squashfs` 不存在的项目额外标记
-“缺失”，已安装项目也可主动重新下载，以修复内容损坏但文件仍存在的情况。
+首页“残留清理”下方提供“Runtime 修复”。页面只列出被当前受管游戏 SH 明确声明的
+Runtime，不展示与这些游戏无关的完整官方目录。列表分成“需要修复”和“已安装”两段：
+缺失项以及 SquashFS 文件头无效的项目归入前者并默认勾选；文件头有效的项目归入后者且
+默认不勾选。体积与当前官方目录不同的已安装文件标记为“版本不同”，但不会被武断判为
+损坏或自动选中；用户可主动勾选并重新下载，以更新版本或处理内容异常等情况。
+首页入口括号中的数字是需要修复的数量，而不是页面总项目数。
 扫描器同时识别 `runtime=` 和 `java_runtime=`、`weston_runtime=` 等 `*_runtime=`
 声明；一个游戏声明多个共享 Runtime 时会逐项检查，不再只记录第一个。
 可用项由随 APP 发布的 `runtime_catalog.tsv` 按 `DEVICE_ARCH` 匹配；catalog 生成自
@@ -41,7 +44,8 @@ catalog 同时保存 GitHub API 报告的每个文件及合并后的实际字节
 `conf/runtime-cache/<source commit>/<runtime>/`；重新进入修复时，curl 使用 `-C -`、
 wget 使用 `-c` 从已有字节继续。代理不支持 Range 时会安全地重新下载该分片；只有
 新镜像校验并原子替换成功后才删除缓存，失败不会破坏旧 Runtime 或已经下载的进度。
-在缺少 curl 且系统 BusyBox wget 不支持 HTTPS 的 LoongOS 上，helper 会复用固件恢复
+helper 优先使用 APP 私有 `conf/runtime-tools/curl`，其次使用系统 curl。在两者都缺少、
+且系统 BusyBox wget 不支持 HTTPS 的 LoongOS 上，helper 会复用固件恢复
 资源中自带的 GNU Wget：复制到 APP 自己的 `conf/runtime-tools/` 并补执行位，不修改
 系统文件，也不在发行包内重复携带下载器。
 

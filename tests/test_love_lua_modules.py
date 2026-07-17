@@ -189,11 +189,13 @@ with tempfile.TemporaryDirectory() as source:
         love.graphics.print=function(value) printed[#printed+1]=tostring(value) end
         love.graphics.line=function() line_calls=line_calls+1 end
         local k=require("kit")
-        local row=k.checkbox("Port",{detail="Game data",checked=false})
+        local row=k.checkbox("Port",{detail="Required by several games with long names that must wrap onto more than one line",detail_max_lines=3,height=96,checked=false})
         k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
-            k.add_page("Manager",{row})
+            k.add_page("Manager",{row},{row_layout={mode="flow",max_columns=1,min_width=300}})
         end})
         love.load(); love.draw()
+        local layout=k.debug_layout()
+        assert(layout.geometry[1].h>layout.rh)
         for _,value in ipairs(printed) do
             assert(not value:find("□",1,true) and not value:find("✓",1,true))
         end
@@ -481,8 +483,8 @@ with tempfile.TemporaryDirectory() as source:
     app = data / "appmanager"
     for directory in (scripts, data / "GameData", app / "conf", app / "trash", base / "libs", base / "images"):
         directory.mkdir(parents=True, exist_ok=True)
-    (base / "libs" / "frt_3.6.squashfs").touch()
-    (base / "libs" / "godot_4.5.squashfs").touch()
+    (base / "libs" / "frt_3.6.squashfs").write_bytes(b"hsqs")
+    (base / "libs" / "godot_4.5.squashfs").write_bytes(b"hsqs")
     (scripts / "Game.sh").write_text(
         'GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\nruntime=godot_4.6.3\n',
         encoding="utf-8",
@@ -627,11 +629,32 @@ with tempfile.TemporaryDirectory() as source:
         assert(k.debug_focus().sidebar_i==5)
         love.keypressed("return")
         local page=k.debug_page()
-        assert(page.index==5 and page.title=="Runtime 修复" and page.row_count==2)
-        assert(page.row_kinds[1]=="checkbox" and page.row_kinds[2]=="checkbox")
-        love.keypressed("return"); love.keypressed("right"); love.keypressed("return")
+        assert(page.index==5 and page.title=="Runtime 修复" and page.row_count==4)
+        assert(page.section_count==2 and page.section_labels[1]=="需要修复（1）")
+        assert(page.section_labels[2]=="已安装（1）")
+        assert(page.row_kinds[1]=="section" and page.row_kinds[2]=="checkbox")
+        assert(page.row_kinds[3]=="section" and page.row_kinds[4]=="checkbox")
+        local layout=k.debug_layout()
+        assert(layout.row_layout_mode=="flow" and layout.columns==1)
+        assert(layout.geometry[2].h>layout.rh and k.debug_focus().focus_i==2)
+        -- The missing item starts selected, so Repair immediately confirms one.
+        love.keypressed("right")
+        local repair_focus=k.debug_focus()
+        assert(repair_focus.zone=="sidebar" and repair_focus.sidebar_i==1,
+            "Runtime row should enter the primary Repair action")
+        love.keypressed("return")
         local dialog=k.debug_dialog()
-        assert(dialog.open and not dialog.danger and dialog.item_count==1)
+        assert(dialog.open and not dialog.danger and dialog.item_count==1,
+            "missing Runtime should be the only default repair")
+        -- An installed item is opt-in; selecting it adds a second forced repair.
+        love.keypressed("escape"); love.keypressed("left"); love.keypressed("down")
+        assert(k.debug_focus().focus_i==4)
+        love.keypressed("return"); love.keypressed("right")
+        repair_focus=k.debug_focus()
+        if repair_focus.sidebar_i~=1 then love.keypressed("up") end
+        love.keypressed("return")
+        dialog=k.debug_dialog()
+        assert(dialog.open and dialog.item_count==2,"installed Runtime should be an opt-in repair")
         love.keypressed("escape"); k.goto_page(1)
     ''')
     # Flow layout derives its column count from the available width, while all

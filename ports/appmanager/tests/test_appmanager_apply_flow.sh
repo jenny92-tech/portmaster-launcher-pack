@@ -94,7 +94,7 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_repair|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
   runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
@@ -141,6 +141,7 @@ EOF
 
   cat > "$case_dir/bin/curl" <<'EOF'
 #!/usr/bin/env bash
+[ "${1:-}" != "--version" ] || { printf 'curl test build\n'; exit 0; }
 out=""
 url=""
 resume=0
@@ -175,6 +176,15 @@ else
 fi
 EOF
   chmod +x "$case_dir/bin/curl"
+  if [ "$mode" = "runtime_private_curl" ]; then
+    mkdir -p "$app/conf/runtime-tools"
+    cp "$case_dir/bin/curl" "$app/conf/runtime-tools/curl"
+    rm -f "$case_dir/bin/curl"
+  elif [ "$mode" = "runtime_bad_private_curl" ]; then
+    mkdir -p "$app/conf/runtime-tools"
+    printf '#!/usr/bin/env bash\nexit 126\n' > "$app/conf/runtime-tools/curl"
+    chmod +x "$app/conf/runtime-tools/curl"
+  fi
 
   cat > "$case_dir/bin/wget" <<'EOF'
 #!/usr/bin/env bash
@@ -277,7 +287,7 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
+    runtime_repair|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
       printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
       ;;
   esac
@@ -385,7 +395,7 @@ EOF
       [ -e "$TEST_BUCKET_ROOT/Keep.sh" ]
       [ "$(grep -Fxc $'FAIL\toperation' "$app/conf/result.txt")" = "2" ]
       ;;
-    runtime_repair)
+    runtime_repair|runtime_private_curl|runtime_bad_private_curl)
       if ! grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"; then
         cat "$app/log.txt" "$app/conf/result.txt" >&2
         exit 1
@@ -475,7 +485,7 @@ EOF
 for mode in delete same_root_delete fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_wget runtime_cached runtime_resume runtime_resume_reset \
+  delete_container_invalid invalid no_plan runtime_repair runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
   runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"

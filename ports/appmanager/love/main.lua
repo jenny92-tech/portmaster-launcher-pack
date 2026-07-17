@@ -124,14 +124,23 @@ local function missing_runtime(script)
 end
 
 local function required_runtimes()
-    local missing={}
-    for _,item in ipairs(report.runtimes.missing or {}) do missing[item.name]=true end
     local out={}
     for name,users in pairs(report.runtimes.need or {}) do
-        out[#out+1]={name=name,users=users,missing=missing[name] or false}
+        local catalog=runtime_catalog[name]
+        local health,bytes=scanner.runtime_file_health(
+            (env.libs_dir or "").."/"..name..".squashfs",catalog and catalog.bytes)
+        out[#out+1]={name=name,users=users,health=health,bytes=bytes,
+            missing=health=="missing",damaged=health=="invalid_magic",different=health=="size_mismatch",
+            needs_repair=health=="missing" or health=="invalid_magic"}
     end
     table.sort(out,function(a,b) return a.name<b.name end)
     return out
+end
+
+local function runtime_issue_count()
+    local count=0
+    for _,item in ipairs(required_runtimes()) do if item.needs_repair then count=count+1 end end
+    return count
 end
 
 local build_home,build_junk,build_trash,build_env,build_runtime,collect_trash
@@ -251,7 +260,7 @@ build_home=function(preserve_focus)
     if #rows==0 then rows[1]=kit.info(L("Ports","端口"),L("No managed ports found.","没有找到可管理的端口。")) end
     local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
     local trash_count=collect_trash and #collect_trash() or 0
-    local runtime_count=#(report.runtimes.missing or {})
+    local runtime_count=runtime_issue_count()
     kit.set_page(HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
         preserve_focus=preserve_focus,
         sidebar_title=L("Quick Tools","快捷工具"),
@@ -293,33 +302,78 @@ local function repair_runtimes()
 end
 
 build_runtime=function(preserve_focus)
-    local rows={}
+    local rows,details={},{}
     if status_message then rows[#rows+1]=kit.info(L("Status","状态"),status_message); status_message=nil end
     local required=required_runtimes()
+    local repair_needed,installed={},{}
     for _,item in ipairs(required) do
+        if item.needs_repair then repair_needed[#repair_needed+1]=item else installed[#installed+1]=item end
+    end
+    for _,item in ipairs(repair_needed) do
+        if selected_runtime[item.name]==nil and runtime_catalog[item.name] then selected_runtime[item.name]=true end
+    end
+
+    local function add_runtime(item)
         local users={}
         for _,script in ipairs(item.users or {}) do users[#users+1]=display_name(script) end
         table.sort(users)
         local available=runtime_catalog[item.name]~=nil
         local detail
         if available then
-            detail=L("Required by: "..table.concat(users,", "),"需要："..table.concat(users,"、"))
+            local count=#users
+            detail=L(string.format("Required by %d: %s",count,table.concat(users,", ")),
+                string.format("依赖 %d 个：%s",count,table.concat(users,"、")))
+            local key="repair:"..item.name
             rows[#rows+1]=kit.checkbox(item.name,{
-                id="repair:"..item.name,detail=detail,checked=selected_runtime[item.name],
+                id=key,detail=detail,detail_max_lines=3,height=96,checked=selected_runtime[item.name],
+                sidebar_target="runtime-repair",
                 on_change=function(value) selected_runtime[item.name]=value end,
-                badge=item.missing and kit.badge(L("Missing","缺失")) or nil,
+                badge=item.missing and kit.badge(L("Missing","缺失")) or
+                    (item.damaged and kit.badge(L("Damaged","损坏"),{1,0.45,0.38}) or
+                    (item.different and kit.badge(L("Different","版本不同"),{1,0.78,0.35}) or
+                    kit.badge(L("Verified","已校验"),{0.48,0.90,0.62}))),
             })
+            local health
+            if item.missing then health=L("Local file is missing.","本地文件不存在。")
+            elseif item.health=="invalid_magic" then health=L("Validation failed: not a SquashFS image.","校验失败：不是有效的 SquashFS 镜像。")
+            elseif item.health=="size_mismatch" then
+                health=L(string.format("The SquashFS header is valid, but the local size is %s; the current official version is %s. Select it to update or replace it.",human(item.bytes),human(runtime_catalog[item.name].bytes)),
+                    string.format("SquashFS 文件头有效，但本地体积为 %s，当前官方版本为 %s。可勾选后更新或替换。",human(item.bytes),human(runtime_catalog[item.name].bytes)))
+            else
+                health=L(string.format("Verified: SquashFS header and exact size (%s). Select it to force a fresh download.",human(item.bytes)),
+                    string.format("已校验 SquashFS 文件头和精确体积（%s）。如怀疑内容异常，可勾选后强制重新下载。",human(item.bytes)))
+            end
+            details[key]={title=item.name,body=L(
+                string.format("%s\n\nRequired by %d managed port%s:\n%s",health.en,count,count==1 and "" or "s",table.concat(users,"\n")),
+                string.format("%s\n\n由 %d 个受管游戏依赖：\n%s",health.zh,count,table.concat(users,"\n")))}
         else
             detail=L("No official download is available for this device architecture.","官方目录没有适用于当前设备架构的下载。")
             rows[#rows+1]=kit.info(item.name,detail,{id="repair:"..item.name})
+        end
+    end
+
+    if #required>0 then
+        rows[#rows+1]=kit.section(L(string.format("Needs repair (%d)",#repair_needed),string.format("需要修复（%d）",#repair_needed)),{font_px=22})
+        if #repair_needed==0 then
+            rows[#rows+1]=kit.info(L("Status","状态"),L("All required Runtimes passed validation.","所有必需 Runtime 均已通过校验。"))
+        else
+            for _,item in ipairs(repair_needed) do add_runtime(item) end
+        end
+        rows[#rows+1]=kit.section(L(string.format("Installed (%d)",#installed),string.format("已安装（%d）",#installed)),{font_px=22})
+        if #installed==0 then
+            rows[#rows+1]=kit.info(L("Runtimes","运行环境"),L("No required Runtime is currently installed.","当前没有已安装的必需 Runtime。"))
+        else
+            for _,item in ipairs(installed) do add_runtime(item) end
         end
     end
     if #required==0 then
         rows[1]=kit.info(L("Runtimes","运行环境"),L("No managed port declares a shared Runtime.","当前游戏没有声明共享 Runtime。"))
     end
     kit.set_page(RUNTIME,L("Runtime repair","Runtime 修复"),rows,{preserve_focus=preserve_focus,
+        row_layout={mode="flow",min_width=360,max_columns=1},sidebar_details=details,
         sidebar_title=L("Quick Tools","快捷工具"),sidebar={
-        button(dynamic_count("Repair (%d)","修复 (%d)",selected_runtime),repair_runtimes,{disabled=empty(selected_runtime)}),
+        button(dynamic_count("Repair (%d)","修复 (%d)",selected_runtime),repair_runtimes,
+            {id="runtime-repair",disabled=empty(selected_runtime)}),
         button(L("Select all","全选"),function() select_all_runtime(true) end,{half=true}),
         button(L("Select none","全不选"),function() select_all_runtime(false) end,{half=true}),
         button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"}),
