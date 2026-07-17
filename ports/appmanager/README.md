@@ -51,8 +51,10 @@ helper 优先使用 APP 私有 `conf/runtime-tools/curl`，其次使用系统 cu
 
 下载源固定为 catalog 注明的 PortMaster-New commit。helper 参考 NapCat Installer，
 同时维护 `githubProxies` 与 `customProxies`：前者只在代理域名后拼完整 GitHub URL；
-后者按独立规则构造去掉 GitHub 域名的路径；jsDelivr 使用其原生的
-`/gh/<owner>/<repo>@<commit>/<path>` 不可变 URL。Custom 候选优先，每批最多并发探测
+后者按服务分别构造：Xget 使用去掉 GitHub 域名的路径，cors.isteed 与 raw.ihtw 保留
+完整 GitHub URL，jsDelivr 使用其原生的 `/gh/<owner>/<repo>@<commit>/<path>` 不可变
+URL。仅提供 Git 仓库克隆或当前返回 403 的 GitClone / Github Fast 不进入 Runtime
+候选。Custom 候选优先，每批最多并发探测
 5 个，只请求 4 字节 Range，只有返回 SquashFS `hsqs` 文件头才算成功；第一批出现可用
 源后就停止继续探测。完整下载若失败，会依次尝试该批其他已验证源，最后验证并回退
 GitHub 原生。完整下载在 APP 临时目录完成，重新校验文件头后以隐藏临时文件原子移动到

@@ -489,14 +489,12 @@ runtime_proxy_candidates() {
     # commit URL instead of pretending to be a github.com prefix proxy.
     custom_rows='jsdelivr|JSDelivr CDN|https://fastly.jsdelivr.net/gh
 custom|github.com/xixu-me/Xget|https://xget.xi-xu.me/gh
-custom|@Lufs|https://cors.isteed.cc
-custom|raw.ihtw.moe|https://raw.ihtw.moe
-custom|Github Fast|https://githubfast.com
-custom|GitClone|https://gitclone.com'
+full|@Lufs / cors.isteed.cc|https://cors.isteed.cc
+full|raw.ihtw.moe|https://raw.ihtw.moe'
   fi
   while IFS='|' read -r format name base; do
     [ -n "$format" ] && [ -n "$name" ] && [ -n "$base" ] || continue
-    case "$format" in custom|jsdelivr) ;; *) continue ;; esac
+    case "$format" in custom|full|jsdelivr) ;; *) continue ;; esac
     case "$base" in https://*) ;; *) continue ;; esac
     printf '%s\t%s\t%s\n' "$format" "$name" "${base%/}"
   done <<< "$custom_rows"
@@ -553,7 +551,7 @@ runtime_url() {
     direct)
       printf '%s/%s\n' "$RUNTIME_DIRECT_BASE" "$source"
       ;;
-    github)
+    github|full)
       printf '%s/https://github.com/PortsMaster/PortMaster-New/raw/%s/runtimes/%s\n' \
         "${base%/}" "$RUNTIME_SOURCE_REF" "$source"
       ;;
