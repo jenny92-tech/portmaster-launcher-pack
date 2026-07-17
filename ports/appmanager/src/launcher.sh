@@ -69,6 +69,9 @@ PLAN_FILE="$CONFDIR/plan.txt"
 RESULT_FILE="$CONFDIR/result.txt"
 APPLY_HELPER="$CONFDIR/apply-helper.sh"
 SIZE_FILE="$CONFDIR/sizes.tsv"
+RUNTIME_CATALOG="$GAMEDIR/love_ui/runtime_catalog.tsv"
+RUNTIME_SOURCE_REF="0d9880ec45269e5dd6df11e5949f07005d5108d8"
+RUNTIME_DIRECT_BASE="https://raw.githubusercontent.com/PortsMaster/PortMaster-New/$RUNTIME_SOURCE_REF/runtimes"
 
 cd "$GAMEDIR" || exit 1
 if [ "$APPLY_ONLY" = "1" ] || [ "$SIZE_ONLY" = "1" ]; then
@@ -149,6 +152,7 @@ write_env() {
   "result_file": "$RESULT_FILE",
   "apply_script": "$APPLY_HELPER",
   "size_file": "$SIZE_FILE",
+  "runtime_catalog_file": "$RUNTIME_CATALOG",
   "ignore_dirs": ["PortMaster", "images", "$PORT_NAME"],
   "ignore_scripts": ["PortMaster.sh", "$(basename "$PAM_LAUNCHER_SOURCE")", ".port.sh"],
   "self_port": "$PORT_NAME"
@@ -382,6 +386,244 @@ delete_selected_item() {
   fi
 }
 
+# ── Runtime repair ─────────────────────────────────────────────────────
+# The official catalog maps the canonical launcher name (the filename kept in
+# controlfolder/libs) to architecture-specific files in PortMaster-New. Some
+# large files are split; they are downloaded in order and joined before the
+# canonical .squashfs is atomically installed.
+runtime_arch() {
+  local arch
+  arch=$(printf '%s' "${DEVICE_ARCH:-$(uname -m 2>/dev/null)}" | tr '[:upper:]' '[:lower:]')
+  case "$arch" in
+    arm64|armv8) echo aarch64 ;;
+    armv7|armv7l) echo armhf ;;
+    amd64) echo x86_64 ;;
+    *) echo "$arch" ;;
+  esac
+}
+
+runtime_sources() {
+  local runtime="$1" arch
+  arch=$(runtime_arch)
+  [ -f "$RUNTIME_CATALOG" ] || return 1
+  awk -F '\t' -v runtime="$runtime" -v arch="$arch" \
+    '$1 == runtime && $2 == arch { print $3; exit }' "$RUNTIME_CATALOG"
+}
+
+runtime_expected_size() {
+  local runtime="$1" arch
+  arch=$(runtime_arch)
+  [ -f "$RUNTIME_CATALOG" ] || return 1
+  awk -F '\t' -v runtime="$runtime" -v arch="$arch" \
+    '$1 == runtime && $2 == arch { print $4; exit }' "$RUNTIME_CATALOG"
+}
+
+runtime_valid_source() {
+  local source="$1"
+  case "$source" in
+    ""|*[!A-Za-z0-9._+-]*|.*|*..*) return 1 ;;
+  esac
+  case "$source" in *.squashfs|*.squashfs.part.[0-9][0-9][0-9]) return 0 ;; esac
+  return 1
+}
+
+runtime_url() {
+  local proxy="$1" source="$2"
+  if [ "$proxy" = "DIRECT" ]; then
+    printf '%s/%s\n' "$RUNTIME_DIRECT_BASE" "$source"
+  else
+    printf '%s/https://github.com/PortsMaster/PortMaster-New/raw/%s/runtimes/%s\n' \
+      "${proxy%/}" "$RUNTIME_SOURCE_REF" "$source"
+  fi
+}
+
+runtime_has_magic() {
+  [ -f "$1" ] && [ "$(LC_ALL=C head -c 4 "$1" 2>/dev/null)" = "hsqs" ]
+}
+
+runtime_probe_url() {
+  local url="$1" out="$2"
+  : > "$out" || return 1
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 3 --max-time 5 --range 0-3 "$url" 2>/dev/null | head -c 4 > "$out"
+  elif command -v wget >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      timeout 5 wget -q -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
+    else
+      wget -q -T 5 -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
+    fi
+  else
+    return 1
+  fi
+  runtime_has_magic "$out"
+}
+
+runtime_fetch_url() {
+  local url="$1" out="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$out" "$url"
+  else
+    return 1
+  fi
+}
+
+# Adapted from NapCat-Mac-Installer's GitHubProxy.auto: all candidates probe a
+# small byte range concurrently and the first verified SquashFS response wins.
+# Native GitHub is verified and used when every proxy fails.
+runtime_select_proxy() {
+  local sample="$1" probe_root proxy id
+  runtime_valid_source "$sample" || return 1
+  probe_root="$CONFDIR/proxy-probe.$$"
+  rm -rf "$probe_root"; mkdir -p "$probe_root" || return 1
+  RUNTIME_PROXIES="${PAM_RUNTIME_PROXIES:-https://gh.h233.eu.org
+https://rapidgit.jjda.de5.net
+https://gh.ddlc.top
+https://gh-proxy.org
+https://cdn.gh-proxy.org
+https://edgeone.gh-proxy.org
+https://ghproxy.it
+https://github.boki.moe
+https://gh-proxy.net
+https://gh.jasonzeng.dev
+https://gh.monlor.com
+https://fastgit.cc
+https://github.tbedu.top
+https://firewall.lxstd.org
+https://github.ednovas.xyz
+https://ghfile.geekertao.top
+https://ghp.keleyaa.com
+https://gh.chjina.com
+https://cdn.crashmc.com
+https://git.yylx.win
+https://gitproxy.mrhjx.cn
+https://ghfast.top
+https://wget.la
+https://hk.gh-proxy.org}"
+  id=0
+  while IFS= read -r proxy; do
+    [ -n "$proxy" ] || continue
+    id=$((id + 1))
+    (
+      if runtime_probe_url "$(runtime_url "$proxy" "$sample")" "$probe_root/probe.$id"; then
+        if mkdir "$probe_root/winner.lock" 2>/dev/null; then
+          printf '%s\n' "$proxy" > "$probe_root/winner"
+        fi
+      fi
+    ) &
+  done <<< "$RUNTIME_PROXIES"
+  wait
+
+  if [ -s "$probe_root/winner" ]; then
+    RUNTIME_PROXY=$(cat "$probe_root/winner")
+    RUNTIME_PROXY_NAME="${RUNTIME_PROXY#*://}"
+  elif runtime_probe_url "$(runtime_url DIRECT "$sample")" "$probe_root/direct"; then
+    RUNTIME_PROXY="DIRECT"
+    RUNTIME_PROXY_NAME="GitHub"
+  else
+    rm -rf "$probe_root"
+    return 1
+  fi
+  echo "$LOG_PREFIX Runtime source selected: $RUNTIME_PROXY_NAME"
+  rm -rf "$probe_root"
+  RUNTIME_PROXY_READY=1
+}
+
+runtime_download_source() {
+  local source="$1" out="$2" candidate url seen_direct=0
+  for candidate in "$RUNTIME_PROXY" DIRECT; do
+    if [ "$candidate" = "DIRECT" ]; then
+      [ "$seen_direct" = "0" ] || continue
+      seen_direct=1
+    fi
+    url=$(runtime_url "$candidate" "$source")
+    rm -f "$out"
+    echo "$LOG_PREFIX downloading $source via $([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+    if runtime_fetch_url "$url" "$out" && [ -s "$out" ]; then
+      RUNTIME_DOWNLOAD_VIA="$([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+      return 0
+    fi
+  done
+  rm -f "$out"
+  return 1
+}
+
+install_runtime() {
+  local runtime="$1" sources expected_size actual_size sample work combined part source target staged
+  case "$runtime" in
+    ""|*[!A-Za-z0-9._+-]*|.*|*..*)
+      printf 'FAIL\truntime\t%s\tinvalid-name\n' "$runtime" >> "$RESULT_FILE"
+      return 1
+      ;;
+  esac
+  target="$LIBS_DIR/$runtime.squashfs"
+  if [ -d "$target" ] && [ ! -L "$target" ]; then
+    printf 'FAIL\truntime\t%s\tinvalid-target\n' "$runtime" >> "$RESULT_FILE"
+    return 1
+  fi
+  sources=$(runtime_sources "$runtime")
+  expected_size=$(runtime_expected_size "$runtime")
+  if [ -z "$sources" ] || [ -z "$expected_size" ]; then
+    printf 'FAIL\truntime\t%s\tunsupported\n' "$runtime" >> "$RESULT_FILE"
+    return 1
+  fi
+  sample=${sources%%,*}
+  if [ "${RUNTIME_PROXY_READY:-0}" != "1" ] && ! runtime_select_proxy "$sample"; then
+    printf 'FAIL\truntime\t%s\tno-source\n' "$runtime" >> "$RESULT_FILE"
+    return 1
+  fi
+
+  work="$CONFDIR/runtime-download.$$.$runtime"
+  combined="$work/$runtime.squashfs"
+  rm -rf "$work"; mkdir -p "$work" || {
+    printf 'FAIL\truntime\t%s\ttemp-dir\n' "$runtime" >> "$RESULT_FILE"
+    return 1
+  }
+  if ! : > "$combined"; then
+    printf 'FAIL\truntime\t%s\ttemp-file\n' "$runtime" >> "$RESULT_FILE"
+    rm -rf "$work"; return 1
+  fi
+  IFS=',' read -r -a runtime_parts <<< "$sources"
+  for source in "${runtime_parts[@]}"; do
+    if ! runtime_valid_source "$source"; then
+      printf 'FAIL\truntime\t%s\tcatalog\n' "$runtime" >> "$RESULT_FILE"
+      rm -rf "$work"; return 1
+    fi
+    part="$work/$source.download"
+    if ! runtime_download_source "$source" "$part" || ! cat "$part" >> "$combined"; then
+      printf 'FAIL\truntime\t%s\tdownload\n' "$runtime" >> "$RESULT_FILE"
+      rm -rf "$work"; return 1
+    fi
+    rm -f "$part"
+  done
+  if ! runtime_has_magic "$combined"; then
+    printf 'FAIL\truntime\t%s\tinvalid-image\n' "$runtime" >> "$RESULT_FILE"
+    rm -rf "$work"; return 1
+  fi
+  actual_size=$(wc -c < "$combined" | tr -d '[:space:]')
+  if [ "$actual_size" != "$expected_size" ]; then
+    printf 'FAIL\truntime\t%s\tsize-mismatch\n' "$runtime" >> "$RESULT_FILE"
+    echo "$LOG_PREFIX Runtime size mismatch: $runtime expected=$expected_size actual=$actual_size"
+    rm -rf "$work"; return 1
+  fi
+
+  staged="$LIBS_DIR/.pam-$runtime.squashfs.$$"
+  if $ESUDO mkdir -p "$LIBS_DIR" &&
+     $ESUDO mv -- "$combined" "$staged" &&
+     $ESUDO chmod 0644 "$staged" &&
+     $ESUDO mv -f -- "$staged" "$target"; then
+    printf 'OK\truntime\t%s\t%s\n' "$runtime" "${RUNTIME_DOWNLOAD_VIA:-$RUNTIME_PROXY_NAME}" >> "$RESULT_FILE"
+    echo "$LOG_PREFIX Runtime installed: $runtime"
+    rm -rf "$work"
+    return 0
+  fi
+  $ESUDO rm -f -- "$staged" 2>/dev/null || true
+  printf 'FAIL\truntime\t%s\tinstall\n' "$runtime" >> "$RESULT_FILE"
+  rm -rf "$work"
+  return 1
+}
+
 apply_plan() {
   local stamp kind arg dest base bucket batch item trash_failed=0 empty_failed=0
   stamp=$(date +%Y%m%d-%H%M%S)
@@ -492,6 +734,10 @@ apply_plan() {
 
       DELETE_ITEM)
         delete_selected_item "$arg"
+        ;;
+
+      INSTALL_RUNTIME)
+        install_runtime "$arg" || true
         ;;
 
       *)

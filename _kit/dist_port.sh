@@ -89,6 +89,11 @@ if [ -n "$USE_LOVE" ]; then
   [ -f "$ROOT/_kit/love/launcher_bg.png" ] && cp "$ROOT/_kit/love/launcher_bg.png" "$DIST/love_ui/"
   # Port-specific Lua modules and optional asset overrides.
   cp "$LOVE_DIR/"*.lua "$DIST/love_ui/"
+  # Optional data catalogs consumed by a port-specific LÖVE UI and its shell
+  # helper. Runtime repair uses a generated, versioned PortMaster mapping here.
+  for f in "$LOVE_DIR/"*.tsv; do
+    [ -f "$f" ] && cp "$f" "$DIST/love_ui/"
+  done
   for f in conf.lua ui.gptk launcher_bg.png; do
     [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
   done

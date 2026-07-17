@@ -74,6 +74,13 @@ grep -Fq 'kit.textview' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'kit.list_item(name' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'Installed Runtimes (%d)' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq '已安装 Runtime（%d）' "$ROOT/ports/appmanager/love/main.lua"
+grep -Fq 'INSTALL_RUNTIME' "$ROOT/ports/appmanager/love/main.lua"
+grep -Fq 'runtime_catalog.tsv' "$ROOT/ports/appmanager/src/launcher.sh"
+catalog="$ROOT/ports/appmanager/love/runtime_catalog.tsv"
+catalog_ref=$(sed -n 's/^# Source commit: //p' "$catalog")
+[ -n "$catalog_ref" ]
+grep -Fq "RUNTIME_SOURCE_REF=\"$catalog_ref\"" "$ROOT/ports/appmanager/src/launcher.sh"
+awk -F '\t' '!/^#/ && (NF != 4 || $1 !~ /^[A-Za-z0-9._+-]+$/ || $2 !~ /^(aarch64|armhf|x86_64)$/ || $4 !~ /^[0-9]+$/) { exit 1 }' "$catalog"
 ! grep -Fq '"Runtime "..index.."/"..#runtimes' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'mode=="flow"' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'font:getWidth(title)>title_w' "$ROOT/_kit/love/kit.lua"
@@ -88,7 +95,7 @@ for retired in bootstrap.pck appmanager.gptk runtime hacksdl; do
     exit 1
   }
 done
-for current in love_ui/kit.lua love_ui/main.lua love_ui/scan.lua love_ui/ui.gptk; do
+for current in love_ui/kit.lua love_ui/main.lua love_ui/scan.lua love_ui/ui.gptk love_ui/runtime_catalog.tsv; do
   [ -f "$ROOT/ports/appmanager/dist/$current" ] || {
     echo "appmanager dist: missing $current" >&2
     exit 1

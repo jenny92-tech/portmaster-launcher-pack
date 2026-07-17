@@ -28,6 +28,20 @@ Lua 只负责只读扫描、选择和生成 `conf/plan.txt`。移动、恢复和
 `launcher.sh --apply-plan` 在 `$ESUDO` 下执行；Shell 会重新验证所有路径边界，不能
 由 UI 绕过。
 
+首页“残留清理”下方提供“Runtime 修复”。页面列出全部被 SH 明确声明的 Runtime，
+并显示依赖它的游戏数量；`controlfolder/libs/<name>.squashfs` 不存在的项目额外标记
+“缺失”，已安装项目也可主动重新下载，以修复内容损坏但文件仍存在的情况。
+可用项由随 APP 发布的 `runtime_catalog.tsv` 按 `DEVICE_ARCH` 匹配；catalog 生成自
+PortMaster-New 官方 `runtimes/runtimes.json` 和同目录文件树，既处理普通架构后缀，
+也按顺序合并 GMToolkit、Mono、Zulu 等 `.part.NNN` 分片。
+catalog 同时保存 GitHub API 报告的实际字节数，合并结果必须与期望总大小完全一致。
+
+下载源固定为 catalog 注明的 PortMaster-New commit。helper 参考 NapCat Installer 的
+GitHub Proxy 策略，并发对代理发送 4 字节 Range 探测，只有返回 SquashFS `hsqs` 文件头
+才算成功；全部代理失败时验证并回退 GitHub 原生。完整下载在 APP 临时目录完成，重新
+校验文件头后以隐藏临时文件原子移动到 `controlfolder/libs`，任何分片或安装失败都不会
+留下冒充已安装 Runtime 的半文件。
+
 扫描器仍只读取每个 SH 明确写出的 `runtime=...`，再与 PortMaster `libs/` 对比；不从
 注释、路径或 glob 猜测依赖。目录归属仍采用 L1 精确解析与 L2 保守引用两条独立规则。
 

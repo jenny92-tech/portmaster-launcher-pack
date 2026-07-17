@@ -7,9 +7,9 @@ local function join(parts,sep) return table.concat(parts,sep or " · ") end
 local function stem(name) return (name:gsub("%.[^.]+$","")) end
 local function shquote(value) return "'"..tostring(value):gsub("'","'\\''").."'" end
 
-local HOME,JUNK,TRASH,ENV = 1,2,3,4
-local env,report,size_map = {},nil,{}
-local selected_home,selected_junk,selected_trash = {},{},{}
+local HOME,JUNK,TRASH,ENV,RUNTIME = 1,2,3,4,5
+local env,report,size_map,runtime_catalog = {},nil,{},{}
+local selected_home,selected_junk,selected_trash,selected_runtime = {},{},{},{}
 local confirm_plan,confirm_return = nil,HOME
 local task,status_message = nil,nil
 
@@ -38,6 +38,28 @@ local function load_sizes()
     for line in f:lines() do
         local bytes,path=line:match("^(%d+)\t(.+)$")
         if bytes and path then size_map[path]=tonumber(bytes) or 0 end
+    end
+    f:close()
+end
+
+local function runtime_arch(value)
+    value=tostring(value or ""):lower()
+    if value=="arm64" or value=="armv8" then return "aarch64" end
+    if value=="armv7" or value=="armv7l" then return "armhf" end
+    if value=="amd64" then return "x86_64" end
+    return value
+end
+
+local function load_runtime_catalog()
+    runtime_catalog={}
+    local f=io.open(env.runtime_catalog_file or "","rb")
+    if not f then return end
+    local arch=runtime_arch(env.device_arch)
+    for line in f:lines() do
+        if not line:match("^%s*#") then
+            local name,row_arch,sources,bytes=line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)$")
+            if name and row_arch==arch then runtime_catalog[name]={sources=sources,arch=row_arch,bytes=tonumber(bytes)} end
+        end
     end
     f:close()
 end
@@ -87,8 +109,9 @@ end
 
 local function refresh_scan()
     load_sizes()
+    load_runtime_catalog()
     report=scanner.run(env)
-    selected_home,selected_junk,selected_trash={},{},{}
+    selected_home,selected_junk,selected_trash,selected_runtime={},{},{},{}
     dump_debug()
 end
 
@@ -100,7 +123,18 @@ local function missing_runtime(script)
     table.sort(out); return table.concat(out,", ")
 end
 
-local build_home,build_junk,build_trash,build_env,collect_trash
+local function required_runtimes()
+    local missing={}
+    for _,item in ipairs(report.runtimes.missing or {}) do missing[item.name]=true end
+    local out={}
+    for name,users in pairs(report.runtimes.need or {}) do
+        out[#out+1]={name=name,users=users,missing=missing[name] or false}
+    end
+    table.sort(out,function(a,b) return a.name<b.name end)
+    return out
+end
+
+local build_home,build_junk,build_trash,build_env,build_runtime,collect_trash
 
 local function show_exit_dialog()
     kit.dialog({
@@ -132,10 +166,14 @@ local function finish_task()
     else status_message=L("Operation completed.","操作已完成。") end
     -- The helper removes plan_file only after completing its env refresh, so
     -- reloading here cannot race a half-written env.json.
-    load_env(); refresh_scan(); build_home()
-    if confirm_return==TRASH then build_trash(); kit.goto_page(TRASH)
-    elseif confirm_return==JUNK then build_junk(); kit.goto_page(JUNK)
-    else kit.goto_page(HOME) end
+    load_env(); refresh_scan()
+    if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
+    else
+        build_home()
+        if confirm_return==TRASH then build_trash(); kit.goto_page(TRASH)
+        elseif confirm_return==JUNK then build_junk(); kit.goto_page(JUNK)
+        else kit.goto_page(HOME) end
+    end
 end
 
 local function start_apply()
@@ -144,9 +182,9 @@ local function start_apply()
         status_message=L("Cannot start the privileged helper.","无法启动提权操作助手。")
         kit.goto_page(confirm_return); return
     end
-    kit.set_busy(true,L("Working…","处理中…"))
+    kit.set_busy(true,confirm_return==RUNTIME and L("Repairing Runtimes…","正在修复 Runtime…") or L("Working…","处理中…"))
     os.execute(shquote(env.apply_script).." --apply-plan >/dev/null 2>&1 &")
-    task={elapsed=0,poll=0}
+    task={elapsed=0,poll=0,timeout=confirm_return==RUNTIME and 1800 or 45}
 end
 
 local function show_confirm(title,plan,labels,return_page,opts)
@@ -213,6 +251,7 @@ build_home=function(preserve_focus)
     if #rows==0 then rows[1]=kit.info(L("Ports","端口"),L("No managed ports found.","没有找到可管理的端口。")) end
     local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
     local trash_count=collect_trash and #collect_trash() or 0
+    local runtime_count=#(report.runtimes.missing or {})
     kit.set_page(HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
         preserve_focus=preserve_focus,
         sidebar_title=L("Quick Tools","快捷工具"),
@@ -224,9 +263,66 @@ build_home=function(preserve_focus)
         button(L("Select none","全不选"),function() select_all_home(false) end,{half=true}),
         button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
             function() build_junk(); kit.goto_page(JUNK) end),
+        button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
+            function() build_runtime(); kit.goto_page(RUNTIME) end),
         button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
             function() build_trash(); kit.goto_page(TRASH) end),
         button(L("Quit","退出"),show_exit_dialog,{group="bottom"}),
+    }})
+end
+
+local function select_all_runtime(value)
+    for _,item in ipairs(required_runtimes()) do
+        if runtime_catalog[item.name] then selected_runtime[item.name]=value end
+    end
+    build_runtime(true)
+end
+
+local function repair_runtimes()
+    local plan,labels={},{}
+    for _,item in ipairs(required_runtimes()) do
+        if selected_runtime[item.name] and runtime_catalog[item.name] then
+            plan[#plan+1]={kind="INSTALL_RUNTIME",arg=item.name}
+            labels[#labels+1]=item.name
+        end
+    end
+    if #plan>0 then
+        show_confirm(L("Repair selected Runtimes","修复所选 Runtime"),plan,labels,RUNTIME,{
+            confirm=L("Download and repair","下载并修复"),danger=false})
+    end
+end
+
+build_runtime=function(preserve_focus)
+    local rows={}
+    if status_message then rows[#rows+1]=kit.info(L("Status","状态"),status_message); status_message=nil end
+    local required=required_runtimes()
+    for _,item in ipairs(required) do
+        local users={}
+        for _,script in ipairs(item.users or {}) do users[#users+1]=display_name(script) end
+        table.sort(users)
+        local available=runtime_catalog[item.name]~=nil
+        local detail
+        if available then
+            detail=L("Required by: "..table.concat(users,", "),"需要："..table.concat(users,"、"))
+            rows[#rows+1]=kit.checkbox(item.name,{
+                id="repair:"..item.name,detail=detail,checked=selected_runtime[item.name],
+                on_change=function(value) selected_runtime[item.name]=value end,
+                badge=item.missing and kit.badge(L("Missing","缺失")) or nil,
+            })
+        else
+            detail=L("No official download is available for this device architecture.","官方目录没有适用于当前设备架构的下载。")
+            rows[#rows+1]=kit.info(item.name,detail,{id="repair:"..item.name})
+        end
+    end
+    if #required==0 then
+        rows[1]=kit.info(L("Runtimes","运行环境"),L("No managed port declares a shared Runtime.","当前游戏没有声明共享 Runtime。"))
+    end
+    kit.set_page(RUNTIME,L("Runtime repair","Runtime 修复"),rows,{preserve_focus=preserve_focus,
+        sidebar_title=L("Quick Tools","快捷工具"),sidebar={
+        button(dynamic_count("Repair (%d)","修复 (%d)",selected_runtime),repair_runtimes,{disabled=empty(selected_runtime)}),
+        button(L("Select all","全选"),function() select_all_runtime(true) end,{half=true}),
+        button(L("Select none","全不选"),function() select_all_runtime(false) end,{half=true}),
+        button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"}),
     }})
 end
 
@@ -405,7 +501,7 @@ local port={
     strings={working=L("Working…","处理中…")},
     on_home_cancel=show_exit_dialog,
     build_pages=function(k)
-        for i=1,4 do k.add_page(L("Loading…","正在加载…"),{k.info("Port App Manager",L("Scanning…","正在扫描…"))}) end
+        for i=1,5 do k.add_page(L("Loading…","正在加载…"),{k.info("Port App Manager",L("Scanning…","正在扫描…"))}) end
     end,
     on_load=function()
         local ok,err=load_env()
@@ -425,10 +521,11 @@ local port={
         if task.poll<0.25 then return end
         task.poll=0
         if not file_exists(env.plan_file) then finish_task()
-        elseif task.elapsed>45 then
+        elseif task.elapsed>(task.timeout or 45) then
             kit.set_busy(false); task=nil
             status_message=L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。")
-            build_home(); kit.goto_page(HOME)
+            if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
+            else build_home(); kit.goto_page(HOME) end
         end
     end,
 }

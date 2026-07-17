@@ -483,7 +483,14 @@ with tempfile.TemporaryDirectory() as source:
         directory.mkdir(parents=True, exist_ok=True)
     (base / "libs" / "frt_3.6.squashfs").touch()
     (base / "libs" / "godot_4.5.squashfs").touch()
-    (scripts / "Game.sh").write_text('GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\n', encoding="utf-8")
+    (scripts / "Game.sh").write_text(
+        'GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\nruntime=godot_4.6.3\n',
+        encoding="utf-8",
+    )
+    (scripts / "Installed.sh").write_text(
+        'GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\nruntime=godot_4.5\n',
+        encoding="utf-8",
+    )
     env_path = app / "conf/env.json"
     env_path.write_text(json.dumps({
         "controlfolder": str(base / "PortMaster"), "scripts_dir": str(scripts),
@@ -493,7 +500,9 @@ with tempfile.TemporaryDirectory() as source:
         "display_width": "960", "display_height": "720", "device_arch": "aarch64",
         "device": "test", "plan_file": str(app / "conf/plan.txt"),
         "result_file": str(app / "conf/result.txt"), "apply_script": "",
-        "size_file": str(app / "conf/sizes.tsv"), "ignore_dirs": ["PortMaster", "images", "appmanager"],
+        "size_file": str(app / "conf/sizes.tsv"),
+        "runtime_catalog_file": str(root / "ports/appmanager/love/runtime_catalog.tsv"),
+        "ignore_dirs": ["PortMaster", "images", "appmanager"],
         "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "appmanager"
     }), encoding="utf-8")
     previous = os.environ.get("PAM_ENV")
@@ -507,7 +516,10 @@ with tempfile.TemporaryDirectory() as source:
     )
     fixture = {
         str(data): [{"name": "GameData", "path": str(data / "GameData"), "is_dir": True}],
-        str(scripts): [{"name": "Game.sh", "path": str(scripts / "Game.sh"), "is_dir": False}],
+        str(scripts): [
+            {"name": "Game.sh", "path": str(scripts / "Game.sh"), "is_dir": False},
+            {"name": "Installed.sh", "path": str(scripts / "Installed.sh"), "is_dir": False},
+        ],
         str(base / "images"): [],
         str(base / "libs"): [
             {"name": "frt_3.6.squashfs", "path": str(base / "libs" / "frt_3.6.squashfs"), "is_dir": False},
@@ -601,6 +613,26 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("down")
         assert(k.debug_focus().focus_i==5)
         love.draw(); love.keypressed("escape")
+    ''')
+    # Missing Runtimes have their own selectable repair page. The official
+    # catalog controls whether the current architecture can repair each item.
+    lua.execute(r'''
+        local k=require("kit")
+        k.goto_page(1); love.keypressed("right")
+        for _=1,10 do
+            local focus=k.debug_focus()
+            if focus.zone=="sidebar" and focus.sidebar_i==5 then break end
+            love.keypressed("down")
+        end
+        assert(k.debug_focus().sidebar_i==5)
+        love.keypressed("return")
+        local page=k.debug_page()
+        assert(page.index==5 and page.title=="Runtime 修复" and page.row_count==2)
+        assert(page.row_kinds[1]=="checkbox" and page.row_kinds[2]=="checkbox")
+        love.keypressed("return"); love.keypressed("right"); love.keypressed("return")
+        local dialog=k.debug_dialog()
+        assert(dialog.open and not dialog.danger and dialog.item_count==1)
+        love.keypressed("escape"); k.goto_page(1)
     ''')
     # Flow layout derives its column count from the available width, while all
     # cards in one visual row share the tallest wrapped TextView height.

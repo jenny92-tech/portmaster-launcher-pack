@@ -28,10 +28,15 @@ make_case() {
   [ "$mode" != "same_root_delete" ] || scripts="$gamedirs"
   local app="$gamedirs/appmanager"
   mkdir -p "$scripts/PortMaster/libs" "$scripts/PortMaster/runtimes/love_11.5" \
-    "$scripts/images" "$gamedirs/GameData" "$app/conf" "$app/trash" "$app/love_ui"
+    "$scripts/images" "$gamedirs/GameData" "$app/conf" "$app/trash" "$app/love_ui" "$case_dir/bin"
   cp "$LAUNCHER" "$scripts/APP Manager.sh"
   : > "$app/love_ui/main.lua"
   : > "$app/love_ui/ui.gptk"
+  cat > "$app/love_ui/runtime_catalog.tsv" <<'EOF'
+# Small deterministic catalog for downloader tests.
+godot_4.5	aarch64	godot_4.5.aarch64.squashfs	20
+gmtoolkit	aarch64	gmtoolkit.aarch64.squashfs.part.001,gmtoolkit.aarch64.squashfs.part.002,gmtoolkit.aarch64.squashfs.part.003	60
+EOF
   : > "$scripts/Game.sh"
 
   cat > "$scripts/PortMaster/control.txt" <<EOF
@@ -89,6 +94,11 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
+  runtime_repair) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
+  runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
+  runtime_fail) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   restore_selected_invalid) printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   invalid) printf '# test plan\nTRASH\t%s\n' "$TEST_OUTSIDE" > "$TEST_PLAN" ;;
   no_plan) ;;
@@ -129,6 +139,31 @@ esac
 EOF
   chmod +x "$case_dir/mock-sudo"
 
+  cat > "$case_dir/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    --connect-timeout|--max-time|--range|--retry|--retry-delay) shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+printf '%s\n' "$url" >> "$TEST_CURL_LOG"
+[ "${TEST_MODE:-}" != "runtime_fail" ] || exit 22
+if [ "${TEST_MODE:-}" = "runtime_direct" ] && printf '%s' "$url" | grep -Fq 'proxy.test'; then
+  exit 22
+fi
+if [ -n "$out" ]; then
+  printf 'hsqs-runtime-payload' > "$out"
+else
+  printf 'hsqs'
+fi
+EOF
+  chmod +x "$case_dir/bin/curl"
+
   export TEST_MODE="$mode"
   export TEST_COUNT="$case_dir/ui-count"
   export TEST_CONTROL_COUNT="$case_dir/control-count"
@@ -145,6 +180,8 @@ EOF
   export TEST_RUNNING_SOURCE="$scripts/.port.sh"
   export TEST_BATCH_ROOT="$app/trash/protected-batch"
   export TEST_BUCKET_ROOT="$app/trash/protected-batch/scripts"
+  export TEST_CURL_LOG="$case_dir/curl.log"
+  export PAM_RUNTIME_PROXIES="https://proxy.test"
   : > "$TEST_OUTSIDE"
 
   case "$mode" in
@@ -198,20 +235,23 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
+    runtime_repair|runtime_fail)
+      printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      ;;
   esac
 
   if [ "$mode" = "renamed_launcher" ]; then
     # MiniLoong 把目标 SH 重命名为 .port.sh 后直接执行。helper 应复制
     # 真实运行的 $0，这样原文件名是否还存在都不影响。
     mv "$scripts/APP Manager.sh" "$scripts/.port.sh"
-    bash "$scripts/.port.sh"
+    PATH="$case_dir/bin:$PATH" bash "$scripts/.port.sh"
   elif [ "$mode" = "helper_fallback" ]; then
     # MiniLoong 会运行临时 .port.sh；它可能在 helper 复制前就被前端移除。
     # 必须从稳定文件回退生成 helper；Linux 真机还会先尝试 Bash 的 fd 255。
     cp "$scripts/APP Manager.sh" "$scripts/.port.sh"
-    bash "$scripts/.port.sh"
+    PATH="$case_dir/bin:$PATH" bash "$scripts/.port.sh"
   else
-    bash "$scripts/APP Manager.sh"
+    PATH="$case_dir/bin:$PATH" bash "$scripts/APP Manager.sh"
   fi
 
   case "$mode" in
@@ -292,6 +332,31 @@ EOF
       [ -e "$TEST_BUCKET_ROOT/Keep.sh" ]
       [ "$(grep -Fxc $'FAIL\toperation' "$app/conf/result.txt")" = "2" ]
       ;;
+    runtime_repair)
+      if ! grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"; then
+        cat "$app/log.txt" "$app/conf/result.txt" >&2
+        exit 1
+      fi
+      grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
+      grep -Fq 'https://proxy.test/https://github.com/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
+      ;;
+    runtime_split)
+      [ "$(wc -c < "$scripts/PortMaster/libs/gmtoolkit.squashfs" | tr -d ' ')" = "60" ]
+      grep -Fq $'OK\truntime\tgmtoolkit\tproxy.test' "$app/conf/result.txt"
+      ;;
+    runtime_direct)
+      grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq $'OK\truntime\tgodot_4.5\tGitHub' "$app/conf/result.txt"
+      grep -Fq 'raw.githubusercontent.com/PortsMaster/PortMaster-New/' "$TEST_CURL_LOG"
+      ;;
+    runtime_invalid)
+      [ ! -e "$scripts/PortMaster/libs/escape.squashfs" ]
+      grep -Fq $'FAIL\truntime\t../escape\tinvalid-name' "$app/conf/result.txt"
+      ;;
+    runtime_fail)
+      grep -Fxq 'old-runtime' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq $'FAIL\truntime\tgodot_4.5\tno-source' "$app/conf/result.txt"
+      ;;
     invalid)
       [ -e "$TEST_OUTSIDE" ]
       grep -Fxq $'FAIL\toperation' "$app/conf/result.txt"
@@ -334,7 +399,7 @@ EOF
 for mode in delete same_root_delete fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan \
+  delete_container_invalid invalid no_plan runtime_repair runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"
 done
