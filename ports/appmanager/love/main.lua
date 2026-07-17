@@ -330,51 +330,70 @@ build_trash=function(preserve_focus)
 end
 
 build_env=function()
-    local rows={}
-    local function section(label) rows[#rows+1]=kit.section(label) end
-    local function info(label,value) rows[#rows+1]=kit.textview(label,provided(value)) end
+    local rows,details={},{}
+    local function section(label) rows[#rows+1]=kit.section(label,{font_px=22}) end
+    local function info(key,label,value,title,body)
+        rows[#rows+1]=kit.textview(label,provided(value),{id=key,label_px=16,value_px=18})
+        details[key]={title=title or label,body=body}
+    end
     section(L("Key paths","关键路径"))
-    info(L("SH folder ($0 folder)","SH 目录（$0 目录）"),env.scripts_dir)
-    info(L("Data folder (directory/ports)","Data 目录（directory/ports）"),env.gamedirs_dir)
-    info(L("PortMaster folder (controlfolder)","PortMaster 目录（controlfolder）"),env.controlfolder)
-    info(L("Runtime folder (controlfolder/libs)","Runtime 目录（controlfolder/libs）"),env.libs_dir)
+    info("path:scripts",L("SH path","SH 路径"),env.scripts_dir,
+        L("Launcher script folder","SH 启动脚本目录"),
+        L("This is the folder containing the menu's .sh launchers, normally the folder of $0. A menu item runs one of these scripts first; it locates game data, prepares the Runtime, maps controls and starts the game. Removing or breaking a script makes that menu item unlaunchable.",
+            "这里存放菜单中的 .sh 启动脚本，通常就是 $0 所在目录。点击游戏后会先执行对应脚本，由它定位数据、准备 Runtime、映射手柄并启动游戏。删除或改错脚本会让对应菜单项无法启动。"))
+    info("path:data",L("Data path","Data 路径"),env.gamedirs_dir,
+        L("Game data folder","游戏数据目录"),
+        L("This is directory/ports: the root that holds each port's game data and configuration, usually one subfolder per port. APP Manager checks references in SH scripts before removing a data folder so shared data is not deleted while another launcher still uses it.",
+            "这里是 directory/ports，保存各个移植的游戏数据和配置，通常一个端口对应一个子目录。APP Manager 删除数据前会检查 SH 脚本引用，避免仍被其他启动器共用的目录遭到误删。"))
+    info("path:portmaster",L("PortMaster path","PortMaster 路径"),env.controlfolder,
+        L("PortMaster core folder","PortMaster 核心目录"),
+        L("This is controlfolder, the shared PortMaster installation. It contains control.txt, common resources, helper scripts and global configuration used by many ports. It is infrastructure, not one game's data, and should not be removed with a port.",
+            "这里是 controlfolder，也就是 PortMaster 的公共核心目录，包含 control.txt、通用资源、辅助脚本和全局配置。它被许多端口共同使用，不属于某一个游戏，不能随单个游戏一起删除。"))
+    info("path:runtimes",L("Runtime path","Runtime 路径"),env.libs_dir,
+        L("Shared Runtime folder","共享 Runtime 目录"),
+        L("This is controlfolder/libs. It stores shared Runtime packages such as love, frt and godot squashfs images. Several launchers may use the same Runtime; if one is missing, every dependent game can fail to start or require a new download.",
+            "这里是 controlfolder/libs，保存 love、frt、godot 等共享 Runtime 的 squashfs 包。多个启动器可能共用同一个 Runtime；文件缺失时，所有依赖它的游戏都可能无法启动或需要重新下载。"))
 
     local resolution=(env.display_width and env.display_width~="" and env.display_height and env.display_height~="")
         and tostring(env.display_width).."×"..tostring(env.display_height) or nil
     section(L("Environment values","环境变量"))
     local values={
-        {L("Firmware (CFW_NAME)","固件（CFW_NAME）"),env.cfw},
-        {L("Display resolution","显示分辨率"),resolution},
-        {L("Architecture (DEVICE_ARCH)","设备架构（DEVICE_ARCH）"),env.device_arch},
-        {L("Controller ID (DEVICE)","手柄 ID（DEVICE）"),env.device},
-        {L("Device profile (param_device)","设备配置（param_device）"),env.param_device},
-        {L("Analog sticks (ANALOGSTICKS)","摇杆数（ANALOGSTICKS）"),env.analog_sticks},
-        {L("Low resolution mode (LOWRES)","低分辨率（LOWRES）"),env.lowres},
-        {L("Display terminal (CUR_TTY)","显示终端（CUR_TTY）"),env.cur_tty},
-        {L("Controller database (SDL_GAMECONTROLLERCONFIG_FILE)","手柄库（SDL_GAMECONTROLLERCONFIG_FILE）"),env.sdl_controller_file},
-        {L("Privilege helper (ESUDO)","提权命令（ESUDO）"),env.esudo},
-        {L("Controller helper (GPTOKEYB)","手柄映射（GPTOKEYB）"),env.gptokeyb},
-        {L("Command search path (PATH)","命令搜索（PATH）"),env.path},
-        {L("Library search path (LD_LIBRARY_PATH)","动态库搜索（LD_LIBRARY_PATH）"),env.ld_library_path},
-        {L("Config root (XDG_CONFIG_HOME)","配置根（XDG_CONFIG_HOME）"),env.xdg_config_home},
-        {L("Data root (XDG_DATA_HOME)","数据根（XDG_DATA_HOME）"),env.xdg_data_home},
-        {L("Free space","剩余空间"),human(env.free_bytes)},
+        {"env:cfw",L("Firmware (CFW_NAME)","固件（CFW_NAME）"),env.cfw,L("Firmware family","固件类型"),L("Identifies the current custom firmware. Launchers use it to select firmware-specific paths and compatibility behaviour.","标识当前掌机固件。启动器会据此选择对应的目录规则和兼容处理。")},
+        {"env:resolution",L("Display resolution","显示分辨率"),resolution,L("Physical display size","物理显示分辨率"),L("The detected display width and height. The Kit uses it to choose layout density, columns and readable font sizes.","系统检测到的屏幕宽高。Kit 会据此决定布局密度、分栏数量和可读字号。")},
+        {"env:arch",L("Architecture (DEVICE_ARCH)","设备架构（DEVICE_ARCH）"),env.device_arch,L("CPU architecture","CPU 架构"),L("Selects compatible executables and libraries, such as aarch64 or armhf. A mismatched binary cannot run on the device.","用于选择匹配的可执行文件和动态库，例如 aarch64 或 armhf。架构不匹配的程序无法在设备上运行。")},
+        {"env:device",L("Controller ID (DEVICE)","手柄 ID（DEVICE）"),env.device,L("Controller identifier","手柄标识"),L("The PortMaster device/controller identifier used when choosing control mappings and device-specific defaults.","PortMaster 用来选择手柄映射和设备默认值的机型或控制器标识。")},
+        {"env:profile",L("Device profile (param_device)","设备配置（param_device）"),env.param_device,L("Device profile","设备配置档"),L("Points to the active PortMaster device profile. It supplies hardware-specific settings that launchers should not hard-code.","指向当前 PortMaster 设备配置档，提供启动器不应硬编码的硬件差异参数。")},
+        {"env:sticks",L("Analog sticks (ANALOGSTICKS)","摇杆数（ANALOGSTICKS）"),env.analog_sticks,L("Analog stick count","摇杆数量"),L("Reports how many analog sticks the device profile exposes. Control helpers use it when building game mappings.","表示设备配置提供几个模拟摇杆，手柄映射工具会据此生成游戏控制方案。")},
+        {"env:lowres",L("Low resolution mode (LOWRES)","低分辨率（LOWRES）"),env.lowres,L("Low-resolution mode","低分辨率模式"),L("Signals that launchers should prefer compact UI, smaller render targets or lighter assets on low-resolution hardware.","提示启动器在低分辨率设备上使用更紧凑的界面、较小渲染尺寸或更轻量的资源。")},
+        {"env:tty",L("Display terminal (CUR_TTY)","显示终端（CUR_TTY）"),env.cur_tty,L("Active display terminal","当前显示终端"),L("Names the terminal used by the frontend. Some launchers need it when switching away from and restoring the system menu.","表示前端正在使用的终端；部分启动器切换显示并返回系统菜单时需要它。")},
+        {"env:controller_db",L("Controller database (SDL_GAMECONTROLLERCONFIG_FILE)","手柄库（SDL_GAMECONTROLLERCONFIG_FILE）"),env.sdl_controller_file,L("SDL controller database","SDL 手柄映射库"),L("Path to the SDL controller mapping database. It normalizes physical button layouts so SDL/LÖVE can expose consistent logical controls.","SDL 手柄映射数据库的路径，用来把不同掌机的实体按键布局规范成一致的逻辑控制。")},
+        {"env:esudo",L("Privilege helper (ESUDO)","提权命令（ESUDO）"),env.esudo,L("Privilege helper","提权助手"),L("The firmware-approved command for operations that need elevated permissions. APP Manager uses its own validated helper rather than guessing a sudo command.","固件提供的提权命令，用于需要更高权限的文件操作。APP Manager 通过受校验的助手调用它，不自行猜测 sudo。")},
+        {"env:gptokeyb",L("Controller helper (GPTOKEYB)","手柄映射（GPTOKEYB）"),env.gptokeyb,L("Gamepad-to-keyboard helper","手柄转键盘工具"),L("Path to gptokeyb, which translates gamepad input into keyboard or mouse events for software without native controller support.","gptokeyb 的路径。它为没有原生手柄支持的软件把手柄输入转换成键盘或鼠标事件。")},
+        {"env:path",L("Command search path (PATH)","命令搜索（PATH）"),env.path,L("Command search path","命令搜索路径"),L("Ordered folders searched by the shell for commands. A missing entry can make a launcher report that an installed tool was not found.","Shell 查找命令时依次搜索的目录。缺少必要目录时，启动器可能找不到已经安装的工具。")},
+        {"env:ld_path",L("Library search path (LD_LIBRARY_PATH)","动态库搜索（LD_LIBRARY_PATH）"),env.ld_library_path,L("Dynamic library search path","动态库搜索路径"),L("Ordered folders searched for shared libraries at program startup. Incorrect entries commonly cause missing .so errors or load an incompatible library.","程序启动时查找共享动态库的目录。配置错误通常会产生缺少 .so，或误加载不兼容库。")},
+        {"env:xdg_config",L("Config root (XDG_CONFIG_HOME)","配置根（XDG_CONFIG_HOME）"),env.xdg_config_home,L("Application config root","应用配置根目录"),L("The standard root where applications store user configuration. Redirecting it keeps per-port settings on persistent storage.","应用保存用户配置的标准根目录。重定向到这里可让各端口设置保存在持久存储中。")},
+        {"env:xdg_data",L("Data root (XDG_DATA_HOME)","数据根（XDG_DATA_HOME）"),env.xdg_data_home,L("Application data root","应用数据根目录"),L("The standard root for application-owned data such as saves, databases and downloaded resources, depending on the port.","应用保存存档、数据库或下载资源等自身数据的标准根目录，具体内容由端口决定。")},
+        {"env:free",L("Free space","剩余空间"),human(env.free_bytes),L("Available storage","可用存储空间"),L("Free bytes on the storage used by ports. Uninstall, restore and Runtime operations may fail safely when there is not enough room.","端口所在存储空间的剩余容量。空间不足时，卸载、还原或 Runtime 操作可能会安全中止。")},
     }
-    for _,item in ipairs(values) do info(item[1],item[2]) end
+    for _,item in ipairs(values) do info(item[1],item[2],item[3],item[4],item[5]) end
 
     local runtimes=report.runtimes.have or {}
     section({
         en=string.format("Installed Runtimes (%d)",#runtimes),
         zh=string.format("已安装 Runtime（%d）",#runtimes),
     })
-    if #runtimes==0 then rows[#rows+1]=kit.list_item(L("None installed","未安装"),{id="runtime:none"})
+    if #runtimes==0 then
+        rows[#rows+1]=kit.list_item(L("None installed","未安装"),{id="runtime:none",font_px=19})
+        details["runtime:none"]={title=L("Installed Runtimes","已安装 Runtime"),body=L("No shared Runtime package was found in the Runtime folder.","Runtime 目录中没有检测到共享运行环境包。")}
     else
         for _,name in ipairs(runtimes) do
-            rows[#rows+1]=kit.list_item(name,{id="runtime:"..name})
+            local key="runtime:"..name
+            rows[#rows+1]=kit.list_item(name,{id=key,font_px=19})
+            details[key]={title=name,body=L("This Runtime is installed in the shared Runtime folder. Launchers that declare this exact name can mount and reuse it without bundling another engine copy.","这个 Runtime 已安装在共享目录中。声明相同名称的启动器可以直接挂载并复用它，不需要再打包一份运行引擎。")}
         end
     end
     kit.set_page(ENV,L("Environment details","环境详情"),rows,{row_layout={mode="grid",columns=2},
-        sidebar_title=L("Details","详情"),sidebar={
+        sidebar_title=L("Explanation","说明"),sidebar_details=details,sidebar={
         button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"})
     }})
 end

@@ -145,8 +145,11 @@ with tempfile.TemporaryDirectory() as source:
         local select_row=k.select("Quality",{"safe","fast"},{safe="Safe",fast="Fast"},"quality",{id="quality"})
         local check_row=k.checkbox("Enabled",{id="enabled",detail="Optional feature",checked=false,
             on_change=function(value) changed=value end})
+        local text_row=k.textview("Path","/roms",{label_px=16,value_px=18})
+        local section_row=k.section("Paths",{font_px=22})
         assert(select_row.kind=="picker" and select_row.id=="quality")
         assert(check_row.kind=="checkbox" and check_row.id=="enabled" and check_row.detail=="Optional feature")
+        assert(text_row.label_px==16 and text_row.value_px==18 and section_row.font_px==22)
         k.run({state={ui_lang="en",quality="safe"},input_map={z="confirm",x="cancel"},
             build_pages=function()
                 k.add_page("Home",{select_row,check_row,k.button("Dialog",function()
@@ -305,6 +308,31 @@ with tempfile.TemporaryDirectory() as source:
         k.invalidate_layout()
         k.debug_layout()
         assert(k.debug_layout_cache().misses==invalidated.misses+1)
+    ''')
+
+# Sidebar context is resolved from the focused row's stable key, never its
+# current array position. Inserting a row while preserving focus keeps the
+# matching explanation.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local details={a={title="A",body="About A"},b={title="B",body="About B"}}
+        local page
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            page=k.add_page("Keyed",{k.textview("A","1",{id="a"}),k.textview("B","2",{id="b"})},
+                {sidebar_details=details})
+        end})
+        love.load(); k.input("down")
+        assert(k.debug_sidebar_detail().key=="b")
+        k.set_page(page,"Keyed",{k.textview("Inserted","0",{id="new"}),
+            k.textview("A","1",{id="a"}),k.textview("B","2",{id="b"})},
+            {preserve_focus=true,sidebar_details=details})
+        local detail=k.debug_sidebar_detail()
+        assert(k.debug_focus().focus_i==3 and detail.key=="b" and detail.body=="About B")
     ''')
 
 # Switch is a state-bound boolean control: Left/Right set an exact value and
@@ -497,7 +525,12 @@ with tempfile.TemporaryDirectory() as source:
         assert(page.index==4 and page.section_count==3 and page.row_count==25)
         assert(page.section_labels[3]=="已安装 Runtime（2）")
         assert(page.row_kinds[24]=="list_item" and page.row_kinds[25]=="list_item")
+        assert(page.row_font_px[1]==22 and page.row_label_px[2]==16 and page.row_value_px[2]==18)
+        assert(page.row_font_px[24]==19)
         assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==2)
+        local detail=k.debug_sidebar_detail()
+        assert(detail.key=="path:scripts" and detail.title=="SH 启动脚本目录")
+        assert(detail.body:find("启动脚本",1,true))
         local layout=k.debug_layout()
         assert(layout.row_layout_mode=="grid" and layout.columns==2)
         assert(layout.geometry[2].x < layout.geometry[3].x)
@@ -506,6 +539,9 @@ with tempfile.TemporaryDirectory() as source:
         assert(layout.geometry[24].h < layout.rh and layout.geometry[25].h < layout.rh)
         love.keypressed("right")
         assert(k.debug_focus().focus_i==3)
+        detail=k.debug_sidebar_detail()
+        assert(detail.key=="path:data" and detail.title=="游戏数据目录")
+        assert(detail.body:find("游戏数据",1,true))
         love.keypressed("down")
         assert(k.debug_focus().focus_i==5)
         love.draw(); love.keypressed("escape")

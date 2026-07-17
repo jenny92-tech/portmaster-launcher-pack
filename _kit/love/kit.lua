@@ -51,7 +51,7 @@ local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
 local busy, busy_message = false, nil
 local dialog_state, dialog_focus = nil, 2
-local layout, sidebar_geometry
+local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
 local measurement_cache = setmetatable({}, {__mode="k"})
 local layout_cache_stats = {hits=0,misses=0,invalidations=0}
@@ -295,7 +295,9 @@ function kit.textview(l,value,opts)
     for key,option in pairs(opts or {}) do row[key]=option end
     return row
 end
-function kit.section(l) return {kind="section",label=l,focusable=false} end
+function kit.section(l,opts)
+    return apply_options({kind="section",label=l,focusable=false},opts)
+end
 function kit.badge(text_,color) return {text=text_,color=color} end
 function kit.add_page(title,rows,opts)
     local page=opts or {}; page.title=title; page.rows=rows or {}; page.sidebar=page.sidebar or {}
@@ -371,16 +373,26 @@ function kit.debug_focus()
 end
 function kit.debug_page()
     local rows=pages[page_i] and pages[page_i].rows or {}; local sections=0
-    local section_labels,row_kinds={},{}
+    local section_labels,row_kinds,row_font_px,row_label_px,row_value_px={},{},{},{},{}
     for index,row in ipairs(rows) do
         row_kinds[index]=row.kind
+        row_font_px[index]=row.font_px
+        row_label_px[index]=row.label_px
+        row_value_px[index]=row.value_px
         if row.kind=="section" then
             sections=sections+1
             section_labels[sections]=t(row.label)
         end
     end
     return {index=page_i,row_count=#rows,section_count=sections,
-        section_labels=section_labels,row_kinds=row_kinds}
+        section_labels=section_labels,row_kinds=row_kinds,row_font_px=row_font_px,
+        row_label_px=row_label_px,row_value_px=row_value_px}
+end
+function kit.debug_sidebar_detail()
+    local detail,key
+    if current_sidebar_detail then detail,key=current_sidebar_detail() end
+    if not detail then return nil end
+    return {key=key,title=t(detail.title or ""),body=t(detail.body or "")}
 end
 function kit.debug_layout_cache()
     return {hits=layout_cache_stats.hits,misses=layout_cache_stats.misses,
@@ -390,6 +402,17 @@ function kit.get_state() return state end
 function kit.translate(key) return t(key) end
 local function cur() return pages[page_i].rows end
 local function sidebar() return pages[page_i].sidebar or {} end
+current_sidebar_detail=function()
+    local page=pages[page_i]
+    if not page or type(page.sidebar_details)~="table" then return nil end
+    local row=page.rows and page.rows[focus_i] or nil
+    local key=row_identity(row)
+    local detail=key~=nil and page.sidebar_details[key] or nil
+    if type(detail)=="function" then detail=detail(row,key,state) end
+    if detail==nil then return nil end
+    if type(detail)~="table" then detail={body=detail} end
+    return detail,key
+end
 local function focusables(items)
     local o={}; for i,r in ipairs(items or {}) do if r.focusable and not disabled(r) then o[#o+1]=i end end; return o
 end
@@ -812,7 +835,9 @@ layout=function()
                     if row.kind=="list_item" then return (row.height or 50)*cs end
                     if row.kind~="textview" then return rh end
                     local pad=12*cs
-                    local label_font,value_font=body_fnt(15*cs),body_fnt(17*cs); local inner_w=width-pad*2
+                    local label_px=(row.label_px or 15)*cs
+                    local value_px=(row.value_px or 17)*cs
+                    local label_font,value_font=body_fnt(label_px),body_fnt(value_px); local inner_w=width-pad*2
                     local _,label_lines=wrapped_text(row.label,label_font,inner_w,2)
                     local label_h=label_lines*label_font:getHeight()
                     local requested=row.expanded and row.expanded_lines or row.max_lines
@@ -1118,7 +1143,8 @@ function kit.draw()
         local focused = (zone=="rows" and i==focus_i)
         local ty = y + vcen(ROW_PX*L.cs, row_h)
         if r.kind=="section" then
-            plain(t(r.label),x+4*L.cs,ty,21*L.cs,{1.0,0.78,0.36},"left",rw-8*L.cs)
+            local px=(r.font_px or 21)*L.cs
+            plain(t(r.label),x+4*L.cs,y+vcen(px,row_h),px,{1.0,0.78,0.36},"left",rw-8*L.cs)
             love.graphics.setColor(1.0,0.78,0.36,0.42); love.graphics.setLineWidth(1)
             love.graphics.line(x,y+row_h-8*L.cs,x+rw,y+row_h-8*L.cs)
         else
@@ -1166,19 +1192,22 @@ function kit.draw()
             plain(t(r.label),x+16*L.cs,y+6*L.cs,16*L.cs,{0.72,0.72,0.82})
             plain(t(r.value),x+16*L.cs,y+27*L.cs,18*L.cs,{1,1,1},"left",rw-32*L.cs)
         elseif r.kind=="list_item" then
-            local px=18*L.cs; local inner_w=math.max(1,rw-32*L.cs); local font=body_fnt(px)
+            local px=(r.font_px or 18)*L.cs; local inner_w=math.max(1,rw-32*L.cs); local font=body_fnt(px)
             local value=clip_ellipsis(tostring(t(r.value) or ""),font,inner_w)
             plain(value,x+16*L.cs,centred_text_y(px,y,row_h,0.5*L.cs),px,
                 disabled(r) and {0.55,0.55,0.57} or {0.96,0.94,1},"left",inner_w)
         elseif r.kind=="textview" then
-            local pad=12*L.cs; local label_font,value_font=body_fnt(15*L.cs),body_fnt(17*L.cs); local inner_w=rw-pad*2
+            local pad=12*L.cs
+            local label_px=(r.label_px or 15)*L.cs
+            local value_px=(r.value_px or 17)*L.cs
+            local label_font,value_font=body_fnt(label_px),body_fnt(value_px); local inner_w=rw-pad*2
             local label,label_lines=wrapped_text(r.label,label_font,inner_w,2)
             local label_h=label_lines*label_font:getHeight()
             local requested=r.expanded and r.expanded_lines or r.max_lines
             local max_fit=math.max(1,math.floor((row_h-pad*2-label_h-5*L.cs)/value_font:getHeight()))
             local value=wrapped_text(r.value,value_font,inner_w,math.min(requested,max_fit))
-            plain(label,x+pad,y+pad,15*L.cs,{0.72,0.72,0.82},"left",inner_w)
-            plain(value,x+pad,y+pad+label_h+5*L.cs,17*L.cs,{1,1,1},"left",inner_w)
+            plain(label,x+pad,y+pad,label_px,{0.72,0.72,0.82},"left",inner_w)
+            plain(value,x+pad,y+pad+label_h+5*L.cs,value_px,{1,1,1},"left",inner_w)
         else
             plain(t(r.label),x,ty,ROW_PX*L.cs,{1,1,1},"center",rw)
         end
@@ -1221,6 +1250,35 @@ function kit.draw()
                 28*L.cs,{1,1,1},"center",L.side_w)
             love.graphics.setColor(1,1,1,0.42); love.graphics.setLineWidth(1)
             love.graphics.line(L.side_x,L.band_top+37*L.cs,L.side_x+L.side_w,L.band_top+37*L.cs)
+
+            local detail=current_sidebar_detail and current_sidebar_detail() or nil
+            if detail then
+                local detail_top=L.band_top+48*L.cs
+                local detail_bottom=L.band_top+L.band
+                for index,g in pairs(geometry) do
+                    if side[index].group=="bottom" then detail_bottom=math.min(detail_bottom,g.y-L.gap)
+                    else detail_top=math.max(detail_top,g.y+g.h+L.gap) end
+                end
+                local detail_h=detail_bottom-detail_top
+                if detail_h>=80*L.cs then
+                    love.graphics.setColor(0.075,0.045,0.12,0.92)
+                    love.graphics.rectangle("fill",L.side_x,detail_top,L.side_w,detail_h,8,8)
+                    love.graphics.setColor(0.78,0.68,0.91,0.45); love.graphics.setLineWidth(1)
+                    love.graphics.rectangle("line",L.side_x,detail_top,L.side_w,detail_h,8,8)
+
+                    local pad=14*L.cs; local inner_w=L.side_w-pad*2
+                    local title_px=21*L.cs; local title_font=body_fnt(title_px)
+                    local title,title_lines=wrapped_text(detail.title or "",title_font,inner_w,2)
+                    local title_h=title_lines*title_font:getHeight()
+                    plain(title,L.side_x+pad,detail_top+pad,title_px,{1.0,0.78,0.36},"left",inner_w)
+
+                    local body_y=detail_top+pad+title_h+12*L.cs
+                    local body_px=18*L.cs; local body_font=body_fnt(body_px)
+                    local max_lines=math.max(1,math.floor((detail_top+detail_h-pad-body_y)/body_font:getHeight()))
+                    local body=wrapped_text(detail.body or "",body_font,inner_w,max_lines)
+                    plain(body,L.side_x+pad,body_y,body_px,{0.92,0.90,0.96},"left",inner_w)
+                end
+            end
         end
         for i,r in ipairs(side) do
             local g=geometry[i]

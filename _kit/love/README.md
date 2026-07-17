@@ -98,12 +98,18 @@ narrow titled action column, divider and scrollbar. Page options `header_action`
 `half=true` pairs two actions on one row, `group="bottom"` pins navigation/quit actions,
 and `disabled=true` (or a function) renders and skips unavailable actions. Sidebar and
 content focus both use their rendered geometry, including vertical movement around
-half-width pairs and spatially nearest transitions between columns.
+half-width pairs and spatially nearest transitions between columns. A page may also
+provide `sidebar_details`, keyed by the same stable `id`/`key` used by its rows. The
+Kit resolves the currently focused row's key and renders the matching wrapped context
+card above bottom sidebar actions; descriptions stay correct across sorting and grid
+reflow because they never depend on row indices.
 
 Read-only content uses `kit.textview(label, value, opts)`. A TextView measures wrapped
 label/value text and grows its card instead of overflowing a fixed-height row. Values
 default to two lines with an ellipsis; A expands/collapses up to eight lines, capped to
-the viewport. Override `max_lines`, `expanded_lines` or `expandable` when needed. Set the
+the viewport. Override `max_lines`, `expanded_lines` or `expandable` when needed;
+`label_px` and `value_px` provide page-specific readability tuning. `list_item` and
+`section` similarly accept `font_px`. Set the
 page option `row_layout={mode="grid",columns=2}` for a fixed, equal-width two-column
 grid (two columns are the default when `columns` is omitted), or
 `row_layout={mode="flow",min_width=260}` to derive the number of equal-width columns
