@@ -393,7 +393,9 @@ end
 function kit.debug_dialog()
     return {open=dialog_state~=nil,focus=dialog_focus==1 and "confirm" or "cancel",
         item_count=dialog_state and #(dialog_state.items or {}) or 0,
-        danger=dialog_state and dialog_state.danger==true or false,scope_depth=#focus_stack}
+        danger=dialog_state and dialog_state.danger==true or false,
+        title=dialog_state and t(dialog_state.title or "") or "",
+        message=dialog_state and t(dialog_state.message or "") or "",scope_depth=#focus_stack}
 end
 function kit.debug_focus()
     return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top,scroll_y=scroll_y}
@@ -1354,8 +1356,18 @@ function kit.draw()
         for i,r in ipairs(side) do
             local g=geometry[i]
             panel(g.x,g.y,g.w,g.h,zone=="sidebar" and i==sidebar_i,disabled(r),L.app)
-            plain(t(r.label),g.x,g.y+vcen((L.app and 20 or 19)*L.cs,g.h),(L.app and 20 or 19)*L.cs,
-                disabled(r) and {0.55,0.55,0.57} or {1,1,1},"center",g.w)
+            if r.kind=="checkbox" then
+                local check_size=(L.app and 26 or 24)*L.cs
+                local check_x=g.x+14*L.cs; local check_y=g.y+(g.h-check_size)/2
+                draw_checkbox(check_x,check_y,check_size,r.checked,zone=="sidebar" and i==sidebar_i,disabled(r))
+                local color=disabled(r) and {0.55,0.55,0.57} or
+                    (r.danger and r.checked and {1,0.58,0.58} or {1,1,1})
+                plain(t(r.label),g.x+50*L.cs,g.y+vcen((L.app and 19 or 18)*L.cs,g.h),
+                    (L.app and 19 or 18)*L.cs,color,"left",g.w-62*L.cs)
+            else
+                plain(t(r.label),g.x,g.y+vcen((L.app and 20 or 19)*L.cs,g.h),(L.app and 20 or 19)*L.cs,
+                    disabled(r) and {0.55,0.55,0.57} or {1,1,1},"center",g.w)
+            end
         end
     end
 
@@ -1409,7 +1421,12 @@ function kit.input(action)
                 if action and not disabled(action) then do_action(action.action) end
             elseif it=="lang" then toggle_lang() end
         elseif zone=="sidebar" then
-            local r=sidebar()[sidebar_i]; if r and r.kind=="button" and not disabled(r) then do_action(r.action) end
+            local r=sidebar()[sidebar_i]
+            if r and r.kind=="button" and not disabled(r) then do_action(r.action)
+            elseif r and r.kind=="checkbox" and not disabled(r) then
+                r.checked=not r.checked
+                if r.on_toggle then r.on_toggle(r.checked,r.meta,r) end
+            end
         else
             local r=cur()[focus_i]
             if r and r.kind=="button" and not disabled(r) then do_action(r.action)

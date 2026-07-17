@@ -570,19 +570,37 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("escape")
         assert(DIALOG_CANCEL==1 and not k.debug_dialog().open)
     ''')
-    # Rebuilding a dynamic selection page must not throw focus back to the
-    # first row. Select All/None stay on the same sidebar controls.
+    # Permanent deletion is a one-shot, explicit sidebar checkbox. It changes
+    # the uninstall dialog to an irreversible warning; Select All/None still
+    # retain their stable sidebar focus when the dynamic page rebuilds.
     lua.execute(r'''
         local k=require("kit")
         love.keypressed("right")
         local before=k.debug_focus()
         assert(before.zone=="sidebar" and before.sidebar_i==2)
         love.keypressed("return")
+        assert(k.debug_focus().sidebar_i==2)
+        love.keypressed("left"); love.keypressed("return"); love.keypressed("right")
+        assert(k.debug_focus().sidebar_i==1)
+        love.keypressed("return")
+        local direct=k.debug_dialog()
+        assert(direct.open and direct.danger and direct.title=="永久删除所选端口")
+        assert(direct.message:find("无法恢复",1,true))
+        -- Cancelling clears the one-shot option; the same uninstall is now reversible.
+        love.keypressed("escape"); love.keypressed("return")
+        local reversible=k.debug_dialog()
+        assert(reversible.open and not reversible.danger and reversible.title=="将所选端口移入回收站")
+        love.keypressed("escape")
+        -- Move past Trash to the paired Select All / Select None row.
+        love.keypressed("down"); love.keypressed("down"); love.keypressed("down")
+        before=k.debug_focus()
+        assert(before.zone=="sidebar" and before.sidebar_i==4)
+        love.keypressed("return")
         local selected=k.debug_focus()
         assert(selected.zone==before.zone and selected.sidebar_i==before.sidebar_i)
         love.keypressed("right"); love.keypressed("return")
         local cleared=k.debug_focus()
-        assert(cleared.zone=="sidebar" and cleared.sidebar_i==3)
+        assert(cleared.zone=="sidebar" and cleared.sidebar_i==5)
         love.keypressed("left"); love.keypressed("left")
         assert(k.debug_focus().zone=="rows")
     ''')
@@ -621,12 +639,12 @@ with tempfile.TemporaryDirectory() as source:
     lua.execute(r'''
         local k=require("kit")
         k.goto_page(1); love.keypressed("right")
-        for _=1,10 do
+        for _=1,12 do
             local focus=k.debug_focus()
-            if focus.zone=="sidebar" and focus.sidebar_i==5 then break end
+            if focus.zone=="sidebar" and focus.sidebar_i==7 then break end
             love.keypressed("down")
         end
-        assert(k.debug_focus().sidebar_i==5)
+        assert(k.debug_focus().sidebar_i==7)
         love.keypressed("return")
         local page=k.debug_page()
         assert(page.index==5 and page.title=="Runtime 修复" and page.row_count==4)

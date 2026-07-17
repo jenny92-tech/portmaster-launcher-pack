@@ -10,6 +10,7 @@ local function shquote(value) return "'"..tostring(value):gsub("'","'\\''").."'"
 local HOME,JUNK,TRASH,ENV,RUNTIME = 1,2,3,4,5
 local env,report,size_map,runtime_catalog = {},nil,{},{}
 local selected_home,selected_junk,selected_trash,selected_runtime = {},{},{},{}
+local delete_direct=false
 local confirm_plan,confirm_return = nil,HOME
 local task,status_message = nil,nil
 
@@ -112,6 +113,7 @@ local function refresh_scan()
     load_runtime_catalog()
     report=scanner.run(env)
     selected_home,selected_junk,selected_trash,selected_runtime={},{},{},{}
+    delete_direct=false
     dump_debug()
 end
 
@@ -202,13 +204,14 @@ local function show_confirm(title,plan,labels,return_page,opts)
     local count=#(labels or {})
     kit.dialog({
         title=title,
-        message=L(string.format("Review %d selected item%s before continuing.",count,count==1 and "" or "s"),
+        message=opts.message or L(string.format("Review %d selected item%s before continuing.",count,count==1 and "" or "s"),
             string.format("即将处理 %d 个所选项目，请确认后继续。",count)),
         items=labels,
         confirm=opts.confirm or L("Confirm","确认"),
         cancel=L("Cancel","取消"),
         danger=opts.danger~=false,
         on_confirm=start_apply,
+        on_cancel=opts.on_cancel,
     })
 end
 
@@ -219,6 +222,7 @@ end
 
 local function uninstall_selected()
     local plan,labels,selected_ports,dir_counts,planned_dirs={},{},{},{},{}
+    local operation=delete_direct and "DELETE_MANAGED" or "TRASH"
     for _,p in ipairs(report.ports) do
         if selected_home[p.script] then
             selected_ports[#selected_ports+1]=p; labels[#labels+1]=display_name(p.script)
@@ -226,17 +230,27 @@ local function uninstall_selected()
         end
     end
     for _,p in ipairs(selected_ports) do
-        plan[#plan+1]={kind="TRASH",arg=env.scripts_dir.."/"..p.script}
+        plan[#plan+1]={kind=operation,arg=env.scripts_dir.."/"..p.script}
         for _,image in ipairs(p.images or {}) do
-            if env.images_dir and env.images_dir~="" then plan[#plan+1]={kind="TRASH",arg=env.images_dir.."/"..image} end
+            if env.images_dir and env.images_dir~="" then plan[#plan+1]={kind=operation,arg=env.images_dir.."/"..image} end
         end
         if p.dir~="" and dir_counts[p.dir]==(report.refcount[p.dir] or 0) and not planned_dirs[p.dir] then
             planned_dirs[p.dir]=true
-            plan[#plan+1]={kind="TRASH",arg=env.gamedirs_dir.."/"..p.dir}
+            plan[#plan+1]={kind=operation,arg=env.gamedirs_dir.."/"..p.dir}
         end
     end
-    if #plan>0 then show_confirm(L("Move selected ports to Trash","将所选端口移入回收站"),plan,labels,HOME,
-        {confirm=L("Move to Trash","移入回收站")}) end
+    if #plan>0 then
+        if delete_direct then
+            show_confirm(L("Permanently delete selected ports","永久删除所选端口"),plan,labels,HOME,{
+                message=L("Launcher, images and unshared game data will be deleted permanently. This cannot be undone.",
+                    "启动项、图片和未被共用的游戏数据将被永久删除，无法恢复。"),
+                confirm=L("Delete forever","永久删除"),danger=true,
+                on_cancel=function() delete_direct=false; build_home(true) end})
+        else
+            show_confirm(L("Move selected ports to Trash","将所选端口移入回收站"),plan,labels,HOME,
+                {confirm=L("Move to Trash","移入回收站"),danger=false})
+        end
+    end
 end
 
 build_home=function(preserve_focus)
@@ -252,7 +266,7 @@ build_home=function(preserve_focus)
         local missing=missing_runtime(script); if missing~="" then detail[#detail+1]=(kit.get_state().ui_lang=="zh" and "缺少 Runtime: " or "Missing Runtime: ")..missing end
         local bytes=path_size(paths); if bytes>0 then detail[#detail+1]=human(bytes) end
         rows[#rows+1]=kit.checkbox(display_name(script),{
-            id=script,detail=join(detail),checked=selected_home[script],
+            id=script,detail=join(detail),checked=selected_home[script],sidebar_target="uninstall",
             on_change=function(value) selected_home[script]=value end,
             badge=missing~="" and kit.badge(L("Runtime missing","缺少 Runtime")) or nil,
         })
@@ -267,15 +281,18 @@ build_home=function(preserve_focus)
         sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
         header_action=button(L("Details","详情"),function() build_env(); kit.goto_page(ENV) end),
         sidebar={
-        button(dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,{disabled=empty(selected_home)}),
-        button(L("Select all","全选"),function() select_all_home(true) end,{half=true}),
-        button(L("Select none","全不选"),function() select_all_home(false) end,{half=true}),
-        button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
-            function() build_junk(); kit.goto_page(JUNK) end),
-        button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
-            function() build_runtime(); kit.goto_page(RUNTIME) end),
+        button(dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,
+            {id="uninstall",disabled=empty(selected_home)}),
+        kit.checkbox(L("Delete permanently","直接删除"),{id="delete-direct",checked=delete_direct,danger=true,
+            on_change=function(value) delete_direct=value end}),
         button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
-            function() build_trash(); kit.goto_page(TRASH) end),
+            function() build_trash(); kit.goto_page(TRASH) end,{id="trash"}),
+        button(L("Select all","全选"),function() select_all_home(true) end,{half=true,id="select-all"}),
+        button(L("Select none","全不选"),function() select_all_home(false) end,{half=true,id="select-none"}),
+        button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
+            function() build_junk(); kit.goto_page(JUNK) end,{id="leftovers"}),
+        button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
+            function() build_runtime(); kit.goto_page(RUNTIME) end,{id="runtime-repair-entry"}),
         button(L("Quit","退出"),show_exit_dialog,{group="bottom"}),
     }})
 end

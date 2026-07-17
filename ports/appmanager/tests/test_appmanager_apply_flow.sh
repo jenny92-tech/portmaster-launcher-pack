@@ -14,6 +14,7 @@ grep -Fq ' --apply-plan >/dev/null 2>&1 &' "$APP_UI"
 grep -Fq 'if not file_exists(env.plan_file)' "$APP_UI"
 grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI"
 grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI"
+grep -Fq 'delete_direct and "DELETE_MANAGED"' "$APP_UI"
 if grep -Fq 'os.execute(shquote(env.apply_script).." --apply-plan")' "$APP_UI"; then
   echo "appmanager helper must not block the render thread" >&2
   exit 1
@@ -82,6 +83,10 @@ printf '%s\n' "$count" > "$TEST_COUNT"
 case "$TEST_MODE" in
   delete|same_root_delete)
     printf '# test plan\nTRASH\t%s\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_IMAGE" "$TEST_GAME" > "$TEST_PLAN" ;;
+  direct_delete|direct_delete_fail)
+    printf '# test plan\nDELETE_MANAGED\t%s\nDELETE_MANAGED\t%s\nDELETE_MANAGED\t%s\n' "$TEST_SCRIPT" "$TEST_IMAGE" "$TEST_GAME" > "$TEST_PLAN" ;;
+  direct_delete_invalid) printf '# test plan\nDELETE_MANAGED\t%s\n' "$TEST_OUTSIDE" > "$TEST_PLAN" ;;
+  direct_delete_self) printf '# test plan\nDELETE_MANAGED\t%s\n' "$TEST_SELF" > "$TEST_PLAN" ;;
   fail)
     printf '# test plan\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_GAME" > "$TEST_PLAN" ;;
   empty|empty_fail) printf '# test plan\nEMPTY_TRASH\t-\n' > "$TEST_PLAN" ;;
@@ -128,6 +133,9 @@ case "$1" in
     ;;
   rm)
     if [ "${TEST_MODE:-}" = "empty_fail" ] && printf '%s\n' "$*" | grep -Fq -- "$TEST_TRASH_ITEM"; then
+      exit 1
+    fi
+    if [ "${TEST_MODE:-}" = "direct_delete_fail" ] && printf '%s\n' "$*" | grep -Fq -- "$TEST_SCRIPT"; then
       exit 1
     fi
     command "$@"
@@ -224,6 +232,7 @@ EOF
   export TEST_SELECTED_IMAGE="$app/trash/selected/images/Game.png"
   export TEST_APPLY_HELPER="$app/conf/apply-helper.sh"
   export TEST_RUNNING_SOURCE="$scripts/.port.sh"
+  export TEST_SELF="$scripts/APP Manager.sh"
   export TEST_BATCH_ROOT="$app/trash/protected-batch"
   export TEST_BUCKET_ROOT="$app/trash/protected-batch/scripts"
   export TEST_CURL_LOG="$case_dir/curl.log"
@@ -237,7 +246,7 @@ EOF
   : > "$TEST_OUTSIDE"
 
   case "$mode" in
-    delete|same_root_delete)
+    delete|same_root_delete|direct_delete|direct_delete_fail)
       : > "$scripts/PORTS_cache-main.db"
       : > "$scripts/unrelated-cache.db"
       : > "$TEST_IMAGE"
@@ -333,6 +342,29 @@ EOF
         [ -n "$(find "$app/trash" -path '*/data/GameData' -print -quit)" ]
         [ -z "$(find "$app/trash" -path '*/scripts/GameData' -print -quit)" ]
       fi
+      ;;
+    direct_delete)
+      [ ! -e "$TEST_SCRIPT" ]
+      [ ! -e "$TEST_IMAGE" ]
+      [ ! -e "$TEST_GAME" ]
+      [ -z "$(find "$app/trash" -mindepth 1 -print -quit)" ]
+      [ -e "$scripts/PORTS_cache-main.db" ]
+      [ -e "$scripts/unrelated-cache.db" ]
+      [ ! -s "$app/conf/result.txt" ]
+      ;;
+    direct_delete_fail)
+      [ -e "$TEST_SCRIPT" ]
+      [ ! -e "$TEST_IMAGE" ]
+      [ -e "$TEST_GAME" ]
+      grep -Fxq $'FAIL\tdelete\tGame.sh' "$app/conf/result.txt"
+      ;;
+    direct_delete_invalid)
+      [ -e "$TEST_OUTSIDE" ]
+      grep -Fxq $'FAIL\toperation' "$app/conf/result.txt"
+      ;;
+    direct_delete_self)
+      [ -e "$TEST_SELF" ]
+      grep -Fxq $'FAIL\toperation' "$app/conf/result.txt"
       ;;
     fail)
       [ -e "$TEST_SCRIPT" ]
@@ -482,7 +514,7 @@ EOF
   [ "$(cat "$TEST_CONTROL_COUNT")" = "1" ]
 }
 
-for mode in delete same_root_delete fail empty empty_fail \
+for mode in delete same_root_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
   delete_container_invalid invalid no_plan runtime_repair runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \

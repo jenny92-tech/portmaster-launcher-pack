@@ -775,15 +775,16 @@ apply_plan() {
     case "$kind" in
       \#*|"") continue ;;
 
-      TRASH)
-        # UI 只能移动三个受管根目录的直接子项。即使 plan.txt 损坏，也不能让提权的
-        # shell 把任意路径移走；本 APP、PortMaster 和临时 .port.sh 再额外挡一次。
+      TRASH|DELETE_MANAGED)
+        # UI 只能处理三个受管根目录的直接子项。即使 plan.txt 损坏，也不能让提权的
+        # shell 移动或删除任意路径；本 APP、PortMaster 和临时 .port.sh 再额外挡一次。
         base=$(basename "$arg")
         if ! { [ "$(dirname "$arg")" = "$SCRIPTS_DIR" ] && [[ "$base" = *.sh ]] ||
                { [ -n "$IMAGES_DIR" ] && [ "$(dirname "$arg")" = "$IMAGES_DIR" ]; } ||
                [ "$(dirname "$arg")" = "$GAMEDIRS_DIR" ]; } ||
            [ "$arg" = "$GAMEDIR" ] ||
            [ "$arg" = "$PAM_DIR/$(basename "$0")" ] ||
+           [ "$base" = "APP Manager.sh" ] ||
            [ "$base" = "PortMaster" ] || [ "$base" = "PortMaster.sh" ] ||
            [ "$base" = ".port.sh" ]; then
           printf 'FAIL\toperation\n' >> "$RESULT_FILE"
@@ -797,6 +798,15 @@ apply_plan() {
         fi
         if [ "$(dirname "$arg")" = "$GAMEDIRS_DIR" ] && [ "$trash_failed" = "1" ]; then
           echo "$LOG_PREFIX kept game folder after earlier move failure: $base"
+          continue
+        fi
+        if [ "$kind" = "DELETE_MANAGED" ]; then
+          if $ESUDO rm -rf -- "$arg"; then
+            echo "$LOG_PREFIX permanently deleted managed item: $base"
+          else
+            printf 'FAIL\tdelete\t%s\n' "$base" >> "$RESULT_FILE"
+            trash_failed=1
+          fi
           continue
         fi
         # MiniLoong 的 SH 根和 Data 根是同一目录，不能只看父目录分类。
