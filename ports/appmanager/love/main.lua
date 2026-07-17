@@ -72,6 +72,36 @@ local function human(bytes)
     return tostring(bytes).." B"
 end
 
+local function runtime_progress()
+    local text=read_all(env.progress_file or "")
+    if not text then return nil end
+    local fields={}
+    for value in (text:gsub("[\r\n]+$","").."\t"):gmatch("(.-)\t") do fields[#fields+1]=value end
+    if fields[1]~="1" or #fields<9 then return nil end
+    local phase,runtime=fields[2],fields[3]
+    local index,count=tonumber(fields[4]) or 0,tonumber(fields[5]) or 0
+    local current,total,speed=tonumber(fields[6]) or 0,tonumber(fields[7]) or 0,tonumber(fields[8]) or 0
+    local stages={
+        preparing=L("Preparing download","准备下载"),probing=L("Testing download sources","正在测速下载源"),
+        downloading=L("Downloading","正在下载"),assembling=L("Joining downloaded parts","正在合并分片"),
+        verifying=L("Verifying Runtime image","正在校验 Runtime"),installing=L("Installing Runtime","正在安装 Runtime"),
+        finished=L("Runtime completed","当前 Runtime 已完成"),failed=L("Runtime repair failed","Runtime 修复失败"),
+        complete=L("Finishing Runtime repair","正在完成 Runtime 修复"),
+    }
+    local stage=stages[phase] or L("Working","处理中")
+    local name=runtime~="" and runtime or L("Runtime repair","Runtime 修复")
+    local left=count>0 and L(string.format("Runtime %d/%d · %s / %s",index,count,human(current),human(total)),
+        string.format("Runtime %d/%d · %s / %s",index,count,human(current),human(total))) or ""
+    local right
+    if phase=="downloading" then
+        right=speed>0 and L(human(speed).."/s",human(speed).."/秒") or L("Calculating speed…","正在计算网速…")
+    elseif phase=="probing" then right=L("Testing…","测速中…")
+    else right="—" end
+    return {progress=total>0 and math.max(0,math.min(1,current/total)) or 0,
+        stage=L(stage.en.." · "..(type(name)=="table" and name.en or name),stage.zh.." · "..(type(name)=="table" and name.zh or name)),
+        detail=fields[9],footer_left=left,footer_right=right,phase=phase}
+end
+
 local function provided(value)
     if type(value)=="table" or type(value)=="function" then return value end
     if value==nil or tostring(value)=="" then return L("Not provided","未提供") end
@@ -170,6 +200,7 @@ end
 local function finish_task()
     kit.set_busy(false)
     task=nil
+    if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
     local result=read_all(env.result_file or "")
     if result and result:match("FAIL") then status_message=L("The last operation reported a failure. See log.txt.","上次操作有项目失败，请查看 log.txt。")
     else status_message=L("Operation completed.","操作已完成。") end
@@ -191,7 +222,14 @@ local function start_apply()
         status_message=L("Cannot start the privileged helper.","无法启动提权操作助手。")
         kit.goto_page(confirm_return); return
     end
-    kit.set_busy(true,confirm_return==RUNTIME and L("Repairing Runtimes…","正在修复 Runtime…") or L("Working…","处理中…"))
+    if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
+    if confirm_return==RUNTIME then
+        kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),{
+            progress=0,stage=L("Starting repair","正在启动修复"),detail="",
+            footer_left=L("Preparing…","准备中…"),footer_right=L("Calculating speed…","正在计算网速…")})
+    else
+        kit.set_busy(true,L("Working…","处理中…"))
+    end
     os.execute(shquote(env.apply_script).." --apply-plan >/dev/null 2>&1 &")
     task={elapsed=0,poll=0,timeout=confirm_return==RUNTIME and 1800 or 45}
 end
@@ -598,6 +636,9 @@ local port={
             status_message=L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。")
             if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
             else build_home(); kit.goto_page(HOME) end
+        elseif confirm_return==RUNTIME then
+            local progress=runtime_progress()
+            if progress then kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),progress) end
         end
     end,
 }

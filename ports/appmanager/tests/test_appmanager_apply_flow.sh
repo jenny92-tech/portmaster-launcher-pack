@@ -15,6 +15,7 @@ grep -Fq 'if not file_exists(env.plan_file)' "$APP_UI"
 grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI"
 grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI"
 grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI"
+grep -Fq 'env.progress_file' "$APP_UI"
 if grep -Fq 'os.execute(shquote(env.apply_script).." --apply-plan")' "$APP_UI"; then
   echo "appmanager helper must not block the render thread" >&2
   exit 1
@@ -99,7 +100,7 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_repair|runtime_progress|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
   runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
@@ -170,7 +171,17 @@ if [ "${TEST_MODE:-}" = "runtime_direct" ] && printf '%s' "$url" | grep -Fq 'pro
 fi
 if [ -n "$out" ]; then
   payload='hsqs-runtime-payload'
-  if [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume_reset" ] && [ ! -e "$TEST_RESUME_REJECTED" ]; then
+  if [ "${TEST_MODE:-}" = "runtime_progress" ]; then
+    printf '%s' "${payload:0:4}" > "$out"
+    sleep 1
+    printf '%s' "${payload:4:8}" >> "$out"
+    for _ in {1..25}; do
+      speed=$(awk -F '\t' '$2 == "downloading" { print $8 }' "$TEST_PROGRESS_FILE" 2>/dev/null | tail -n 1)
+      case "$speed" in ""|0|*[!0-9]*) ;; *) : > "$TEST_PROGRESS_OBSERVED"; break ;; esac
+      sleep 0.1
+    done
+    printf '%s' "${payload:12}" >> "$out"
+  elif [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume_reset" ] && [ ! -e "$TEST_RESUME_REJECTED" ]; then
     : > "$TEST_RESUME_REJECTED"
     exit 33
   elif [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume" ]; then
@@ -237,6 +248,8 @@ EOF
   export TEST_BUCKET_ROOT="$app/trash/protected-batch/scripts"
   export TEST_CURL_LOG="$case_dir/curl.log"
   export TEST_RESUME_REJECTED="$case_dir/resume-rejected"
+  export TEST_PROGRESS_FILE="$app/conf/progress.tsv"
+  export TEST_PROGRESS_OBSERVED="$case_dir/progress-observed"
   export PAM_RUNTIME_PROXIES="https://proxy.test"
   if [ "$mode" = "runtime_wget" ]; then
     export PAM_RUNTIME_WGET="$case_dir/bin/wget"
@@ -296,7 +309,7 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
+    runtime_repair|runtime_progress|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
       printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
       ;;
   esac
@@ -427,13 +440,15 @@ EOF
       [ -e "$TEST_BUCKET_ROOT/Keep.sh" ]
       [ "$(grep -Fxc $'FAIL\toperation' "$app/conf/result.txt")" = "2" ]
       ;;
-    runtime_repair|runtime_private_curl|runtime_bad_private_curl)
+    runtime_repair|runtime_progress|runtime_private_curl|runtime_bad_private_curl)
       if ! grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"; then
         cat "$app/log.txt" "$app/conf/result.txt" >&2
         exit 1
       fi
       grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
       grep -Fq 'https://proxy.test/https://github.com/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
+      grep -Fxq $'1\tcomplete\tgodot_4.5\t1\t1\t20\t20\t0\tRuntime repair complete' "$app/conf/progress.tsv"
+      [ "$mode" != "runtime_progress" ] || [ -e "$TEST_PROGRESS_OBSERVED" ]
       ;;
     runtime_wget)
       grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
@@ -517,7 +532,7 @@ EOF
 for mode in delete same_root_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
+  delete_container_invalid invalid no_plan runtime_repair runtime_progress runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
   runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"

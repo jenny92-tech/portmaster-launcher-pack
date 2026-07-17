@@ -172,6 +172,12 @@ with tempfile.TemporaryDirectory() as source:
         k.dialog({title="Confirm",on_cancel=function() changed="cancelled" end})
         love.keypressed("x")
         assert(changed=="cancelled" and not k.debug_dialog().open)
+        k.set_busy(true,"Repairing",{stage="Downloading · godot_4.5",detail="part.001 · proxy",
+            progress=0.42,footer_left="8.4 MB / 20.0 MB",footer_right="1.2 MB/s"})
+        local busy=k.debug_busy()
+        assert(busy.busy and busy.progress==0.42 and busy.stage=="Downloading · godot_4.5")
+        love.draw(); k.set_busy(false)
+        assert(not k.debug_busy().busy)
         k.input("up")
         assert(k.debug_focus().focus_i==3)
     ''')
@@ -502,6 +508,7 @@ with tempfile.TemporaryDirectory() as source:
         "display_width": "960", "display_height": "720", "device_arch": "aarch64",
         "device": "test", "plan_file": str(app / "conf/plan.txt"),
         "result_file": str(app / "conf/result.txt"), "apply_script": "",
+        "progress_file": str(app / "conf/progress.tsv"),
         "size_file": str(app / "conf/sizes.tsv"),
         "runtime_catalog_file": str(root / "ports/appmanager/love/runtime_catalog.tsv"),
         "ignore_dirs": ["PortMaster", "images", "appmanager"],

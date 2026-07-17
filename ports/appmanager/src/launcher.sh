@@ -67,6 +67,7 @@ done
 TRASH_DIR="$GAMEDIR/trash"
 PLAN_FILE="$CONFDIR/plan.txt"
 RESULT_FILE="$CONFDIR/result.txt"
+PROGRESS_FILE="$CONFDIR/progress.tsv"
 APPLY_HELPER="$CONFDIR/apply-helper.sh"
 SIZE_FILE="$CONFDIR/sizes.tsv"
 RUNTIME_CATALOG="$GAMEDIR/love_ui/runtime_catalog.tsv"
@@ -150,6 +151,7 @@ write_env() {
   "xdg_data_home": "${XDG_DATA_HOME:-}",
   "plan_file": "$PLAN_FILE",
   "result_file": "$RESULT_FILE",
+  "progress_file": "$PROGRESS_FILE",
   "apply_script": "$APPLY_HELPER",
   "size_file": "$SIZE_FILE",
   "runtime_catalog_file": "$RUNTIME_CATALOG",
@@ -391,6 +393,48 @@ delete_selected_item() {
 # controlfolder/libs) to architecture-specific files in PortMaster-New. Some
 # large files are split; they are downloaded in order and joined before the
 # canonical .squashfs is atomically installed.
+RUNTIME_PROGRESS_COUNT=0
+RUNTIME_PROGRESS_INDEX=0
+RUNTIME_PROGRESS_TOTAL_BYTES=0
+RUNTIME_PROGRESS_DONE_BYTES=0
+RUNTIME_PROGRESS_RUNTIME=""
+RUNTIME_PROGRESS_SOURCE_BASE=0
+RUNTIME_PROGRESS_DETAIL=""
+
+runtime_progress_write() {
+  local phase="${1:-preparing}" current="${2:-0}" speed="${3:-0}" detail="${4:-}" tmp
+  [ "$RUNTIME_PROGRESS_COUNT" -gt 0 ] || return 0
+  case "$current" in ""|*[!0-9]*) current=0 ;; esac
+  case "$speed" in ""|*[!0-9]*) speed=0 ;; esac
+  if [ "$RUNTIME_PROGRESS_TOTAL_BYTES" -gt 0 ] && [ "$current" -gt "$RUNTIME_PROGRESS_TOTAL_BYTES" ]; then
+    current=$RUNTIME_PROGRESS_TOTAL_BYTES
+  fi
+  detail=${detail//$'\t'/ }; detail=${detail//$'\r'/ }; detail=${detail//$'\n'/ }
+  tmp="$PROGRESS_FILE.tmp.$$"
+  printf '1\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$phase" "$RUNTIME_PROGRESS_RUNTIME" "$RUNTIME_PROGRESS_INDEX" "$RUNTIME_PROGRESS_COUNT" \
+    "$current" "$RUNTIME_PROGRESS_TOTAL_BYTES" "$speed" "$detail" > "$tmp" &&
+    mv -f -- "$tmp" "$PROGRESS_FILE"
+}
+
+runtime_progress_prepare_plan() {
+  local kind arg bytes
+  RUNTIME_PROGRESS_COUNT=0
+  RUNTIME_PROGRESS_INDEX=0
+  RUNTIME_PROGRESS_TOTAL_BYTES=0
+  RUNTIME_PROGRESS_DONE_BYTES=0
+  while IFS=$'\t' read -r kind arg; do
+    [ "$kind" = "INSTALL_RUNTIME" ] || continue
+    RUNTIME_PROGRESS_COUNT=$((RUNTIME_PROGRESS_COUNT + 1))
+    bytes=$(runtime_expected_size "$arg")
+    case "$bytes" in ""|*[!0-9]*) bytes=0 ;; esac
+    RUNTIME_PROGRESS_TOTAL_BYTES=$((RUNTIME_PROGRESS_TOTAL_BYTES + bytes))
+  done < "$PLAN_FILE"
+  if [ "$RUNTIME_PROGRESS_COUNT" -gt 0 ]; then
+    runtime_progress_write preparing 0 0 "Preparing Runtime repair"
+  fi
+}
+
 runtime_arch() {
   local arch
   arch=$(printf '%s' "${DEVICE_ARCH:-$(uname -m 2>/dev/null)}" | tr '[:upper:]' '[:lower:]')
@@ -513,23 +557,44 @@ runtime_probe_url() {
 }
 
 runtime_fetch_url() {
-  local url="$1" out="$2" resume="${3:-0}"
+  local url="$1" out="$2" resume="${3:-0}" fetch_pid monitor_pid rc actual
   runtime_prepare_downloader || return 1
   if [ "$RUNTIME_DOWNLOADER" = "curl" ]; then
     if [ "$resume" = "1" ]; then
-      "$RUNTIME_CURL" -fL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url"
+      "$RUNTIME_CURL" -fL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url" &
     else
-      "$RUNTIME_CURL" -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
+      "$RUNTIME_CURL" -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url" &
     fi
   elif [ "$RUNTIME_DOWNLOADER" = "wget" ]; then
     if [ "$resume" = "1" ]; then
-      "$RUNTIME_WGET" -c -O "$out" "$url"
+      "$RUNTIME_WGET" -c -O "$out" "$url" &
     else
-      "$RUNTIME_WGET" -O "$out" "$url"
+      "$RUNTIME_WGET" -O "$out" "$url" &
     fi
   else
     return 1
   fi
+  fetch_pid=$!
+  (
+    local now last_time last_size current delta elapsed
+    last_time=$(date +%s); last_size=$(runtime_file_size "$out")
+    while kill -0 "$fetch_pid" 2>/dev/null; do
+      sleep 1
+      now=$(date +%s); current=$(runtime_file_size "$out")
+      elapsed=$((now - last_time)); delta=$((current - last_size))
+      [ "$elapsed" -gt 0 ] || elapsed=1
+      [ "$delta" -ge 0 ] || delta=0
+      runtime_progress_write downloading "$((RUNTIME_PROGRESS_SOURCE_BASE + current))" "$((delta / elapsed))" "$RUNTIME_PROGRESS_DETAIL"
+      last_time=$now; last_size=$current
+    done
+  ) &
+  monitor_pid=$!
+  rc=0; wait "$fetch_pid" || rc=$?
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  actual=$(runtime_file_size "$out")
+  runtime_progress_write downloading "$((RUNTIME_PROGRESS_SOURCE_BASE + actual))" 0 "$RUNTIME_PROGRESS_DETAIL"
+  return "$rc"
 }
 
 runtime_file_size() {
@@ -546,6 +611,7 @@ runtime_select_proxy() {
   runtime_prepare_downloader || return 1
   probe_root="$CONFDIR/proxy-probe.$$"
   rm -rf "$probe_root"; mkdir -p "$probe_root" || return 1
+  runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "$sample"
   RUNTIME_PROXIES="${PAM_RUNTIME_PROXIES:-https://gh.h233.eu.org
 https://rapidgit.jjda.de5.net
 https://gh.ddlc.top
@@ -595,6 +661,7 @@ https://hk.gh-proxy.org}"
     return 1
   fi
   echo "$LOG_PREFIX Runtime source selected: $RUNTIME_PROXY_NAME"
+  runtime_progress_write preparing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Source: $RUNTIME_PROXY_NAME"
   rm -rf "$probe_root"
   RUNTIME_PROXY_READY=1
 }
@@ -607,6 +674,7 @@ runtime_download_source() {
   if [ "$actual" = "$expected" ]; then
     echo "$LOG_PREFIX using complete Runtime cache: $source"
     [ -n "${RUNTIME_DOWNLOAD_VIA:-}" ] || RUNTIME_DOWNLOAD_VIA="Cache"
+    runtime_progress_write downloading "$((RUNTIME_PROGRESS_SOURCE_BASE + expected))" 0 "$source · Cache"
     return 0
   fi
   if [ "$actual" -gt "$expected" ]; then
@@ -624,6 +692,7 @@ runtime_download_source() {
     fi
     url=$(runtime_url "$candidate" "$source")
     echo "$LOG_PREFIX downloading $source via $([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+    RUNTIME_PROGRESS_DETAIL="$source · $([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
     actual=$(runtime_file_size "$out")
     rc=0
     if [ "$actual" -gt 0 ]; then
@@ -659,7 +728,7 @@ runtime_download_source() {
 }
 
 install_runtime() {
-  local runtime="$1" sources source_sizes expected_size actual_size work combined part source source_size target staged cache_root cache_ref cache_dir index
+  local runtime="$1" sources source_sizes expected_size actual_size work combined part source source_size target staged cache_root cache_ref cache_dir index runtime_part_done=0
   local RUNTIME_DOWNLOAD_VIA=""
   case "$runtime" in
     ""|*[!A-Za-z0-9._+-]*|.*|*..*)
@@ -679,6 +748,7 @@ install_runtime() {
     printf 'FAIL\truntime\t%s\tunsupported\n' "$runtime" >> "$RESULT_FILE"
     return 1
   fi
+  runtime_progress_write preparing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "$runtime"
   cache_root="$CONFDIR/runtime-cache"
   cache_ref="$cache_root/$RUNTIME_SOURCE_REF"
   cache_dir="$cache_ref/$runtime"
@@ -718,6 +788,7 @@ install_runtime() {
       rm -rf "$work"; return 1 ;;
     esac
     part="$cache_dir/$source.download"
+    RUNTIME_PROGRESS_SOURCE_BASE=$((RUNTIME_PROGRESS_DONE_BYTES + runtime_part_done))
     if [ -L "$part" ]; then
       rm -f -- "$part" || {
         printf 'FAIL\truntime\t%s\tcache-file\n' "$runtime" >> "$RESULT_FILE"
@@ -733,7 +804,10 @@ install_runtime() {
       printf 'FAIL\truntime\t%s\tdownload\n' "$runtime" >> "$RESULT_FILE"
       rm -rf "$work"; return 1
     fi
+    runtime_part_done=$((runtime_part_done + source_size))
+    runtime_progress_write assembling "$((RUNTIME_PROGRESS_DONE_BYTES + runtime_part_done))" 0 "$source"
   done
+  runtime_progress_write verifying "$((RUNTIME_PROGRESS_DONE_BYTES + expected_size))" 0 "$runtime"
   if ! runtime_has_magic "$combined"; then
     printf 'FAIL\truntime\t%s\tinvalid-image\n' "$runtime" >> "$RESULT_FILE"
     rm -rf "$cache_dir" "$work"; return 1
@@ -746,6 +820,7 @@ install_runtime() {
   fi
 
   staged="$LIBS_DIR/.pam-$runtime.squashfs.$$"
+  runtime_progress_write installing "$((RUNTIME_PROGRESS_DONE_BYTES + expected_size))" 0 "$target"
   if $ESUDO mkdir -p "$LIBS_DIR" &&
      $ESUDO mv -- "$combined" "$staged" &&
      $ESUDO chmod 0644 "$staged" &&
@@ -763,13 +838,15 @@ install_runtime() {
 }
 
 apply_plan() {
-  local stamp kind arg dest base bucket batch item trash_failed=0 empty_failed=0
+  local stamp kind arg dest base bucket batch item trash_failed=0 empty_failed=0 runtime_bytes
   stamp=$(date +%Y%m%d-%H%M%S)
   : > "$RESULT_FILE"
+  rm -f -- "$PROGRESS_FILE" "$PROGRESS_FILE.tmp.$$"
   if [ ! -f "$PLAN_FILE" ]; then
     printf 'FAIL\toperation\n' >> "$RESULT_FILE"
     return
   fi
+  runtime_progress_prepare_plan
 
   while IFS=$'\t' read -r kind arg; do
     case "$kind" in
@@ -885,7 +962,18 @@ apply_plan() {
         ;;
 
       INSTALL_RUNTIME)
-        install_runtime "$arg" || true
+        RUNTIME_PROGRESS_INDEX=$((RUNTIME_PROGRESS_INDEX + 1))
+        RUNTIME_PROGRESS_RUNTIME="$arg"
+        runtime_progress_write preparing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "$arg"
+        runtime_bytes=$(runtime_expected_size "$arg")
+        case "$runtime_bytes" in ""|*[!0-9]*) runtime_bytes=0 ;; esac
+        if install_runtime "$arg"; then
+          RUNTIME_PROGRESS_DONE_BYTES=$((RUNTIME_PROGRESS_DONE_BYTES + runtime_bytes))
+          runtime_progress_write finished "$RUNTIME_PROGRESS_DONE_BYTES" 0 "$arg"
+        else
+          RUNTIME_PROGRESS_DONE_BYTES=$((RUNTIME_PROGRESS_DONE_BYTES + runtime_bytes))
+          runtime_progress_write failed "$RUNTIME_PROGRESS_DONE_BYTES" 0 "$arg"
+        fi
         ;;
 
       *)
@@ -894,6 +982,10 @@ apply_plan() {
         ;;
     esac
   done < "$PLAN_FILE"
+
+  if [ "$RUNTIME_PROGRESS_COUNT" -gt 0 ]; then
+    runtime_progress_write complete "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Runtime repair complete"
+  fi
 
   sync
 }

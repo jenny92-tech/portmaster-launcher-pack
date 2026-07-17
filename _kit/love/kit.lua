@@ -50,7 +50,7 @@ local external_font_data, external_font_checked = nil, false
 local pages, page_i = {}, 1
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
-local busy, busy_message = false, nil
+local busy, busy_message, busy_info = false, nil, nil
 local dialog_state, dialog_focus = nil, 2
 local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
@@ -352,7 +352,18 @@ function kit.set_page(index,title,rows,opts)
     end
     return index
 end
-function kit.set_busy(value,message) busy=value and true or false; busy_message=message end
+function kit.set_busy(value,message,info)
+    busy=value and true or false
+    busy_message=message
+    busy_info=busy and type(info)=="table" and info or nil
+end
+function kit.debug_busy()
+    return {busy=busy,message=t(busy_message or ""),stage=busy_info and t(busy_info.stage or "") or "",
+        detail=busy_info and t(busy_info.detail or "") or "",
+        progress=busy_info and tonumber(busy_info.progress) or nil,
+        footer_left=busy_info and t(busy_info.footer_left or "") or "",
+        footer_right=busy_info and t(busy_info.footer_right or "") or ""}
+end
 local function capture_focus()
     local page=pages[page_i] or {}
     return {page_i=page_i,zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,
@@ -1406,9 +1417,29 @@ function kit.draw()
 
     if busy then
         love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,W,H)
-        local bw,bh=math.min(W*0.72,520),110*L.cs; local bx,by=(W-math.min(W*0.72,520))/2,(H-bh)/2
+        local detailed=busy_info~=nil
+        local bw=math.min(W*0.78,600); local bh=(detailed and 210 or 110)*L.cs
+        local bx,by=(W-bw)/2,(H-bh)/2
         panel(bx,by,bw,bh,true,false,L.app)
-        plain(t(busy_message or "working"),bx,by+vcen(22*L.cs,bh),22*L.cs,{1,1,1},"center",bw)
+        if not detailed then
+            plain(t(busy_message or "working"),bx,by+vcen(22*L.cs,bh),22*L.cs,{1,1,1},"center",bw)
+        else
+            local pad=24*L.cs
+            plain(t(busy_message or "working"),bx+pad,by+20*L.cs,23*L.cs,{1,1,1},"left",bw-pad*2)
+            plain(t(busy_info.stage or ""),bx+pad,by+55*L.cs,19*L.cs,{0.88,0.82,1},"left",bw-pad*2)
+            plain(t(busy_info.detail or ""),bx+pad,by+83*L.cs,16*L.cs,{0.72,0.72,0.80},"left",bw-pad*2)
+            local progress=math.max(0,math.min(1,tonumber(busy_info.progress) or 0))
+            local track_x,track_y,track_w,track_h=bx+pad,by+116*L.cs,bw-pad*2,20*L.cs
+            love.graphics.setColor(0.12,0.09,0.18,1); love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,6,6)
+            if progress>0 then
+                love.graphics.setColor(0.48,0.28,0.75,1)
+                love.graphics.rectangle("fill",track_x,track_y,track_w*progress,track_h,6,6)
+            end
+            love.graphics.setColor(1,1,1,0.5); love.graphics.rectangle("line",track_x,track_y,track_w,track_h,6,6)
+            plain(string.format("%d%%",math.floor(progress*100+0.5)),track_x,track_y+vcen(14*L.cs,track_h),14*L.cs,{1,1,1},"center",track_w)
+            plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"left",track_w)
+            plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"right",track_w)
+        end
     end
 
     if letterbox then
