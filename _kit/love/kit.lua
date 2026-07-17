@@ -51,6 +51,7 @@ local pages, page_i = {}, 1
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
 local busy, busy_message, busy_info = false, nil, nil
+local toast_state = nil
 local dialog_state, dialog_focus = nil, 2
 local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
@@ -363,6 +364,24 @@ function kit.debug_busy()
         progress=busy_info and tonumber(busy_info.progress) or nil,
         footer_left=busy_info and t(busy_info.footer_left or "") or "",
         footer_right=busy_info and t(busy_info.footer_right or "") or ""}
+end
+function kit.toast(message,opts)
+    opts=type(opts)=="table" and opts or {}
+    local kind=opts.kind or "info"
+    if kind~="success" and kind~="error" and kind~="warning" then kind="info" end
+    toast_state={message=message or "",kind=kind,duration=math.max(0.1,tonumber(opts.duration) or 5),elapsed=0}
+    return true
+end
+function kit.dismiss_toast()
+    if not toast_state then return false end
+    toast_state=nil
+    return true
+end
+function kit.debug_toast()
+    return {open=toast_state~=nil,message=toast_state and t(toast_state.message) or "",
+        kind=toast_state and toast_state.kind or "",
+        duration=toast_state and toast_state.duration or 0,
+        remaining=toast_state and math.max(0,toast_state.duration-toast_state.elapsed) or 0}
 end
 local function capture_focus()
     local page=pages[page_i] or {}
@@ -828,7 +847,7 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2; focus_stack={}
+    dialog_state,dialog_focus=nil,2; focus_stack={}; toast_state=nil
     input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
     for key,action in pairs(port.input_map or {}) do input_map[key]=action end
     measurement_cache=setmetatable({}, {__mode="k"})
@@ -842,6 +861,10 @@ function kit.load()
 end
 
 function kit.update(dt)
+    if toast_state then
+        toast_state.elapsed=toast_state.elapsed+(tonumber(dt) or 0)
+        if toast_state.elapsed>=toast_state.duration then toast_state=nil end
+    end
     if port and port.update then port.update(dt,kit,state) end
 end
 
@@ -1440,6 +1463,44 @@ function kit.draw()
             plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"left",track_w)
             plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"right",track_w)
         end
+    end
+
+    -- Toasts report short-lived outcomes without changing page content or
+    -- stealing controller focus. They slide up from the bottom, remain visible
+    -- for the configured duration, then leave along the same edge.
+    if toast_state then
+        local enter_time,exit_time=0.22,0.22
+        local remaining=toast_state.duration-toast_state.elapsed
+        local visibility=1
+        if toast_state.elapsed<enter_time then
+            local p=math.max(0,math.min(1,toast_state.elapsed/enter_time))
+            visibility=1-(1-p)^3
+        elseif remaining<exit_time then
+            local p=math.max(0,math.min(1,remaining/exit_time))
+            visibility=p*p
+        end
+        local cs=L.cs
+        local tw=math.min(W-36*cs,620*cs)
+        local pad_x,pad_y=22*cs,15*cs
+        local font=body_fnt(19*cs)
+        local text,lines=wrapped_text(toast_state.message,font,tw-pad_x*2,2)
+        local th=math.max(58*cs,lines*font:getHeight()+pad_y*2)
+        local tx=(W-tw)/2
+        local resting_y=H-th-22*cs
+        local ty=resting_y+(1-visibility)*(th+32*cs)
+        local accents={
+            success={0.36,0.86,0.55},error={1.0,0.40,0.38},
+            warning={1.0,0.76,0.30},info={0.72,0.56,1.0},
+        }
+        local accent=accents[toast_state.kind] or accents.info
+        love.graphics.setColor(0.045,0.035,0.065,0.98*visibility)
+        love.graphics.rectangle("fill",tx,ty,tw,th,10,10)
+        love.graphics.setColor(accent[1],accent[2],accent[3],0.96*visibility)
+        love.graphics.rectangle("fill",tx,ty,5*cs,th)
+        love.graphics.setColor(accent[1],accent[2],accent[3],0.55*visibility)
+        love.graphics.setLineWidth(1)
+        love.graphics.rectangle("line",tx,ty,tw,th,10,10)
+        plain(text,tx+pad_x,ty+(th-lines*font:getHeight())/2,19*cs,{1,1,1,visibility},"left",tw-pad_x*2)
     end
 
     if letterbox then

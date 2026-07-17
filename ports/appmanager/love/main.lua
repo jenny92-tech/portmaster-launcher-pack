@@ -11,7 +11,7 @@ local HOME,JUNK,TRASH,ENV,RUNTIME = 1,2,3,4,5
 local env,report,size_map,runtime_catalog = {},nil,{},{}
 local selected_home,selected_junk,selected_trash,selected_runtime = {},{},{},{}
 local confirm_plan,confirm_return = nil,HOME
-local task,status_message = nil,nil
+local task = nil
 
 local function file_exists(path)
     local f=path and io.open(path,"rb")
@@ -202,8 +202,11 @@ local function finish_task()
     task=nil
     if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
     local result=read_all(env.result_file or "")
-    if result and result:match("FAIL") then status_message=L("The last operation reported a failure. See log.txt.","上次操作有项目失败，请查看 log.txt。")
-    else status_message=L("Operation completed.","操作已完成。") end
+    if result and result:match("FAIL") then
+        kit.toast(L("The operation reported a failure. See log.txt.","操作有项目失败，请查看 log.txt。"),{kind="error"})
+    else
+        kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
+    end
     -- The helper removes plan_file only after completing its env refresh, so
     -- reloading here cannot race a half-written env.json.
     load_env(); refresh_scan()
@@ -219,7 +222,7 @@ end
 local function start_apply()
     if not confirm_plan or #confirm_plan==0 then return end
     if not write_plan(confirm_plan) or not env.apply_script or env.apply_script=="" then
-        status_message=L("Cannot start the privileged helper.","无法启动提权操作助手。")
+        kit.toast(L("Cannot start the privileged helper.","无法启动提权操作助手。"),{kind="error"})
         kit.goto_page(confirm_return); return
     end
     if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
@@ -296,7 +299,6 @@ end
 
 build_home=function(preserve_focus)
     local rows={}
-    if status_message then rows[#rows+1]=kit.info(L("Status","状态"),status_message); status_message=nil end
     for _,p in ipairs(report.ports or {}) do
         local script=p.script
         local paths={env.scripts_dir.."/"..script}
@@ -359,7 +361,6 @@ end
 
 build_runtime=function(preserve_focus)
     local rows,details={},{}
-    if status_message then rows[#rows+1]=kit.info(L("Status","状态"),status_message); status_message=nil end
     local required=required_runtimes()
     local repair_needed,installed={},{}
     for _,item in ipairs(required) do
@@ -633,7 +634,7 @@ local port={
         if not file_exists(env.plan_file) then finish_task()
         elseif task.elapsed>(task.timeout or 45) then
             kit.set_busy(false); task=nil
-            status_message=L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。")
+            kit.toast(L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。"),{kind="error"})
             if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
             else build_home(); kit.goto_page(HOME) end
         elseif confirm_return==RUNTIME then

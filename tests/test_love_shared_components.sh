@@ -23,7 +23,8 @@ for symbol in \
   'function kit.input' \
   'function kit.invalidate_layout' \
   'function kit.quit' \
-  'function kit.set_busy'; do
+  'function kit.set_busy' \
+  'function kit.toast'; do
   grep -Fq "$symbol" "$ROOT/_kit/love/kit.lua" || {
     echo "kit.lua: missing shared component: $symbol" >&2
     exit 1
@@ -55,6 +56,8 @@ grep -Fq 'kit.checkbox' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'kit.checkbox(display_name(script),{' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'on_change=' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'kit.set_busy' "$ROOT/ports/appmanager/love/main.lua"
+grep -Fq 'kit.toast' "$ROOT/ports/appmanager/love/main.lua"
+! grep -Fq 'status_message' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'theme={kind="app"' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'sidebar_title=' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'half=true' "$ROOT/ports/appmanager/love/main.lua"

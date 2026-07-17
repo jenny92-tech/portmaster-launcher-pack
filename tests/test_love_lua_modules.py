@@ -178,8 +178,17 @@ with tempfile.TemporaryDirectory() as source:
         assert(busy.busy and busy.progress==0.42 and busy.stage=="Downloading · godot_4.5")
         love.draw(); k.set_busy(false)
         assert(not k.debug_busy().busy)
+        k.toast({en="Saved",zh="已保存"},{kind="success",duration=0.3})
+        local toast=k.debug_toast()
+        assert(toast.open and toast.message=="Saved" and toast.kind=="success")
+        local focus_before=k.debug_focus().focus_i
         k.input("up")
-        assert(k.debug_focus().focus_i==3)
+        assert(k.debug_focus().focus_i~=focus_before and k.debug_toast().open)
+        love.update(0.2); assert(k.debug_toast().open)
+        love.draw(); love.update(0.11)
+        assert(not k.debug_toast().open)
+        k.input("up")
+        assert(k.debug_focus().focus_i==2)
     ''')
 
 # Checkbox visuals are drawn as a real control, not font-dependent square/check
