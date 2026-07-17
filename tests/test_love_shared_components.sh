@@ -80,7 +80,7 @@ catalog="$ROOT/ports/appmanager/love/runtime_catalog.tsv"
 catalog_ref=$(sed -n 's/^# Source commit: //p' "$catalog")
 [ -n "$catalog_ref" ]
 grep -Fq "RUNTIME_SOURCE_REF=\"$catalog_ref\"" "$ROOT/ports/appmanager/src/launcher.sh"
-awk -F '\t' '!/^#/ && (NF != 4 || $1 !~ /^[A-Za-z0-9._+-]+$/ || $2 !~ /^(aarch64|armhf|x86_64)$/ || $4 !~ /^[0-9]+$/) { exit 1 }' "$catalog"
+awk -F '\t' '!/^#/ { if (NF != 5 || $1 !~ /^[A-Za-z0-9._+-]+$/ || $2 !~ /^(aarch64|armhf|x86_64)$/ || $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+(,[0-9]+)*$/) exit 1; sources=split($3,a,","); sizes=split($5,b,","); if (sources != sizes) exit 1; total=0; for (i=1;i<=sizes;i++) total+=b[i]; if (total != $4) exit 1 }' "$catalog"
 ! grep -Fq '"Runtime "..index.."/"..#runtimes' "$ROOT/ports/appmanager/love/main.lua"
 grep -Fq 'mode=="flow"' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'font:getWidth(title)>title_w' "$ROOT/_kit/love/kit.lua"

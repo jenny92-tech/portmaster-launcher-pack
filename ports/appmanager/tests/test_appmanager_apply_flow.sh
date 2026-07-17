@@ -34,8 +34,8 @@ make_case() {
   : > "$app/love_ui/ui.gptk"
   cat > "$app/love_ui/runtime_catalog.tsv" <<'EOF'
 # Small deterministic catalog for downloader tests.
-godot_4.5	aarch64	godot_4.5.aarch64.squashfs	20
-gmtoolkit	aarch64	gmtoolkit.aarch64.squashfs.part.001,gmtoolkit.aarch64.squashfs.part.002,gmtoolkit.aarch64.squashfs.part.003	60
+godot_4.5	aarch64	godot_4.5.aarch64.squashfs	20	20
+gmtoolkit	aarch64	gmtoolkit.aarch64.squashfs.part.001,gmtoolkit.aarch64.squashfs.part.002,gmtoolkit.aarch64.squashfs.part.003	60	20,20,20
 EOF
   : > "$scripts/Game.sh"
 
@@ -94,7 +94,7 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_repair|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
   runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
@@ -143,21 +143,33 @@ EOF
 #!/usr/bin/env bash
 out=""
 url=""
+resume=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift 2 ;;
+    -C) resume=1; shift 2 ;;
     --connect-timeout|--max-time|--range|--retry|--retry-delay) shift 2 ;;
     -*) shift ;;
     *) url=$1; shift ;;
   esac
 done
-printf '%s\n' "$url" >> "$TEST_CURL_LOG"
+printf 'resume=%s out=%s url=%s\n' "$resume" "$out" "$url" >> "$TEST_CURL_LOG"
 [ "${TEST_MODE:-}" != "runtime_fail" ] || exit 22
+[ "${TEST_MODE:-}" != "runtime_cached" ] || exit 22
 if [ "${TEST_MODE:-}" = "runtime_direct" ] && printf '%s' "$url" | grep -Fq 'proxy.test'; then
   exit 22
 fi
 if [ -n "$out" ]; then
-  printf 'hsqs-runtime-payload' > "$out"
+  payload='hsqs-runtime-payload'
+  if [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume_reset" ] && [ ! -e "$TEST_RESUME_REJECTED" ]; then
+    : > "$TEST_RESUME_REJECTED"
+    exit 33
+  elif [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume" ]; then
+    current=$(wc -c < "$out" | tr -d '[:space:]')
+    printf '%s' "$payload" | tail -c "+$((current + 1))" >> "$out"
+  else
+    printf '%s' "$payload" > "$out"
+  fi
 else
   printf 'hsqs'
 fi
@@ -181,6 +193,7 @@ EOF
   export TEST_BATCH_ROOT="$app/trash/protected-batch"
   export TEST_BUCKET_ROOT="$app/trash/protected-batch/scripts"
   export TEST_CURL_LOG="$case_dir/curl.log"
+  export TEST_RESUME_REJECTED="$case_dir/resume-rejected"
   export PAM_RUNTIME_PROXIES="https://proxy.test"
   : > "$TEST_OUTSIDE"
 
@@ -235,10 +248,21 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_fail)
+    runtime_repair|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
       printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
       ;;
   esac
+  if [ "$mode" = "runtime_cached" ] || [ "$mode" = "runtime_resume" ] ||
+     [ "$mode" = "runtime_resume_reset" ] || [ "$mode" = "runtime_fail" ]; then
+    runtime_ref=$(sed -n 's/^RUNTIME_SOURCE_REF="\([^"]*\)"/\1/p' "$scripts/APP Manager.sh" | head -n 1)
+    runtime_cache="$app/conf/runtime-cache/$runtime_ref/godot_4.5"
+    mkdir -p "$runtime_cache"
+    if [ "$mode" = "runtime_cached" ]; then
+      printf 'hsqs-runtime-payload' > "$runtime_cache/godot_4.5.aarch64.squashfs.download"
+    else
+      printf 'hsqs-run' > "$runtime_cache/godot_4.5.aarch64.squashfs.download"
+    fi
+  fi
 
   if [ "$mode" = "renamed_launcher" ]; then
     # MiniLoong 把目标 SH 重命名为 .port.sh 后直接执行。helper 应复制
@@ -340,6 +364,23 @@ EOF
       grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
       grep -Fq 'https://proxy.test/https://github.com/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       ;;
+    runtime_cached)
+      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq $'OK\truntime\tgodot_4.5\tCache' "$app/conf/result.txt"
+      [ ! -s "$TEST_CURL_LOG" ]
+      [ ! -d "$runtime_cache" ]
+      ;;
+    runtime_resume)
+      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq 'resume=1 out=' "$TEST_CURL_LOG"
+      [ ! -d "$runtime_cache" ]
+      ;;
+    runtime_resume_reset)
+      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq 'resume=1 out=' "$TEST_CURL_LOG"
+      [ -e "$TEST_RESUME_REJECTED" ]
+      [ ! -d "$runtime_cache" ]
+      ;;
     runtime_split)
       [ "$(wc -c < "$scripts/PortMaster/libs/gmtoolkit.squashfs" | tr -d ' ')" = "60" ]
       grep -Fq $'OK\truntime\tgmtoolkit\tproxy.test' "$app/conf/result.txt"
@@ -356,6 +397,7 @@ EOF
     runtime_fail)
       grep -Fxq 'old-runtime' "$scripts/PortMaster/libs/godot_4.5.squashfs"
       grep -Fq $'FAIL\truntime\tgodot_4.5\tno-source' "$app/conf/result.txt"
+      grep -Fxq 'hsqs-run' "$runtime_cache/godot_4.5.aarch64.squashfs.download"
       ;;
     invalid)
       [ -e "$TEST_OUTSIDE" ]
@@ -399,7 +441,8 @@ EOF
 for mode in delete same_root_delete fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_split runtime_direct runtime_invalid runtime_fail \
+  delete_container_invalid invalid no_plan runtime_repair runtime_cached runtime_resume runtime_resume_reset \
+  runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"
 done

@@ -57,8 +57,8 @@ local function load_runtime_catalog()
     local arch=runtime_arch(env.device_arch)
     for line in f:lines() do
         if not line:match("^%s*#") then
-            local name,row_arch,sources,bytes=line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)$")
-            if name and row_arch==arch then runtime_catalog[name]={sources=sources,arch=row_arch,bytes=tonumber(bytes)} end
+            local name,row_arch,sources,bytes,source_bytes=line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)\t([%d,]+)$")
+            if name and row_arch==arch then runtime_catalog[name]={sources=sources,arch=row_arch,bytes=tonumber(bytes),source_bytes=source_bytes} end
         end
     end
     f:close()

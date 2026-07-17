@@ -418,6 +418,14 @@ runtime_expected_size() {
     '$1 == runtime && $2 == arch { print $4; exit }' "$RUNTIME_CATALOG"
 }
 
+runtime_source_sizes() {
+  local runtime="$1" arch
+  arch=$(runtime_arch)
+  [ -f "$RUNTIME_CATALOG" ] || return 1
+  awk -F '\t' -v runtime="$runtime" -v arch="$arch" \
+    '$1 == runtime && $2 == arch { print $5; exit }' "$RUNTIME_CATALOG"
+}
+
 runtime_valid_source() {
   local source="$1"
   case "$source" in
@@ -459,14 +467,27 @@ runtime_probe_url() {
 }
 
 runtime_fetch_url() {
-  local url="$1" out="$2"
+  local url="$1" out="$2" resume="${3:-0}"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
+    if [ "$resume" = "1" ]; then
+      curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url"
+    else
+      curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget -O "$out" "$url"
+    if [ "$resume" = "1" ]; then
+      wget -c -O "$out" "$url"
+    else
+      wget -O "$out" "$url"
+    fi
   else
     return 1
   fi
+}
+
+runtime_file_size() {
+  [ -f "$1" ] || { echo 0; return; }
+  wc -c < "$1" | tr -d '[:space:]'
 }
 
 # Adapted from NapCat-Mac-Installer's GitHubProxy.auto: all candidates probe a
@@ -531,26 +552,67 @@ https://hk.gh-proxy.org}"
 }
 
 runtime_download_source() {
-  local source="$1" out="$2" candidate url seen_direct=0
+  local source="$1" expected="$2" out="$3" candidate url seen_direct=0 actual rc
+  case "$expected" in ""|*[!0-9]*|0) return 1 ;; esac
+  if [ -L "$out" ]; then rm -f -- "$out" || return 1; fi
+  actual=$(runtime_file_size "$out")
+  if [ "$actual" = "$expected" ]; then
+    echo "$LOG_PREFIX using complete Runtime cache: $source"
+    [ -n "${RUNTIME_DOWNLOAD_VIA:-}" ] || RUNTIME_DOWNLOAD_VIA="Cache"
+    return 0
+  fi
+  if [ "$actual" -gt "$expected" ]; then
+    echo "$LOG_PREFIX discarding oversized Runtime cache: $source"
+    rm -f -- "$out" || return 1
+    actual=0
+  elif [ "$actual" -gt 0 ]; then
+    echo "$LOG_PREFIX resuming $source from $actual of $expected bytes"
+  fi
+
   for candidate in "$RUNTIME_PROXY" DIRECT; do
     if [ "$candidate" = "DIRECT" ]; then
       [ "$seen_direct" = "0" ] || continue
       seen_direct=1
     fi
     url=$(runtime_url "$candidate" "$source")
-    rm -f "$out"
     echo "$LOG_PREFIX downloading $source via $([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
-    if runtime_fetch_url "$url" "$out" && [ -s "$out" ]; then
+    actual=$(runtime_file_size "$out")
+    rc=0
+    if [ "$actual" -gt 0 ]; then
+      runtime_fetch_url "$url" "$out" 1 || rc=$?
+    else
+      runtime_fetch_url "$url" "$out" 0 || rc=$?
+    fi
+    actual=$(runtime_file_size "$out")
+    if [ "$rc" = "0" ] && [ "$actual" = "$expected" ]; then
       RUNTIME_DOWNLOAD_VIA="$([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
       return 0
     fi
+    if [ "$actual" -gt "$expected" ]; then
+      rm -f -- "$out"
+      actual=0
+    fi
+    # curl 33 means the endpoint rejected the requested resume offset. Retry
+    # that same source cleanly once; exact size validation still gates success.
+    if [ "$rc" = "33" ]; then
+      echo "$LOG_PREFIX source cannot resume; restarting $source"
+      rm -f -- "$out" || return 1
+      rc=0
+      runtime_fetch_url "$url" "$out" 0 || rc=$?
+      actual=$(runtime_file_size "$out")
+      if [ "$rc" = "0" ] && [ "$actual" = "$expected" ]; then
+        RUNTIME_DOWNLOAD_VIA="$([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+        return 0
+      fi
+      [ "$actual" -le "$expected" ] || rm -f -- "$out"
+    fi
   done
-  rm -f "$out"
   return 1
 }
 
 install_runtime() {
-  local runtime="$1" sources expected_size actual_size sample work combined part source target staged
+  local runtime="$1" sources source_sizes expected_size actual_size work combined part source source_size target staged cache_root cache_ref cache_dir index
+  local RUNTIME_DOWNLOAD_VIA=""
   case "$runtime" in
     ""|*[!A-Za-z0-9._+-]*|.*|*..*)
       printf 'FAIL\truntime\t%s\tinvalid-name\n' "$runtime" >> "$RESULT_FILE"
@@ -563,18 +625,24 @@ install_runtime() {
     return 1
   fi
   sources=$(runtime_sources "$runtime")
+  source_sizes=$(runtime_source_sizes "$runtime")
   expected_size=$(runtime_expected_size "$runtime")
-  if [ -z "$sources" ] || [ -z "$expected_size" ]; then
+  if [ -z "$sources" ] || [ -z "$source_sizes" ] || [ -z "$expected_size" ]; then
     printf 'FAIL\truntime\t%s\tunsupported\n' "$runtime" >> "$RESULT_FILE"
     return 1
   fi
-  sample=${sources%%,*}
-  if [ "${RUNTIME_PROXY_READY:-0}" != "1" ] && ! runtime_select_proxy "$sample"; then
-    printf 'FAIL\truntime\t%s\tno-source\n' "$runtime" >> "$RESULT_FILE"
+  cache_root="$CONFDIR/runtime-cache"
+  cache_ref="$cache_root/$RUNTIME_SOURCE_REF"
+  cache_dir="$cache_ref/$runtime"
+  if [ -L "$cache_root" ] || [ -L "$cache_ref" ] || [ -L "$cache_dir" ]; then
+    printf 'FAIL\truntime\t%s\tcache-dir\n' "$runtime" >> "$RESULT_FILE"
     return 1
   fi
-
-  work="$CONFDIR/runtime-download.$$.$runtime"
+  mkdir -p "$cache_dir" || {
+    printf 'FAIL\truntime\t%s\tcache-dir\n' "$runtime" >> "$RESULT_FILE"
+    return 1
+  }
+  work="$CONFDIR/runtime-assembly.$$.$runtime"
   combined="$work/$runtime.squashfs"
   rm -rf "$work"; mkdir -p "$work" || {
     printf 'FAIL\truntime\t%s\ttemp-dir\n' "$runtime" >> "$RESULT_FILE"
@@ -585,27 +653,48 @@ install_runtime() {
     rm -rf "$work"; return 1
   fi
   IFS=',' read -r -a runtime_parts <<< "$sources"
-  for source in "${runtime_parts[@]}"; do
+  IFS=',' read -r -a runtime_part_sizes <<< "$source_sizes"
+  if [ "${#runtime_parts[@]}" != "${#runtime_part_sizes[@]}" ]; then
+    printf 'FAIL\truntime\t%s\tcatalog\n' "$runtime" >> "$RESULT_FILE"
+    rm -rf "$work"; return 1
+  fi
+  for index in "${!runtime_parts[@]}"; do
+    source="${runtime_parts[$index]}"
+    source_size="${runtime_part_sizes[$index]}"
     if ! runtime_valid_source "$source"; then
       printf 'FAIL\truntime\t%s\tcatalog\n' "$runtime" >> "$RESULT_FILE"
       rm -rf "$work"; return 1
     fi
-    part="$work/$source.download"
-    if ! runtime_download_source "$source" "$part" || ! cat "$part" >> "$combined"; then
+    case "$source_size" in ""|*[!0-9]*|0)
+      printf 'FAIL\truntime\t%s\tcatalog\n' "$runtime" >> "$RESULT_FILE"
+      rm -rf "$work"; return 1 ;;
+    esac
+    part="$cache_dir/$source.download"
+    if [ -L "$part" ]; then
+      rm -f -- "$part" || {
+        printf 'FAIL\truntime\t%s\tcache-file\n' "$runtime" >> "$RESULT_FILE"
+        rm -rf "$work"; return 1
+      }
+    fi
+    if [ "$(runtime_file_size "$part")" != "$source_size" ] &&
+       [ "${RUNTIME_PROXY_READY:-0}" != "1" ] && ! runtime_select_proxy "$source"; then
+      printf 'FAIL\truntime\t%s\tno-source\n' "$runtime" >> "$RESULT_FILE"
+      rm -rf "$work"; return 1
+    fi
+    if ! runtime_download_source "$source" "$source_size" "$part" || ! cat "$part" >> "$combined"; then
       printf 'FAIL\truntime\t%s\tdownload\n' "$runtime" >> "$RESULT_FILE"
       rm -rf "$work"; return 1
     fi
-    rm -f "$part"
   done
   if ! runtime_has_magic "$combined"; then
     printf 'FAIL\truntime\t%s\tinvalid-image\n' "$runtime" >> "$RESULT_FILE"
-    rm -rf "$work"; return 1
+    rm -rf "$cache_dir" "$work"; return 1
   fi
   actual_size=$(wc -c < "$combined" | tr -d '[:space:]')
   if [ "$actual_size" != "$expected_size" ]; then
     printf 'FAIL\truntime\t%s\tsize-mismatch\n' "$runtime" >> "$RESULT_FILE"
     echo "$LOG_PREFIX Runtime size mismatch: $runtime expected=$expected_size actual=$actual_size"
-    rm -rf "$work"; return 1
+    rm -rf "$cache_dir" "$work"; return 1
   fi
 
   staged="$LIBS_DIR/.pam-$runtime.squashfs.$$"
@@ -615,6 +704,7 @@ install_runtime() {
      $ESUDO mv -f -- "$staged" "$target"; then
     printf 'OK\truntime\t%s\t%s\n' "$runtime" "${RUNTIME_DOWNLOAD_VIA:-$RUNTIME_PROXY_NAME}" >> "$RESULT_FILE"
     echo "$LOG_PREFIX Runtime installed: $runtime"
+    rm -rf "$cache_dir"
     rm -rf "$work"
     return 0
   fi

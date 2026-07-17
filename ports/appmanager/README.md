@@ -34,7 +34,11 @@ Lua 只负责只读扫描、选择和生成 `conf/plan.txt`。移动、恢复和
 可用项由随 APP 发布的 `runtime_catalog.tsv` 按 `DEVICE_ARCH` 匹配；catalog 生成自
 PortMaster-New 官方 `runtimes/runtimes.json` 和同目录文件树，既处理普通架构后缀，
 也按顺序合并 GMToolkit、Mono、Zulu 等 `.part.NNN` 分片。
-catalog 同时保存 GitHub API 报告的实际字节数，合并结果必须与期望总大小完全一致。
+catalog 同时保存 GitHub API 报告的每个文件及合并后的实际字节数，合并结果必须与
+期望总大小完全一致。下载中的普通文件和 `.part.NNN` 分片会分别缓存在
+`conf/runtime-cache/<source commit>/<runtime>/`；重新进入修复时，curl 使用 `-C -`、
+wget 使用 `-c` 从已有字节继续。代理不支持 Range 时会安全地重新下载该分片；只有
+新镜像校验并原子替换成功后才删除缓存，失败不会破坏旧 Runtime 或已经下载的进度。
 
 下载源固定为 catalog 注明的 PortMaster-New commit。helper 参考 NapCat Installer 的
 GitHub Proxy 策略，并发对代理发送 4 字节 Range 探测，只有返回 SquashFS `hsqs` 文件头
