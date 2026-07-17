@@ -23,3 +23,6 @@ __pycache__/
 
 /pocs
 /external
+
+# Bundled runtimes are fetched, not committed (ports/*/src/scripts/fetch_runtime.sh)
+ports/*/src/runtime/*.squashfs

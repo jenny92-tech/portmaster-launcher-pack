@@ -97,6 +97,8 @@ fi
 python3 "$ROOT/_kit/port_json.py" "$MANIFEST" "$DIST" "$PORT"
 
 find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$DIST/" \;
+# A port may bundle its own runtime instead of relying on PortMaster libs/.
+[ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
 [ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"
 [ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
 
