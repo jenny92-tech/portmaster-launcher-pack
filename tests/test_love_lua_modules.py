@@ -531,6 +531,13 @@ with tempfile.TemporaryDirectory() as source:
         "love.load(); local L=require('kit').debug_layout(); "
         "assert(L.app and L.x <= 20 and L.w > L.side_w * 2 and L.rh >= 70 and L.dim >= 0.90)"
     )
+    lua.execute(r'''
+        local page=require("kit").debug_page()
+        assert(page.title=="Port App Manager")
+        assert(#page.sidebar_footer_lines==2)
+        assert(page.sidebar_footer_lines[1]=="开发: Bili 解腻Jenny")
+        assert(page.sidebar_footer_lines[2]=="QQ 群 1047158975")
+    ''')
     # Dialogs trap focus, default to the safe cancel action, and close before
     # calling either callback. Escape/B always follows the cancel path.
     lua.execute(r'''

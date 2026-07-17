@@ -399,8 +399,11 @@ function kit.debug_focus()
     return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top,scroll_y=scroll_y}
 end
 function kit.debug_page()
-    local rows=pages[page_i] and pages[page_i].rows or {}; local sections=0
+    local page=pages[page_i] or {}; local rows=page.rows or {}; local sections=0
     local section_labels,row_kinds,row_font_px,row_label_px,row_value_px={},{},{},{},{}
+    local footer_lines={}
+    local footer=page.sidebar_footer
+    for index,line in ipairs(footer and (footer.lines or footer) or {}) do footer_lines[index]=t(line) end
     for index,row in ipairs(rows) do
         row_kinds[index]=row.kind
         row_font_px[index]=row.font_px
@@ -411,9 +414,9 @@ function kit.debug_page()
             section_labels[sections]=t(row.label)
         end
     end
-    return {index=page_i,row_count=#rows,section_count=sections,
+    return {index=page_i,title=t(page.title or ""),row_count=#rows,section_count=sections,
         section_labels=section_labels,row_kinds=row_kinds,row_font_px=row_font_px,
-        row_label_px=row_label_px,row_value_px=row_value_px}
+        row_label_px=row_label_px,row_value_px=row_value_px,sidebar_footer_lines=footer_lines}
 end
 function kit.debug_sidebar_detail()
     local detail,key
@@ -1273,10 +1276,31 @@ function kit.draw()
     if L.has_sidebar then
         local side=sidebar(); local geometry=sidebar_geometry(L)
         if L.app then
-            outlined(t(pages[page_i].sidebar_title or {en="Quick Tools",zh="快捷工具"}),L.side_x,L.band_top,
+            local page=pages[page_i]
+            outlined(t(page.sidebar_title or {en="Quick Tools",zh="快捷工具"}),L.side_x,L.band_top,
                 28*L.cs,{1,1,1},"center",L.side_w)
             love.graphics.setColor(1,1,1,0.42); love.graphics.setLineWidth(1)
             love.graphics.line(L.side_x,L.band_top+37*L.cs,L.side_x+L.side_w,L.band_top+37*L.cs)
+
+            local footer_top=nil
+            local footer=page.sidebar_footer
+            local footer_lines=footer and (footer.lines or footer) or nil
+            if footer_lines and #footer_lines>0 then
+                local footer_bottom=L.band_top+L.band
+                for index,g in pairs(geometry) do
+                    if side[index].group=="bottom" then footer_bottom=math.min(footer_bottom,g.y-L.gap) end
+                end
+                local line_h=22*L.cs
+                local footer_h=(#footer_lines*22+12)*L.cs
+                footer_top=footer_bottom-footer_h
+                love.graphics.setColor(1,1,1,0.20); love.graphics.setLineWidth(1)
+                love.graphics.line(L.side_x,footer_top,L.side_x+L.side_w,footer_top)
+                for index,line in ipairs(footer_lines) do
+                    local px=(index==1 and 17 or 16)*L.cs
+                    local color=index==1 and {0.86,0.82,0.91} or {1.0,0.78,0.36}
+                    plain(t(line),L.side_x,footer_top+7*L.cs+(index-1)*line_h,px,color,"center",L.side_w)
+                end
+            end
 
             local detail=current_sidebar_detail and current_sidebar_detail() or nil
             if detail then
@@ -1286,6 +1310,7 @@ function kit.draw()
                     if side[index].group=="bottom" then detail_bottom=math.min(detail_bottom,g.y-L.gap)
                     else detail_top=math.max(detail_top,g.y+g.h+L.gap) end
                 end
+                if footer_top then detail_bottom=math.min(detail_bottom,footer_top-L.gap) end
                 local detail_h=detail_bottom-detail_top
                 if detail_h>=80*L.cs then
                     love.graphics.setColor(0.075,0.045,0.12,0.92)

@@ -1,7 +1,9 @@
-# APP Manager
+# Port App Manager
 
 掌机上的 PortMaster 端口管理器。列出所有端口、卸载（连同图片和游戏目录）、清理
 残留目录和图片、修复 Jenny 移植游戏的设置启动器。手柄操作，中英双语。
+首页标题使用 `Port App Manager`，快捷工具栏在退出按钮上方固定显示
+“开发: Bili 解腻Jenny”和 QQ 群联系方式，品牌信息不参与焦点导航。
 
 “环境详情”只诊断 PortMaster/系统环境：显示 SH、Data、PortMaster 和
 `libs/` Runtime 目录，以及 `control.txt` / `mod_*.txt` / `get_controls`

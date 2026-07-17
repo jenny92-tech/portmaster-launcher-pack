@@ -102,7 +102,9 @@ half-width pairs and spatially nearest transitions between columns. A page may a
 provide `sidebar_details`, keyed by the same stable `id`/`key` used by its rows. The
 Kit resolves the currently focused row's key and renders the matching wrapped context
 card above bottom sidebar actions; descriptions stay correct across sorting and grid
-reflow because they never depend on row indices.
+reflow because they never depend on row indices. `sidebar_footer={lines={...}}` renders
+small non-focusable identity/contact text directly above bottom actions without adding
+items to the controller focus chain.
 
 Read-only content uses `kit.textview(label, value, opts)`. A TextView measures wrapped
 label/value text and grows its card instead of overflowing a fixed-height row. Values

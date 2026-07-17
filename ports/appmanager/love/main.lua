@@ -104,7 +104,7 @@ local build_home,build_junk,build_trash,build_env,collect_trash
 
 local function show_exit_dialog()
     kit.dialog({
-        title=L("Exit APP Manager?","退出 APP Manager？"),
+        title=L("Exit Port App Manager?","退出 Port App Manager？"),
         message=L("Return to the system menu?","将返回系统菜单。"),
         confirm=L("Exit","退出"),
         cancel=L("Stay","暂不退出"),
@@ -213,9 +213,10 @@ build_home=function(preserve_focus)
     if #rows==0 then rows[1]=kit.info(L("Ports","端口"),L("No managed ports found.","没有找到可管理的端口。")) end
     local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
     local trash_count=collect_trash and #collect_trash() or 0
-    kit.set_page(HOME,{en="APP Manager",zh="APP Manager"},rows,{
+    kit.set_page(HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
         preserve_focus=preserve_focus,
         sidebar_title=L("Quick Tools","快捷工具"),
+        sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
         header_action=button(L("Details","详情"),function() build_env(); kit.goto_page(ENV) end),
         sidebar={
         button(dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,{disabled=empty(selected_home)}),
@@ -404,13 +405,15 @@ local port={
     strings={working=L("Working…","处理中…")},
     on_home_cancel=show_exit_dialog,
     build_pages=function(k)
-        for i=1,4 do k.add_page(L("Loading…","正在加载…"),{k.info(L("APP Manager","APP 管理器"),L("Scanning…","正在扫描…"))}) end
+        for i=1,4 do k.add_page(L("Loading…","正在加载…"),{k.info("Port App Manager",L("Scanning…","正在扫描…"))}) end
     end,
     on_load=function()
         local ok,err=load_env()
         if not ok then
-            kit.set_page(HOME,{en="APP Manager",zh="APP Manager"},{kit.info(L("Startup error","启动失败"),err)},
-                {sidebar_title=L("Quick Tools","快捷工具"),sidebar={button(L("Quit","退出"),show_exit_dialog,{group="bottom"})}})
+            kit.set_page(HOME,{en="Port App Manager",zh="Port App Manager"},{kit.info(L("Startup error","启动失败"),err)},
+                {sidebar_title=L("Quick Tools","快捷工具"),
+                sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
+                sidebar={button(L("Quit","退出"),show_exit_dialog,{group="bottom"})}})
             return
         end
         refresh_scan(); build_home()
