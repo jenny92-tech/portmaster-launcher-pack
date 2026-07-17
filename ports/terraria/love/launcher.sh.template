@@ -12,14 +12,11 @@ PORT_NAME="terraria"; LOG_PREFIX="[TER-LOVE]"
 # ── PortMaster preamble (controlfolder discovery + control.txt).
 # The $(dirname $0)/PortMaster branch is required: without it controlfolder
 # resolves to the wrong path on some devices.
-XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
-if [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then controlfolder="$XDG_DATA_HOME/PortMaster"
-elif [ -d "/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/sdcard/roms/ports/PortMaster"
-elif [ -d "$(cd "$(dirname "$0")" && pwd)/PortMaster/" ]; then controlfolder="$(cd "$(dirname "$0")" && pwd)/PortMaster"
-else controlfolder="/roms/ports/PortMaster"
-fi
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+#@KIT-END
+portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source "$controlfolder/control.txt"
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 get_controls

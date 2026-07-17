@@ -15,14 +15,16 @@ font are present on every PortMaster install. That is the core reason for pickin
 
 ```
 _kit/love/kit.lua          reusable skeleton
+_kit/love/launcher.lua     declarative launcher schema + presets
+_kit/love/conf.lua         shared fullscreen/module configuration
+_kit/love/ui.gptk          shared gamepad mapping
 ports/<port>/love/
-  main.lua                 port config: strings/state/pages/credits/write_env
-  conf.lua                 love.conf: fullscreen + physics/audio/joystick disabled
-  ui.gptk                  gptokeyb mapping (gamepad → keyboard)
+  main.lua                 fields/pages/env/legacy declarations
   launcher.sh(.template)   PortMaster launch script
 ```
 
-`main.lua` is config only and calls `kit.run(port)`. The skeleton supplies: header bar,
+Normal ports call `launcher.define`; dynamic apps such as APP Manager call `kit.run`
+directly. The skeleton supplies: header bar,
 adaptive-density layout, outlined text, rounded pickers/buttons, focus ring, EN/ZH
 toggle, credits, QQ group, state save, env write-out.
 
@@ -32,18 +34,43 @@ toggle, credits, QQ group, state save, env write-out.
 (`panel`), layout engine (`layout` + adaptive density), focus navigation (`move_v` /
 `move_h`), font and outlining (`fnt` / `outlined`).
 
-**The three factories a port builds pages with**:
+**Shared row/page factories**:
 
 | Factory | Purpose | Example |
 |---|---|---|
 | `kit.picker(label, values, labels, key)` | item with a cycling selection (`< value >`, stored in `state[key]`) | `kit.picker("resolution", RESOLUTIONS, RES_LABELS, "resolution")` |
-| `kit.button(label, action)` | clickable item; action = `"start"` (exit 42) / `"quit"` (exit 0) / `"page:N"` / a function | `kit.button("start_game", "start")` |
+| `kit.button(label, action, opts)` | clickable item; action = `"start"` (exit 42) / `"quit"` (exit 0) / `"page:N"` / a function | `kit.button("start_game", "start")` |
+| `kit.checkbox(label, detail, checked, callback)` | selectable list item | APP Manager port/trash rows |
+| `kit.info(label, value)` | read-only focusable detail item | environment page |
+| `kit.section(label)` | non-focusable visual heading for grouped details | environment categories |
 | `kit.add_page(title, rows)` | a page = a list of the above; page 1 is the home page | `kit.add_page("title", { picker, picker, button })` |
 
-**Hooks a port provides** (define `port.xxx` in `main.lua`): `port.state` (initial
-values), `port.strings` (en/zh text), `port.credits`, `port.build_pages(k, state)` (build
-pages with the three factories), `port.write_env(f, state, k)` (write the selections as
-the env lines launcher.sh stage-2 expects).
+Pages optionally carry a `sidebar` button column. `kit.set_page` replaces a dynamic
+page; pass `preserve_focus=true` when a selection-only rebuild must keep the current
+row/sidebar control and scroll position. `kit.set_busy` blocks input behind a progress
+overlay during background Shell work.
+
+`kit.dialog(opts)` opens a shared modal confirmation without leaving the current
+page. It accepts localized `title`, `message`, `items`, `confirm` and `cancel`
+values, plus `danger`, `on_confirm` and `on_cancel`. Focus is trapped inside the
+modal and defaults to Cancel. Ordinary launchers accept A/B as the focused action
+and X/Y as return. APP Manager uses a device-specific raw a/b inversion so its
+printed A confirms and printed B cancels on the target handhelds.
+Only the first four item labels are shown, followed by a remaining-item count.
+Apps that need guarded home-page exits can provide `port.on_home_cancel`; call
+`kit.quit()` only from the dialog's confirmed callback so state is saved first.
+
+Dynamic apps can set `port.theme={kind="app",background_dim=0.94}` for the full
+application shell used by APP Manager: a tall toolbar, wide scrolling content list,
+narrow titled action column, divider and scrollbar. Page options `header_action` and
+`sidebar_title` fill the two toolbar areas. `kit.button` also accepts reusable options:
+`half=true` pairs two actions on one row, `group="bottom"` pins navigation/quit actions,
+and `disabled=true` (or a function) renders and skips unavailable actions.
+
+Ordinary launchers use `launcher.resolution`, `launcher.select` and
+`launcher.toggle`. Each field declares its default, options, localized label, env
+binding and legacy source once; the schema derives state, validation, pages, old-Godot
+import and `launch_config.env`.
 
 **Tunable defaults** (constants at the top of kit.lua, one change applies to every port):
 `ROW_MAX_W` (hard row-width cap), `ROW_MAX` / `ROW_MIN` (row height), `BAR_H` (header
@@ -52,9 +79,7 @@ bounds), and the colours in `panel()`. These are **global defaults** with no per
 override — a launcher wants every row uniform, so it never came up; add optional override
 args to the factories if that changes.
 
-**A new port = just `main.lua`** (the Black Myth template is 98 lines, pure config, zero
-render code): text + initial values + a list of pickers/buttons per page + env mapping.
-Copy and adapt `ports/heishenhua/love/main.lua`.
+**A new port = just `main.lua`**. Copy and adapt `ports/hk/love/main.lua`.
 
 ## Hard-won details (don't relearn these)
 

@@ -20,7 +20,8 @@
   },
   "depends_on": [
     "https://github.com/jenny92-tech/godot/tree/linuxbsd-sdl2",
-    "https://github.com/pardeike/Harmony"
+    "https://github.com/pardeike/Harmony",
+    "PortMaster runtimes/love_11.5"
   ],
   "notes": "Self-contained: ships its own godot.mono SDL2 fork (~60 MB). Uses src/scripts/dist-port.sh because STS2 also builds a Harmony patcher and shader overlay pck."
 }

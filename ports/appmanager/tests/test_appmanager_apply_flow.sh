@@ -2,19 +2,19 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-LAUNCHER="$ROOT/src/launcher.sh"
-APP_UI="$ROOT/src/app_ui.gd"
+REPO_ROOT=$(cd "$ROOT/../.." && pwd)
+"$REPO_ROOT/_kit/dist_port.sh" appmanager >/dev/null
+LAUNCHER="$ROOT/dist/APP Manager.sh"
+APP_UI="$ROOT/love/main.lua"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# helper 必须后台执行；同步 execute 会卡住 FRT 渲染，在 TrimUI 上表现为
-# 黑屏闪烁和“App 重启”。非阻塞调用后由当前场景轮询子进程并刷新。
-grep -Fq 'OS.execute("/bin/bash", PoolStringArray([helper, "--apply-plan"]), false)' "$APP_UI"
-grep -Fq 'OS.is_process_running(_apply_pid)' "$APP_UI"
-grep -Fq 'OS.execute("/bin/bash", PoolStringArray([helper, "--scan-sizes"]), false)' "$APP_UI"
-grep -Fq 'OS.is_process_running(_size_pid)' "$APP_UI"
-grep -Fq '"kind": "DELETE_ITEM"' "$APP_UI"
-if grep -Fq 'OS.execute("/bin/bash", PoolStringArray([helper, "--apply-plan"]), true)' "$APP_UI"; then
+# helper must remain asynchronous so the LÖVE render loop stays responsive.
+grep -Fq ' --apply-plan >/dev/null 2>&1 &' "$APP_UI"
+grep -Fq 'if not file_exists(env.plan_file)' "$APP_UI"
+grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI"
+grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI"
+if grep -Fq 'os.execute(shquote(env.apply_script).." --apply-plan")' "$APP_UI"; then
   echo "appmanager helper must not block the render thread" >&2
   exit 1
 fi
@@ -27,12 +27,11 @@ make_case() {
   local gamedirs="$card/ports"
   [ "$mode" != "same_root_delete" ] || scripts="$gamedirs"
   local app="$gamedirs/appmanager"
-  mkdir -p "$scripts/PortMaster/libs" "$scripts/images" "$gamedirs/GameData" \
-    "$app/runtime" "$app/conf" "$app/trash" "$app/hacksdl"
+  mkdir -p "$scripts/PortMaster/libs" "$scripts/PortMaster/runtimes/love_11.5" \
+    "$scripts/images" "$gamedirs/GameData" "$app/conf" "$app/trash" "$app/love_ui"
   cp "$LAUNCHER" "$scripts/APP Manager.sh"
-  : > "$app/runtime/frt_3.6.squashfs"
-  : > "$app/bootstrap.pck"
-  : > "$app/appmanager.gptk"
+  : > "$app/love_ui/main.lua"
+  : > "$app/love_ui/ui.gptk"
   : > "$scripts/Game.sh"
 
   cat > "$scripts/PortMaster/control.txt" <<EOF
@@ -63,16 +62,11 @@ pm_platform_helper() { :; }
 pm_finish() { :; }
 EOF
 
-  cat > "$case_dir/mock-sudo" <<'EOF'
-#!/usr/bin/env bash
-set -e
-case "$1" in
-  umount)
-    exit 0
-    ;;
-  mount)
-    mkdir -p "$3"
-    cat > "$3/frt_3.6" <<'FRT'
+  cat > "$scripts/PortMaster/runtimes/love_11.5/love.txt" <<'EOF'
+LOVE_GPTK=love.aarch64
+LOVE_RUN="$controlfolder/runtimes/love_11.5/love.aarch64"
+EOF
+  cat > "$scripts/PortMaster/runtimes/love_11.5/love.aarch64" <<'LOVE'
 #!/usr/bin/env bash
 set -e
 count=0
@@ -82,56 +76,33 @@ printf '%s\n' "$count" > "$TEST_COUNT"
 [ "$count" = "1" ] || exit 0
 case "$TEST_MODE" in
   delete|same_root_delete)
-    printf '# test plan\nTRASH\t%s\nTRASH\t%s\nTRASH\t%s\n' \
-      "$TEST_SCRIPT" "$TEST_IMAGE" "$TEST_GAME" > "$TEST_PLAN"
-    ;;
+    printf '# test plan\nTRASH\t%s\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_IMAGE" "$TEST_GAME" > "$TEST_PLAN" ;;
   fail)
-    printf '# test plan\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_GAME" > "$TEST_PLAN"
-    ;;
-  repair|repair_missing|repair_fail)
-    printf '# test plan\nINSTALL_RT\tfrt_3.6\n' > "$TEST_PLAN"
-    [ "$TEST_MODE" != "repair_missing" ] || rm -f "$TEST_BUNDLED"
-    ;;
-  empty|empty_fail)
-    printf '# test plan\nEMPTY_TRASH\t-\n' > "$TEST_PLAN"
-    ;;
-  restore|restore_legacy|restore_conflict|restore_fail)
-    printf '# test plan\nRESTORE_TRASH\t-\n' > "$TEST_PLAN"
-    ;;
+    printf '# test plan\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_GAME" > "$TEST_PLAN" ;;
+  empty|empty_fail) printf '# test plan\nEMPTY_TRASH\t-\n' > "$TEST_PLAN" ;;
+  restore|restore_legacy|restore_conflict|restore_fail) printf '# test plan\nRESTORE_TRASH\t-\n' > "$TEST_PLAN" ;;
   restore_selected)
-    printf '# test plan\nRESTORE_ITEM\t%s\nRESTORE_ITEM\t%s\n' \
-      "$TEST_SELECTED_ITEM" "$TEST_SELECTED_IMAGE" > "$TEST_PLAN"
-    ;;
-  restore_misbucket)
-    printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN"
-    ;;
+    printf '# test plan\nRESTORE_ITEM\t%s\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" "$TEST_SELECTED_IMAGE" > "$TEST_PLAN" ;;
+  restore_misbucket) printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_selected)
-    printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' \
-      "$TEST_SELECTED_ITEM" "$TEST_SELECTED_IMAGE" > "$TEST_PLAN"
-    ;;
-  delete_selected_invalid)
-    printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN"
-    ;;
+    printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" "$TEST_SELECTED_IMAGE" > "$TEST_PLAN" ;;
+  delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
-    printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' \
-      "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN"
-    ;;
-  restore_selected_invalid)
-    printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN"
-    ;;
-  invalid)
-    printf '# test plan\nTRASH\t%s\n' "$TEST_OUTSIDE" > "$TEST_PLAN"
-    ;;
-  no_plan)
-    ;;
+    printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
+  restore_selected_invalid) printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
+  invalid) printf '# test plan\nTRASH\t%s\n' "$TEST_OUTSIDE" > "$TEST_PLAN" ;;
+  no_plan) ;;
 esac
 [ "$TEST_MODE" != "renamed_launcher" ] || exit 0
-# 与真实 UI 一样，在同一个 FRT 生命周期里调用受控 helper；不靠退出码 42 重启。
 bash "$TEST_APPLY_HELPER" --apply-plan
 exit 0
-FRT
-    chmod +x "$3/frt_3.6"
-    ;;
+LOVE
+  chmod +x "$scripts/PortMaster/runtimes/love_11.5/love.aarch64"
+
+  cat > "$case_dir/mock-sudo" <<'EOF'
+#!/usr/bin/env bash
+set -e
+case "$1" in
   mv)
     if [ "${TEST_MODE:-}" = "fail" ] && printf '%s\n' "$*" | grep -Fq -- "$TEST_SCRIPT"; then
       exit 1
@@ -167,7 +138,6 @@ EOF
   export TEST_IMAGE="$scripts/images/Game.png"
   export TEST_GAME="$gamedirs/GameData"
   export TEST_OUTSIDE="$case_dir/outside.txt"
-  export TEST_BUNDLED="$app/runtime/frt_3.6.squashfs"
   export TEST_TRASH_ITEM="$app/trash/visible"
   export TEST_SELECTED_ITEM="$app/trash/selected/scripts/Game.sh"
   export TEST_SELECTED_IMAGE="$app/trash/selected/images/Game.png"
@@ -266,16 +236,6 @@ EOF
       [ -e "$TEST_GAME" ]
       grep -Fxq $'FAIL\ttrash\tGame.sh' "$app/conf/result.txt"
       ;;
-    repair)
-      cmp "$app/runtime/frt_3.6.squashfs" "$scripts/PortMaster/libs/frt_3.6.squashfs"
-      [ ! -s "$app/conf/result.txt" ]
-      ;;
-    repair_missing)
-      grep -Fxq $'FAIL\trepair_files' "$app/conf/result.txt"
-      ;;
-    repair_fail)
-      grep -Fxq $'FAIL\trepair' "$app/conf/result.txt"
-      ;;
     empty)
       [ -z "$(find "$app/trash" -mindepth 1 -print -quit)" ]
       [ ! -s "$app/conf/result.txt" ]
@@ -371,7 +331,7 @@ EOF
   [ "$(cat "$TEST_CONTROL_COUNT")" = "1" ]
 }
 
-for mode in delete same_root_delete fail repair repair_missing repair_fail empty empty_fail \
+for mode in delete same_root_delete fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
   delete_container_invalid invalid no_plan \

@@ -10,7 +10,9 @@ launcher fail to start.
 
 | File | Purpose |
 |---|---|
-| `love/kit.lua` | Shared LÖVE UI: layout, focus, localization, persisted state, legacy env import, and stage-2 env output. |
+| `love/kit.lua` | Shared LÖVE UI: pages, items, buttons, split layout, focus, localization and busy state. |
+| `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
+| `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
 | `launcher_unity_common.sh` | **Unity-loader only**: button remap and game launch. Legacy Godot stage-1 helpers remain for compatibility. |
 | `pck_builder.py` | Build a Godot pck (godot 3 `format_version=1` or godot 4 `format_version=3`) from a manifest.json. |
@@ -27,10 +29,12 @@ logic. Skeleton:
 #!/bin/bash
 PORT_NAME="heishenhua"; LOG_PREFIX="[HSH]"
 
-# ── PortMaster preamble (controlfolder discovery + control.txt) ──
-XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
-if [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
-... ; else controlfolder="/roms/ports/PortMaster"; fi
+# ── PortMaster preamble (shared discovery + control.txt) ──
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+#@KIT-END
+portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source $controlfolder/control.txt
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 get_controls
@@ -82,7 +86,7 @@ lives in the device's game dir and is NOT part of the launcher — don't overwri
 
 ## LÖVE payload
 
-`dist_port.sh` copies the shared `kit.lua` and background, then overlays the
-port's `love/main.lua`, `conf.lua`, `ui.gptk`, and optional background into
+`dist_port.sh` copies the shared kit, launcher schema, `conf.lua`, `ui.gptk` and
+background, then overlays the port's Lua modules and optional asset overrides into
 `dist/love_ui/`. The CJK font is provisioned from PortMaster on first launch.
 See [`love/README.md`](love/README.md) for the component and device details.

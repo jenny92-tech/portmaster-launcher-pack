@@ -11,18 +11,45 @@ grep -Fq 'assembled hk' <<<"$out"
 bash -n "$tmp/hk.sh"
 ! grep -qE '#@KIT|source "\$KIT/' "$tmp/hk.sh"
 
+# Shared runtime assets live once in _kit; individual ports only declare their schema
+# and launcher shell. dist_port.sh copies the common assets into every deployable pack.
+for file in kit.lua launcher.lua conf.lua ui.gptk; do
+  [ -f "$ROOT/_kit/love/$file" ] || {
+    echo "_kit/love: missing shared $file" >&2
+    exit 1
+  }
+done
+
 # Every migrated launcher declares its legacy Godot env so existing choices survive
-# the first LÖVE launch, and every package carries the shared UI inputs.
+# the first LÖVE launch.
 for port in heishenhua hk sts2 terraria vampiresurvivors114; do
   main="$ROOT/ports/$port/love/main.lua"
-  grep -Fq 'port.legacy_env' "$main"
+  grep -Fq 'launcher.define' "$main"
+  grep -Fq 'legacy' "$main"
   grep -Fq 'state_path' "$main"
-  for file in main.lua conf.lua ui.gptk launcher.sh.template; do
+  for file in main.lua launcher.sh.template; do
     [ -f "$ROOT/ports/$port/love/$file" ] || {
       echo "$port: missing love/$file" >&2
       exit 1
     }
   done
+  [ ! -f "$ROOT/ports/$port/love/conf.lua" ] || {
+    echo "$port: conf.lua must come from _kit/love" >&2
+    exit 1
+  }
+  [ ! -f "$ROOT/ports/$port/love/ui.gptk" ] || {
+    echo "$port: ui.gptk must come from _kit/love" >&2
+    exit 1
+  }
+done
+
+# Build one representative port and assert the common files are materialized in dist.
+"$ROOT/_kit/dist_port.sh" hk >/dev/null
+for file in kit.lua launcher.lua conf.lua ui.gptk; do
+  [ -f "$ROOT/ports/hk/dist/love_ui/$file" ] || {
+    echo "hk dist: missing shared $file" >&2
+    exit 1
+  }
 done
 
 python3 - "$ROOT" <<'PY'

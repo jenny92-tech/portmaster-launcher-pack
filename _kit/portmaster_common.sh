@@ -137,6 +137,8 @@ run_love_launcher_ui() {
   fi
   _love_provide_font "$ui_dir"
   (   # Display env stays in this subshell — leaking it breaks the stage-2 game.
+    export LOVE_IDENTITY="${PORT_NAME:-portmaster}_launcher"
+    export LOVE_WINDOW_TITLE="${PORT_NAME:-PortMaster} Launcher"
     source "$love_txt"
     export LIBGL_ES=2 LIBGL_GL=21
     local wl_dir="" wl_disp="${WAYLAND_DISPLAY:-wayland-0}" d

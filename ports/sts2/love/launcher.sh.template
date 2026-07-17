@@ -11,14 +11,11 @@
 # gptokeyb/EVDEV grab, must not pass --verbose, and DEFSHADER must not contain
 # rect. The love launcher's gptokeyb is transient and is killed when love exits.
 
-XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
-if [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then controlfolder="$XDG_DATA_HOME/PortMaster"
-elif [ -d "/mnt/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/mnt/sdcard/roms/ports/PortMaster"
-elif [ -d "$(cd "$(dirname "$0")" && pwd)/PortMaster/" ]; then controlfolder="$(cd "$(dirname "$0")" && pwd)/PortMaster"
-else controlfolder="/roms/ports/PortMaster"
-fi
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+#@KIT-END
+portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source $controlfolder/control.txt
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 get_controls

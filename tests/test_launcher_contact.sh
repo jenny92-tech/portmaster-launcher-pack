@@ -15,13 +15,18 @@ grep -Fq "$CONTACT" "$ROOT/_kit/launcher_base.gd" || {
 }
 
 for main in "$ROOT"/ports/*/love/main.lua; do
-  grep -Fq 'require("kit")' "$main" || {
-    echo "${main#$ROOT/}: does not load the shared kit containing the contact text" >&2
+  case "$main" in
+    */ports/appmanager/*) required='require("kit")' ;;
+    *) required='require("launcher")' ;;
+  esac
+  grep -Fq "$required" "$main" || {
+    echo "${main#$ROOT/}: does not load the shared LÖVE layer" >&2
     exit 1
   }
 done
 
 for manifest in "$ROOT"/ports/*/src/manifest.bootstrap.json; do
+  [ -f "$manifest" ] || continue
   python3 - "$manifest" <<'PY'
 import json
 import sys

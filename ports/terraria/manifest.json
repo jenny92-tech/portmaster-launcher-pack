@@ -10,5 +10,6 @@
     "image": {
       "screenshot": "screenshot.png"
     }
-  }
+  },
+  "depends_on": ["PortMaster runtimes/love_11.5"]
 }

@@ -19,7 +19,8 @@
     }
   },
   "depends_on": [
-    "https://github.com/jenny92-tech/Bogodroid (unityloader)"
+    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "PortMaster runtimes/love_11.5"
   ],
   "notes": "Direct Unity launch. gptokeyb is intentionally disabled for the game stage so BUTTON_A/B reach Unity as Android gamepad keycodes."
 }

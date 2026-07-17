@@ -14,7 +14,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
-| [`appmanager`](ports/appmanager) | Launcher manager | Godot 3.5 | Bundled Godot UI | TrimUI, MiniLoong |
+| [`appmanager`](ports/appmanager) | Launcher manager | LÖVE 11.5 | Shared LÖVE UI kit | TrimUI, MiniLoong |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
@@ -28,10 +28,9 @@ It is not a PortMaster install manifest and is not copied to `dist/`. The build
 step generates PortMaster-style `dist/port.json` from it. Port images use the
 standard filename `screenshot.png` in both the port root and `dist/`.
 
-LÖVE launchers package `_kit/love/kit.lua` plus the port's `main.lua`, `conf.lua`,
-and `ui.gptk` into `dist/love_ui/`. The Godot PCK builder remains for the legacy
-APP Manager and for game-runtime tooling; it is no longer part of migrated
-stage-1 launchers.
+LÖVE launchers package the shared `kit.lua`, declarative launcher schema, common
+`conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. APP Manager
+uses the same component kit; the Godot PCK builder remains only for game-runtime tooling.
 
 ## Dist a port
 

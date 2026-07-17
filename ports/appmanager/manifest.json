@@ -1,22 +1,21 @@
 {
   "name": "appmanager",
   "title": "APP Manager",
-  "engine": "Godot 3.5 (GDScript)",
-  "runtime": "self-contained: bundles its own frt_3.6.squashfs",
-  "godot_launcher": "3.5.2 (frt + hacksdl + gptokeyb)",
+  "engine": "LÖVE 11.5 (Lua)",
+  "runtime": "PortMaster system runtimes/love_11.5",
+  "launcher": "LÖVE 11.5 (shared Jenny UI kit + gptokeyb)",
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One", "ROCKNIX"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "appmanager",
   "script": "APP Manager.sh",
-  "bootstrap_pck": "src/manifest.bootstrap.json",
   "launcher_sh": "src/launcher.sh",
-  "gptk": "src/appmanager.gptk",
+  "gptk": "love/ui.gptk",
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",
       "names": ["APP Manager.png"]
     }
   },
-  "depends_on": []
+  "depends_on": ["PortMaster runtimes/love_11.5"]
 }

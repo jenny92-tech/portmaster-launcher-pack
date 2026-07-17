@@ -31,6 +31,8 @@ if grep -R -nE 'VS_GAME_LANG|vs114_apply_language|I2 Language|SaveDataUnity|game
 fi
 
 grep -Fq 'run_love_launcher_ui' "$LOVE/launcher.sh.template"
-grep -Fq 'f:write("VS_WIDTH=auto' "$LOVE/main.lua"
+grep -Fq 'local launcher = require("launcher")' "$LOVE/main.lua"
+grep -Fq 'launcher.define {' "$LOVE/main.lua"
+grep -Fq 'static_env = {{"VS_WIDTH", "auto"}, {"VS_HEIGHT", "auto"}}' "$LOVE/main.lua"
 grep -Fq 'Vampire Survivors Launcher/launch_config.env' "$LOVE/main.lua"
 bash -n "$LOVE/launcher.sh.template"

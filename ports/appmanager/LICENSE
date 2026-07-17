@@ -43,31 +43,6 @@ Notices:
   - This license attaches only to original code, assets, build scripts,
     and documentation contributed to this launcher by jenny92-tech (and
     any future contributors who choose to license under the same terms).
-    Third-party components (frt, gptokeyb, hacksdl, fonts, the Bogodroid
-    unityloader, etc.) retain their own respective licenses; see their
-    upstream projects.
-
-────────────────────────────────────────────────────────────────────────
-
-IMPORTANT SEPARATE NOTICE — Game files are NOT covered
-
-This license grants NO rights whatsoever to the underlying game
-"Hollow Knight" or to any of its code, assemblies, art assets, audio
-data, fonts, scripts, configuration, or compiled resource packs.
-"Hollow Knight" is © Team Cherry and is not affiliated with this
-project.
-
-Please support the developers and own a legal copy of the official
-Hollow Knight (Steam / GOG / Nintendo Switch, etc.). This launcher is
-built to run a community-made, Android-compatible build of the game;
-the game's files are supplied by the user at runtime — the launcher
-does not contain, embed, or distribute any Team Cherry material.
-
-Redistribution of Hollow Knight game files — including but not limited
-to libil2cpp.so, global-metadata.dat, data.unity3d, asset bundles, or
-any modified versions of the above — is NOT authorised by this license
-and is likely to infringe Team Cherry's copyright. Any such
-redistribution is the sole responsibility of the redistributor.
-
-Distributing builds of this launcher that include Hollow Knight game
-files in any form is explicitly prohibited.
+    Third-party components supplied by PortMaster at runtime (including
+    LÖVE, gptokeyb and fonts) retain their own respective licenses; see
+    their upstream projects.

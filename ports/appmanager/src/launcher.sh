@@ -3,18 +3,14 @@
 #
 # APP Manager — PortMaster 端口管理器。
 #
-# 这个 port 刻意做到零外部 runtime 依赖: 它自带 runtime/frt_3.6.squashfs 并挂
-# 自己那一份来跑 UI, 完全不依赖 PortMaster libs/ 里有什么。这不是洁癖 —— 这个
-# APP 的职责之一就是修复 Jenny 移植游戏的设置启动器。如果它自己得先有外部
-# runtime 才能启动，那在最需要修复的机器上它恰好起不来。同一个 squashfs 同时
-# 作为内部修复组件；这些实现名不展示给普通用户。
+# UI uses PortMaster's system LÖVE 11.5 runtime, the same guaranteed runtime used
+# by every migrated Jenny launcher. Safety-critical filesystem mutations remain
+# in this shell and are never performed directly by Lua.
 #
-# 删除动作全部在这里执行, 不在 Godot 里: 卡是 exFAT 以 uid=0 挂的, Godot 作为
-# 子进程拿不到 root。UI 写 plan.txt 后调用本脚本的 --apply-plan 模式，用 $ESUDO
-# 落地；FRT 不退出，完成后只让 UI 重新扫描并刷新列表。
+# UI writes plan.txt and invokes this script's --apply-plan mode. The helper
+# re-validates every path under $ESUDO, then the running LÖVE UI rescans.
 
 PORT_NAME="appmanager"; LOG_PREFIX="[PAM]"
-BUNDLED_RT="frt_3.6"
 APPLY_ONLY=0
 SIZE_ONLY=0
 case "${1:-}" in
@@ -33,13 +29,11 @@ esac
 # 会把它清空 —— 用通用名字在这里必然被踩掉(实测 [$SCRIPT_DIR] -> [])。
 PAM_DIR="${PAM_SOURCE_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 PAM_LAUNCHER_SOURCE="$0"
-XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
-if [ -d "$PAM_DIR/PortMaster/" ]; then controlfolder="$PAM_DIR/PortMaster"
-elif [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then controlfolder="$XDG_DATA_HOME/PortMaster"
-else controlfolder="/roms/ports/PortMaster"
-fi
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+#@KIT-END
+portmaster_discover "$PAM_DIR"
 source "$controlfolder/control.txt"
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 # get_controls 是启动 UI 时的平台初始化，不是“取变量”。部分固件
@@ -109,7 +103,13 @@ if [ "$APPLY_ONLY" != "1" ] && [ "$SIZE_ONLY" != "1" ]; then
 fi
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} scripts=$SCRIPTS_DIR gamedirs=$GAMEDIRS_DIR"
 
-# ── 环境 → env.json (GDScript 侧的唯一事实来源) ──────────────────────────
+# Shared LÖVE runtime/font/display/input helpers are inlined for device builds.
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_common.sh"
+#@KIT-END
+
+# ── 环境 → env.json (LÖVE UI 的唯一事实来源) ───────────────────────────
 # $directory / $controlfolder 只有 shell 知道 (control.txt 注入), 而扫描器必须
 # 拿它们去展开脚本里的 GAMEDIR="/$directory/ports/$PORT_NAME"。喂不进去, 一半
 # 的脚本就解析不出目录。
@@ -130,7 +130,6 @@ write_env() {
   "home": "$HOME",
   "cfw": "$CFW_NAME",
   "free_bytes": $free,
-  "bundled_runtime": "$BUNDLED_RT",
   "display_width": "${DISPLAY_WIDTH:-}",
   "display_height": "${DISPLAY_HEIGHT:-}",
   "device_arch": "${DEVICE_ARCH:-}",
@@ -155,48 +154,6 @@ write_env() {
   "self_port": "$PORT_NAME"
 }
 EOF
-}
-
-# ── frt: 先用自带的, 没有才回落到 PortMaster libs/ ───────────────────────
-FRT_MNT="$GAMEDIR/frt_rt"
-frt_mount() {
-  local squash=""
-  if [ -f "$GAMEDIR/runtime/${BUNDLED_RT}.squashfs" ]; then
-    squash="$GAMEDIR/runtime/${BUNDLED_RT}.squashfs"
-    FRT_NAME="$BUNDLED_RT"
-  else
-    squash=$(ls "$LIBS_DIR"/frt_3.*.squashfs 2>/dev/null | sort -V | tail -1)
-    [ -z "$squash" ] && return 1
-    FRT_NAME="$(basename "$squash" .squashfs)"
-  fi
-  mkdir -p "$FRT_MNT"
-  $ESUDO umount "$FRT_MNT" 2>/dev/null
-  $ESUDO mount "$squash" "$FRT_MNT" || return 1
-  FRT_BIN="$FRT_MNT/$FRT_NAME"
-  [ -x "$FRT_BIN" ] || return 1
-  echo "$LOG_PREFIX frt: $squash -> $FRT_BIN"
-  return 0
-}
-
-frt_umount() {
-  $ESUDO umount "$FRT_MNT" 2>/dev/null
-}
-
-run_ui() {
-  export FRT_NO_EXIT_SHORTCUTS=FRT_NO_EXIT_SHORTCUTS
-  export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
-  export PAM_ENV="$CONFDIR/env.json"
-  export PAM_SOURCE_DIR="$PAM_DIR"
-  $GPTOKEYB "$FRT_NAME" -c "$GAMEDIR/${PORT_NAME}.gptk" &
-  local gptokeyb_pid=$!
-  pm_platform_helper "$FRT_NAME"
-  LD_PRELOAD="$GAMEDIR/hacksdl/hacksdl.aarch64.so" HACKSDL_DEVICE_DISABLE_0=2 \
-  XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
-  GODOT_SILENCE_ROOT_WARNING=1 \
-    "$FRT_BIN" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" \
-    --main-pack "$GAMEDIR/bootstrap.pck"
-  ui_exit=$?
-  kill $gptokeyb_pid 2>/dev/null; wait $gptokeyb_pid 2>/dev/null
 }
 
 # ── 执行 UI 产出的行动清单 ───────────────────────────────────────────────
@@ -486,25 +443,6 @@ apply_plan() {
         fi
         ;;
 
-      INSTALL_RT)
-        if [ "$arg" != "$BUNDLED_RT" ]; then
-          printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-          echo "$LOG_PREFIX rejected repair component: $arg"
-          continue
-        fi
-        local src="$GAMEDIR/runtime/${arg}.squashfs"
-        if [ ! -f "$src" ]; then
-          printf 'FAIL\trepair_files\n' >> "$RESULT_FILE"
-          continue
-        fi
-        $ESUDO mkdir -p "$LIBS_DIR"
-        if $ESUDO cp -f "$src" "$LIBS_DIR/${arg}.squashfs"; then
-          echo "$LOG_PREFIX launcher repair complete"
-        else
-          printf 'FAIL\trepair\n' >> "$RESULT_FILE"
-        fi
-        ;;
-
       EMPTY_TRASH)
         empty_failed=0
         # 普通 * 不包含隐藏项；三组 glob 才能完整覆盖，并且始终限定在 APP 回收站内。
@@ -563,12 +501,11 @@ apply_plan() {
     esac
   done < "$PLAN_FILE"
 
-  $ESUDO rm -f "$PLAN_FILE"
   sync
 }
 
 # ── 主入口 ────────────────────────────────────────────────────────────
-# 容量统计会递归读整个游戏目录，绝不能放在 Godot 渲染线程。
+# 容量统计会递归读整个游戏目录，绝不能放在 LÖVE 渲染线程。
 # UI 用 --scan-sizes 后台启动这一模式；这里原子替换缓存，UI 始终可以
 # 先读上一份完整结果。du 统计占用的磁盘块，比逻辑文件长度更接近真实
 # 可释放空间。
@@ -648,22 +585,14 @@ write_env
 if [ "$APPLY_ONLY" = "1" ]; then
   apply_plan
   write_env          # 空间、Runtime 和目录状态都可能变化
+  # plan.txt is the UI's completion signal. Remove it only after env.json is
+  # fully refreshed, otherwise the renderer can race a partially-written file.
+  $ESUDO rm -f "$PLAN_FILE"
   exit 0
 fi
 
-if ! frt_mount; then
-  echo "$LOG_PREFIX 找不到可用的 frt 运行时, 退出"
-  exit 1
-fi
-
-while true; do
-  run_ui
-  echo "$LOG_PREFIX ui_exit=$ui_exit"
-  [ "$ui_exit" = "42" ] || break
-  apply_plan
-  write_env          # 空间/目录都变了, 重新采一次
-done
-
-frt_umount
+export PAM_ENV="$CONFDIR/env.json"
+export PAM_SOURCE_DIR="$PAM_DIR"
+run_love_launcher_ui "$GAMEDIR/love_ui"
 [ -n "$(command -v pm_finish)" ] && pm_finish
 exit 0

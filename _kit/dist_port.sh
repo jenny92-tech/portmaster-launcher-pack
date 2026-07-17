@@ -73,12 +73,23 @@ USE_LOVE=""
 if [ -f "$LOVE_DIR/launcher.sh.template" ]; then
   USE_LOVE=1
   "$ROOT/_kit/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/$SCRIPT_NAME"
+elif [ -f "$LOVE_DIR/main.lua" ] && [ -f "$SRC/launcher.sh" ]; then
+  # Complex ports such as APP Manager keep their safety-critical shell in src/
+  # while replacing only the UI/runtime layer with LÖVE.
+  USE_LOVE=1
+  "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
+fi
+
+if [ -n "$USE_LOVE" ]; then
   mkdir -p "$DIST/love_ui"
-  cp "$ROOT/_kit/love/kit.lua" "$DIST/love_ui/"
+  # Shared LÖVE runtime layer. Ports only carry main.lua and optional overrides.
+  cp "$ROOT/_kit/love/"*.lua "$DIST/love_ui/"
+  cp "$ROOT/_kit/love/ui.gptk" "$DIST/love_ui/"
   # 通用启动器背景(品牌 Logo 在图内): 所有 love port 共享这一张。
   [ -f "$ROOT/_kit/love/launcher_bg.png" ] && cp "$ROOT/_kit/love/launcher_bg.png" "$DIST/love_ui/"
-  # 本 port 文件; 若 port 自带 launcher_bg.png 则覆盖通用背景(需单独指定时)。
-  for f in main.lua conf.lua ui.gptk launcher_bg.png; do
+  # Port-specific Lua modules and optional asset overrides.
+  cp "$LOVE_DIR/"*.lua "$DIST/love_ui/"
+  for f in conf.lua ui.gptk launcher_bg.png; do
     [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
   done
 elif [ -f "$SRC/launcher.sh" ]; then
@@ -118,9 +129,9 @@ python3 "$ROOT/_kit/port_json.py" "$MANIFEST" "$DIST" "$PORT"
 if [ -d "$SRC" ]; then
   find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$DIST/" \;
   # A port may bundle its own runtime instead of relying on PortMaster libs/.
-  [ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
+  [ -z "$USE_LOVE" ] && [ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
   [ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"
-  [ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
+  [ -z "$USE_LOVE" ] && [ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
 fi
 
 if compgen -G "$DIST/*.sh" >/dev/null; then
