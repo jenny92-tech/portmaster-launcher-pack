@@ -49,11 +49,14 @@ helper 优先使用 APP 私有 `conf/runtime-tools/curl`，其次使用系统 cu
 资源中自带的 GNU Wget：复制到 APP 自己的 `conf/runtime-tools/` 并补执行位，不修改
 系统文件，也不在发行包内重复携带下载器。
 
-下载源固定为 catalog 注明的 PortMaster-New commit。helper 参考 NapCat Installer 的
-GitHub Proxy 策略，并发对代理发送 4 字节 Range 探测，只有返回 SquashFS `hsqs` 文件头
-才算成功；全部代理失败时验证并回退 GitHub 原生。完整下载在 APP 临时目录完成，重新
-校验文件头后以隐藏临时文件原子移动到 `controlfolder/libs`，任何分片或安装失败都不会
-留下冒充已安装 Runtime 的半文件。
+下载源固定为 catalog 注明的 PortMaster-New commit。helper 参考 NapCat Installer，
+同时维护 `githubProxies` 与 `customProxies`：前者只在代理域名后拼完整 GitHub URL；
+后者按独立规则构造去掉 GitHub 域名的路径；jsDelivr 使用其原生的
+`/gh/<owner>/<repo>@<commit>/<path>` 不可变 URL。Custom 候选优先，每批最多并发探测
+5 个，只请求 4 字节 Range，只有返回 SquashFS `hsqs` 文件头才算成功；第一批出现可用
+源后就停止继续探测。完整下载若失败，会依次尝试该批其他已验证源，最后验证并回退
+GitHub 原生。完整下载在 APP 临时目录完成，重新校验文件头后以隐藏临时文件原子移动到
+`controlfolder/libs`，任何分片或安装失败都不会留下冒充已安装 Runtime 的半文件。
 
 修复期间 helper 每秒将阶段、当前 Runtime、总项目序号、已处理/总字节数和瞬时下载速度
 原子写入 `conf/progress.tsv`。LÖVE UI 每 0.25 秒读取并显示进度条；代理测速、下载、

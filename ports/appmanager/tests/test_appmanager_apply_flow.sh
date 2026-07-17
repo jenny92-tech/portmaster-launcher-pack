@@ -16,6 +16,7 @@ grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI"
 grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI"
 grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI"
 grep -Fq 'env.progress_file' "$APP_UI"
+grep -Fq 'local batch_size=5' "$LAUNCHER"
 if grep -Fq 'os.execute(shquote(env.apply_script).." --apply-plan")' "$APP_UI"; then
   echo "appmanager helper must not block the render thread" >&2
   exit 1
@@ -100,7 +101,7 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair|runtime_progress|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_repair|runtime_progress|runtime_custom|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
   runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
@@ -166,6 +167,10 @@ done
 printf 'resume=%s out=%s url=%s\n' "$resume" "$out" "$url" >> "$TEST_CURL_LOG"
 [ "${TEST_MODE:-}" != "runtime_fail" ] || exit 22
 [ "${TEST_MODE:-}" != "runtime_cached" ] || exit 22
+if [ "${TEST_MODE:-}" = "runtime_proxy_failover" ]; then
+  if [ -z "$out" ] && printf '%s' "$url" | grep -Fq 'secondary.test'; then sleep 1; fi
+  if [ -n "$out" ] && printf '%s' "$url" | grep -Fq 'primary.test'; then exit 22; fi
+fi
 if [ "${TEST_MODE:-}" = "runtime_direct" ] && printf '%s' "$url" | grep -Fq 'proxy.test'; then
   exit 22
 fi
@@ -251,6 +256,17 @@ EOF
   export TEST_PROGRESS_FILE="$app/conf/progress.tsv"
   export TEST_PROGRESS_OBSERVED="$case_dir/progress-observed"
   export PAM_RUNTIME_PROXIES="https://proxy.test"
+  export PAM_RUNTIME_CUSTOM_PROXIES=""
+  if [ "$mode" = "runtime_custom" ]; then
+    export PAM_RUNTIME_PROXIES=""
+    export PAM_RUNTIME_CUSTOM_PROXIES='custom|custom.test|https://custom.test'
+  elif [ "$mode" = "runtime_jsdelivr" ]; then
+    export PAM_RUNTIME_PROXIES=""
+    export PAM_RUNTIME_CUSTOM_PROXIES='jsdelivr|JSDelivr CDN|https://fastly.jsdelivr.net/gh'
+  elif [ "$mode" = "runtime_proxy_failover" ]; then
+    export PAM_RUNTIME_PROXIES=""
+    export PAM_RUNTIME_CUSTOM_PROXIES=$'custom|primary.test|https://primary.test\ncustom|secondary.test|https://secondary.test'
+  fi
   if [ "$mode" = "runtime_wget" ]; then
     export PAM_RUNTIME_WGET="$case_dir/bin/wget"
   else
@@ -309,7 +325,7 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_progress|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
+    runtime_repair|runtime_progress|runtime_custom|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
       printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
       ;;
   esac
@@ -455,6 +471,19 @@ EOF
       grep -Fq 'wget resume=0 out=' "$TEST_CURL_LOG"
       grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
       ;;
+    runtime_custom)
+      grep -Fq $'OK\truntime\tgodot_4.5\tcustom.test' "$app/conf/result.txt"
+      grep -Fq 'https://custom.test/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
+      ;;
+    runtime_jsdelivr)
+      grep -Fq $'OK\truntime\tgodot_4.5\tJSDelivr CDN' "$app/conf/result.txt"
+      grep -Fq 'https://fastly.jsdelivr.net/gh/PortsMaster/PortMaster-New@' "$TEST_CURL_LOG"
+      ;;
+    runtime_proxy_failover)
+      grep -Fq $'OK\truntime\tgodot_4.5\tsecondary.test' "$app/conf/result.txt"
+      grep -Fq 'https://primary.test/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
+      grep -Fq 'https://secondary.test/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
+      ;;
     runtime_cached)
       grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
       grep -Fq $'OK\truntime\tgodot_4.5\tCache' "$app/conf/result.txt"
@@ -532,7 +561,7 @@ EOF
 for mode in delete same_root_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_progress runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
+  delete_container_invalid invalid no_plan runtime_repair runtime_progress runtime_custom runtime_jsdelivr runtime_proxy_failover runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
   runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"

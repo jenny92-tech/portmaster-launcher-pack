@@ -479,14 +479,94 @@ runtime_valid_source() {
   return 1
 }
 
-runtime_url() {
-  local proxy="$1" source="$2"
-  if [ "$proxy" = "DIRECT" ]; then
-    printf '%s/%s\n' "$RUNTIME_DIRECT_BASE" "$source"
+runtime_proxy_candidates() {
+  local custom_rows github_rows format name base
+  if [ "${PAM_RUNTIME_CUSTOM_PROXIES+x}" = "x" ]; then
+    custom_rows="$PAM_RUNTIME_CUSTOM_PROXIES"
   else
-    printf '%s/https://github.com/PortsMaster/PortMaster-New/raw/%s/runtimes/%s\n' \
-      "${proxy%/}" "$RUNTIME_SOURCE_REF" "$source"
+    # Custom URL builders are deliberately first. They tend to be longer-lived
+    # than simple GitHub domain mirrors; jsDelivr also has a dedicated immutable
+    # commit URL instead of pretending to be a github.com prefix proxy.
+    custom_rows='jsdelivr|JSDelivr CDN|https://fastly.jsdelivr.net/gh
+custom|github.com/xixu-me/Xget|https://xget.xi-xu.me/gh
+custom|@Lufs|https://cors.isteed.cc
+custom|raw.ihtw.moe|https://raw.ihtw.moe
+custom|Github Fast|https://githubfast.com
+custom|GitClone|https://gitclone.com'
   fi
+  while IFS='|' read -r format name base; do
+    [ -n "$format" ] && [ -n "$name" ] && [ -n "$base" ] || continue
+    case "$format" in custom|jsdelivr) ;; *) continue ;; esac
+    case "$base" in https://*) ;; *) continue ;; esac
+    printf '%s\t%s\t%s\n' "$format" "$name" "${base%/}"
+  done <<< "$custom_rows"
+
+  if [ "${PAM_RUNTIME_PROXIES+x}" = "x" ]; then
+    github_rows="$PAM_RUNTIME_PROXIES"
+  else
+    github_rows='https://gh.h233.eu.org
+https://rapidgit.jjda.de5.net
+https://gh.ddlc.top
+https://gh-proxy.org
+https://cdn.gh-proxy.org
+https://edgeone.gh-proxy.org
+https://ghproxy.it
+https://github.boki.moe
+https://gh-proxy.net
+https://gh.jasonzeng.dev
+https://gh.monlor.com
+https://fastgit.cc
+https://github.tbedu.top
+https://firewall.lxstd.org
+https://github.ednovas.xyz
+https://ghfile.geekertao.top
+https://ghp.keleyaa.com
+https://gh.chjina.com
+https://ghpxy.hwinzniej.top
+https://cdn.crashmc.com
+https://git.yylx.win
+https://gitproxy.mrhjx.cn
+https://ghproxy.cxkpro.top
+https://gh.xxooo.cf
+https://github.limoruirui.com
+https://gh.idayer.com
+https://gh.llkk.cc
+https://gh.nxnow.top
+https://gh.zwy.one
+https://ghproxy.monkeyray.net
+https://gh.xx9527.cn
+https://ghfast.top
+https://wget.la
+https://hk.gh-proxy.org'
+  fi
+  while IFS= read -r base; do
+    [ -n "$base" ] || continue
+    case "$base" in https://*) ;; *) continue ;; esac
+    name="${base#*://}"
+    printf 'github\t%s\t%s\n' "$name" "${base%/}"
+  done <<< "$github_rows"
+}
+
+runtime_url() {
+  local format="$1" base="$2" source="$3"
+  case "$format" in
+    direct)
+      printf '%s/%s\n' "$RUNTIME_DIRECT_BASE" "$source"
+      ;;
+    github)
+      printf '%s/https://github.com/PortsMaster/PortMaster-New/raw/%s/runtimes/%s\n' \
+        "${base%/}" "$RUNTIME_SOURCE_REF" "$source"
+      ;;
+    custom)
+      printf '%s/PortsMaster/PortMaster-New/raw/%s/runtimes/%s\n' \
+        "${base%/}" "$RUNTIME_SOURCE_REF" "$source"
+      ;;
+    jsdelivr)
+      printf '%s/PortsMaster/PortMaster-New@%s/runtimes/%s\n' \
+        "${base%/}" "$RUNTIME_SOURCE_REF" "$source"
+      ;;
+    *) return 1 ;;
+  esac
 }
 
 runtime_has_magic() {
@@ -602,64 +682,74 @@ runtime_file_size() {
   wc -c < "$1" | tr -d '[:space:]'
 }
 
-# Adapted from NapCat-Mac-Installer's GitHubProxy.auto: all candidates probe a
-# small byte range concurrently and the first verified SquashFS response wins.
-# Native GitHub is verified and used when every proxy fails.
+# Return the first successful candidate in a probe batch, followed by the other
+# candidates from that same batch which also returned a valid SquashFS header.
+# Keeping the remaining verified entries lets a full download fail over without
+# launching another broad probe.
+runtime_probe_batch_results() {
+  local root="$1" first="$2" last="$3" winner id
+  [ -s "$root/winner" ] || return 1
+  winner=$(cat "$root/winner")
+  [ -s "$root/ok.$winner" ] || return 1
+  cat "$root/ok.$winner"
+  id=$first
+  while [ "$id" -le "$last" ]; do
+    if [ "$id" != "$winner" ] && [ -s "$root/ok.$id" ]; then cat "$root/ok.$id"; fi
+    id=$((id + 1))
+  done
+}
+
+# Adapted from NapCat-Mac-Installer's GitHubProxy.auto, but bounded for handheld
+# hardware: probe at most five candidates concurrently and stop after the first
+# batch with a verified SquashFS response. Custom builders (including the
+# jsDelivr commit URL) are ordered before simple github.com prefix proxies.
 runtime_select_proxy() {
-  local sample="$1" probe_root proxy id
+  local sample="$1" probe_root candidates format name base url selected_format selected_base id=0 batch_start=1 batch_count=0
+  local batch_size=5 verified=""
   runtime_valid_source "$sample" || return 1
   runtime_prepare_downloader || return 1
   probe_root="$CONFDIR/proxy-probe.$$"
   rm -rf "$probe_root"; mkdir -p "$probe_root" || return 1
-  runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "$sample"
-  RUNTIME_PROXIES="${PAM_RUNTIME_PROXIES:-https://gh.h233.eu.org
-https://rapidgit.jjda.de5.net
-https://gh.ddlc.top
-https://gh-proxy.org
-https://cdn.gh-proxy.org
-https://edgeone.gh-proxy.org
-https://ghproxy.it
-https://github.boki.moe
-https://gh-proxy.net
-https://gh.jasonzeng.dev
-https://gh.monlor.com
-https://fastgit.cc
-https://github.tbedu.top
-https://firewall.lxstd.org
-https://github.ednovas.xyz
-https://ghfile.geekertao.top
-https://ghp.keleyaa.com
-https://gh.chjina.com
-https://cdn.crashmc.com
-https://git.yylx.win
-https://gitproxy.mrhjx.cn
-https://ghfast.top
-https://wget.la
-https://hk.gh-proxy.org}"
-  id=0
-  while IFS= read -r proxy; do
-    [ -n "$proxy" ] || continue
+  candidates=$(runtime_proxy_candidates)
+  while IFS=$'\t' read -r format name base; do
+    [ -n "$format" ] && [ -n "$name" ] || continue
     id=$((id + 1))
+    batch_count=$((batch_count + 1))
+    printf '%s\t%s\t%s\n' "$format" "$name" "$base" > "$probe_root/candidate.$id"
     (
-      if runtime_probe_url "$(runtime_url "$proxy" "$sample")" "$probe_root/probe.$id"; then
+      url=$(runtime_url "$format" "$base" "$sample") || exit 1
+      if runtime_probe_url "$url" "$probe_root/probe.$id"; then
+        cp "$probe_root/candidate.$id" "$probe_root/ok.$id"
         if mkdir "$probe_root/winner.lock" 2>/dev/null; then
-          printf '%s\n' "$proxy" > "$probe_root/winner"
+          printf '%s\n' "$id" > "$probe_root/winner"
         fi
       fi
     ) &
-  done <<< "$RUNTIME_PROXIES"
-  wait
+    if [ "$batch_count" -ge "$batch_size" ]; then
+      runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Testing sources $batch_start-$id"
+      wait
+      verified=$(runtime_probe_batch_results "$probe_root" "$batch_start" "$id" 2>/dev/null || true)
+      [ -z "$verified" ] || break
+      rm -rf "$probe_root/winner.lock"; rm -f "$probe_root/winner"
+      batch_start=$((id + 1)); batch_count=0
+    fi
+  done <<< "$candidates"
 
-  if [ -s "$probe_root/winner" ]; then
-    RUNTIME_PROXY=$(cat "$probe_root/winner")
-    RUNTIME_PROXY_NAME="${RUNTIME_PROXY#*://}"
-  elif runtime_probe_url "$(runtime_url DIRECT "$sample")" "$probe_root/direct"; then
-    RUNTIME_PROXY="DIRECT"
-    RUNTIME_PROXY_NAME="GitHub"
+  if [ -z "$verified" ] && [ "$batch_count" -gt 0 ]; then
+    runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Testing sources $batch_start-$id"
+    wait
+    verified=$(runtime_probe_batch_results "$probe_root" "$batch_start" "$id" 2>/dev/null || true)
+  fi
+
+  if [ -n "$verified" ]; then
+    RUNTIME_VERIFIED_PROXIES="$verified"$'\ndirect\tGitHub\t'
+  elif runtime_probe_url "$(runtime_url direct "" "$sample")" "$probe_root/direct"; then
+    RUNTIME_VERIFIED_PROXIES=$'direct\tGitHub\t'
   else
     rm -rf "$probe_root"
     return 1
   fi
+  IFS=$'\t' read -r selected_format RUNTIME_PROXY_NAME selected_base <<< "$RUNTIME_VERIFIED_PROXIES"
   echo "$LOG_PREFIX Runtime source selected: $RUNTIME_PROXY_NAME"
   runtime_progress_write preparing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Source: $RUNTIME_PROXY_NAME"
   rm -rf "$probe_root"
@@ -667,7 +757,7 @@ https://hk.gh-proxy.org}"
 }
 
 runtime_download_source() {
-  local source="$1" expected="$2" out="$3" candidate url seen_direct=0 actual rc
+  local source="$1" expected="$2" out="$3" format name base url actual rc
   case "$expected" in ""|*[!0-9]*|0) return 1 ;; esac
   if [ -L "$out" ]; then rm -f -- "$out" || return 1; fi
   actual=$(runtime_file_size "$out")
@@ -685,14 +775,11 @@ runtime_download_source() {
     echo "$LOG_PREFIX resuming $source from $actual of $expected bytes"
   fi
 
-  for candidate in "$RUNTIME_PROXY" DIRECT; do
-    if [ "$candidate" = "DIRECT" ]; then
-      [ "$seen_direct" = "0" ] || continue
-      seen_direct=1
-    fi
-    url=$(runtime_url "$candidate" "$source")
-    echo "$LOG_PREFIX downloading $source via $([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
-    RUNTIME_PROGRESS_DETAIL="$source · $([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+  while IFS=$'\t' read -r format name base; do
+    [ -n "$format" ] && [ -n "$name" ] || continue
+    url=$(runtime_url "$format" "$base" "$source") || continue
+    echo "$LOG_PREFIX downloading $source via $name"
+    RUNTIME_PROGRESS_DETAIL="$source · $name"
     actual=$(runtime_file_size "$out")
     rc=0
     if [ "$actual" -gt 0 ]; then
@@ -702,7 +789,7 @@ runtime_download_source() {
     fi
     actual=$(runtime_file_size "$out")
     if [ "$rc" = "0" ] && [ "$actual" = "$expected" ]; then
-      RUNTIME_DOWNLOAD_VIA="$([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+      RUNTIME_DOWNLOAD_VIA="$name"
       return 0
     fi
     if [ "$actual" -gt "$expected" ]; then
@@ -718,12 +805,12 @@ runtime_download_source() {
       runtime_fetch_url "$url" "$out" 0 || rc=$?
       actual=$(runtime_file_size "$out")
       if [ "$rc" = "0" ] && [ "$actual" = "$expected" ]; then
-        RUNTIME_DOWNLOAD_VIA="$([ "$candidate" = DIRECT ] && echo GitHub || echo "${candidate#*://}")"
+        RUNTIME_DOWNLOAD_VIA="$name"
         return 0
       fi
       [ "$actual" -le "$expected" ] || rm -f -- "$out"
     fi
-  done
+  done <<< "$RUNTIME_VERIFIED_PROXIES"
   return 1
 }
 
