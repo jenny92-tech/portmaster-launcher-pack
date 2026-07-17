@@ -280,6 +280,55 @@ with tempfile.TemporaryDirectory() as source:
         end
     ''')
 
+# The launcher passes the validated PortMaster font's real path. Kit reads it
+# once as FileData and shares that same object across every requested size,
+# instead of requiring a copied font.ttf inside each launcher directory.
+with tempfile.TemporaryDirectory() as source:
+    local_copy = Path(source) / "font.ttf"
+    local_copy.write_bytes(b"old-per-launcher-copy")
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local system_font="/PortMaster/resources/NotoSansSC-Regular.ttf"
+        local original_getenv,original_open=os.getenv,io.open
+        local reads,new_fonts=0,0
+        local shared_data=nil
+        os.getenv=function(key)
+            if key=="LOVE_FONT_PATH" then return system_font end
+            return original_getenv(key)
+        end
+        io.open=function(path,mode)
+            if path==system_font then
+                return {read=function() reads=reads+1; return "validated-font-data" end,
+                    close=function() end}
+            end
+            return original_open(path,mode)
+        end
+        love.filesystem.newFileData=function(contents,name)
+            assert(contents=="validated-font-data" and name:match("%.ttf$"))
+            shared_data={kind="font-data"}; return shared_data
+        end
+        local font={getHeight=function() return 20 end,getWidth=function(_,text) return #text*10 end,
+            getWrap=function(_,text,limit) return limit,{text} end}
+        love.graphics.newFont=function(source,size)
+            assert(source==shared_data and type(size)=="number")
+            new_fonts=new_fonts+1; return font
+        end
+        love.filesystem.getInfo=function(path)
+            assert(path~="font.ttf","system font must not require a local copy")
+            return nil
+        end
+        local k=require("kit")
+        k.run({state={ui_lang="en"},build_pages=function()
+            k.add_page("Font",{k.button("One",function() end),k.info("Two","Value")})
+        end})
+        love.load(); love.draw()
+        assert(reads==1 and new_fonts>1)
+    ''')
+    assert not local_copy.exists()
+
 # Measured Grid/Flow geometry is cached independently of focus and scroll.
 # Expanding a TextView invalidates the measurement and produces a new height.
 with tempfile.TemporaryDirectory() as source:

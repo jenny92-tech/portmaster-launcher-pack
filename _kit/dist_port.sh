@@ -66,7 +66,7 @@ rm -rf "$DIST"
 mkdir -p "$DIST"
 
 # love 启动器优先: 存在 love/launcher.sh.template 时它就是 stage-1(替代 frt/godot)。
-# love_ui = 共享 _kit/love/kit.lua + 本 port 的 main/conf/gptk(font.ttf 运行时供给);
+# love_ui = 共享 _kit/love/kit.lua + 本 port 的 main/conf/gptk；系统字体真实路径由启动脚本传入;
 # 这一段是所有 love port 的通用组装步骤。
 LOVE_DIR="$PORT_DIR/love"
 USE_LOVE=""

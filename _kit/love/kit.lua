@@ -46,6 +46,7 @@ local ROW_MAX_W = 540             -- hard row-width cap (px, does not grow with 
 local W, H, realW, realH, offX, offY, letterbox
 local port, strings, state = nil, {}, {}
 local fonts, bg_img = {}, nil
+local external_font_data, external_font_checked = nil, false
 local pages, page_i = {}, 1
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
@@ -109,13 +110,39 @@ end
 
 
 -- ── Fonts / text ─────────────────────────────────────────────────────
+local function load_external_font()
+    if external_font_checked then return external_font_data end
+    external_font_checked=true
+    local path=os.getenv("LOVE_FONT_PATH")
+    if not path or path=="" then return nil end
+    local file=io.open(path,"rb")
+    if not file then return nil end
+    local contents=file:read("*a"); file:close()
+    if not contents or contents=="" then return nil end
+    local name=path:match("([^/\\]+)$") or "NotoSansSC-Regular.ttf"
+    local ok,data=pcall(love.filesystem.newFileData,contents,name)
+    if ok then
+        external_font_data=data
+        -- Upgrade cleanup happens only after the shared file is safely in
+        -- memory. If the direct read fails, the old local copy remains usable.
+        local source=love.filesystem.getSource()
+        local local_path=source and source:gsub("/+$","").."/font.ttf" or nil
+        if local_path and path~=local_path then os.remove(local_path) end
+    end
+    return external_font_data
+end
 local function fnt(px)
     px = math.max(9, math.floor(px + 0.5))
     if not fonts[px] then
-        -- Normally GAMEDIR/font.ttf (the NotoSansSC the launcher staged). If staging
-        -- failed entirely (provide_font gave up), fall back to LÖVE's built-in font:
-        -- English still renders, so no black screen and no crash.
-        if love.filesystem.getInfo("font.ttf") then
+        -- The shell resolves PortMaster's real NotoSansSC path across firmware
+        -- layouts. Load it once as shared FileData so every size uses that exact
+        -- system file without creating a per-launcher disk copy.
+        local data=load_external_font()
+        if data then
+            fonts[px] = love.graphics.newFont(data,px)
+        elseif love.filesystem.getInfo("font.ttf") then
+            -- Upgrade/degraded fallback for a device whose shared font could
+            -- not be repaired. English still renders if this is absent too.
             fonts[px] = love.graphics.newFont("font.ttf", px)
         else
             fonts[px] = love.graphics.newFont(px)

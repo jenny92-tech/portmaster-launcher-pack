@@ -12,7 +12,7 @@ PortMaster 自带的 LÖVE 11.5 显示设置界面；Stage 2 按选择修改 `co
 | `love/conf.lua` | LÖVE 全屏和模块配置。 |
 | `love/ui.gptk` | 设置界面的手柄到键盘映射。 |
 | `love/launcher.sh.template` | 两阶段设备脚本模板。 |
-| `dist/love_ui/` | 打包后的 LÖVE UI、共享 kit、背景和运行时字体缓存。 |
+| `dist/love_ui/` | 打包后的 LÖVE UI、共享 kit 和背景；字体直接复用 PortMaster 系统资源。 |
 
 首次 LÖVE 启动会从旧 Godot userdata 的 `launch_config.env` 导入已有选择；
 之后状态保存在 `love_ui/state.txt`。

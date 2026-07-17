@@ -83,7 +83,7 @@ install_exit_trap() {
 #
 # UI files live in $GAMEDIR/love_ui/ (main.lua/kit.lua/conf.lua/ui.gptk/
 # launcher_bg.png). The CJK font is taken from PortMaster's own NotoSansSC and
-# cached as love_ui/font.ttf (see _kit/love/README.md).
+# passed to LÖVE by its validated real path (see _kit/love/README.md).
 # Exit codes match run_launcher_ui: 0 = back to menu, 42 = start game.
 
 _love_valid_font() { [ -f "$1" ] && [ "$(wc -c < "$1" 2>/dev/null || echo 0)" -gt 1000000 ]; }
@@ -108,19 +108,40 @@ _love_unpack_noto() {
 }
 _love_provide_font() {
   local ui_dir="$1" out="$1/font.ttf" std="${PM_RESOURCE_DIR:-$controlfolder/resources}" f src
-  _love_valid_font "$out" && { echo "$LOG_PREFIX font (cached)"; return 0; }
+  unset LOVE_FONT_PATH
+
+  # Prefer a validated shared file and pass its real path through unchanged.
+  # Kit removes a stale per-launcher copy only after it has successfully read
+  # this shared source into FileData, preserving a safe upgrade fallback.
   for f in "$std/NotoSansSC-Regular.ttf" "$controlfolder/pylibs/resources/NotoSansSC-Regular.ttf"; do
-    if _love_valid_font "$f" && cp -f "$f" "$out" && _love_valid_font "$out"; then
-      echo "$LOG_PREFIX font <- $f"; return 0; fi
+    if _love_valid_font "$f"; then
+      LOVE_FONT_PATH="$f"
+      echo "$LOG_PREFIX font -> $LOVE_FONT_PATH"; return 0
+    fi
   done
-  src="$(_love_noto_src)"
+
+  src="$(_love_noto_src || true)"
   if [ -n "$src" ]; then
     # Unpack into PortMaster's standard resource dir so its own GUI benefits too.
-    if _love_unpack_noto "$src" "$std" && cp -f "$std/NotoSansSC-Regular.ttf" "$out" && _love_valid_font "$out"; then
-      echo "$LOG_PREFIX font <- $src (repaired $std)"; return 0; fi
-    if _love_unpack_noto "$src" "$ui_dir" NotoSansSC-Regular.ttf && mv -f "$ui_dir/NotoSansSC-Regular.ttf" "$out" && _love_valid_font "$out"; then
-      echo "$LOG_PREFIX font <- $src (love_ui fallback)"; return 0; fi
+    if _love_unpack_noto "$src" "$std"; then
+      LOVE_FONT_PATH="$std/NotoSansSC-Regular.ttf"
+      echo "$LOG_PREFIX font -> $LOVE_FONT_PATH (repaired from $src)"; return 0
+    fi
   fi
+
+  # Compatibility fallback for a device whose shared resource location cannot
+  # be repaired. Existing old caches stay usable; otherwise extract only SC.
+  if _love_valid_font "$out"; then
+    LOVE_FONT_PATH="$out"
+    echo "$LOG_PREFIX font -> $LOVE_FONT_PATH (local fallback)"; return 0
+  fi
+  if [ -n "$src" ]; then
+    if _love_unpack_noto "$src" "$ui_dir" NotoSansSC-Regular.ttf && mv -f "$ui_dir/NotoSansSC-Regular.ttf" "$out" && _love_valid_font "$out"; then
+      LOVE_FONT_PATH="$out"
+      echo "$LOG_PREFIX font -> $LOVE_FONT_PATH (extracted fallback from $src)"; return 0
+    fi
+  fi
+  unset LOVE_FONT_PATH
   echo "$LOG_PREFIX WARN: no CJK font — love falls back to its built-in (latin only)"; return 1
 }
 
@@ -135,10 +156,11 @@ run_love_launcher_ui() {
     launcher_exit=1
     return
   fi
-  _love_provide_font "$ui_dir"
+  _love_provide_font "$ui_dir" || true
   (   # Display env stays in this subshell — leaking it breaks the stage-2 game.
     export LOVE_IDENTITY="${PORT_NAME:-portmaster}_launcher"
     export LOVE_WINDOW_TITLE="${PORT_NAME:-PortMaster} Launcher"
+    if [ -n "${LOVE_FONT_PATH:-}" ]; then export LOVE_FONT_PATH; else unset LOVE_FONT_PATH; fi
     source "$love_txt"
     export LIBGL_ES=2 LIBGL_GL=21
     local wl_dir="" wl_disp="${WAYLAND_DISPLAY:-wayland-0}" d
@@ -166,6 +188,7 @@ run_love_launcher_ui() {
     exit $le
   )
   launcher_exit=$?
+  unset LOVE_FONT_PATH
   if [ "$launcher_exit" = "0" ]; then
     echo "$LOG_PREFIX launcher: back to menu"
     pm_finish; exit 0

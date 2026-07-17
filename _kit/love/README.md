@@ -171,32 +171,35 @@ unpacked the zip non-standardly into a **double-nested `pylibs/pylibs/`**. funcs
 `if` hardcodes the single-level path and never matches, so the font never reached the
 standard location on that device.
 
-`provide_font()` therefore goes **standard first, repair to standard if broken, fall back
-only if repair is impossible** — three steps on one line:
+`_love_provide_font()` therefore goes **standard first, repair to standard if broken,
+fall back only if repair is impossible**. It returns the validated real path through
+`LOVE_FONT_PATH`; it does not copy a healthy shared font into every launcher:
 
 | Step | State | Action |
 |---|---|---|
-| ① **standard first** | healthy device, or one repaired earlier | read the `.ttf` from `$PM_RESOURCE_DIR` / `$controlfolder/pylibs/resources`, copy to `font.ttf` |
-| ② **repair to standard** | standard location empty but a source exists (double-nested tar.xz / pylibs.zip) | extract Noto **into `$PM_RESOURCE_DIR`** per funcs.txt's do_init destination, then take SC. **Fixes the broken install as a side effect** — PM's own GUI benefits, and later runs hit ① directly |
-| ③ gamedir fallback | standard location not writable ($ESUDO read-only) | last resort: extract SC to `$GAMEDIR/font.ttf`, at least it starts |
+| ① **standard first** | healthy device, or one repaired earlier | validate the `.ttf` in `$PM_RESOURCE_DIR` / `$controlfolder/pylibs/resources`, export that exact path |
+| ② **repair to standard** | standard location empty but a source exists (double-nested tar.xz / pylibs.zip) | extract Noto **into `$PM_RESOURCE_DIR`** per funcs.txt's do_init destination, then export the repaired SC path. **Fixes the broken install as a side effect** — PM's own GUI benefits, and later runs hit ① directly |
+| ③ gamedir fallback | standard location cannot be repaired | reuse an old valid `love_ui/font.ttf`, or extract only SC there as a last resort |
 
-**"Even the fallback should repair"**: ② makes the fallback a repair (extracting to the
-standard location rather than gamedir), so no separate gamedir-only layer is needed —
-gamedir is purely the last resort when ② can't write. First line is a cache check
-(`font.ttf` already >1MB → skip re-extraction). **Only the font is added to the standard
-location; the double-nested `pylibs/pylibs/` structure is left alone** (it may be how
-LoongOS packages things, and meddling is risky). On the love side:
-`love.graphics.newFont("font.ttf", px)`.
+**"Even the fallback should repair"**: ② makes the normal fallback a repair (extracting
+to the standard location rather than gamedir); the double-nested `pylibs/pylibs/`
+structure is left alone because it may be how LoongOS packages things. On the LÖVE side,
+Kit opens `LOVE_FONT_PATH` once with standard Lua I/O, creates one `FileData`, and shares that
+object across every requested size via `love.graphics.newFont(font_data, px)`. This uses
+the genuinely resolved PortMaster file without LÖVE's source/save-relative path limit.
+Only after `FileData` creation succeeds does Kit remove a stale per-launcher `font.ttf`;
+a failed direct read therefore leaves the upgrade fallback intact.
 
-Every step **verifies real success**: both the source font and the resulting `font.ttf`
-must pass `_valid_font` (exists and >1MB, rejecting 0-byte/truncated files), and `cp`/`mv`
-must actually return 0 — no false success on a read-only or full disk. Total failure is
-**not fatal**: `fnt()` in `kit.lua` falls back to LÖVE's built-in font when `font.ttf` is
-missing (English renders, no black screen, no crash).
+Every step **verifies real success**: the selected shared or fallback font must pass
+`_love_valid_font` (readable, exists and >1MB, rejecting 0-byte/truncated files), and
+repair/extraction must actually return 0. Total failure is **not fatal**: `fnt()` first
+accepts a legacy local fallback and finally uses LÖVE's built-in font (English renders,
+no black screen and no crash).
 
 Measured: TrimUI hits ① (healthy); MiniLoong in its broken state hits ② on the first run,
 extracting the full Noto set to `/PortMaster/resources` (repaired), then hits ① on the
-second. Both end up with the same 10,560,380-byte font.
+second. Both resolve the same 10,560,380-byte system font without retaining one duplicate
+per launcher.
 
 ### ② gl4es must be configured or the screen stays black
 

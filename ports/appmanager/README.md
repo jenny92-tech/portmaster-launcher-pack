@@ -144,7 +144,8 @@ adb push 'ports/appmanager/dist/APP Manager.sh' '/mnt/sdcard/roms/ports/APP Mana
 adb push ports/appmanager/dist/love_ui /mnt/sdcard/roms/ports/appmanager/
 ```
 
-运行时与中文字体均复用 PortMaster 标准资源，包内不再携带 Godot PCK、FRT 或 hacksdl。
+运行时与中文字体均复用 PortMaster 标准资源；启动脚本把兼容查找后验证成功的真实字体
+路径交给 Kit，不再生成每个 APP 独立的 `font.ttf`。包内不携带 Godot PCK、FRT 或 hacksdl。
 
 ## 排障
 
