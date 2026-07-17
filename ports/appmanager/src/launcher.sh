@@ -52,7 +52,7 @@ fi
 # 脚本目录和游戏目录不一定是同一个。PortMaster 的 shell 侧只导出 $directory 和
 # $controlfolder —— "脚本放哪"这个知识只存在于它 Python 侧的 HM_SCRIPTS_DIR, bash
 # 拿不到。而各固件确实不一样(实测):
-#   蜜酒龙/多数  gamedirs=/$directory/ports          scripts=同上
+#   迷你龙/多数  gamedirs=/$directory/ports          scripts=同上
 #   吹米 TrimUI  gamedirs=/mnt/SDCARD/Data/ports     scripts=/mnt/SDCARD/Roms/PORTS
 #   muOS         gamedirs=/mnt/mmc/ports             scripts=/mnt/mmc/ROMS/Ports
 #   ROCKNIX      gamedirs=/storage/roms/ports        scripts=/storage/roms/ports_scripts

@@ -1,0 +1,19 @@
+# gptokeyb: 手柄 → 键盘。方向键导航, A/回车确定, B/ESC 退出。
+# 用来验证 gptokeyb→love.keypressed 这条(将来 stage-1 要走的)路。
+a = enter
+b = esc
+x = esc
+y = esc
+start = enter
+back = esc
+guide = esc
+
+up = up
+down = down
+left = left
+right = right
+
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right

@@ -12,7 +12,10 @@ The pack assembles via `src/scripts/assemble-launcher-pack.sh`.
 dist/
 ├── Slay the Spire 2.sh                         [our] launcher.sh
 ├── godot.mono                                  [our fork CI]
-├── bootstrap.pck                               [our build]
+├── love_ui/                                    [our build]
+│   ├── kit.lua                                 [our shared UI]
+│   ├── main.lua / conf.lua / ui.gptk           [our port UI]
+│   └── launcher_bg.png                         [our shared art]
 ├── port_compat.pck                             [our build]
 ├── libsteam_api64.so                           [our stub]
 ├── input_remap.cfg                             [our template]
@@ -43,7 +46,7 @@ dist/
 
 | Origin | License | Count | Size | Notes |
 |---|---|---|---|---|
-| **Our source code build** | MIT (this repo) | 4 | ~5.7 MB | sts2_compat.dll, bootstrap.pck, port_compat.pck, launcher.sh |
+| **Our source code build** | MIT (this repo) | 8 | ~6.8 MB | sts2_compat.dll, port_compat.pck, launcher.sh, love_ui files |
 | **Our forks CI artifacts** | godot=MIT, fmod fork=Utopia/MIT, spine fork=Esoteric EULA | 4 | ~76 MB | godot.mono, GodotSharp.dll, libGodotFmod, libspine_godot |
 | **Our stubs** | MIT (this repo) | 4 | ~165 KB | libsteam_api64.so, SentryStub.gd, runtimeconfig.json, input_remap.cfg |
 | **NuGet / Microsoft public** | MIT/Apache | 110+ | ~85 MB | 0Harmony.dll, Microsoft .NET 9 BCL + native interop |

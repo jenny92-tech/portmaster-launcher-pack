@@ -22,7 +22,8 @@ green() { printf "\033[32m%s\033[0m\n" "$*"; }
 "$SRC_ROOT/scripts/dist-port.sh"
 
 [ -f "$DIST/Slay the Spire 2.sh" ] || { echo "missing dist launcher"; exit 1; }
-[ -f "$DIST/bootstrap.pck" ] || { echo "missing dist/bootstrap.pck"; exit 1; }
+[ -f "$DIST/love_ui/main.lua" ] || { echo "missing dist/love_ui/main.lua"; exit 1; }
+[ -f "$DIST/love_ui/kit.lua" ] || { echo "missing dist/love_ui/kit.lua"; exit 1; }
 [ -f "$DIST/port_compat.pck" ] || { echo "missing dist/port_compat.pck"; exit 1; }
 [ -f "$DIST/data_sts2_linuxbsd_arm64/sts2_compat.dll" ] || { echo "missing dist sts2_compat.dll"; exit 1; }
 

@@ -22,7 +22,8 @@ DIST="$PORT_DIR/dist"
 MANIFEST="$PORT_DIR/manifest.json"
 
 [ -d "$PORT_DIR" ] || { echo "no such port: $PORT" >&2; exit 1; }
-[ -d "$SRC" ] || { echo "missing source dir: $SRC" >&2; exit 1; }
+# love 启动器的 port 不再需要 src/(godot 启动器已删); 只要有 love/ 或 src/ 之一即可。
+[ -d "$SRC" ] || [ -d "$PORT_DIR/love" ] || { echo "missing source dir: $SRC (and no love/)" >&2; exit 1; }
 [ -f "$MANIFEST" ] || { echo "missing manifest: $MANIFEST" >&2; exit 1; }
 
 if [ -x "$SRC/scripts/dist-port.sh" ]; then
@@ -64,11 +65,28 @@ PY
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
-if [ -f "$SRC/launcher.sh" ]; then
+# love 启动器优先: 存在 love/launcher.sh.template 时它就是 stage-1(替代 frt/godot)。
+# love_ui = 共享 _kit/love/kit.lua + 本 port 的 main/conf/gptk(font.ttf 运行时供给);
+# 这一段是所有 love port 的通用组装步骤。
+LOVE_DIR="$PORT_DIR/love"
+USE_LOVE=""
+if [ -f "$LOVE_DIR/launcher.sh.template" ]; then
+  USE_LOVE=1
+  "$ROOT/_kit/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/$SCRIPT_NAME"
+  mkdir -p "$DIST/love_ui"
+  cp "$ROOT/_kit/love/kit.lua" "$DIST/love_ui/"
+  # 通用启动器背景(品牌 Logo 在图内): 所有 love port 共享这一张。
+  [ -f "$ROOT/_kit/love/launcher_bg.png" ] && cp "$ROOT/_kit/love/launcher_bg.png" "$DIST/love_ui/"
+  # 本 port 文件; 若 port 自带 launcher_bg.png 则覆盖通用背景(需单独指定时)。
+  for f in main.lua conf.lua ui.gptk launcher_bg.png; do
+    [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
+  done
+elif [ -f "$SRC/launcher.sh" ]; then
   "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
 fi
 
-if [ -n "$BOOTSTRAP_MANIFEST" ] && [ -f "$PORT_DIR/$BOOTSTRAP_MANIFEST" ]; then
+# bootstrap.pck 只给 frt/godot 启动器用; love 启动器不需要, 跳过。
+if [ -z "$USE_LOVE" ] && [ -n "$BOOTSTRAP_MANIFEST" ] && [ -f "$PORT_DIR/$BOOTSTRAP_MANIFEST" ]; then
   python3 "$ROOT/_kit/pck_builder.py" "$PORT_DIR/$BOOTSTRAP_MANIFEST"
 fi
 
@@ -96,11 +114,14 @@ PY
 fi
 python3 "$ROOT/_kit/port_json.py" "$MANIFEST" "$DIST" "$PORT"
 
-find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$DIST/" \;
-# A port may bundle its own runtime instead of relying on PortMaster libs/.
-[ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
-[ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"
-[ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
+# 以下都是 src/ 里的可选运行时/输入文件; love-only 的 port 没有 src/, 跳过即可。
+if [ -d "$SRC" ]; then
+  find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$DIST/" \;
+  # A port may bundle its own runtime instead of relying on PortMaster libs/.
+  [ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
+  [ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"
+  [ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
+fi
 
 if compgen -G "$DIST/*.sh" >/dev/null; then
   bash -n "$DIST"/*.sh

@@ -1,7 +1,8 @@
 # _kit — shared toolkit for portmaster-launcher-pack
 
-Shared across all `ports/<name>/`. The repo keeps editable launcher inputs in
-`ports/<name>/src/`; `dist_port.sh` builds them into `ports/<name>/dist/`,
+Shared across all `ports/<name>/`. Migrated settings launchers live in
+`ports/<name>/love/`; game/runtime sources and legacy launchers live in `src/`.
+`dist_port.sh` builds them into `ports/<name>/dist/`,
 which is the only directory that should be copied to a device. `assemble.sh`
 stitches the shell template into **one self-contained `.sh`** because a handheld
 has no copy of `_kit/` and any `source` of an external file would make the
@@ -9,15 +10,16 @@ launcher fail to start.
 
 | File | Purpose |
 |---|---|
-| `portmaster_common.sh` | **Engine-agnostic** device helpers (any port): `audio_setup` (per-CFW branch), `memory_tuning`, `install_exit_trap` (dmesg post-mortem on exit). Pure function library, no top-level side effects. |
-| `launcher_unity_common.sh` | **Unity-loader only** (hk, heishenhua — NOT godot ports like sts2): `find_godot_binary`, `run_godot_launcher`, `apply_button_remap`, `run_unity_game`. Depends on `portmaster_common.sh`. |
+| `love/kit.lua` | Shared LÖVE UI: layout, focus, localization, persisted state, legacy env import, and stage-2 env output. |
+| `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
+| `launcher_unity_common.sh` | **Unity-loader only**: button remap and game launch. Legacy Godot stage-1 helpers remain for compatibility. |
 | `pck_builder.py` | Build a Godot pck (godot 3 `format_version=1` or godot 4 `format_version=3`) from a manifest.json. |
-| `assemble.sh` | Inline the `#@KIT` block of a port's `src/launcher.sh` template into one self-contained device script. |
-| `dist_port.sh` | Build `src/` and copy runtime/metadata files into `ports/<port>/dist/`. |
+| `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
+| `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
 
 ## How a port's launcher.sh is structured (a template)
 
-Each `ports/<port>/src/launcher.sh` is a **template**: its own preamble + a KIT block
+Each `ports/<port>/love/launcher.sh.template` is a **template**: its preamble + a KIT block
 that `assemble.sh` replaces with the inlined `_kit` libraries, then port-specific
 logic. Skeleton:
 
@@ -43,11 +45,8 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-# ── STAGE 1: launcher UI ──   (frt3 for hk + heishenhua; godot4 still supported)
-if find_godot_binary frt3 && [ -f "$GAMEDIR/bootstrap.pck" ]; then
-  run_godot_launcher "$GAMEDIR/bootstrap.pck"
-  [ "$launcher_exit" = "0" ] && { pm_finish; exit 0; }
-fi
+# ── STAGE 1: shared LÖVE launcher UI ──
+run_love_launcher_ui
 
 # ── STAGE 2: patch toml from launcher choices (per-port) + run ──
 # ... sed displayWidth/Height; apply_button_remap "$GAMEDIR/x.toml" ...
@@ -61,15 +60,14 @@ deployable as one file.
 ## Build → dist → deploy
 
 ```bash
-# 1. Build src/ and collect all deployable files.
+# 1. Assemble the shell and collect love_ui/ plus metadata.
 _kit/dist_port.sh heishenhua
 _kit/dist_port.sh hk
 
 # 2. Push to the device from dist/ only.
 #    MiniLoong (adb 10.10.1.90):
 adb -s 10.10.1.90:5555 push ports/heishenhua/dist/[中]黑神话悟空-像素版.sh "/mnt/sdcard/roms/ports/[中]黑神话悟空-像素版.sh"
-find ports/heishenhua/dist -maxdepth 1 -type f ! -name '*.sh' -exec adb -s 10.10.1.90:5555 push {} /mnt/sdcard/roms/ports/heishenhua/ \;
-adb -s 10.10.1.90:5555 push ports/heishenhua/dist/hacksdl /mnt/sdcard/roms/ports/heishenhua/hacksdl
+adb -s 10.10.1.90:5555 push ports/heishenhua/dist/love_ui /mnt/sdcard/roms/ports/heishenhua/
 #    TrimUI (ssh 10.10.1.91):
 scp ports/heishenhua/dist/[中]黑神话悟空-像素版.sh "root@10.10.1.91:/mnt/sdcard/mmcblk1p1/Roms/PORTS/[中]黑神话悟空-像素版.sh"
 rsync -a --exclude='*.sh' ports/heishenhua/dist/ root@10.10.1.91:/mnt/sdcard/mmcblk1p1/Data/ports/heishenhua/
@@ -82,23 +80,9 @@ heishenhua 90° rotation); on **TrimUI-class (KMSDRM)** it runs pulseaudio + a
 `/tmp/xdg-*` fallback. Game data (`unityloader`, `*.toml`, `gamedata/`) already
 lives in the device's game dir and is NOT part of the launcher — don't overwrite it.
 
-## pck manifest
+## LÖVE payload
 
-`ports/<port>/src/manifest.bootstrap.json`:
-
-```json
-{
-  "godot_version": "4.5",
-  "project_godot": "project.godot",
-  "bootstrap_tscn": "bootstrap.tscn",
-  "files": [
-    { "res_path": "res://launcher_ui.gd",       "src_path": "launcher_ui.gd" },
-    { "res_path": "res://launcher_bg.png",      "src_path": "assets/launcher_bg.png" },
-    { "res_path": "res://launcher_font_zh.ttf", "src_path": "assets/launcher_font_zh.ttf" }
-  ],
-  "output": "../dist/bootstrap.pck"
-}
-```
-
-Paths resolve relative to the manifest's directory, so run from anywhere:
-`python3 _kit/pck_builder.py ports/<port>/src/manifest.bootstrap.json`.
+`dist_port.sh` copies the shared `kit.lua` and background, then overlays the
+port's `love/main.lua`, `conf.lua`, `ui.gptk`, and optional background into
+`dist/love_ui/`. The CJK font is provisioned from PortMaster on first launch.
+See [`love/README.md`](love/README.md) for the component and device details.

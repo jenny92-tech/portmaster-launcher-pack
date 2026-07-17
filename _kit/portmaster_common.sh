@@ -75,3 +75,99 @@ install_exit_trap() {
     sync
   ' EXIT INT TERM
 }
+
+# ── love stage-1 UI (replaces run_launcher_ui frt3) ──────────────────────
+# Per port: swap `run_launcher_ui frt3 "$GAMEDIR/bootstrap.pck"` for
+# `run_love_launcher_ui` and point stage-2's env at `$LAUNCH_ENV`; stage-2 is
+# otherwise untouched.
+#
+# UI files live in $GAMEDIR/love_ui/ (main.lua/kit.lua/conf.lua/ui.gptk/
+# launcher_bg.png). The CJK font is taken from PortMaster's own NotoSansSC and
+# cached as love_ui/font.ttf (see _kit/love/README.md).
+# Exit codes match run_launcher_ui: 0 = back to menu, 42 = start game.
+
+_love_valid_font() { [ -f "$1" ] && [ "$(wc -c < "$1" 2>/dev/null || echo 0)" -gt 1000000 ]; }
+_love_noto_src() {
+  local t z inner
+  t=$(ls "$controlfolder"/pylibs/pylibs/resources/NotoSans.tar.xz \
+         "$controlfolder"/pylibs/resources/NotoSans.tar.xz 2>/dev/null | head -1)
+  [ -n "$t" ] && { echo "$t"; return; }
+  z="$controlfolder/pylibs.zip"; [ -f "$z" ] || return
+  inner=$(unzip -l "$z" 2>/dev/null | grep -oE '[^ ]*NotoSans\.tar\.xz' | head -1)
+  [ -n "$inner" ] && echo "zip:$z:$inner"
+}
+_love_unpack_noto() {
+  local src="$1" dst="$2" member="${3:-}" pipe rest
+  $ESUDO mkdir -p "$dst" 2>/dev/null || return 1
+  case "$src" in
+    zip:*) rest="${src#zip:}"; pipe="unzip -p '${rest%%:*}' '${rest#*:}' | xz -dc" ;;
+    *)     pipe="xz -dc '$src'" ;;
+  esac
+  $ESUDO sh -c "$pipe | tar xf - -C '$dst' $member" 2>/dev/null
+  _love_valid_font "$dst/NotoSansSC-Regular.ttf"
+}
+_love_provide_font() {
+  local ui_dir="$1" out="$1/font.ttf" std="${PM_RESOURCE_DIR:-$controlfolder/resources}" f src
+  _love_valid_font "$out" && { echo "$LOG_PREFIX font (cached)"; return 0; }
+  for f in "$std/NotoSansSC-Regular.ttf" "$controlfolder/pylibs/resources/NotoSansSC-Regular.ttf"; do
+    if _love_valid_font "$f" && cp -f "$f" "$out" && _love_valid_font "$out"; then
+      echo "$LOG_PREFIX font <- $f"; return 0; fi
+  done
+  src="$(_love_noto_src)"
+  if [ -n "$src" ]; then
+    # Unpack into PortMaster's standard resource dir so its own GUI benefits too.
+    if _love_unpack_noto "$src" "$std" && cp -f "$std/NotoSansSC-Regular.ttf" "$out" && _love_valid_font "$out"; then
+      echo "$LOG_PREFIX font <- $src (repaired $std)"; return 0; fi
+    if _love_unpack_noto "$src" "$ui_dir" NotoSansSC-Regular.ttf && mv -f "$ui_dir/NotoSansSC-Regular.ttf" "$out" && _love_valid_font "$out"; then
+      echo "$LOG_PREFIX font <- $src (love_ui fallback)"; return 0; fi
+  fi
+  echo "$LOG_PREFIX WARN: no CJK font — love falls back to its built-in (latin only)"; return 1
+}
+
+# run_love_launcher_ui [ui_dir]   (default $GAMEDIR/love_ui)
+# Sets launcher_exit and LAUNCH_ENV.
+run_love_launcher_ui() {
+  local ui_dir="${1:-$GAMEDIR/love_ui}" love_txt
+  LAUNCH_ENV="$ui_dir/launch_config.env"
+  love_txt=$(ls "$controlfolder"/runtimes/love_*/love.txt 2>/dev/null | sort -V | tail -1)
+  if [ -z "$love_txt" ] || [ ! -f "$ui_dir/main.lua" ]; then
+    echo "$LOG_PREFIX no love runtime / main.lua — skipping settings UI, using current config"
+    launcher_exit=1
+    return
+  fi
+  _love_provide_font "$ui_dir"
+  (   # Display env stays in this subshell — leaking it breaks the stage-2 game.
+    source "$love_txt"
+    export LIBGL_ES=2 LIBGL_GL=21
+    local wl_dir="" wl_disp="${WAYLAND_DISPLAY:-wayland-0}" d
+    for d in "$XDG_RUNTIME_DIR" "/run" "/run/user/$(id -u 2>/dev/null)" "/var/run"; do
+      [ -n "$d" ] || continue
+      if [ -S "$d/$wl_disp" ]; then wl_dir="$d"; break; fi
+      if [ -S "$d/wayland-0" ]; then wl_dir="$d"; wl_disp="wayland-0"; break; fi
+    done
+    if [ -n "$wl_dir" ]; then
+      export XDG_RUNTIME_DIR="$wl_dir" WAYLAND_DISPLAY="$wl_disp" SDL_VIDEODRIVER=wayland
+      unset LIBGL_FB
+      echo "$LOG_PREFIX love display=wayland ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY)"
+    else
+      unset SDL_VIDEODRIVER WAYLAND_DISPLAY
+      export LIBGL_FB=4; [ ! -e "/dev/dri/card0" ] && export LIBGL_FB=2
+      echo "$LOG_PREFIX love display=kms FB=$LIBGL_FB"
+    fi
+    $GPTOKEYB "$LOVE_GPTK" -c "$ui_dir/ui.gptk" &
+    local gpid=$!
+    pm_platform_helper "$LOVE_GPTK" 2>/dev/null || true
+    cd "$ui_dir"
+    $LOVE_RUN "$ui_dir"
+    local le=$?
+    kill $gpid 2>/dev/null; wait $gpid 2>/dev/null
+    exit $le
+  )
+  launcher_exit=$?
+  if [ "$launcher_exit" = "0" ]; then
+    echo "$LOG_PREFIX launcher: back to menu"
+    pm_finish; exit 0
+  elif [ "$launcher_exit" != "42" ]; then
+    echo "$LOG_PREFIX launcher failed ($launcher_exit) — starting game anyway"
+  fi
+}

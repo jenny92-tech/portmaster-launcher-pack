@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="$ROOT/ports/vampiresurvivors114"
-SRC="$PORT/src"
+LOVE="$PORT/love"
 
-[ -f "$SRC/launcher.sh" ] || { echo "missing launcher.sh" >&2; exit 1; }
-[ -f "$SRC/launcher_ui.gd" ] || { echo "missing launcher_ui.gd" >&2; exit 1; }
+[ -f "$LOVE/launcher.sh.template" ] || { echo "missing love launcher template" >&2; exit 1; }
+[ -f "$LOVE/main.lua" ] || { echo "missing love main.lua" >&2; exit 1; }
 
 python3 - "$PORT/manifest.json" <<'PY'
 import json
@@ -20,12 +20,17 @@ if manifest.get("script") != expected:
     raise SystemExit(f"manifest script must be {expected!r}")
 PY
 
-if [ -f "$SRC/vs114_language.sh" ]; then
+if [ -f "$PORT/src/vs114_language.sh" ]; then
   echo "vampiresurvivors114 must not ship a language patch script" >&2
   exit 1
 fi
 
-if grep -R -nE 'VS_GAME_LANG|vs114_apply_language|I2 Language|SaveDataUnity|game_lang|GAME_LANGS' "$SRC/launcher.sh" "$SRC/launcher_ui.gd"; then
+if grep -R -nE 'VS_GAME_LANG|vs114_apply_language|I2 Language|SaveDataUnity|game_lang|GAME_LANGS' "$LOVE/launcher.sh.template" "$LOVE/main.lua"; then
   echo "vampiresurvivors114 launcher must not write game language or save data" >&2
   exit 1
 fi
+
+grep -Fq 'run_love_launcher_ui' "$LOVE/launcher.sh.template"
+grep -Fq 'f:write("VS_WIDTH=auto' "$LOVE/main.lua"
+grep -Fq 'Vampire Survivors Launcher/launch_config.env' "$LOVE/main.lua"
+bash -n "$LOVE/launcher.sh.template"

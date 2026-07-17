@@ -3,15 +3,13 @@
   "title": "Vampire Survivors 1.14.111",
   "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
   "runtime": "Bogodroid unityloader",
-  "godot_launcher": null,
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "vampiresurvivors114",
   "script": "V_吸血鬼幸存者_114.sh",
-  "bootstrap_pck": "src/manifest.bootstrap.json",
-  "launcher_sh": "src/launcher.sh",
-  "gptk": null,
+  "gptk": "love/ui.gptk",
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

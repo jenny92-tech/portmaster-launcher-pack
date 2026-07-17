@@ -14,6 +14,7 @@ Installed layout:
   manifest.json
   unityloader.gplay
   vs.toml
+  love_ui/
   gamedata/
     lib/arm64-v8a/*.so
     assets/...
@@ -90,17 +91,20 @@ No launcher-side bind mount is required for `assets` or `assets/aa`.
 
 ## Launcher
 
-`src/launcher.sh` is the editable template. `_kit/dist_port.sh
+`love/launcher.sh.template` is the editable template. `_kit/dist_port.sh
 vampiresurvivors114` writes the self-contained device script to
-`dist/vampiresurvivors114.sh`; the device never needs shared `_kit` scripts.
+`dist/V_吸血鬼幸存者_114.sh` and stages the LÖVE files under `dist/love_ui/`;
+the device never needs shared `_kit` scripts.
 
-If a Godot/frt launcher payload is present, it can update `vs.toml` through:
+The LÖVE UI updates `vs.toml` through:
 
 ```text
-conf/godot/app_userdata/Vampire Survivors Launcher/launch_config.env
+love_ui/launch_config.env
 ```
 
-If the UI payload is absent, the script starts with the current `vs.toml`.
+On the first migrated launch, existing ABXY choices are imported from the old
+Godot userdata env file. If the UI payload is absent, the script starts with the
+current `vs.toml`.
 
 The game stage intentionally does not run `gptokeyb`; Unity receives the
 handheld buttons as Android gamepad events.
@@ -130,10 +134,12 @@ Copy the loader and launcher atomically:
 scp build-release/unityloader \
   root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.gplay.new
 _kit/dist_port.sh vampiresurvivors114
-scp ports/vampiresurvivors114/dist/vampiresurvivors114.sh \
+scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
   root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/launcher.sh.new
-scp ports/vampiresurvivors114/dist/vampiresurvivors114.sh \
+scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
   root@10.10.1.91:/mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new
+rsync -a ports/vampiresurvivors114/dist/love_ui/ \
+  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/love_ui/
 
 ssh root@10.10.1.91 'set -e
 cd /mnt/SDCARD/Data/ports/vampiresurvivors114

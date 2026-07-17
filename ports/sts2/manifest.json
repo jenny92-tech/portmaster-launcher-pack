@@ -3,15 +3,13 @@
   "title": "Slay the Spire 2 (杀戮尖塔 2)",
   "engine": "C# Godot 4.5 (mono)",
   "runtime": "godot-sdl2 fork + Harmony patcher",
-  "godot_launcher": "4.5.1 (godot.mono SDL2 fork, bundled)",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "sts2",
   "script": "Slay the Spire 2.sh",
-  "bootstrap_pck": "src/scripts/make-bootstrap-pck.py",
-  "launcher_sh": "src/linux/launcher.sh",
-  "gptk": null,
+  "gptk": "love/ui.gptk",
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

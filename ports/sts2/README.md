@@ -17,13 +17,12 @@ OOMs immediately.
 - `src/STS2LinuxLauncher/` — Harmony patcher (`sts2_compat.dll`) injected
   into the game's .NET runtime at boot. Each `Patches/*.cs` is a single
   hook with a short header comment describing what it fixes.
-- `src/linux/launcher_ui.gd` — GDScript launcher UI (background art, language
-  picker, button-layout picker, preload-mode picker, start button).
-- `src/linux/launcher.sh` — PortMaster two-stage launch script.
+- `love/` — LÖVE settings UI, gptokeyb mapping, and two-stage launcher template.
+- `_kit/love/kit.lua` — shared layout, focus, persistence, and env handoff,
+  copied into `dist/love_ui/` during packaging.
 - `src/linux/data-template/sts2.runtimeconfig.json` — generic .NET 9 self-contained
   config shipped in the launcher pack.
-- `src/linux/assets/` — bundled launcher background image and CJK font subset.
-- `src/scripts/` — pck builders, dist assembler, device deploy helper.
+- `src/scripts/` — shader-overlay builder, dist assembler, and device deploy helper.
 - `src/external/` — pinned CI build artifacts of the three forks listed below
   (kept in LFS).
 - `dist/` — generated deployable files. `*.sh` goes to `Roms/PORTS/`;
@@ -53,9 +52,6 @@ Requires .NET 9 SDK and Python 3.10+.
 # Patcher dll → dist/data_sts2_linuxbsd_arm64/sts2_compat.dll
 (cd src/STS2LinuxLauncher && dotnet build -c Release)
 
-# Launcher UI pck → dist/bootstrap.pck
-python3 src/scripts/make-bootstrap-pck.py
-
 # Shader-overlay pck → dist/port_compat.pck
 python3 src/scripts/make-overlay-pck.py
 ```
@@ -76,9 +72,9 @@ _kit/dist_port.sh sts2
 pack (`dist-sts2-<date>.zip`) by:
 
 1. Verifying source artifacts are present.
-2. Building the three pck/dll outputs above.
+2. Building the shader-overlay PCK and compatibility DLL.
 3. Downloading the Microsoft .NET 9 runtime (cached to `.cache/`).
-4. Composing the on-device dist under `dist/`.
+4. Composing the on-device dist, including `love_ui/`, under `dist/`.
 5. Zipping the result.
 
 `src/scripts/MANIFEST.md` documents every file in the pack, categorized by
@@ -103,8 +99,8 @@ DEVICE=root@<ip> PORT_PATH=/path/to/sts2 src/scripts/deploy-to-device.sh
   the shader compatibility set.
 - [Harmony](https://github.com/pardeike/Harmony) by Andreas Pardeike — the
   runtime patching framework.
-- [LXGW WenKai Lite](https://github.com/lxgw/LxgwWenkai-Lite) — the CJK
-  font used in the launcher UI (subsetted, SIL OFL 1.1).
+- [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) — the CJK
+  font provisioned from PortMaster's shared resources at runtime.
 - [PortMaster](https://portmaster.games/) — the handheld port distribution
   framework this launcher targets.
 

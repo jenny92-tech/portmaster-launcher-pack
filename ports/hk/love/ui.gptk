@@ -1,0 +1,24 @@
+# gptokeyb mapping for the love UI navigation (gamepad -> keyboard).
+#
+# A/B placement is ambiguous across handhelds: the A-labelled button often reports as
+# SDL button B. So both face buttons confirm (enter) and cancel/back lives on x/y/start,
+# which keeps this independent of any device's A/B layout.
+# (Learned the hard way: with b=esc, pressing the A-labelled button sent SDL b -> esc,
+# love read it as escape and quit, so "start game" was unreachable.)
+a = enter
+b = enter
+x = esc
+y = esc
+start = esc
+back = esc
+guide = enter
+
+up = up
+down = down
+left = left
+right = right
+
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right

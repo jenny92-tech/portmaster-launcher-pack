@@ -9,7 +9,7 @@ public static class QualityProfile
 {
     public enum Level { Smooth, Balanced, Quality }
 
-    public static readonly Level Current = Parse(Environment.GetEnvironmentVariable("SLL_QUALITY"));
+    public static readonly Level Current = Parse(PortPaths.Get("SLL_QUALITY"));
 
     public static int ParticleCap => Current switch
     {
@@ -40,7 +40,7 @@ public static class QualityProfile
 
     public static void LogChosen()
     {
-        var raw = Environment.GetEnvironmentVariable("SLL_QUALITY") ?? "unset";
+        var raw = PortPaths.Get("SLL_QUALITY") ?? "unset";
         Console.Error.WriteLine(
             $"[STS2 Linux Compat] quality = {Current} (particleCap={ParticleCap}, cutMenuAnim={CutMenuAnim}) [SLL_QUALITY={raw}]");
     }

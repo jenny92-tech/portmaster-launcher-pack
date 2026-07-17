@@ -20,7 +20,9 @@ rm -rf "$DIST"
 mkdir -p "$DIST" "$DATA" "$DIST/gamedata"
 
 blue "=== STS2 dist: build pcks ==="
-python3 "$SRC_ROOT/scripts/make-bootstrap-pck.py"
+# bootstrap.pck (the godot launcher UI) is retired -- the launcher is now love (see below).
+# Only the overlay (port_compat.pck) is built: the game's Mali-compat shader pack,
+# unrelated to the launcher.
 python3 "$SRC_ROOT/scripts/make-overlay-pck.py"
 
 blue "=== STS2 dist: build/copy patcher ==="
@@ -34,7 +36,19 @@ else
 fi
 
 blue "=== STS2 dist: collect deploy files ==="
-cp "$SRC_ROOT/linux/launcher.sh" "$DIST/Slay the Spire 2.sh"
+# Launcher = the love build (ports/sts2/love/); the godot4 launcher is gone. _kit/assemble.sh
+# inlines the KIT block and stages love_ui/ (shared kit.lua + launcher_bg.png + this port's
+# main/conf/gptk).
+KIT_ROOT="$(cd "$PORT_ROOT/../../_kit" && pwd)"
+LOVE_DIR="$PORT_ROOT/love"
+[ -f "$LOVE_DIR/launcher.sh.template" ] || { red "missing love launcher: $LOVE_DIR/launcher.sh.template"; exit 1; }
+"$KIT_ROOT/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/Slay the Spire 2.sh"
+mkdir -p "$DIST/love_ui"
+cp "$KIT_ROOT/love/kit.lua" "$DIST/love_ui/"
+[ -f "$KIT_ROOT/love/launcher_bg.png" ] && cp "$KIT_ROOT/love/launcher_bg.png" "$DIST/love_ui/"
+for f in main.lua conf.lua ui.gptk launcher_bg.png; do
+  [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
+done
 cp "$SRC_ROOT/linux/data-template/sts2.runtimeconfig.json" "$DATA/"
 cp "$SRC_ROOT/linux/gamedata-README.md" "$DIST/gamedata/README.md"
 [ -f "$PORT_ROOT/LICENSE" ] && cp "$PORT_ROOT/LICENSE" "$DIST/"

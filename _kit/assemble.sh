@@ -27,11 +27,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${1:?Usage: assemble.sh <ports/<port>/launcher.sh> [out.sh]}"
 [ -f "$SRC" ] || { echo "no such launcher: $SRC" >&2; exit 1; }
 SRC_DIR="$(cd "$(dirname "$SRC")" && pwd)"
-if [ "$(basename "$SRC_DIR")" = "src" ]; then
+case "$(basename "$SRC_DIR")" in
+src|love)
   PORT_DIR="$(dirname "$SRC_DIR")"
-else
+  ;;
+*)
   PORT_DIR="$SRC_DIR"
-fi
+  ;;
+esac
 PORT="$(basename "$PORT_DIR")"
 SCRIPT_NAME="$(python3 - "$PORT_DIR/manifest.json" "$PORT" <<'PY'
 import json

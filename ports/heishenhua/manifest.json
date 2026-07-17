@@ -3,15 +3,13 @@
   "title": "Wukong pixel edition",
   "engine": "Unity 2021.3 (IL2CPP)",
   "runtime": "Bogodroid unityloader",
-  "godot_launcher": "3.5.2 (frt + hacksdl + gptokeyb)",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": ["TrimUI Smart Pro/Brick"],
   "language": ["zh-CN"],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "heishenhua",
   "script": "[中]黑神话悟空-像素版.sh",
-  "bootstrap_pck": "src/manifest.bootstrap.json",
-  "launcher_sh": "src/launcher.sh",
-  "gptk": "src/heishenhua.gptk",
+  "gptk": "love/ui.gptk",
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",
@@ -22,7 +20,6 @@
   },
   "depends_on": [
     "https://github.com/jenny92-tech/Bogodroid (unityloader)",
-    "PortMaster libs/frt_3.6.squashfs",
-    "PortMaster libs/hacksdl.aarch64.so"
+    "PortMaster runtimes/love_11.5"
   ]
 }
