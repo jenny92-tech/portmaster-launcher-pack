@@ -31,6 +31,8 @@ Lua 只负责只读扫描、选择和生成 `conf/plan.txt`。移动、恢复和
 首页“残留清理”下方提供“Runtime 修复”。页面列出全部被 SH 明确声明的 Runtime，
 并显示依赖它的游戏数量；`controlfolder/libs/<name>.squashfs` 不存在的项目额外标记
 “缺失”，已安装项目也可主动重新下载，以修复内容损坏但文件仍存在的情况。
+扫描器同时识别 `runtime=` 和 `java_runtime=`、`weston_runtime=` 等 `*_runtime=`
+声明；一个游戏声明多个共享 Runtime 时会逐项检查，不再只记录第一个。
 可用项由随 APP 发布的 `runtime_catalog.tsv` 按 `DEVICE_ARCH` 匹配；catalog 生成自
 PortMaster-New 官方 `runtimes/runtimes.json` 和同目录文件树，既处理普通架构后缀，
 也按顺序合并 GMToolkit、Mono、Zulu 等 `.part.NNN` 分片。
@@ -39,6 +41,9 @@ catalog 同时保存 GitHub API 报告的每个文件及合并后的实际字节
 `conf/runtime-cache/<source commit>/<runtime>/`；重新进入修复时，curl 使用 `-C -`、
 wget 使用 `-c` 从已有字节继续。代理不支持 Range 时会安全地重新下载该分片；只有
 新镜像校验并原子替换成功后才删除缓存，失败不会破坏旧 Runtime 或已经下载的进度。
+在缺少 curl 且系统 BusyBox wget 不支持 HTTPS 的 LoongOS 上，helper 会复用固件恢复
+资源中自带的 GNU Wget：复制到 APP 自己的 `conf/runtime-tools/` 并补执行位，不修改
+系统文件，也不在发行包内重复携带下载器。
 
 下载源固定为 catalog 注明的 PortMaster-New commit。helper 参考 NapCat Installer 的
 GitHub Proxy 策略，并发对代理发送 4 字节 Range 探测，只有返回 SquashFS `hsqs` 文件头

@@ -37,5 +37,13 @@ assert(not test.mentions("/ports/brotato1.15/", "brotato"))
 
 assert(test.runtime_of("# runtime=frt_3.6\nruntime=godot_4.5\n") == "godot_4.5")
 assert(test.runtime_of("# runtime=frt_3.6\n") == "")
+local runtimes = test.runtimes_of([[java_runtime="zulu11.48.21-ca-jdk11.0.11-linux"
+weston_runtime="weston_pkg_0.2"
+runtime="zulu11.48.21-ca-jdk11.0.11-linux"
+# ignored_runtime="frt_3.6"
+]])
+assert(#runtimes == 2)
+assert(runtimes[1] == "zulu11.48.21-ca-jdk11.0.11-linux")
+assert(runtimes[2] == "weston_pkg_0.2")
 
 print("appmanager Lua scanner tests: PASS")

@@ -133,14 +133,22 @@ local function mentions(text,name)
     end
 end
 
-local function runtime_of(text)
+local function runtimes_of(text)
+    local out,seen={},{}
     for line in (text.."\n"):gmatch("(.-)\n") do
         if not trim(line):match("^#") then
-            local value=line:match("^%s*export%s+runtime=[\"']?([A-Za-z0-9_.+%-]+)") or line:match("^%s*runtime=[\"']?([A-Za-z0-9_.+%-]+)")
-            if value then return value end
+            local name,value=line:match("^%s*export%s+([A-Za-z_][A-Za-z0-9_]*)=[\"']?([A-Za-z0-9_.+%-]+)")
+            if not name then name,value=line:match("^%s*([A-Za-z_][A-Za-z0-9_]*)=[\"']?([A-Za-z0-9_.+%-]+)") end
+            if name and (name=="runtime" or name:match("_runtime$")) and not seen[value] then
+                seen[value]=true; out[#out+1]=value
+            end
         end
     end
-    return ""
+    return out
+end
+
+local function runtime_of(text)
+    return runtimes_of(text)[1] or ""
 end
 
 local function stem(name) return (name:gsub("%.[^.]+$","")) end
@@ -167,8 +175,9 @@ function scan.run(env)
         local result=port_dir_of(texts[name],real_dirs,seed,env.ignore_dirs)
         if result.dir~="" and result.exists then refcount[result.dir]=(refcount[result.dir] or 0)+1
         elseif result.dir~="" then dead[#dead+1]={script=name,missing_dir=result.dir} end
+        local runtimes=runtimes_of(texts[name])
         ports[#ports+1]={script=name,dir=result.exists and result.dir or "",claimed_dir=result.dir,dir_exists=result.exists,
-            images=image_of[name],runtime=runtime_of(texts[name])}
+            images=image_of[name],runtime=runtimes[1] or "",runtimes=runtimes}
     end
     local orphan_dirs={}
     for name in pairs(real_dirs) do
@@ -180,7 +189,11 @@ function scan.run(env)
     local orphan_images={}; for _,img in ipairs(images) do if not script_stems[stem(img.name):lower()] then orphan_images[#orphan_images+1]=img.name end end
     table.sort(orphan_images)
     local have={}; for _,entry in ipairs(list(env.libs_dir,false)) do local name=entry.name:match("^(.-)%.squashfs$"); if name then have[name]=true end end
-    local need={}; for _,p in ipairs(ports) do if p.runtime~="" then need[p.runtime]=need[p.runtime] or {}; need[p.runtime][#need[p.runtime]+1]=p.script end end
+    local need={}; for _,p in ipairs(ports) do
+        for _,runtime in ipairs(p.runtimes or {}) do
+            need[runtime]=need[runtime] or {}; need[runtime][#need[runtime]+1]=p.script
+        end
+    end
     local missing={}; for name,users in pairs(need) do if not have[name] then missing[#missing+1]={name=name,users=users} end end
     table.sort(missing,function(a,b) return a.name<b.name end)
     local have_list={}; for name in pairs(have) do have_list[#have_list+1]=name end; table.sort(have_list)
@@ -190,5 +203,5 @@ end
 
 scan.read=read
 scan.basename=basename
-scan._test={port_dir_of=port_dir_of,mentions=mentions,runtime_of=runtime_of,collect_vars=collect_vars,expand=expand}
+scan._test={port_dir_of=port_dir_of,mentions=mentions,runtime_of=runtime_of,runtimes_of=runtimes_of,collect_vars=collect_vars,expand=expand}
 return scan

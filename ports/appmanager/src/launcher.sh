@@ -449,16 +449,53 @@ runtime_has_magic() {
   [ -f "$1" ] && [ "$(LC_ALL=C head -c 4 "$1" 2>/dev/null)" = "hsqs" ]
 }
 
+runtime_prepare_downloader() {
+  local candidate tool_dir tool_tmp
+  [ -z "${RUNTIME_DOWNLOADER:-}" ] || return 0
+  if [ -z "${PAM_RUNTIME_WGET:-}" ] && command -v curl >/dev/null 2>&1; then
+    RUNTIME_DOWNLOADER="curl"
+    return 0
+  fi
+
+  candidate="${PAM_RUNTIME_WGET:-}"
+  # LoongOS ships an HTTPS-enabled GNU Wget in its PortMaster recovery assets,
+  # but some firmware images lose the executable bit. Copy it into APP-owned
+  # conf instead of modifying the read-only/system copy. BusyBox wget remains
+  # the generic fallback on systems where it supports HTTPS itself.
+  if [ -z "$candidate" ] && [ -r /oem/loong/recover/userdata/app/portmaster/wget ]; then
+    candidate=/oem/loong/recover/userdata/app/portmaster/wget
+  fi
+  if [ -z "$candidate" ]; then candidate=$(command -v wget 2>/dev/null || true); fi
+  [ -n "$candidate" ] && [ -f "$candidate" ] || return 1
+  if [ ! -x "$candidate" ]; then
+    tool_dir="$CONFDIR/runtime-tools"
+    [ ! -L "$tool_dir" ] || return 1
+    mkdir -p "$tool_dir" || return 1
+    [ ! -L "$tool_dir/wget" ] || rm -f -- "$tool_dir/wget" || return 1
+    tool_tmp="$tool_dir/.wget.$$"
+    rm -f -- "$tool_tmp"
+    cp -- "$candidate" "$tool_tmp" && chmod 0700 "$tool_tmp" && mv -f -- "$tool_tmp" "$tool_dir/wget" || {
+      rm -f -- "$tool_tmp"
+      return 1
+    }
+    candidate="$tool_dir/wget"
+  fi
+  [ -x "$candidate" ] || return 1
+  RUNTIME_WGET="$candidate"
+  RUNTIME_DOWNLOADER="wget"
+}
+
 runtime_probe_url() {
   local url="$1" out="$2"
   : > "$out" || return 1
-  if command -v curl >/dev/null 2>&1; then
+  runtime_prepare_downloader || return 1
+  if [ "$RUNTIME_DOWNLOADER" = "curl" ]; then
     curl -fsSL --connect-timeout 3 --max-time 5 --range 0-3 "$url" 2>/dev/null | head -c 4 > "$out"
-  elif command -v wget >/dev/null 2>&1; then
+  elif [ "$RUNTIME_DOWNLOADER" = "wget" ]; then
     if command -v timeout >/dev/null 2>&1; then
-      timeout 5 wget -q -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
+      timeout 5 "$RUNTIME_WGET" -q -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
     else
-      wget -q -T 5 -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
+      "$RUNTIME_WGET" -q -T 5 -O - --header='Range: bytes=0-3' "$url" 2>/dev/null | head -c 4 > "$out"
     fi
   else
     return 1
@@ -468,17 +505,18 @@ runtime_probe_url() {
 
 runtime_fetch_url() {
   local url="$1" out="$2" resume="${3:-0}"
-  if command -v curl >/dev/null 2>&1; then
+  runtime_prepare_downloader || return 1
+  if [ "$RUNTIME_DOWNLOADER" = "curl" ]; then
     if [ "$resume" = "1" ]; then
       curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url"
     else
       curl -fL --connect-timeout 8 --retry 2 --retry-delay 1 -o "$out" "$url"
     fi
-  elif command -v wget >/dev/null 2>&1; then
+  elif [ "$RUNTIME_DOWNLOADER" = "wget" ]; then
     if [ "$resume" = "1" ]; then
-      wget -c -O "$out" "$url"
+      "$RUNTIME_WGET" -c -O "$out" "$url"
     else
-      wget -O "$out" "$url"
+      "$RUNTIME_WGET" -O "$out" "$url"
     fi
   else
     return 1
@@ -496,6 +534,7 @@ runtime_file_size() {
 runtime_select_proxy() {
   local sample="$1" probe_root proxy id
   runtime_valid_source "$sample" || return 1
+  runtime_prepare_downloader || return 1
   probe_root="$CONFDIR/proxy-probe.$$"
   rm -rf "$probe_root"; mkdir -p "$probe_root" || return 1
   RUNTIME_PROXIES="${PAM_RUNTIME_PROXIES:-https://gh.h233.eu.org

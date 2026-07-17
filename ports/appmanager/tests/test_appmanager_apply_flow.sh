@@ -94,7 +94,7 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
+  runtime_repair|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_split) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
   runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
@@ -176,6 +176,30 @@ fi
 EOF
   chmod +x "$case_dir/bin/curl"
 
+  cat > "$case_dir/bin/wget" <<'EOF'
+#!/usr/bin/env bash
+out=""
+url=""
+resume=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -O) out=$2; shift 2 ;;
+    -c) resume=1; shift ;;
+    -T|--header) shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+printf 'wget resume=%s out=%s url=%s\n' "$resume" "$out" "$url" >> "$TEST_CURL_LOG"
+if [ "$out" = "-" ] || [ -z "$out" ]; then
+  printf 'hsqs'
+else
+  printf 'hsqs-runtime-payload' > "$out"
+fi
+EOF
+  chmod +x "$case_dir/bin/wget"
+  [ "$mode" != "runtime_wget" ] || rm -f "$case_dir/bin/curl"
+
   export TEST_MODE="$mode"
   export TEST_COUNT="$case_dir/ui-count"
   export TEST_CONTROL_COUNT="$case_dir/control-count"
@@ -195,6 +219,11 @@ EOF
   export TEST_CURL_LOG="$case_dir/curl.log"
   export TEST_RESUME_REJECTED="$case_dir/resume-rejected"
   export PAM_RUNTIME_PROXIES="https://proxy.test"
+  if [ "$mode" = "runtime_wget" ]; then
+    export PAM_RUNTIME_WGET="$case_dir/bin/wget"
+  else
+    unset PAM_RUNTIME_WGET
+  fi
   : > "$TEST_OUTSIDE"
 
   case "$mode" in
@@ -248,7 +277,7 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
+    runtime_repair|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
       printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
       ;;
   esac
@@ -364,6 +393,11 @@ EOF
       grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
       grep -Fq 'https://proxy.test/https://github.com/PortsMaster/PortMaster-New/raw/' "$TEST_CURL_LOG"
       ;;
+    runtime_wget)
+      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
+      grep -Fq 'wget resume=0 out=' "$TEST_CURL_LOG"
+      grep -Fq $'OK\truntime\tgodot_4.5\tproxy.test' "$app/conf/result.txt"
+      ;;
     runtime_cached)
       grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
       grep -Fq $'OK\truntime\tgodot_4.5\tCache' "$app/conf/result.txt"
@@ -441,7 +475,7 @@ EOF
 for mode in delete same_root_delete fail empty empty_fail \
   restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_cached runtime_resume runtime_resume_reset \
+  delete_container_invalid invalid no_plan runtime_repair runtime_wget runtime_cached runtime_resume runtime_resume_reset \
   runtime_split runtime_direct runtime_invalid runtime_fail \
   renamed_launcher helper_fallback; do
   make_case "$mode"
