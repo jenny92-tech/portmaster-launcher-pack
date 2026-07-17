@@ -380,6 +380,7 @@ function kit.dialog(opts)
     if type(opts)~="table" then return false end
     if not dialog_state then focus_stack[#focus_stack+1]=capture_focus() end
     dialog_state=opts
+    dialog_state._checkbox_checked=opts.checkbox and opts.checkbox.checked==true or false
     dialog_focus=opts.default_focus=="confirm" and 1 or 2
     return true
 end
@@ -391,11 +392,16 @@ function kit.close_dialog()
     return true
 end
 function kit.debug_dialog()
-    return {open=dialog_state~=nil,focus=dialog_focus==1 and "confirm" or "cancel",
+    local checked=dialog_state and dialog_state._checkbox_checked or false
+    local checkbox=dialog_state and dialog_state.checkbox or nil
+    local danger=dialog_state and (dialog_state.danger==true or
+        (checkbox and checkbox.danger==true and checked)) or false
+    return {open=dialog_state~=nil,focus=dialog_focus==1 and "confirm" or dialog_focus==3 and "checkbox" or "cancel",
         item_count=dialog_state and #(dialog_state.items or {}) or 0,
-        danger=dialog_state and dialog_state.danger==true or false,
-        title=dialog_state and t(dialog_state.title or "") or "",
-        message=dialog_state and t(dialog_state.message or "") or "",scope_depth=#focus_stack}
+        danger=danger,checkbox_checked=checked,checkbox_label=checkbox and t(checkbox.label or "") or "",
+        title=dialog_state and t(checked and dialog_state.title_checked or dialog_state.title or "") or "",
+        message=dialog_state and t(checked and dialog_state.message_checked or dialog_state.message or "") or "",
+        scope_depth=#focus_stack}
 end
 function kit.debug_focus()
     return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top,scroll_y=scroll_y}
@@ -793,10 +799,11 @@ end
 
 local function finish_dialog(confirm)
     local current=dialog_state
+    local checked=current and current._checkbox_checked==true or false
     kit.close_dialog()
     if not current then return end
     local callback=confirm and current.on_confirm or current.on_cancel
-    if callback then callback(kit) end
+    if callback then callback(kit,checked) end
 end
 
 
@@ -1098,11 +1105,16 @@ local function draw_dialog(L)
     local d=dialog_state
     if not d then return end
     local cs=math.max(0.72,math.min(1,H/720))
+    local checked=d._checkbox_checked==true
+    local effective_danger=d.danger==true or (d.checkbox and d.checkbox.danger==true and checked)
+    local title=checked and d.title_checked or d.title
+    local message=checked and d.message_checked or d.message
     local items=d.items or {}; local shown=math.min(4,#items)
-    local message_h=d.message and 48*cs or 0
+    local message_h=message and 48*cs or 0
     local more_h=#items>shown and 24*cs or 0
+    local checkbox_h=d.checkbox and 58*cs or 0
     local dw=math.min(W-36*cs,640*cs)
-    local dh=math.max(230*cs,112*cs+message_h+shown*32*cs+more_h+70*cs)
+    local dh=math.max(230*cs,112*cs+message_h+shown*32*cs+more_h+checkbox_h+70*cs)
     dh=math.min(dh,H-44*cs)
     local dx,dy=(W-dw)/2,(H-dh)/2
 
@@ -1110,16 +1122,16 @@ local function draw_dialog(L)
     love.graphics.setColor(0.055,0.035,0.085,0.995); love.graphics.rectangle("fill",dx,dy,dw,dh,10,10)
     love.graphics.setColor(1,1,1,0.48); love.graphics.setLineWidth(1)
     love.graphics.rectangle("line",dx,dy,dw,dh,10,10)
-    if d.danger then
+    if effective_danger then
         love.graphics.setColor(0.72,0.18,0.22,1); love.graphics.rectangle("fill",dx,dy,dw,5*cs,10,10)
     end
 
     local pad=26*cs; local content_y=dy+24*cs
-    outlined(t(d.title or {en="Confirm action",zh="确认操作"}),dx+pad,content_y,28*cs,
-        d.danger and {1,0.72,0.72} or {1,1,1},"left",dw-pad*2)
+    outlined(t(title or {en="Confirm action",zh="确认操作"}),dx+pad,content_y,28*cs,
+        effective_danger and {1,0.72,0.72} or {1,1,1},"left",dw-pad*2)
     content_y=content_y+43*cs
-    if d.message then
-        plain(t(d.message),dx+pad,content_y,18*cs,{0.82,0.82,0.88},"left",dw-pad*2)
+    if message then
+        plain(t(message),dx+pad,content_y,18*cs,{0.82,0.82,0.88},"left",dw-pad*2)
         content_y=content_y+message_h
     end
     local function clip_line(value,px,max_w)
@@ -1144,6 +1156,15 @@ local function draw_dialog(L)
     end
 
     local gap=12*cs; local bw=(dw-pad*2-gap)/2; local bh=50*cs; local by=dy+dh-pad-bh
+    if d.checkbox then
+        local option_h=46*cs; local option_y=by-gap-option_h
+        panel(dx+pad,option_y,dw-pad*2,option_h,dialog_focus==3,false,L.app)
+        local check_size=26*cs; local check_x=dx+pad+14*cs
+        draw_checkbox(check_x,option_y+(option_h-check_size)/2,check_size,checked,dialog_focus==3,false)
+        local color=d.checkbox.danger and checked and {1,0.62,0.62} or {0.96,0.94,1}
+        plain(t(d.checkbox.label or ""),check_x+40*cs,option_y+vcen(19*cs,option_h),19*cs,
+            color,"left",dw-pad*2-68*cs)
+    end
     local function draw_button(index,x,label,danger)
         local focused=dialog_focus==index
         if danger then
@@ -1154,7 +1175,8 @@ local function draw_dialog(L)
         else panel(x,by,bw,bh,focused,false,L.app) end
         plain(t(label),x,by+vcen(20*cs,bh),20*cs,{1,1,1},"center",bw)
     end
-    draw_button(1,dx+pad,d.confirm or {en="Confirm",zh="确认"},d.danger)
+    local confirm_label=checked and d.confirm_checked or d.confirm
+    draw_button(1,dx+pad,confirm_label or {en="Confirm",zh="确认"},effective_danger)
     draw_button(2,dx+pad+bw+gap,d.cancel or {en="Cancel",zh="取消"},false)
 end
 
@@ -1401,8 +1423,17 @@ end
 function kit.input(action)
     if busy then return false end
     if dialog_state then
-        if action=="left" or action=="up" then dialog_focus=1
-        elseif action=="right" or action=="down" then dialog_focus=2
+        if action=="up" and dialog_state.checkbox then dialog_focus=3
+        elseif action=="down" and dialog_focus==3 then dialog_focus=2
+        elseif action=="left" and dialog_focus~=3 then dialog_focus=1
+        elseif action=="right" and dialog_focus~=3 then dialog_focus=2
+        elseif action=="up" then dialog_focus=1
+        elseif action=="down" then dialog_focus=2
+        elseif action=="confirm" and dialog_focus==3 then
+            dialog_state._checkbox_checked=not dialog_state._checkbox_checked
+            if dialog_state.checkbox.on_change then
+                dialog_state.checkbox.on_change(dialog_state._checkbox_checked,dialog_state.checkbox)
+            end
         elseif action=="confirm" then finish_dialog(dialog_focus==1)
         elseif action=="cancel" then finish_dialog(false)
         else return false end

@@ -14,7 +14,7 @@ grep -Fq ' --apply-plan >/dev/null 2>&1 &' "$APP_UI"
 grep -Fq 'if not file_exists(env.plan_file)' "$APP_UI"
 grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI"
 grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI"
-grep -Fq 'delete_direct and "DELETE_MANAGED"' "$APP_UI"
+grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI"
 if grep -Fq 'os.execute(shquote(env.apply_script).." --apply-plan")' "$APP_UI"; then
   echo "appmanager helper must not block the render thread" >&2
   exit 1
