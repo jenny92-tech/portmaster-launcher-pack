@@ -230,6 +230,53 @@ with tempfile.TemporaryDirectory() as source:
         assert(value_count==1 and line_calls>=2 and rectangle_calls>=4)
     ''')
 
+# Body typography renders once on integer pixel coordinates. Only the large
+# page title keeps one light shadow pass plus its foreground pass.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local draws={}
+        local current_font=nil
+        love.graphics.newFont=function(size)
+            local f={size=tonumber(size) or 20}
+            f.getHeight=function(self) return self.size end
+            f.getWidth=function(self,text) return #text*self.size*0.5 end
+            f.getWrap=function(self,text,limit) return limit,{text} end
+            return f
+        end
+        love.graphics.setFont=function(font) current_font=font end
+        local function record(value,x,y)
+            value=tostring(value)
+            draws[value]=draws[value] or {}
+            draws[value][#draws[value]+1]={x=x,y=y,size=current_font.size}
+        end
+        love.graphics.print=record
+        love.graphics.printf=function(value,x,y) record(value,x,y) end
+        local k=require("kit")
+        k.run({state={ui_lang="en",feature="on"},theme={kind="app"},build_pages=function()
+            k.add_page("Manager",{
+                k.section("Installed"),
+                k.list_item("frt_3.6"),k.list_item("godot_4.5"),
+                k.switch("Feature","feature"),
+                k.checkbox("Port",{checked=false}),
+            },{row_layout={mode="grid",columns=2}})
+        end})
+        love.load(); love.draw()
+        assert(#(draws.Manager or {})==2)
+        assert(draws.Manager[2].size==40)
+        assert(draws.Installed[1].size==23)
+        assert(draws["frt_3.6"][1].size==19)
+        assert(draws.Feature[1].size==26 and draws.Port[1].size==26)
+        for _,value in ipairs({"Installed","frt_3.6","godot_4.5","Feature","Port"}) do
+            local items=draws[value] or {}
+            assert(#items==1,value)
+            assert(items[1].x==math.floor(items[1].x) and items[1].y==math.floor(items[1].y),value)
+        end
+    ''')
+
 # Measured Grid/Flow geometry is cached independently of focus and scroll.
 # Expanding a TextView invalidates the measurement and produces a new height.
 with tempfile.TemporaryDirectory() as source:
@@ -357,6 +404,8 @@ with tempfile.TemporaryDirectory() as source:
     app = data / "appmanager"
     for directory in (scripts, data / "GameData", app / "conf", app / "trash", base / "libs", base / "images"):
         directory.mkdir(parents=True, exist_ok=True)
+    (base / "libs" / "frt_3.6.squashfs").touch()
+    (base / "libs" / "godot_4.5.squashfs").touch()
     (scripts / "Game.sh").write_text('GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\n', encoding="utf-8")
     env_path = app / "conf/env.json"
     env_path.write_text(json.dumps({
@@ -382,7 +431,12 @@ with tempfile.TemporaryDirectory() as source:
     fixture = {
         str(data): [{"name": "GameData", "path": str(data / "GameData"), "is_dir": True}],
         str(scripts): [{"name": "Game.sh", "path": str(scripts / "Game.sh"), "is_dir": False}],
-        str(base / "images"): [], str(base / "libs"): [], str(app / "trash"): [],
+        str(base / "images"): [],
+        str(base / "libs"): [
+            {"name": "frt_3.6.squashfs", "path": str(base / "libs" / "frt_3.6.squashfs"), "is_dir": False},
+            {"name": "godot_4.5.squashfs", "path": str(base / "libs" / "godot_4.5.squashfs"), "is_dir": False},
+        ],
+        str(app / "trash"): [],
     }
     lua.globals().SCAN_FIXTURE = json.dumps(fixture)
     lua.execute(r'''
@@ -434,19 +488,22 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("left"); love.keypressed("left")
         assert(k.debug_focus().zone=="rows")
     ''')
-    # Environment details restore the old three sections: 4 key paths,
-    # 16 environment values, and one no-runtime row in this fixture.
+    # Environment details use three sections: 4 key paths, 16 environment
+    # values, then a counted compact list of installed runtimes.
     lua.execute(r'''
         local k=require("kit")
         love.keypressed("up"); love.keypressed("return")
         local page=k.debug_page()
-        assert(page.index==4 and page.section_count==3 and page.row_count==24)
+        assert(page.index==4 and page.section_count==3 and page.row_count==25)
+        assert(page.section_labels[3]=="已安装 Runtime（2）")
+        assert(page.row_kinds[24]=="list_item" and page.row_kinds[25]=="list_item")
         assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==2)
         local layout=k.debug_layout()
         assert(layout.row_layout_mode=="grid" and layout.columns==2)
         assert(layout.geometry[2].x < layout.geometry[3].x)
         assert(layout.geometry[2].y == layout.geometry[3].y)
         assert(layout.geometry[2].h == layout.geometry[3].h)
+        assert(layout.geometry[24].h < layout.rh and layout.geometry[25].h < layout.rh)
         love.keypressed("right")
         assert(k.debug_focus().focus_i==3)
         love.keypressed("down")

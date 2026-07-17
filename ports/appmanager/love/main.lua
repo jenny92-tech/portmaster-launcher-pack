@@ -362,10 +362,17 @@ build_env=function()
     }
     for _,item in ipairs(values) do info(item[1],item[2]) end
 
-    section(L("Installed Runtimes","已安装 Runtime"))
     local runtimes=report.runtimes.have or {}
-    if #runtimes==0 then info("Runtime",L("None installed","未安装"))
-    else for index,name in ipairs(runtimes) do info("Runtime "..index.."/"..#runtimes,name) end end
+    section({
+        en=string.format("Installed Runtimes (%d)",#runtimes),
+        zh=string.format("已安装 Runtime（%d）",#runtimes),
+    })
+    if #runtimes==0 then rows[#rows+1]=kit.list_item(L("None installed","未安装"),{id="runtime:none"})
+    else
+        for _,name in ipairs(runtimes) do
+            rows[#rows+1]=kit.list_item(name,{id="runtime:"..name})
+        end
+    end
     kit.set_page(ENV,L("Environment details","环境详情"),rows,{row_layout={mode="grid",columns=2},
         sidebar_title=L("Details","详情"),sidebar={
         button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"})

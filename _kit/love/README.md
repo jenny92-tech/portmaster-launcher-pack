@@ -44,6 +44,7 @@ toggle, credits, QQ group, state save, env write-out.
 | `kit.checkbox(label, detail, checked, callback)` | selectable list item; the options-table form supports `id`, `detail`, `checked`, `on_change` and common row options | `kit.checkbox("mods", {id="mods", checked=true, on_change=changed})` |
 | `kit.switch(label, key, opts)` | state-bound two-value switch; Left turns it off, Right turns it on, Confirm toggles it | `kit.switch("rumble", "rumble", {off_value="off", on_value="on"})` |
 | `kit.info(label, value)` | read-only focusable detail item | environment page |
+| `kit.list_item(value, opts)` | compact one-line read-only item for dense, scrollable lists | installed Runtime names |
 | `kit.section(label)` | non-focusable visual heading for grouped details | environment categories |
 | `kit.add_page(title, rows)` | a page = a list of the above; page 1 is the home page | `kit.add_page("title", { picker, picker, button })` |
 
@@ -51,6 +52,13 @@ Form controls share one visual language: a dark inset surface, lavender outline,
 bright active state and vector-drawn indicators. Select values are rendered once
 without an outline shadow and centred from the font's measured height; its chevrons
 and Checkbox's checkmark do not depend on font glyphs.
+
+Body typography is rendered once on pixel-snapped coordinates so Wayland compositors
+do not filter text placed between physical pixels. Only page, dialog and sidebar titles
+keep one light 1 px shadow pass; body labels no longer use multi-pass outlines. A shared
+`BODY_TEXT_SCALE` gives all non-title text a small readability boost while keeping the
+component geometry and title hierarchy unchanged; measured TextViews account for the
+larger glyphs when wrapping.
 
 Pages optionally carry a `sidebar` button column. `kit.set_page` replaces a dynamic
 page; pass `preserve_focus=true` when a selection-only rebuild must keep the current
@@ -116,7 +124,8 @@ values are shell-quoted, and a failed write keeps the UI open on a Retry/Stay di
 
 **Tunable defaults** (constants at the top of kit.lua, one change applies to every port):
 `ROW_MAX_W` (hard row-width cap), `ROW_MAX` / `ROW_MIN` (row height), `BAR_H` (header
-height), `TITLE_PX` / `ROW_PX` / ... (type sizes), `MINCS` / `MAXCS` (content-scale
+height), `TITLE_PX` / `ROW_PX` / ... (type sizes), `BODY_TEXT_SCALE` (uniform non-title
+type boost), `MINCS` / `MAXCS` (content-scale
 bounds), and the colours in `panel()`. Ordinary launcher rows retain these global
 uniform defaults; app-style TextViews opt into measured heights through a page's
 `row_layout`.

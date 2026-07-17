@@ -39,6 +39,7 @@ kit.BASE_STRINGS = {
 local BAR_H, SUB_PX          = 58, 18
 local ROW_MAX, ROW_MIN, GAP  = 58, 48, 9
 local TITLE_PX, ROW_PX, CRED_PX, BTN_PX = 28, 24, 18, 23
+local BODY_TEXT_SCALE = 1.08       -- small handheld readability boost; titles keep their designed size
 local MINCS, MAXCS = 0.72, 1.15   -- content scale bounds (readability floor / cap on big screens)
 local ROW_MAX_W = 540             -- hard row-width cap (px, does not grow with cs): keeps wide screens narrow
 
@@ -128,20 +129,26 @@ local function t(key)
     local p = strings[key]; if not p then return key end
     return p[state.ui_lang] or p.en or key
 end
+local function snapped_text_box(x,y,limit)
+    local right=limit and math.floor(x+limit+0.5) or nil
+    x=math.floor(x+0.5); y=math.floor(y+0.5)
+    if right then limit=math.max(1,right-x) end
+    return x,y,limit
+end
 local function outlined(txt, x, y, px, col, align, limit)
+    x,y,limit=snapped_text_box(x,y,limit)
     local f = fnt(px); love.graphics.setFont(f)
-    local shadow=is_app() and {{-1,0},{1,0},{0,-1},{0,1}} or {{-2,0},{2,0},{0,-2},{0,2},{-2,-2},{2,2},{-2,2},{2,-2}}
-    love.graphics.setColor(0,0,0,is_app() and 0.68 or 0.9)
-    for _,d in ipairs(shadow) do
-        if align then love.graphics.printf(txt, x+d[1], y+d[2], limit, align)
-        else love.graphics.print(txt, x+d[1], y+d[2]) end
-    end
+    love.graphics.setColor(0,0,0,is_app() and 0.45 or 0.60)
+    if align then love.graphics.printf(txt,x+1,y+1,limit,align)
+    else love.graphics.print(txt,x+1,y+1) end
     love.graphics.setColor(col[1],col[2],col[3],col[4] or 1)
     if align then love.graphics.printf(txt, x, y, limit, align)
     else love.graphics.print(txt, x, y) end
 end
+local function body_fnt(px) return fnt(px*BODY_TEXT_SCALE) end
 local function plain(txt,x,y,px,col,align,limit)
-    local f=fnt(px); love.graphics.setFont(f)
+    x,y,limit=snapped_text_box(x,y,limit)
+    local f=body_fnt(px); love.graphics.setFont(f)
     love.graphics.setColor(col[1],col[2],col[3],col[4] or 1)
     txt=tostring(txt or "")
     if align then love.graphics.printf(txt,x,y,limit,align)
@@ -165,9 +172,9 @@ local function wrapped_text(value,font,width,max_lines)
     if truncated then shown[count]=clip_ellipsis(shown[count].."…",font,width) end
     return table.concat(shown,"\n"),count,truncated
 end
-local function vcen(px, h) return (h - fnt(px):getHeight())/2 end
+local function vcen(px, h) return (h - body_fnt(px):getHeight())/2 end
 local function centred_text_y(px,y,h,optical_offset)
-    return y+(h-fnt(px):getHeight())/2+(optical_offset or 0)
+    return y+(h-body_fnt(px):getHeight())/2+(optical_offset or 0)
 end
 
 local function panel(x,y,w,h,focused,is_disabled,app)
@@ -243,7 +250,7 @@ local function draw_select(x,y,w,h,value,focused,is_disabled,cs)
     love.graphics.line(left_x+arrow_dx,cy-arrow_dy,left_x,cy,left_x+arrow_dx,cy+arrow_dy)
     love.graphics.line(right_x-arrow_dx,cy-arrow_dy,right_x,cy,right_x-arrow_dx,cy+arrow_dy)
 
-    local font=fnt(19*cs)
+    local font=body_fnt(19*cs)
     local text_x,text_w=x+32*cs,math.max(1,w-64*cs)
     value=clip_ellipsis(tostring(t(value) or ""),font,text_w)
     plain(value,text_x,y+(h-font:getHeight())/2,19*cs,
@@ -280,6 +287,9 @@ function kit.switch(l,key,opts)
     return apply_options({kind="switch",label=l,key=key,off_value="off",on_value="on",focusable=true},opts)
 end
 function kit.info(l,value,meta) return {kind="info",label=l,value=value,meta=meta,focusable=true} end
+function kit.list_item(value,opts)
+    return apply_options({kind="list_item",value=value,focusable=true,compact=true},opts)
+end
 function kit.textview(l,value,opts)
     local row={kind="textview",label=l,value=value,focusable=true,max_lines=2,expanded_lines=8,expandable=true}
     for key,option in pairs(opts or {}) do row[key]=option end
@@ -361,8 +371,16 @@ function kit.debug_focus()
 end
 function kit.debug_page()
     local rows=pages[page_i] and pages[page_i].rows or {}; local sections=0
-    for _,row in ipairs(rows) do if row.kind=="section" then sections=sections+1 end end
-    return {index=page_i,row_count=#rows,section_count=sections}
+    local section_labels,row_kinds={},{}
+    for index,row in ipairs(rows) do
+        row_kinds[index]=row.kind
+        if row.kind=="section" then
+            sections=sections+1
+            section_labels[sections]=t(row.label)
+        end
+    end
+    return {index=page_i,row_count=#rows,section_count=sections,
+        section_labels=section_labels,row_kinds=row_kinds}
 end
 function kit.debug_layout_cache()
     return {hits=layout_cache_stats.hits,misses=layout_cache_stats.misses,
@@ -791,9 +809,10 @@ layout=function()
                 geometry={}; local content_y=0; local i=1
                 local function measured_height(row,width)
                     if row.kind=="section" then return 49*cs end
+                    if row.kind=="list_item" then return (row.height or 50)*cs end
                     if row.kind~="textview" then return rh end
                     local pad=12*cs
-                    local label_font,value_font=fnt(15*cs),fnt(17*cs); local inner_w=width-pad*2
+                    local label_font,value_font=body_fnt(15*cs),body_fnt(17*cs); local inner_w=width-pad*2
                     local _,label_lines=wrapped_text(row.label,label_font,inner_w,2)
                     local label_h=label_lines*label_font:getHeight()
                     local requested=row.expanded and row.expanded_lines or row.max_lines
@@ -812,7 +831,7 @@ layout=function()
                         while i<=n and rows[i].kind~="section" and #group<columns do
                             group[#group+1]=i; i=i+1
                         end
-                        local h=rh
+                        local h=0
                         for _,index in ipairs(group) do h=math.max(h,measured_height(rows[index],cell_w)) end
                         for column,index in ipairs(group) do
                             geometry[index]={x=margin+(column-1)*(cell_w+gap),content_y=content_y,
@@ -919,12 +938,12 @@ local function draw_bar(L)
             local focused=zone=="bar" and (items[bar_i]=="back" or items[bar_i]=="header")
             panel(pad,18*cs,bw,bh_button,focused,disabled(left),true)
             local label=secondary and t("back") or t(left.label)
-            outlined((secondary and "‹ " or "")..label,pad,18*cs+vcen(26*cs,bh_button),26*cs,
+            plain((secondary and "‹ " or "")..label,pad,18*cs+vcen(26*cs,bh_button),26*cs,
                 disabled(left) and {0.58,0.58,0.60} or {1,1,1},"center",bw)
         end
         local lw,lh=90*cs,54*cs; local lx=W-lw-pad
         panel(lx,18*cs,lw,lh,zone=="bar" and items[bar_i]=="lang",false,true)
-        outlined(state.ui_lang=="en" and "中" or "EN",lx,18*cs+vcen(27*cs,lh),27*cs,{1,1,1},"center",lw)
+        plain(state.ui_lang=="en" and "中" or "EN",lx,18*cs+vcen(27*cs,lh),27*cs,{1,1,1},"center",lw)
         local title_x=pad+157*cs; local title_w=math.max(120*cs,W-title_x*2)
         local title=t(page.title); local title_px=40; local font=fnt(title_px*cs)
         while title_px>24 and font:getWidth(title)>title_w do
@@ -950,14 +969,14 @@ local function draw_bar(L)
         local bw = 108*cs
         local focused = (zone=="bar" and items[bar_i]=="back")
         panel(pad, (bh-44*cs)/2, bw, 44*cs, focused)
-        outlined("‹ "..t("back"), pad, (bh-44*cs)/2+vcen(BTN_PX*cs,44*cs), BTN_PX*cs, {1,1,1}, "center", bw)
+        plain("‹ "..t("back"),pad,(bh-44*cs)/2+vcen(BTN_PX*cs,44*cs),BTN_PX*cs,{1,1,1},"center",bw)
     end
     -- Language: always top-right (back sits left on secondary pages, language right)
     local lw = 84*cs
     local lx = W - lw - pad
     local lfocused = (zone=="bar" and items[bar_i]=="lang")
     panel(lx, (bh-44*cs)/2, lw, 44*cs, lfocused)
-    outlined(state.ui_lang=="en" and "中" or "EN", lx, (bh-44*cs)/2+vcen(BTN_PX*cs,44*cs), BTN_PX*cs, {1,1,1}, "center", lw)
+    plain(state.ui_lang=="en" and "中" or "EN",lx,(bh-44*cs)/2+vcen(BTN_PX*cs,44*cs),BTN_PX*cs,{1,1,1},"center",lw)
     -- Centred title, constrained between Back and language controls.
     local title=t(pages[page_i].title); local right_inset=W-(lx-12*cs)
     local title_inset=secondary and math.max(pad+120*cs,right_inset) or right_inset
@@ -967,7 +986,7 @@ local function draw_bar(L)
     title=clip_ellipsis(title,font,title_w)
     outlined(title,title_x,(bh-font:getHeight())/2,title_px*cs,{1,1,1},"center",title_w)
     -- Detected resolution (small type)
-    outlined(string.format(t("detected"), realW, realH), 0, bh+2*cs, SUB_PX*cs, {1,1,1,0.7}, "center", W)
+    plain(string.format(t("detected"),realW,realH),0,bh+2*cs,SUB_PX*cs,{1,1,1,0.7},"center",W)
 end
 
 sidebar_geometry=function(L)
@@ -1030,11 +1049,11 @@ local function draw_dialog(L)
         d.danger and {1,0.72,0.72} or {1,1,1},"left",dw-pad*2)
     content_y=content_y+43*cs
     if d.message then
-        outlined(t(d.message),dx+pad,content_y,18*cs,{0.82,0.82,0.88},"left",dw-pad*2)
+        plain(t(d.message),dx+pad,content_y,18*cs,{0.82,0.82,0.88},"left",dw-pad*2)
         content_y=content_y+message_h
     end
     local function clip_line(value,px,max_w)
-        value=t(value); local font=fnt(px)
+        value=t(value); local font=body_fnt(px)
         if not font.getWidth or font:getWidth(value)<=max_w then return value end
         local out=""
         for char in value:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
@@ -1045,13 +1064,13 @@ local function draw_dialog(L)
     end
     for i=1,shown do
         local label=clip_line("• "..t(items[i]),19*cs,dw-pad*2)
-        outlined(label,dx+pad,content_y+(i-1)*32*cs,19*cs,{0.94,0.94,0.97},"left",dw-pad*2)
+        plain(label,dx+pad,content_y+(i-1)*32*cs,19*cs,{0.94,0.94,0.97},"left",dw-pad*2)
     end
     content_y=content_y+shown*32*cs
     if #items>shown then
         local more=#items-shown
         local label=state.ui_lang=="zh" and string.format("另有 %d 项",more) or string.format("%d more items",more)
-        outlined(label,dx+pad,content_y,17*cs,{0.68,0.68,0.76},"left",dw-pad*2)
+        plain(label,dx+pad,content_y,17*cs,{0.68,0.68,0.76},"left",dw-pad*2)
     end
 
     local gap=12*cs; local bw=(dw-pad*2-gap)/2; local bh=50*cs; local by=dy+dh-pad-bh
@@ -1063,7 +1082,7 @@ local function draw_dialog(L)
             love.graphics.setColor(focused and 1 or 0.85,focused and 0.78 or 0.35,focused and 0.80 or 0.40,1)
             love.graphics.setLineWidth(focused and 3 or 1); love.graphics.rectangle("line",x,by,bw,bh,8,8)
         else panel(x,by,bw,bh,focused,false,L.app) end
-        outlined(t(label),x,by+vcen(20*cs,bh),20*cs,{1,1,1},"center",bw)
+        plain(t(label),x,by+vcen(20*cs,bh),20*cs,{1,1,1},"center",bw)
     end
     draw_button(1,dx+pad,d.confirm or {en="Confirm",zh="确认"},d.danger)
     draw_button(2,dx+pad+bw+gap,d.cancel or {en="Cancel",zh="取消"},false)
@@ -1099,7 +1118,7 @@ function kit.draw()
         local focused = (zone=="rows" and i==focus_i)
         local ty = y + vcen(ROW_PX*L.cs, row_h)
         if r.kind=="section" then
-            outlined(t(r.label),x+4*L.cs,ty,21*L.cs,{1.0,0.78,0.36},"left",rw-8*L.cs)
+            plain(t(r.label),x+4*L.cs,ty,21*L.cs,{1.0,0.78,0.36},"left",rw-8*L.cs)
             love.graphics.setColor(1.0,0.78,0.36,0.42); love.graphics.setLineWidth(1)
             love.graphics.line(x,y+row_h-8*L.cs,x+rw,y+row_h-8*L.cs)
         else
@@ -1110,8 +1129,8 @@ function kit.draw()
             local select_x=x+rw-select_w-16*L.cs
             local select_y=y+(row_h-select_h)/2
             local label_w=math.max(1,select_x-x-30*L.cs)
-            local label=clip_ellipsis(tostring(t(r.label) or ""),fnt(ROW_PX*L.cs),label_w)
-            outlined(label,x+18*L.cs,ty,ROW_PX*L.cs,{1,1,1})
+            local label=clip_ellipsis(tostring(t(r.label) or ""),body_fnt(ROW_PX*L.cs),label_w)
+            plain(label,x+18*L.cs,ty,ROW_PX*L.cs,{1,1,1})
             local disp=r.labels and r.labels[state[r.key]]
             disp = disp and (strings[disp] and t(disp) or disp) or state[r.key]
             draw_select(select_x,select_y,select_w,select_h,disp,focused,disabled(r),L.cs)
@@ -1122,10 +1141,10 @@ function kit.draw()
             draw_checkbox(check_x,check_y,check_size,r.checked,focused,disabled(r))
             local tx=x+(L.app and 70 or 56)*L.cs
             if r.detail then
-                outlined(t(r.label),tx,y+(L.app and 10 or 7)*L.cs,(L.app and 22 or 20)*L.cs,{1,1,1})
-                outlined(t(r.detail),tx,y+(L.app and 39 or 31)*L.cs,(L.app and 18 or 14)*L.cs,{0.78,0.78,0.84})
+                plain(t(r.label),tx,y+(L.app and 10 or 7)*L.cs,(L.app and 22 or 20)*L.cs,{1,1,1})
+                plain(t(r.detail),tx,y+(L.app and 39 or 31)*L.cs,(L.app and 18 or 14)*L.cs,{0.78,0.78,0.84})
             else
-                outlined(t(r.label),tx,ty,ROW_PX*L.cs,{1,1,1})
+                plain(t(r.label),tx,ty,ROW_PX*L.cs,{1,1,1})
             end
         elseif r.kind=="switch" then
             local raw=switch_current(r)
@@ -1133,10 +1152,10 @@ function kit.draw()
             local track_w,track_h=68*L.cs,30*L.cs
             local track_x=x+rw-track_w-18*L.cs
             local track_y=y+(row_h-track_h)/2
-            local optical_y=0.5*L.cs
+            local optical_y=0
             local label_px=ROW_PX*L.cs
             local label_y=centred_text_y(label_px,y,row_h,optical_y)
-            outlined(t(r.label),x+18*L.cs,label_y,label_px,{1,1,1})
+            plain(t(r.label),x+18*L.cs,label_y,label_px,{1,1,1})
             love.graphics.setColor(on and 0.48 or 0.24,on and 0.25 or 0.24,on and 0.72 or 0.28,1)
             love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,track_h/2,track_h/2)
             local knob=24*L.cs
@@ -1144,24 +1163,29 @@ function kit.draw()
             love.graphics.setColor(0.98,0.98,1,1)
             love.graphics.rectangle("fill",knob_x,track_y+3*L.cs,knob,knob,knob/2,knob/2)
         elseif r.kind=="info" then
-            outlined(t(r.label),x+16*L.cs,y+6*L.cs,16*L.cs,{0.72,0.72,0.82})
-            outlined(t(r.value),x+16*L.cs,y+27*L.cs,18*L.cs,{1,1,1},"left",rw-32*L.cs)
+            plain(t(r.label),x+16*L.cs,y+6*L.cs,16*L.cs,{0.72,0.72,0.82})
+            plain(t(r.value),x+16*L.cs,y+27*L.cs,18*L.cs,{1,1,1},"left",rw-32*L.cs)
+        elseif r.kind=="list_item" then
+            local px=18*L.cs; local inner_w=math.max(1,rw-32*L.cs); local font=body_fnt(px)
+            local value=clip_ellipsis(tostring(t(r.value) or ""),font,inner_w)
+            plain(value,x+16*L.cs,centred_text_y(px,y,row_h,0.5*L.cs),px,
+                disabled(r) and {0.55,0.55,0.57} or {0.96,0.94,1},"left",inner_w)
         elseif r.kind=="textview" then
-            local pad=12*L.cs; local label_font,value_font=fnt(15*L.cs),fnt(17*L.cs); local inner_w=rw-pad*2
+            local pad=12*L.cs; local label_font,value_font=body_fnt(15*L.cs),body_fnt(17*L.cs); local inner_w=rw-pad*2
             local label,label_lines=wrapped_text(r.label,label_font,inner_w,2)
             local label_h=label_lines*label_font:getHeight()
             local requested=r.expanded and r.expanded_lines or r.max_lines
             local max_fit=math.max(1,math.floor((row_h-pad*2-label_h-5*L.cs)/value_font:getHeight()))
             local value=wrapped_text(r.value,value_font,inner_w,math.min(requested,max_fit))
-            outlined(label,x+pad,y+pad,15*L.cs,{0.72,0.72,0.82},"left",inner_w)
-            outlined(value,x+pad,y+pad+label_h+5*L.cs,17*L.cs,{1,1,1},"left",inner_w)
+            plain(label,x+pad,y+pad,15*L.cs,{0.72,0.72,0.82},"left",inner_w)
+            plain(value,x+pad,y+pad+label_h+5*L.cs,17*L.cs,{1,1,1},"left",inner_w)
         else
-            outlined(t(r.label), x, ty, ROW_PX*L.cs, {1,1,1}, "center", rw)
+            plain(t(r.label),x,ty,ROW_PX*L.cs,{1,1,1},"center",rw)
         end
         local badge=meta_badge(r)
         if badge then
             local color=badge.color or {1,0.78,0.35}
-            outlined(t(badge.text),x,y+7*L.cs,14*L.cs,color,"right",rw-14*L.cs)
+            plain(t(badge.text),x,y+7*L.cs,14*L.cs,color,"right",rw-14*L.cs)
         end
         end
     end
@@ -1185,8 +1209,8 @@ function kit.draw()
             end
             love.graphics.setColor(0.42,0.42,0.45,0.94); love.graphics.rectangle("fill",track_x+1*L.cs,thumb_y,7*L.cs,thumb_h,4,4)
         else
-            if L.first>1 then outlined("▲",0,L.band_top-2*L.cs,SUB_PX*L.cs,{1,1,1,0.7},"center",W) end
-            if L.last<L.n then outlined("▼",0,L.band_top+L.band-14*L.cs,SUB_PX*L.cs,{1,1,1,0.7},"center",W) end
+            if L.first>1 then plain("▲",0,L.band_top-2*L.cs,SUB_PX*L.cs,{1,1,1,0.7},"center",W) end
+            if L.last<L.n then plain("▼",0,L.band_top+L.band-14*L.cs,SUB_PX*L.cs,{1,1,1,0.7},"center",W) end
         end
     end
 
@@ -1201,7 +1225,7 @@ function kit.draw()
         for i,r in ipairs(side) do
             local g=geometry[i]
             panel(g.x,g.y,g.w,g.h,zone=="sidebar" and i==sidebar_i,disabled(r),L.app)
-            outlined(t(r.label),g.x,g.y+vcen((L.app and 20 or 19)*L.cs,g.h),(L.app and 20 or 19)*L.cs,
+            plain(t(r.label),g.x,g.y+vcen((L.app and 20 or 19)*L.cs,g.h),(L.app and 20 or 19)*L.cs,
                 disabled(r) and {0.55,0.55,0.57} or {1,1,1},"center",g.w)
         end
     end
@@ -1210,10 +1234,10 @@ function kit.draw()
     if not L.app and port.credits then
         local cy = H - 16*L.cs - #port.credits*24*L.cs
         for i,c in ipairs(port.credits) do
-            outlined(t(c[1])..": "..c[2], 16*L.cs, cy+(i-1)*24*L.cs, CRED_PX*L.cs, {1,1,1,0.9})
+            plain(t(c[1])..": "..c[2],16*L.cs,cy+(i-1)*24*L.cs,CRED_PX*L.cs,{1,1,1,0.9})
         end
     end
-    if not L.app then outlined(kit.CONTACT, 0, H-32*L.cs, CRED_PX*L.cs, {1,1,1,0.9}, "right", W-16*L.cs) end
+    if not L.app then plain(kit.CONTACT,0,H-32*L.cs,CRED_PX*L.cs,{1,1,1,0.9},"right",W-16*L.cs) end
 
     if dialog_state then draw_dialog(L) end
 
@@ -1221,14 +1245,14 @@ function kit.draw()
         love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,W,H)
         local bw,bh=math.min(W*0.72,520),110*L.cs; local bx,by=(W-math.min(W*0.72,520))/2,(H-bh)/2
         panel(bx,by,bw,bh,true,false,L.app)
-        outlined(t(busy_message or "working"),bx,by+vcen(22*L.cs,bh),22*L.cs,{1,1,1},"center",bw)
+        plain(t(busy_message or "working"),bx,by+vcen(22*L.cs,bh),22*L.cs,{1,1,1},"center",bw)
     end
 
     if letterbox then
         love.graphics.setScissor(); love.graphics.pop()
         love.graphics.setColor(1,1,1,0.5); love.graphics.setLineWidth(1)
         love.graphics.rectangle("line",offX,offY,W,H)
-        outlined(W.."×"..H.." preview", offX+8, offY+4, 14, {1,1,0.6})
+        plain(W.."×"..H.." preview",offX+8,offY+4,14,{1,1,0.6})
     end
 end
 
