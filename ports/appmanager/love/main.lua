@@ -204,8 +204,11 @@ build_home=function(preserve_focus)
         if p.dir~="" then detail[#detail+1]=p.dir.."/" elseif p.claimed_dir~="" then detail[#detail+1]=L("Missing data: ","数据缺失：")[kit.get_state().ui_lang]..p.claimed_dir end
         local missing=missing_runtime(script); if missing~="" then detail[#detail+1]=(kit.get_state().ui_lang=="zh" and "缺少 Runtime: " or "Missing Runtime: ")..missing end
         local bytes=path_size(paths); if bytes>0 then detail[#detail+1]=human(bytes) end
-        rows[#rows+1]=kit.checkbox(display_name(script),join(detail),selected_home[script],function(value) selected_home[script]=value end,
-            missing~="" and {badge=kit.badge(L("Runtime missing","缺少 Runtime"))} or nil)
+        rows[#rows+1]=kit.checkbox(display_name(script),{
+            id=script,detail=join(detail),checked=selected_home[script],
+            on_change=function(value) selected_home[script]=value end,
+            badge=missing~="" and kit.badge(L("Runtime missing","缺少 Runtime")) or nil,
+        })
     end
     if #rows==0 then rows[1]=kit.info(L("Ports","端口"),L("No managed ports found.","没有找到可管理的端口。")) end
     local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
@@ -244,7 +247,10 @@ end
 build_junk=function(preserve_focus)
     local rows={}
     local function add(label,detail,path)
-        local meta={path=path}; local row=kit.checkbox(label,detail,selected_junk[path],function(value) selected_junk[path]=value end,meta)
+        local row=kit.checkbox(label,{
+            id=path,detail=detail,checked=selected_junk[path],meta={path=path},
+            on_change=function(value) selected_junk[path]=value end,
+        })
         rows[#rows+1]=row
     end
     for _,name in ipairs(report.orphan_dirs or {}) do add(name.."/",L("Orphan data folder","孤立数据目录"),env.gamedirs_dir.."/"..name) end
@@ -305,9 +311,12 @@ build_trash=function(preserve_focus)
     for _,item in ipairs(collect_trash()) do
         local key=item.paths[1]; local bytes=path_size(item.paths); local detail=item.detail
         if bytes>0 then detail=function() return kit.translate(item.detail).." · "..human(bytes) end end
-        rows[#rows+1]=kit.checkbox(item.title,detail,selected_trash[key],function(value)
-            for _,path in ipairs(item.paths) do selected_trash[path]=value end
-        end,{paths=item.paths})
+        rows[#rows+1]=kit.checkbox(item.title,{
+            id=key,detail=detail,checked=selected_trash[key],meta={paths=item.paths},
+            on_change=function(value)
+                for _,path in ipairs(item.paths) do selected_trash[path]=value end
+            end,
+        })
     end
     if #rows==0 then rows[1]=kit.info(L("Trash","回收站"),L("Trash is empty.","回收站是空的。")) end
     kit.set_page(TRASH,L("Trash","回收站"),rows,{preserve_focus=preserve_focus,
@@ -323,7 +332,7 @@ end
 build_env=function()
     local rows={}
     local function section(label) rows[#rows+1]=kit.section(label) end
-    local function info(label,value) rows[#rows+1]=kit.info(label,provided(value)) end
+    local function info(label,value) rows[#rows+1]=kit.textview(label,provided(value)) end
     section(L("Key paths","关键路径"))
     info(L("SH folder ($0 folder)","SH 目录（$0 目录）"),env.scripts_dir)
     info(L("Data folder (directory/ports)","Data 目录（directory/ports）"),env.gamedirs_dir)
@@ -357,7 +366,8 @@ build_env=function()
     local runtimes=report.runtimes.have or {}
     if #runtimes==0 then info("Runtime",L("None installed","未安装"))
     else for index,name in ipairs(runtimes) do info("Runtime "..index.."/"..#runtimes,name) end end
-    kit.set_page(ENV,L("Environment details","环境详情"),rows,{sidebar_title=L("Details","详情"),sidebar={
+    kit.set_page(ENV,L("Environment details","环境详情"),rows,{row_layout={mode="grid",columns=2},
+        sidebar_title=L("Details","详情"),sidebar={
         button(L("Back","返回"),function() kit.goto_page(HOME) end,{group="bottom"})
     }})
 end

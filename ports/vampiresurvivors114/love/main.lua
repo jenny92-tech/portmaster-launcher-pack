@@ -8,8 +8,8 @@ launcher.define {
         {"credit_porter", "Bili 解腻Jenny"},
     },
     fields = {
-        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "换 A/B:"}, env = "VS_SWAP_AB"},
-        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "换 X/Y:"}, env = "VS_SWAP_XY"},
+        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "VS_SWAP_AB"},
+        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "VS_SWAP_XY"},
     },
     field_order = {"swap_ab", "swap_xy"},
     static_env = {{"VS_WIDTH", "auto"}, {"VS_HEIGHT", "auto"}},

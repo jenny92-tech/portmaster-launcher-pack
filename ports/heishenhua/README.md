@@ -23,7 +23,7 @@ PortMaster 自带的 LÖVE 11.5 显示设置界面；Stage 2 按选择修改 `co
 |---|---|---|
 | 渲染分辨率 | auto/640x480/720x720/960x540/960x720/1280x720 | `displayWidth/Height` |
 | 画面质量 | 384/480/720/0 | `textureMaxDim` |
-| 换 A/B、换 X/Y | on/off | `[input.remap]` |
+| 交换 A/B、交换 X/Y | on/off | `[input.remap]` |
 | 减伤、无限资源、技能冷却 | 多档 | `[[il2cpp_patch]]` |
 
 ## 构建与部署

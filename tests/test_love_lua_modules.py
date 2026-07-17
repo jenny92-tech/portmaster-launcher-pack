@@ -16,7 +16,15 @@ root = Path(__file__).resolve().parents[1]
 
 mock = r'''
 love = {graphics={}, filesystem={}, event={}}
-local font = {getHeight=function() return 20 end,getWidth=function(_,text) return #text*10 end}
+local font = {
+    getHeight=function() return 20 end,
+    getWidth=function(_,text) return #text*10 end,
+    getWrap=function(_,text,limit)
+        local count=math.max(1,math.floor(limit/10)); local lines={}
+        for i=1,#text,count do lines[#lines+1]=text:sub(i,i+count-1) end
+        return math.min(#text*10,limit),lines
+    end,
+}
 love.graphics.getDimensions=function() return 960,720 end
 love.graphics.setBackgroundColor=function() end
 love.graphics.newFont=function() return font end
@@ -39,11 +47,11 @@ love.event.quit=function(code) LAST_QUIT=code end
 '''
 
 expected_env = {
-    "heishenhua": (5, ("HSH_WIDTH=auto", "HSH_TEXMAX=480", "HSH_DMG=1.0", "HSH_LAUNCH_COUNT=1")),
-    "hk": (4, ("HKL_WIDTH=auto", "HKL_TEXMAX=384", "HKL_SWAP_AB=off", "HKL_LAUNCH_COUNT=1")),
-    "sts2": (4, ("SLL_PCK_VARIANT=8x8", "SLL_LANGUAGE=zh_CN", "SLL_SWAP_AB=on", "SLL_LAUNCH_COUNT=1")),
-    "terraria": (4, ("TER_WIDTH=auto", "TER_LANGUAGE=7", "TER_SWAP_AB=off", "TER_LAUNCH_COUNT=1")),
-    "vampiresurvivors114": (2, ("VS_WIDTH=auto", "VS_HEIGHT=auto", "VS_SWAP_AB=off", "VS_LAUNCH_COUNT=1")),
+    "heishenhua": (5, ("HSH_WIDTH='auto'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'")),
+    "hk": (4, ("HKL_WIDTH='auto'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'")),
+    "sts2": (4, ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_SWAP_AB='on'", "SLL_LAUNCH_COUNT='1'")),
+    "terraria": (4, ("TER_WIDTH='auto'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'")),
+    "vampiresurvivors114": (2, ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'")),
 }
 
 for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):
@@ -62,6 +70,280 @@ for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):
         text = (Path(source) / "launch_config.env").read_text(encoding="utf-8")
         for line in required:
             assert line in text, (port, line, text)
+
+# Persisted picker values are untrusted input: invalid values must fall back to
+# defaults and generated shell environments must quote every value.
+with tempfile.TemporaryDirectory() as source:
+    marker = Path(source) / "would-run"
+    (Path(source) / "state.txt").write_text(
+        f"ui_lang=invalid\nlaunch_count=0\nquality=$(touch {marker})\n", encoding="utf-8"
+    )
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        require("launcher").define({title={en="Test",zh="测试"},static_env={{"TEXT","it's safe"}},fields={
+            require("launcher").select({key="quality",default="safe",
+                options={{value="safe",label="Safe"},{value="fast",label="Fast"}},env="QUALITY"})
+        }})
+        love.load()
+        local state=require("kit").get_state()
+        assert(state.ui_lang=="zh" and state.quality=="safe")
+        love.keypressed("down"); love.keypressed("return")
+    ''')
+    text = (Path(source) / "launch_config.env").read_text(encoding="utf-8")
+    assert "QUALITY='safe'" in text and "TEXT='it'\"'\"'s safe'" in text, text
+    assert "$(touch" not in text and not marker.exists(), text
+
+# A failed atomic environment write keeps the launcher open and reports an
+# ordinary retry/stay dialog instead of returning EXIT_START with stale config.
+lua = LuaRuntime(unpack_returned_tuples=True)
+lua.globals().SOURCE = "/definitely/missing/port/source"
+lua.execute(mock)
+lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+lua.execute(r'''
+    local k=require("kit")
+    k.run({state={ui_lang="en",launch_count=0},
+        build_pages=function() k.add_page("Test",{k.button("Start","start")}) end,
+        write_env=function(out) out:write("VALUE=ok\n") end})
+    love.load(); love.keypressed("return")
+    assert(LAST_QUIT==nil and k.debug_dialog().open and k.debug_dialog().focus=="cancel")
+''')
+
+# A writer exception leaves the previous complete environment in place and
+# removes the temporary file.
+with tempfile.TemporaryDirectory() as source:
+    old_env = Path(source) / "launch_config.env"
+    old_env.write_text("OLD='complete'\n", encoding="utf-8")
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en",launch_count=0},
+            build_pages=function() k.add_page("Test",{k.button("Start","start")}) end,
+            write_env=function() error("simulated write failure") end})
+        love.load(); love.keypressed("return")
+        assert(LAST_QUIT==nil and k.debug_dialog().open)
+    ''')
+    assert old_env.read_text(encoding="utf-8") == "OLD='complete'\n"
+    assert not Path(str(old_env) + ".tmp").exists()
+
+# The shared component API stays small but explicit: Select is the named form
+# of the existing picker, Checkbox accepts an options table, and physical keys
+# are translated to semantic actions before widgets see them.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local changed=nil
+        local select_row=k.select("Quality",{"safe","fast"},{safe="Safe",fast="Fast"},"quality",{id="quality"})
+        local check_row=k.checkbox("Enabled",{id="enabled",detail="Optional feature",checked=false,
+            on_change=function(value) changed=value end})
+        assert(select_row.kind=="picker" and select_row.id=="quality")
+        assert(check_row.kind=="checkbox" and check_row.id=="enabled" and check_row.detail=="Optional feature")
+        k.run({state={ui_lang="en",quality="safe"},input_map={z="confirm",x="cancel"},
+            build_pages=function()
+                k.add_page("Home",{select_row,check_row,k.button("Dialog",function()
+                    k.dialog({title="Confirm",on_cancel=function() changed="cancelled" end})
+                end,{id="dialog"})})
+                k.add_page("Other",{k.button("Other",function() end,{id="other"})})
+            end})
+        love.load()
+        love.keypressed("down"); love.keypressed("z")
+        assert(check_row.checked and changed==true)
+        love.keypressed("down"); love.keypressed("z")
+        local before=k.debug_focus()
+        assert(k.debug_dialog().open and k.debug_dialog().scope_depth==1)
+        -- A programmatic page change cannot steal the modal's return target.
+        k.set_page(1,"Home",{k.button("Inserted",function() end,{id="inserted"}),
+            select_row,check_row,k.button("Dialog",function() end,{id="dialog"})},{preserve_focus=true})
+        k.goto_page(2); k.close_dialog()
+        local after=k.debug_focus()
+        assert(k.debug_page().index==1 and after.zone==before.zone and after.focus_i==before.focus_i+1)
+        k.dialog({title="Confirm",on_cancel=function() changed="cancelled" end})
+        love.keypressed("x")
+        assert(changed=="cancelled" and not k.debug_dialog().open)
+        k.input("up")
+        assert(k.debug_focus().focus_i==3)
+    ''')
+
+# Checkbox visuals are drawn as a real control, not font-dependent square/check
+# glyphs. The selected state adds a vector checkmark to the custom box.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local printed={}
+        local line_calls=0
+        love.graphics.print=function(value) printed[#printed+1]=tostring(value) end
+        love.graphics.line=function() line_calls=line_calls+1 end
+        local k=require("kit")
+        local row=k.checkbox("Port",{detail="Game data",checked=false})
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            k.add_page("Manager",{row})
+        end})
+        love.load(); love.draw()
+        for _,value in ipairs(printed) do
+            assert(not value:find("□",1,true) and not value:find("✓",1,true))
+        end
+        local unchecked_lines=line_calls
+        printed={}; line_calls=0
+        k.input("confirm"); love.draw()
+        assert(row.checked and line_calls>unchecked_lines)
+        for _,value in ipairs(printed) do
+            assert(not value:find("□",1,true) and not value:find("✓",1,true))
+        end
+    ''')
+
+# Select renders its value once as crisp centred text inside a custom control,
+# with vector chevrons instead of fuzzy font characters around the value.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local printed={}
+        local line_calls,rectangle_calls=0,0
+        love.graphics.printf=function(value) printed[#printed+1]=tostring(value) end
+        love.graphics.line=function() line_calls=line_calls+1 end
+        love.graphics.rectangle=function() rectangle_calls=rectangle_calls+1 end
+        local k=require("kit")
+        local row=k.select("Quality",{"safe","fast"},{safe="Safe",fast="Fast"},"quality")
+        k.run({state={ui_lang="en",quality="safe"},build_pages=function()
+            k.add_page("Launcher",{row})
+        end})
+        love.load(); love.draw()
+        local value_count=0
+        for _,value in ipairs(printed) do
+            if value=="Safe" then value_count=value_count+1 end
+            assert(value~="< Safe >")
+        end
+        assert(value_count==1 and line_calls>=2 and rectangle_calls>=4)
+    ''')
+
+# Measured Grid/Flow geometry is cached independently of focus and scroll.
+# Expanding a TextView invalidates the measurement and produces a new height.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local row=k.textview("Long",string.rep("long value ",80),{id="long"})
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            k.add_page("Cache",{row},{row_layout={mode="grid",columns=2}})
+        end})
+        love.load()
+        local before=k.debug_layout_cache()
+        local compact=k.debug_layout()
+        local measured=k.debug_layout_cache()
+        k.debug_layout()
+        local reused=k.debug_layout_cache()
+        assert(measured.misses==before.misses+1 and reused.hits==measured.hits+1)
+        k.input("confirm")
+        local expanded=k.debug_layout()
+        local invalidated=k.debug_layout_cache()
+        assert(invalidated.misses==reused.misses+1)
+        assert(expanded.geometry[1].h>compact.geometry[1].h)
+        k.invalidate_layout()
+        k.debug_layout()
+        assert(k.debug_layout_cache().misses==invalidated.misses+1)
+    ''')
+
+# Switch is a state-bound boolean control: Left/Right set an exact value and
+# Confirm toggles it. Declarative launcher.toggle fields render through it.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local changes={}
+        local switch_row=k.switch("Feature","feature",{id="feature",off_value="disabled",on_value="enabled",
+            on_change=function(on,value) changes[#changes+1]={on,value} end})
+        assert(switch_row.kind=="switch" and switch_row.id=="feature")
+        k.run({state={ui_lang="en",feature="disabled"},build_pages=function()
+            k.add_page("Switch",{switch_row})
+        end})
+        love.load(); love.draw()
+        k.input("right")
+        assert(k.get_state().feature=="enabled" and changes[1][1]==true and changes[1][2]=="enabled")
+        k.input("left")
+        assert(k.get_state().feature=="disabled" and changes[2][1]==false and changes[2][2]=="disabled")
+        k.input("confirm")
+        assert(k.get_state().feature=="enabled" and changes[3][1]==true)
+        switch_row.disabled=true
+        k.input("left")
+        assert(k.get_state().feature=="enabled" and #changes==3)
+    ''')
+
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local original=k.switch
+        local switch_calls=0
+        k.switch=function(...) switch_calls=switch_calls+1; return original(...) end
+        require("launcher").define({title="Toggle",fields={
+            require("launcher").toggle({key="enabled",label="Enabled",default="on",env="ENABLED"})
+        }})
+        love.load()
+        assert(switch_calls==1 and k.get_state().enabled=="on")
+    ''')
+
+# Switch needs no redundant On/Off copy: its label, track and knob share one
+# centre line, while position and colour communicate the boolean state.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local current_font=nil
+        local label_y,label_h,track_cy,knob_cy
+        local status_seen=false
+        love.graphics.newFont=function(size)
+            local f={size=tonumber(size) or 20}
+            f.getHeight=function(self) return self.size end
+            f.getWidth=function(self,text) return #text*self.size*0.5 end
+            f.getWrap=function(self,text,limit) return limit,{text} end
+            return f
+        end
+        love.graphics.setFont=function(font) current_font=font end
+        love.graphics.print=function(value,x,y)
+            if value=="Feature" then label_y,label_h=y,current_font.size end
+        end
+        love.graphics.printf=function(value,x,y)
+            if value=="On" or value=="Off" then status_seen=true end
+        end
+        love.graphics.rectangle=function(mode,x,y,w,h)
+            if mode=="fill" and w/h>2 and w/h<2.5 then track_cy=y+h/2 end
+            if mode=="fill" and math.abs(w-h)<0.01 and w<40 then knob_cy=y+h/2 end
+        end
+        local k=require("kit")
+        k.run({state={ui_lang="en",feature="on"},theme={kind="app"},build_pages=function()
+            k.add_page("Switch",{k.switch("Feature","feature")})
+        end})
+        love.load(); love.draw()
+        assert(label_y and track_cy and knob_cy)
+        assert(not status_seen)
+        assert(math.abs((label_y+label_h/2)-track_cy)<=0.75)
+        assert(math.abs(knob_cy-track_cy)<0.01)
+    ''')
 
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute("arg = {[1]=...}", str(root / "ports/appmanager/love"))
@@ -160,7 +442,89 @@ with tempfile.TemporaryDirectory() as source:
         local page=k.debug_page()
         assert(page.index==4 and page.section_count==3 and page.row_count==24)
         assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==2)
+        local layout=k.debug_layout()
+        assert(layout.row_layout_mode=="grid" and layout.columns==2)
+        assert(layout.geometry[2].x < layout.geometry[3].x)
+        assert(layout.geometry[2].y == layout.geometry[3].y)
+        assert(layout.geometry[2].h == layout.geometry[3].h)
+        love.keypressed("right")
+        assert(k.debug_focus().focus_i==3)
+        love.keypressed("down")
+        assert(k.debug_focus().focus_i==5)
         love.draw(); love.keypressed("escape")
+    ''')
+    # Flow layout derives its column count from the available width, while all
+    # cards in one visual row share the tallest wrapped TextView height.
+    lua.execute(r'''
+        local k=require("kit")
+        local flow=k.add_page("Flow",{
+            k.textview("Long","This value is deliberately long enough to wrap across several lines inside a card."),
+            k.textview("Short","OK"),
+            k.textview("Third","Another card"),
+        },{row_layout={mode="flow",min_width=250}})
+        k.goto_page(flow)
+        local L=k.debug_layout()
+        assert(L.row_layout_mode=="flow" and L.columns==2)
+        assert(L.geometry[1].y==L.geometry[2].y and L.geometry[1].h==L.geometry[2].h)
+        assert(L.geometry[1].h>L.rh)
+        love.keypressed("right"); assert(k.debug_focus().focus_i==2)
+        love.keypressed("down"); assert(k.debug_focus().focus_i==3)
+        love.keypressed("right"); assert(k.debug_focus().focus_i==3)
+        k.goto_page(1)
+    ''')
+    # Moving right from the lowest grid row chooses the spatially closest
+    # bottom sidebar action rather than jumping to its first action.
+    lua.execute(r'''
+        local k=require("kit"); local rows={}
+        for i=1,12 do rows[i]=k.textview("Row "..i,"Value") end
+        local cross=k.add_page("Cross",rows,{row_layout={mode="grid",columns=2},sidebar={
+            k.button("Top",function() end),k.button("Bottom",function() end,{group="bottom"})}})
+        k.goto_page(cross); love.keypressed("right")
+        for _=1,5 do love.keypressed("down") end
+        assert(k.debug_focus().focus_i==12)
+        love.keypressed("right")
+        assert(k.debug_focus().zone=="sidebar" and k.debug_focus().sidebar_i==2)
+        k.goto_page(1)
+    ''')
+    # Sidebar navigation follows visual rows: Down skips the right half of the
+    # current row, while Right still crosses between paired half buttons.
+    lua.execute(r'''
+        local k=require("kit")
+        local sidebar_page=k.add_page("Sidebar",{k.button("Row",function() end)},{sidebar={
+            k.button("Full",function() end),k.button("Left",function() end,{half=true}),
+            k.button("Right",function() end,{half=true}),k.button("Next",function() end)}})
+        k.goto_page(sidebar_page); love.keypressed("right"); love.keypressed("down")
+        assert(k.debug_focus().sidebar_i==2)
+        love.keypressed("down"); assert(k.debug_focus().sidebar_i==4)
+        love.keypressed("up"); assert(k.debug_focus().sidebar_i==2)
+        love.keypressed("right"); assert(k.debug_focus().sidebar_i==3)
+        k.goto_page(1)
+    ''')
+    # preserve_focus follows a stable row id across insertions rather than
+    # retaining an index that now names another action.
+    lua.execute(r'''
+        local k=require("kit")
+        local function b(name) return k.button(name,function() LAST_ACTION=name end,{id=name}) end
+        local stable=k.add_page("Stable",{b("A"),b("B"),b("C")})
+        k.goto_page(stable); love.keypressed("down")
+        k.set_page(stable,"Stable",{b("X"),b("A"),b("B"),b("C")},{preserve_focus=true})
+        love.keypressed("return"); assert(LAST_ACTION=="B" and k.debug_focus().focus_i==3)
+        love.keypressed("down")
+        k.set_page(stable,"Stable",{b("A"),b("B")},{preserve_focus=true})
+        love.keypressed("return"); assert(LAST_ACTION=="B" and k.debug_focus().focus_i==2)
+        k.goto_page(1)
+    ''')
+    # TextViews default to a compact two-line value, expose an ellipsis, and
+    # expand on A without ever becoming taller than the viewport.
+    lua.execute(r'''
+        local k=require("kit"); local long=string.rep("very long value ",400)
+        local text_page=k.add_page("Text",{k.textview("Long",long)},{row_layout={mode="grid",columns=2}})
+        k.goto_page(text_page); local compact=k.debug_layout()
+        assert(compact.geometry[1].h<compact.band/2)
+        love.keypressed("return"); local expanded=k.debug_layout()
+        assert(expanded.geometry[1].h>compact.geometry[1].h and expanded.geometry[1].h<=expanded.band)
+        love.keypressed("return"); assert(k.debug_layout().geometry[1].h==compact.geometry[1].h)
+        k.goto_page(1)
     ''')
     # Toggle a real scanned port, move into the shared sidebar, open the
     # confirmation dialog, then cancel without leaving the dynamic home page.

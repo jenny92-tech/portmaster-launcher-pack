@@ -37,7 +37,7 @@ function launcher.toggle(spec)
     spec.values = {"off", "on"}
     spec.labels = {off = "off", on = "on"}
     spec.default = spec.default or "off"
-    return field("select", spec)
+    return field("toggle", spec)
 end
 
 function launcher.resolution(spec)
@@ -85,7 +85,9 @@ local function encoded_value(f, value)
 end
 
 local function write_pair(out, name, value)
-    out:write(name .. "=" .. tostring(value) .. "\n")
+    value=tostring(value)
+    local quoted="'"..value:gsub("'","'\"'\"'").."'"
+    out:write(name .. "=" .. quoted .. "\n")
 end
 
 function launcher.define(spec)
@@ -126,7 +128,12 @@ function launcher.define(spec)
             for _, entry in ipairs(page.rows or page.fields or {}) do
                 local f = type(entry) == "string" and by_key[entry] or nil
                 if f then
-                    rows[#rows + 1] = k.picker(f.label_key, f.values, f.labels, f.key)
+                    if f.kind=="toggle" then
+                        rows[#rows + 1] = k.switch(f.label_key, f.key,
+                            {id=f.key,off_value=f.values[1],on_value=f.values[2]})
+                    else
+                        rows[#rows + 1] = k.select(f.label_key, f.values, f.labels, f.key, {id=f.key})
+                    end
                 elseif type(entry) == "table" and entry.kind == "button" then
                     local key = add_localized(port.strings, "page_" .. page_index .. "_button_" .. (#rows + 1), entry.label)
                     rows[#rows + 1] = k.button(key, entry.action)
@@ -159,6 +166,18 @@ function launcher.define(spec)
         end
         if spec.launch_count_env then write_pair(out, spec.launch_count_env, state.launch_count) end
         if spec.write_env then spec.write_env(out, state, k) end
+    end
+
+    port.validate_state = function(state)
+        local changed=false
+        for _,f in ipairs(fields) do
+            local valid=false
+            for _,value in ipairs(f.values) do
+                if state[f.key]==value then valid=true; break end
+            end
+            if not valid then state[f.key]=f.default; changed=true end
+        end
+        return changed
     end
 
     kit.run(port)

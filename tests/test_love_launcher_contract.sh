@@ -70,5 +70,13 @@ grep -Fq 'export SLL_LANGUAGE SLL_QUALITY' "$ROOT/ports/sts2/love/launcher.sh.te
 grep -Fq 'PortPaths.Get("SLL_QUALITY")' "$ROOT/ports/sts2/src/STS2LinuxLauncher/QualityProfile.cs"
 grep -Fq 'love_ui/main.lua' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
 grep -Fq 'love_ui/kit.lua' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"
+grep -Fq 'cp "$KIT_ROOT/love/"*.lua "$DIST/love_ui/"' "$ROOT/ports/sts2/src/scripts/dist-port.sh"
+UI_ONLY=1 "$ROOT/_kit/dist_port.sh" sts2 >/dev/null
+for file in 'Slay the Spire 2.sh' love_ui/kit.lua love_ui/launcher.lua love_ui/main.lua love_ui/ui.gptk; do
+  [ -f "$ROOT/ports/sts2/dist/$file" ] || {
+    echo "sts2 UI-only dist: missing $file" >&2
+    exit 1
+  }
+done
 ! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
 ! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"

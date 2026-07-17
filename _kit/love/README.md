@@ -25,7 +25,7 @@ ports/<port>/love/
 
 Normal ports call `launcher.define`; dynamic apps such as APP Manager call `kit.run`
 directly. The skeleton supplies: header bar,
-adaptive-density layout, outlined text, rounded pickers/buttons, focus ring, EN/ZH
+adaptive-density layout, outlined text, rounded selects/switches/buttons, focus ring, EN/ZH
 toggle, credits, QQ group, state save, env write-out.
 
 ## Component catalogue (declarative: a port declares what it uses, never renders)
@@ -39,21 +39,44 @@ toggle, credits, QQ group, state save, env write-out.
 | Factory | Purpose | Example |
 |---|---|---|
 | `kit.picker(label, values, labels, key)` | item with a cycling selection (`< value >`, stored in `state[key]`) | `kit.picker("resolution", RESOLUTIONS, RES_LABELS, "resolution")` |
+| `kit.select(label, values, labels, key, opts)` | public Select name for `picker`; accepts stable IDs and common row options | `kit.select("quality", VALUES, LABELS, "quality", {id="quality"})` |
 | `kit.button(label, action, opts)` | clickable item; action = `"start"` (exit 42) / `"quit"` (exit 0) / `"page:N"` / a function | `kit.button("start_game", "start")` |
-| `kit.checkbox(label, detail, checked, callback)` | selectable list item | APP Manager port/trash rows |
+| `kit.checkbox(label, detail, checked, callback)` | selectable list item; the options-table form supports `id`, `detail`, `checked`, `on_change` and common row options | `kit.checkbox("mods", {id="mods", checked=true, on_change=changed})` |
+| `kit.switch(label, key, opts)` | state-bound two-value switch; Left turns it off, Right turns it on, Confirm toggles it | `kit.switch("rumble", "rumble", {off_value="off", on_value="on"})` |
 | `kit.info(label, value)` | read-only focusable detail item | environment page |
 | `kit.section(label)` | non-focusable visual heading for grouped details | environment categories |
 | `kit.add_page(title, rows)` | a page = a list of the above; page 1 is the home page | `kit.add_page("title", { picker, picker, button })` |
 
+Form controls share one visual language: a dark inset surface, lavender outline,
+bright active state and vector-drawn indicators. Select values are rendered once
+without an outline shadow and centred from the font's measured height; its chevrons
+and Checkbox's checkmark do not depend on font glyphs.
+
 Pages optionally carry a `sidebar` button column. `kit.set_page` replaces a dynamic
 page; pass `preserve_focus=true` when a selection-only rebuild must keep the current
-row/sidebar control and scroll position. `kit.set_busy` blocks input behind a progress
-overlay during background Shell work.
+row/sidebar control and scroll position. Give dynamic rows a stable `id` (checkbox
+metadata may use `id`, `path` or `paths`) so insertions and sorting preserve the same
+logical item; a removed item falls back to its nearest focusable neighbour.
+`kit.set_busy` blocks input behind a progress overlay during background Shell work.
+
+Input inside the Kit is semantic. `love.keypressed` translates raw keys through the
+default ActionMap (`up/down/left/right/confirm/cancel`) and then calls
+`kit.input(action)`. A port may add raw-key mappings with `port.input_map`; a future
+native joystick adapter can call `kit.input` directly. Widgets never need to know
+whether the physical source was A, B, Return or gptokeyb.
+
+Use Checkbox for selecting zero or more list items, as APP Manager does for ports,
+leftovers and trash. Use Switch for one boolean setting. `launcher.toggle(...)`
+automatically renders a Switch while preserving its existing `off` / `on` state and
+environment values; launcher definitions do not need to change. Switch communicates
+state through knob position and colour and does not repeat redundant On/Off text.
 
 `kit.dialog(opts)` opens a shared modal confirmation without leaving the current
 page. It accepts localized `title`, `message`, `items`, `confirm` and `cancel`
 values, plus `danger`, `on_confirm` and `on_cancel`. Focus is trapped inside the
-modal and defaults to Cancel. Ordinary launchers accept A/B as the focused action
+modal and defaults to Cancel. Opening it pushes the current page, focus zone, stable
+Item ID and scroll position onto a focus stack; closing restores that target, or its
+nearest surviving neighbour after a dynamic rebuild. Ordinary launchers accept A/B as the focused action
 and X/Y as return. APP Manager uses a device-specific raw a/b inversion so its
 printed A confirms and printed B cancels on the target handhelds.
 Only the first four item labels are shown, followed by a remaining-item count.
@@ -65,19 +88,38 @@ application shell used by APP Manager: a tall toolbar, wide scrolling content li
 narrow titled action column, divider and scrollbar. Page options `header_action` and
 `sidebar_title` fill the two toolbar areas. `kit.button` also accepts reusable options:
 `half=true` pairs two actions on one row, `group="bottom"` pins navigation/quit actions,
-and `disabled=true` (or a function) renders and skips unavailable actions.
+and `disabled=true` (or a function) renders and skips unavailable actions. Sidebar and
+content focus both use their rendered geometry, including vertical movement around
+half-width pairs and spatially nearest transitions between columns.
+
+Read-only content uses `kit.textview(label, value, opts)`. A TextView measures wrapped
+label/value text and grows its card instead of overflowing a fixed-height row. Values
+default to two lines with an ellipsis; A expands/collapses up to eight lines, capped to
+the viewport. Override `max_lines`, `expanded_lines` or `expandable` when needed. Set the
+page option `row_layout={mode="grid",columns=2}` for a fixed, equal-width two-column
+grid (two columns are the default when `columns` is omitted), or
+`row_layout={mode="flow",min_width=260}` to derive the number of equal-width columns
+from the available content width. Sections always span the full row; cards sharing a
+visual row use the tallest measured height so the grid remains aligned. D-pad focus
+follows the resulting two-dimensional geometry and scrolling is pixel-based.
+Measured Grid/Flow geometry is cached separately from focus and scrolling. Language
+changes, dynamic `set_page` replacement and TextView expansion invalidate it
+automatically. Code that edits a row's label/value in place should call
+`kit.invalidate_layout()`; ordinary focus movement reuses the existing measurement.
 
 Ordinary launchers use `launcher.resolution`, `launcher.select` and
 `launcher.toggle`. Each field declares its default, options, localized label, env
 binding and legacy source once; the schema derives state, validation, pages, old-Godot
-import and `launch_config.env`.
+import and `launch_config.env`. Persisted values are validated against their declared
+options. State and launch environments use temporary-file + rename writes; environment
+values are shell-quoted, and a failed write keeps the UI open on a Retry/Stay dialog.
 
 **Tunable defaults** (constants at the top of kit.lua, one change applies to every port):
 `ROW_MAX_W` (hard row-width cap), `ROW_MAX` / `ROW_MIN` (row height), `BAR_H` (header
 height), `TITLE_PX` / `ROW_PX` / ... (type sizes), `MINCS` / `MAXCS` (content-scale
-bounds), and the colours in `panel()`. These are **global defaults** with no per-item
-override — a launcher wants every row uniform, so it never came up; add optional override
-args to the factories if that changes.
+bounds), and the colours in `panel()`. Ordinary launcher rows retain these global
+uniform defaults; app-style TextViews opt into measured heights through a page's
+`row_layout`.
 
 **A new port = just `main.lua`**. Copy and adapt `ports/hk/love/main.lua`.
 

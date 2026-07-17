@@ -29,6 +29,10 @@ kit.BASE_STRINGS = {
     credit_dev   = {en="Developer",    zh="游戏作者"},
     credit_art   = {en="Artist",       zh="美术作者"},
     credit_porter= {en="Porter",       zh="移植作者"},
+    save_failed  = {en="Could not save settings", zh="无法保存设置"},
+    save_failed_message={en="Nothing was launched. Check free space, then try again.",zh="尚未启动游戏。请检查剩余空间后重试。"},
+    retry        = {en="Try again",    zh="重试"},
+    stay         = {en="Stay",         zh="暂不启动"},
 }
 
 -- Design sizes (720p baseline, multiplied by the content scale CS).
@@ -43,14 +47,63 @@ local port, strings, state = nil, {}, {}
 local fonts, bg_img = {}, nil
 local pages, page_i = {}, 1
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
-local scroll_top = 1
+local scroll_top, scroll_y = 1, 0
 local busy, busy_message = false, nil
 local dialog_state, dialog_focus = nil, 2
+local layout, sidebar_geometry
+local input_map, focus_stack = {}, {}
+local measurement_cache = setmetatable({}, {__mode="k"})
+local layout_cache_stats = {hits=0,misses=0,invalidations=0}
+
+local DEFAULT_INPUT_MAP = {
+    up="up", down="down", left="left", right="right",
+    ["return"]="confirm", kpenter="confirm", space="confirm", escape="cancel",
+    -- These aliases let a future native gamepad adapter dispatch semantic
+    -- actions without manufacturing keyboard names.
+    confirm="confirm", cancel="cancel",
+}
 
 local function is_app() return port and port.theme and port.theme.kind=="app" end
 local function disabled(row)
     if not row then return false end
     return type(row.disabled)=="function" and row.disabled() or row.disabled==true
+end
+local function row_identity(row)
+    if not row then return nil end
+    if row.id~=nil then return row.id end
+    if row.key~=nil then return row.key end
+    if row.meta then
+        if row.meta.id~=nil then return row.meta.id end
+        if row.meta.path~=nil then return row.meta.path end
+        if row.meta.paths and row.meta.paths[1]~=nil then return row.meta.paths[1] end
+    end
+    return nil
+end
+local function first_focusable(items)
+    for i,row in ipairs(items or {}) do
+        if row.focusable and not disabled(row) then return i end
+    end
+    return 1
+end
+local function valid_focus(items,index)
+    local row=items and items[index]
+    return row and row.focusable and not disabled(row)
+end
+local function nearest_focus(items,index)
+    local count=#(items or {})
+    index=math.max(1,math.min(index or 1,math.max(1,count)))
+    for distance=0,count do
+        local left,right=index-distance,index+distance
+        if left>=1 and valid_focus(items,left) then return left end
+        if right<=count and right~=left and valid_focus(items,right) then return right end
+    end
+    return first_focusable(items)
+end
+local function find_focus_identity(items,id)
+    if id==nil then return nil end
+    for i,row in ipairs(items or {}) do
+        if row_identity(row)==id and row.focusable and not disabled(row) then return i end
+    end
 end
 
 
@@ -87,7 +140,35 @@ local function outlined(txt, x, y, px, col, align, limit)
     if align then love.graphics.printf(txt, x, y, limit, align)
     else love.graphics.print(txt, x, y) end
 end
+local function plain(txt,x,y,px,col,align,limit)
+    local f=fnt(px); love.graphics.setFont(f)
+    love.graphics.setColor(col[1],col[2],col[3],col[4] or 1)
+    txt=tostring(txt or "")
+    if align then love.graphics.printf(txt,x,y,limit,align)
+    else love.graphics.print(txt,x,y) end
+end
+local function clip_ellipsis(text,font,max_w)
+    if font:getWidth(text)<=max_w then return text end
+    local out=""
+    for char in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        if font:getWidth(out..char.."…")>max_w then break end
+        out=out..char
+    end
+    return out.."…"
+end
+local function wrapped_text(value,font,width,max_lines)
+    local text=tostring(t(value) or ""); local _,lines=font:getWrap(text,math.max(1,width))
+    if #lines==0 then lines={""} end
+    local truncated=max_lines and #lines>max_lines
+    local count=truncated and max_lines or #lines; local shown={}
+    for i=1,count do shown[i]=lines[i] end
+    if truncated then shown[count]=clip_ellipsis(shown[count].."…",font,width) end
+    return table.concat(shown,"\n"),count,truncated
+end
 local function vcen(px, h) return (h - fnt(px):getHeight())/2 end
+local function centred_text_y(px,y,h,optical_offset)
+    return y+(h-fnt(px):getHeight())/2+(optical_offset or 0)
+end
 
 local function panel(x,y,w,h,focused,is_disabled,app)
     if is_disabled then
@@ -106,66 +187,186 @@ local function panel(x,y,w,h,focused,is_disabled,app)
     end
 end
 
+local function draw_checkbox(x,y,size,checked,focused,is_disabled)
+    local radius=math.max(4,size*0.18)
+    if is_disabled then
+        love.graphics.setColor(0.16,0.16,0.18,0.92)
+        love.graphics.rectangle("fill",x,y,size,size,radius,radius)
+        love.graphics.setColor(1,1,1,0.18)
+        love.graphics.setLineWidth(math.max(1,size*0.055))
+        love.graphics.rectangle("line",x,y,size,size,radius,radius)
+        return
+    end
+    if checked then
+        -- A light lavender fill stays distinct from both the dark row and the
+        -- purple focused-row fill. The dark vector tick remains crisp without
+        -- relying on a font containing checkbox glyphs.
+        love.graphics.setColor(0.84,0.70,1.00,1)
+        love.graphics.rectangle("fill",x,y,size,size,radius,radius)
+        love.graphics.setColor(1,0.94,1,focused and 1 or 0.78)
+        love.graphics.setLineWidth(math.max(1,size*0.055))
+        love.graphics.rectangle("line",x,y,size,size,radius,radius)
+        love.graphics.setColor(0.12,0.055,0.20,1)
+        love.graphics.setLineWidth(math.max(2,size*0.105))
+        love.graphics.line(x+size*0.23,y+size*0.52,x+size*0.43,y+size*0.71,x+size*0.78,y+size*0.30)
+    else
+        love.graphics.setColor(0.045,0.03,0.07,0.96)
+        love.graphics.rectangle("fill",x,y,size,size,radius,radius)
+        love.graphics.setColor(0.78,0.68,0.91,focused and 1 or 0.84)
+        love.graphics.setLineWidth(math.max(2,size*0.065))
+        love.graphics.rectangle("line",x,y,size,size,radius,radius)
+    end
+end
+
+local function draw_select(x,y,w,h,value,focused,is_disabled,cs)
+    local radius=math.max(5,8*cs)
+    if is_disabled then
+        love.graphics.setColor(0.16,0.16,0.18,0.92)
+        love.graphics.rectangle("fill",x,y,w,h,radius,radius)
+        love.graphics.setColor(1,1,1,0.18)
+    else
+        -- Match Checkbox's dark surface and lavender outline so form controls
+        -- read as one family, even when the containing row is focused purple.
+        love.graphics.setColor(0.045,0.03,0.07,0.96)
+        love.graphics.rectangle("fill",x,y,w,h,radius,radius)
+        love.graphics.setColor(0.78,0.68,0.91,focused and 1 or 0.84)
+    end
+    love.graphics.setLineWidth(math.max(1,2*cs))
+    love.graphics.rectangle("line",x,y,w,h,radius,radius)
+
+    local cy=y+h/2
+    local arrow_dx,arrow_dy=6*cs,7*cs
+    local left_x,right_x=x+18*cs,x+w-18*cs
+    love.graphics.setColor(is_disabled and 0.45 or 0.84,is_disabled and 0.45 or 0.74,is_disabled and 0.47 or 1,
+        is_disabled and 0.5 or 1)
+    love.graphics.setLineWidth(math.max(2,2.4*cs))
+    love.graphics.line(left_x+arrow_dx,cy-arrow_dy,left_x,cy,left_x+arrow_dx,cy+arrow_dy)
+    love.graphics.line(right_x-arrow_dx,cy-arrow_dy,right_x,cy,right_x-arrow_dx,cy+arrow_dy)
+
+    local font=fnt(19*cs)
+    local text_x,text_w=x+32*cs,math.max(1,w-64*cs)
+    value=clip_ellipsis(tostring(t(value) or ""),font,text_w)
+    plain(value,text_x,y+(h-font:getHeight())/2,19*cs,
+        is_disabled and {0.55,0.55,0.57} or {0.98,0.96,1},"center",text_w)
+end
+
 
 -- ── Row factories ────────────────────────────────────────────────────
-function kit.picker(l,vals,labels,key) return {kind="picker",label=l,values=vals,labels=labels,key=key,focusable=true} end
-function kit.button(l,action,opts)
-    local row={kind="button",label=l,action=action,focusable=true}
+local function apply_options(row,opts)
     for key,value in pairs(opts or {}) do row[key]=value end
     return row
 end
+function kit.picker(l,vals,labels,key,opts)
+    return apply_options({kind="picker",label=l,values=vals,labels=labels,key=key,focusable=true},opts)
+end
+-- Select is the public component name; picker remains as a compatibility alias
+-- for existing launcher schemas.
+function kit.select(l,vals,labels,key,opts) return kit.picker(l,vals,labels,key,opts) end
+function kit.button(l,action,opts)
+    return apply_options({kind="button",label=l,action=action,focusable=true},opts)
+end
 function kit.checkbox(l,detail,checked,on_toggle,meta)
+    if type(detail)=="table" and checked==nil and on_toggle==nil and meta==nil then
+        local opts=detail
+        local row=apply_options({kind="checkbox",label=l,focusable=true},opts)
+        row.checked=opts.checked and true or false
+        row.on_toggle=opts.on_toggle or opts.on_change
+        return row
+    end
     return {kind="checkbox",label=l,detail=detail,checked=checked and true or false,
-            on_toggle=on_toggle,meta=meta,focusable=true}
+        on_toggle=on_toggle,meta=meta,focusable=true}
+end
+function kit.switch(l,key,opts)
+    return apply_options({kind="switch",label=l,key=key,off_value="off",on_value="on",focusable=true},opts)
 end
 function kit.info(l,value,meta) return {kind="info",label=l,value=value,meta=meta,focusable=true} end
+function kit.textview(l,value,opts)
+    local row={kind="textview",label=l,value=value,focusable=true,max_lines=2,expanded_lines=8,expandable=true}
+    for key,option in pairs(opts or {}) do row[key]=option end
+    return row
+end
 function kit.section(l) return {kind="section",label=l,focusable=false} end
 function kit.badge(text_,color) return {text=text_,color=color} end
 function kit.add_page(title,rows,opts)
     local page=opts or {}; page.title=title; page.rows=rows or {}; page.sidebar=page.sidebar or {}
     pages[#pages+1]=page; return #pages
 end
+function kit.invalidate_layout(page)
+    if page then measurement_cache[page]=nil
+    else measurement_cache=setmetatable({}, {__mode="k"}) end
+    layout_cache_stats.invalidations=layout_cache_stats.invalidations+1
+end
 function kit.set_page(index,title,rows,opts)
+    local old_page=pages[index]
+    local old_row_id=old_page and zone=="rows" and row_identity(old_page.rows and old_page.rows[focus_i]) or nil
+    local old_sidebar_id=old_page and zone=="sidebar" and row_identity(old_page.sidebar and old_page.sidebar[sidebar_i]) or nil
+    if old_page then kit.invalidate_layout(old_page) end
     local page=opts or {}; page.title=title; page.rows=rows or {}; page.sidebar=page.sidebar or {}
     pages[index]=page
     if page_i==index then
-        local function first(items)
-            for i,r in ipairs(items or {}) do if r.focusable and not disabled(r) then return i end end
-            return 1
-        end
-        local function valid(items,index_)
-            local row=items and items[index_]
-            return row and row.focusable and not disabled(row)
-        end
         if page.preserve_focus then
-            if zone=="rows" and not valid(page.rows,focus_i) then focus_i=first(page.rows) end
-            if zone=="sidebar" and not valid(page.sidebar,sidebar_i) then sidebar_i=first(page.sidebar) end
+            if zone=="rows" then focus_i=find_focus_identity(page.rows,old_row_id) or nearest_focus(page.rows,focus_i) end
+            if zone=="sidebar" then sidebar_i=find_focus_identity(page.sidebar,old_sidebar_id) or nearest_focus(page.sidebar,sidebar_i) end
         else
-            zone="rows"; focus_i=first(page.rows); sidebar_i=first(page.sidebar); bar_i=1; scroll_top=1
+            zone="rows"; focus_i=first_focusable(page.rows); sidebar_i=first_focusable(page.sidebar); bar_i=1; scroll_top=1; scroll_y=0
         end
     end
     return index
 end
 function kit.set_busy(value,message) busy=value and true or false; busy_message=message end
+local function capture_focus()
+    local page=pages[page_i] or {}
+    return {page_i=page_i,zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,
+        row_id=row_identity(page.rows and page.rows[focus_i]),
+        sidebar_id=row_identity(page.sidebar and page.sidebar[sidebar_i]),
+        scroll_top=scroll_top,scroll_y=scroll_y}
+end
+local function restore_focus(snapshot)
+    if not snapshot or not pages[snapshot.page_i] then return end
+    page_i=snapshot.page_i
+    local page=pages[page_i]
+    focus_i=find_focus_identity(page.rows,snapshot.row_id) or nearest_focus(page.rows,snapshot.focus_i)
+    sidebar_i=find_focus_identity(page.sidebar,snapshot.sidebar_id) or nearest_focus(page.sidebar,snapshot.sidebar_i)
+    zone=snapshot.zone
+    if zone=="rows" and not valid_focus(page.rows,focus_i) then
+        zone=valid_focus(page.sidebar,sidebar_i) and "sidebar" or "bar"
+    elseif zone=="sidebar" and not valid_focus(page.sidebar,sidebar_i) then
+        zone=valid_focus(page.rows,focus_i) and "rows" or "bar"
+    end
+    bar_i=snapshot.bar_i or 1
+    scroll_top=snapshot.scroll_top or 1
+    scroll_y=snapshot.scroll_y or 0
+end
 function kit.dialog(opts)
     if type(opts)~="table" then return false end
+    if not dialog_state then focus_stack[#focus_stack+1]=capture_focus() end
     dialog_state=opts
     dialog_focus=opts.default_focus=="confirm" and 1 or 2
     return true
 end
-function kit.close_dialog() dialog_state=nil; dialog_focus=2 end
+function kit.close_dialog()
+    if not dialog_state then return false end
+    dialog_state=nil; dialog_focus=2
+    local snapshot=table.remove(focus_stack)
+    restore_focus(snapshot)
+    return true
+end
 function kit.debug_dialog()
     return {open=dialog_state~=nil,focus=dialog_focus==1 and "confirm" or "cancel",
         item_count=dialog_state and #(dialog_state.items or {}) or 0,
-        danger=dialog_state and dialog_state.danger==true or false}
+        danger=dialog_state and dialog_state.danger==true or false,scope_depth=#focus_stack}
 end
 function kit.debug_focus()
-    return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top}
+    return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top,scroll_y=scroll_y}
 end
 function kit.debug_page()
     local rows=pages[page_i] and pages[page_i].rows or {}; local sections=0
     for _,row in ipairs(rows) do if row.kind=="section" then sections=sections+1 end end
     return {index=page_i,row_count=#rows,section_count=sections}
+end
+function kit.debug_layout_cache()
+    return {hits=layout_cache_stats.hits,misses=layout_cache_stats.misses,
+        invalidations=layout_cache_stats.invalidations}
 end
 function kit.get_state() return state end
 function kit.translate(key) return t(key) end
@@ -187,6 +388,79 @@ end
 
 
 -- ── Focus navigation ─────────────────────────────────────────────────
+local function spatial_row(dx,dy)
+    local page=pages[page_i]
+    if not page or not page.row_layout or not layout then return nil end
+    local L=layout(); local from=L.geometry and L.geometry[focus_i]
+    if not from then return nil end
+    local fx,fy=from.x+from.w/2,from.content_y+from.h/2
+    local best,best_score
+    for _,index in ipairs(focusables(cur())) do
+        if index~=focus_i then
+            local g=L.geometry[index]
+            if g then
+                local vx=(g.x+g.w/2)-fx; local vy=(g.content_y+g.h/2)-fy
+                local overlaps_y=g.content_y<from.content_y+from.h and g.content_y+g.h>from.content_y
+                local eligible=(dx>0 and vx>1 and overlaps_y) or (dx<0 and vx < -1 and overlaps_y)
+                    or (dy>0 and vy>1) or (dy<0 and vy < -1)
+                if eligible then
+                    local primary=dx~=0 and math.abs(vx) or math.abs(vy)
+                    local secondary=dx~=0 and math.abs(vy) or math.abs(vx)
+                    local score=primary*10000+secondary
+                    if not best_score or score<best_score then best,best_score=index,score end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function spatial_sidebar(dx,dy)
+    if not layout or not sidebar_geometry then return nil end
+    local L=layout(); local geometry=sidebar_geometry(L); local from=geometry[sidebar_i]
+    if not from then return nil end
+    local fx,fy=from.x+from.w/2,from.y+from.h/2
+    local best,best_score
+    for _,index in ipairs(focusables(sidebar())) do
+        if index~=sidebar_i then
+            local g=geometry[index]
+            if g then
+                local vx=(g.x+g.w/2)-fx; local vy=(g.y+g.h/2)-fy
+                local overlaps_y=g.y<from.y+from.h and g.y+g.h>from.y
+                local eligible=(dx>0 and vx>1 and overlaps_y) or (dx<0 and vx < -1 and overlaps_y)
+                    or (dy>0 and vy>1) or (dy<0 and vy < -1)
+                if eligible then
+                    local primary=dx~=0 and math.abs(vx) or math.abs(vy)
+                    local secondary=dx~=0 and math.abs(vy) or math.abs(vx)
+                    local score=primary*10000+secondary
+                    if not best_score or score<best_score then best,best_score=index,score end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function nearest_sidebar_for_row()
+    if not layout or not sidebar_geometry then return nil end
+    local L=layout(); local from=L.geometry and L.geometry[focus_i]
+    if not from then
+        if focus_i<L.first or focus_i>L.last then return nil end
+        from={x=L.x,y=L.top+(focus_i-L.first)*(L.rh+L.gap),w=L.w,h=L.rh}
+    end
+    local geometry=sidebar_geometry(L); local fx,fy=from.x+from.w/2,from.y+from.h/2
+    local best,best_score
+    for _,index in ipairs(focusables(sidebar())) do
+        local g=geometry[index]
+        if g then
+            local vx=(g.x+g.w/2)-fx; local vy=(g.y+g.h/2)-fy
+            local score=math.abs(vy)*10000+math.abs(vx)
+            if not best_score or score<best_score then best,best_score=index,score end
+        end
+    end
+    return best
+end
+
 local function move_v(d)
     if zone == "bar" then
         if d > 0 then
@@ -196,35 +470,79 @@ local function move_v(d)
         end
         return
     end
-    local items = zone=="sidebar" and sidebar() or cur()
-    local fs = focusables(items); local current = zone=="sidebar" and sidebar_i or focus_i; local pos=1
+    if zone=="sidebar" then
+        local next_index=spatial_sidebar(0,d)
+        if next_index then sidebar_i=next_index
+        elseif d<0 then zone="bar"; bar_i=1 end
+        return
+    elseif zone=="rows" and pages[page_i].row_layout then
+        local next_index=spatial_row(0,d)
+        if next_index then focus_i=next_index
+        elseif d<0 then zone="bar"; bar_i=1 end
+        return
+    end
+    local items = cur()
+    local fs = focusables(items); local current = focus_i; local pos=1
     for i,idx in ipairs(fs) do if idx==current then pos=i end end
     pos = pos + d
     if pos < 1 then zone="bar"; bar_i=1; return
     elseif pos > #fs then pos=#fs end
-    if zone=="sidebar" then sidebar_i=fs[pos] else focus_i=fs[pos] end
+    focus_i=fs[pos]
+end
+local function switch_current(row)
+    if row.key~=nil then return state[row.key] end
+    return row.value
+end
+local function set_switch(row,on)
+    if disabled(row) then return false end
+    local value
+    if on then value=row.on_value else value=row.off_value end
+    if switch_current(row)==value then return false end
+    if row.key~=nil then state[row.key]=value else row.value=value end
+    if row.on_change then row.on_change(on,value,row) end
+    return true
 end
 local function move_h(d)
     if zone == "bar" then
         local n = #bar_items()
         bar_i = math.max(1, math.min(n, bar_i + d))
     elseif zone == "sidebar" then
-        local side=sidebar(); local row=side[sidebar_i]
-        if row and row.half and d>0 and side[sidebar_i+1] and side[sidebar_i+1].half then
-            sidebar_i=sidebar_i+1
-        elseif row and row.half and d<0 and side[sidebar_i-1] and side[sidebar_i-1].half then
-            sidebar_i=sidebar_i-1
+        local next_index=spatial_sidebar(d,0)
+        if next_index then sidebar_i=next_index
         elseif d<0 and #focusables(cur())>0 then
-            zone="rows"; focus_i=focusables(cur())[1]
+            local fs=focusables(cur()); local nearest=fs[1]
+            if pages[page_i].row_layout and layout and sidebar_geometry then
+                local L=layout(); local sg=sidebar_geometry(L)[sidebar_i]
+                if sg then
+                    local tx,ty=sg.x,sg.y+sg.h/2; local best_score
+                    for _,index in ipairs(fs) do
+                        local g=L.geometry and L.geometry[index]
+                        if g then
+                            local dx_=(g.x+g.w/2)-tx; local dy_=(g.y+g.h/2)-ty
+                            local score=dx_*dx_+dy_*dy_
+                            if not best_score or score<best_score then nearest,best_score=index,score end
+                        end
+                    end
+                end
+            end
+            zone="rows"; focus_i=nearest
         end
     else
         local r = cur()[focus_i]
-        if r and r.kind=="picker" then
+        if r and r.kind=="switch" then
+            set_switch(r,d>0)
+        elseif r and r.kind=="picker" then
             local v=r.values; local idx=1
             for i,x in ipairs(v) do if x==state[r.key] then idx=i end end
             state[r.key]=v[((idx-1+d)%#v)+1]
+        elseif pages[page_i].row_layout then
+            local next_index=spatial_row(d,0)
+            if next_index then focus_i=next_index
+            elseif d>0 and #focusables(sidebar())>0 then
+                zone="sidebar"; sidebar_i=nearest_sidebar_for_row() or focusables(sidebar())[1]
+            end
         elseif d>0 and #focusables(sidebar())>0 then
-            zone="sidebar"; sidebar_i=focusables(sidebar())[1]
+            zone="sidebar"; sidebar_i=nearest_sidebar_for_row() or focusables(sidebar())[1]
         end
     end
 end
@@ -232,9 +550,29 @@ end
 
 -- ── State save / env ─────────────────────────────────────────────────
 local function spath() return love.filesystem.getSource().."/state.txt" end
+local function atomic_write(path,writer)
+    local tmp=path..".tmp"
+    local f,open_err=io.open(tmp,"w")
+    if not f then return false,open_err or "open failed" end
+    local called,result,write_err=pcall(writer,f)
+    if not called or result==false then
+        pcall(function() f:close() end); os.remove(tmp)
+        return false,called and (write_err or "write failed") or result
+    end
+    local closed,close_err=f:close()
+    if not closed then os.remove(tmp); return false,close_err or "close failed" end
+    local renamed,rename_err=os.rename(tmp,path)
+    if not renamed then os.remove(tmp); return false,rename_err or "rename failed" end
+    return true
+end
 local function save_state()
-    local f=io.open(spath(),"w"); if not f then return end
-    for k,v in pairs(state) do f:write(k.."="..tostring(v).."\n") end; f:close()
+    return atomic_write(spath(),function(f)
+        for k,v in pairs(state) do
+            local wrote,err=f:write(k.."="..tostring(v).."\n")
+            if not wrote then return false,err end
+        end
+        return true
+    end)
 end
 local function allowed_value(values, value)
     if not values then return value ~= nil end
@@ -289,16 +627,55 @@ local function import_legacy_state()
 end
 local function load_state()
     state={}; for k,v in pairs(port.state) do state[k]=v end
+    local imported=false
     local f=io.open(spath(),"r")
     if f then
         for line in f:lines() do local k,v=line:match("^([%w_]+)=(.*)$"); if k and state[k]~=nil then state[k]=v end end
-        f:close(); return
+        f:close()
+    else
+        imported=import_legacy_state()
     end
-    if import_legacy_state() then save_state() end
+    local changed=false
+    if state.ui_lang~="en" and state.ui_lang~="zh" then
+        local default_lang=port.state.ui_lang
+        state.ui_lang=(default_lang=="en" or default_lang=="zh") and default_lang or "zh"
+        changed=true
+    end
+    if state.launch_count~=nil then
+        local original=state.launch_count
+        local count=tonumber(state.launch_count)
+        if not count or count<0 then count=tonumber(port.state.launch_count) or 0; changed=true end
+        count=math.floor(count)
+        if tostring(original)~=tostring(count) then changed=true end
+        state.launch_count=count
+    end
+    if port.validate_state and port.validate_state(state,kit) then changed=true end
+    if changed or imported then save_state() end
 end
 local function write_env()
-    local f=io.open(love.filesystem.getSource().."/launch_config.env","w"); if not f then return end
-    f:write("# generated by love launcher\n"); if port.write_env then port.write_env(f,state,kit) end; f:close()
+    return atomic_write(love.filesystem.getSource().."/launch_config.env",function(f)
+        local wrote,err=f:write("# generated by love launcher\n")
+        if not wrote then return false,err end
+        if port.write_env then port.write_env(f,state,kit) end
+        return true
+    end)
+end
+local function validate_component_state()
+    local changed=false
+    for _,page in ipairs(pages) do
+        for _,row in ipairs(page.rows or {}) do
+            if row.kind=="picker" and row.key and state[row.key]~=nil then
+                local valid=false
+                for _,value in ipairs(row.values or {}) do if state[row.key]==value then valid=true; break end end
+                if not valid and row.values and row.values[1]~=nil then state[row.key]=row.values[1]; changed=true end
+            elseif row.kind=="switch" and row.key and state[row.key]~=nil then
+                if state[row.key]~=row.off_value and state[row.key]~=row.on_value then
+                    state[row.key]=row.off_value; changed=true
+                end
+            end
+        end
+    end
+    if changed then save_state() end
 end
 function kit.resolution_wh(key)
     local r=state[key or "resolution"]
@@ -310,15 +687,28 @@ end
 -- ── Actions ──────────────────────────────────────────────────────────
 local function goto_page(n)
     if not pages[n] then return end
-    page_i=n; zone="rows"; focus_i=focusables(cur())[1] or 1; sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1
+    page_i=n; zone="rows"; focus_i=focusables(cur())[1] or 1; sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
 end
 function kit.goto_page(n) goto_page(n) end
-local function toggle_lang() state.ui_lang=(state.ui_lang=="en") and "zh" or "en"; save_state() end
+local function toggle_lang()
+    state.ui_lang=(state.ui_lang=="en") and "zh" or "en"
+    kit.invalidate_layout()
+    save_state()
+end
 function kit.quit() save_state(); love.event.quit(kit.EXIT_QUIT) end
 local function do_action(a)
     if a=="start" then
-        state.launch_count=(tonumber(state.launch_count) or 0)+1
-        save_state(); write_env(); love.event.quit(kit.EXIT_START)
+        local previous=state.launch_count
+        state.launch_count=(tonumber(previous) or 0)+1
+        local ok,err=write_env()
+        if ok then ok,err=save_state() end
+        if ok then love.event.quit(kit.EXIT_START)
+        else
+            state.launch_count=previous
+            kit.dialog({title="save_failed",message="save_failed_message",items={tostring(err or "write failed")},
+                confirm="retry",cancel="stay",danger=false,default_focus="cancel",
+                on_confirm=function() do_action("start") end})
+        end
     elseif a=="quit" then kit.quit()
     elseif type(a)=="string" and a:match("^page:") then goto_page(tonumber(a:match("%d+")))
     elseif type(a)=="function" then a(kit) end
@@ -343,12 +733,16 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2
+    dialog_state,dialog_focus=nil,2; focus_stack={}
+    input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
+    for key,action in pairs(port.input_map or {}) do input_map[key]=action end
+    measurement_cache=setmetatable({}, {__mode="k"})
+    layout_cache_stats={hits=0,misses=0,invalidations=0}
     strings={}; for k,v in pairs(kit.BASE_STRINGS) do strings[k]=v end
     for k,v in pairs(port.strings or {}) do strings[k]=v end
     load_state()
     if love.filesystem.getInfo("launcher_bg.png") then bg_img=love.graphics.newImage("launcher_bg.png") end
-    pages={}; port.build_pages(kit,state); goto_page(1)
+    pages={}; port.build_pages(kit,state); validate_component_state(); goto_page(1)
     if port.on_load then port.on_load(kit,state) end
 end
 
@@ -358,7 +752,7 @@ end
 
 
 -- Adaptive density: pick the largest content scale CS that still fits. Returns a layout table.
-local function layout()
+layout=function()
     local rows = cur(); local n = #rows; local count=math.max(1,n)
     if is_app() then
         local cs=math.max(0.72,math.min(1,H/720))
@@ -371,6 +765,86 @@ local function layout()
         local bottom=20*cs
         local band=H-content_top-bottom
         local rh,gap=74*cs,9*cs
+        local page=pages[page_i]
+        local row_layout=page.row_layout
+        if row_layout then
+            local mode=row_layout.mode or "grid"
+            local columns
+            if mode=="flow" then
+                local min_width=(row_layout.min_width or 260)*cs
+                columns=math.max(1,math.floor((w+gap)/(min_width+gap)))
+                if row_layout.max_columns then columns=math.min(columns,row_layout.max_columns) end
+            else
+                columns=math.max(1,math.floor(row_layout.columns or 2))
+            end
+            columns=math.min(columns,math.max(1,n))
+            local cell_w=(w-gap*(columns-1))/columns
+            local signature=table.concat({tostring(W),tostring(H),tostring(state.ui_lang or ""),mode,
+                tostring(columns),tostring(n),tostring(cs),tostring(w),tostring(band),
+                tostring(cell_w),tostring(gap)},"|")
+            local cached=measurement_cache[page]
+            local geometry,total_h
+            if cached and cached.signature==signature then
+                geometry,total_h=cached.geometry,cached.total_h
+                layout_cache_stats.hits=layout_cache_stats.hits+1
+            else
+                geometry={}; local content_y=0; local i=1
+                local function measured_height(row,width)
+                    if row.kind=="section" then return 49*cs end
+                    if row.kind~="textview" then return rh end
+                    local pad=12*cs
+                    local label_font,value_font=fnt(15*cs),fnt(17*cs); local inner_w=width-pad*2
+                    local _,label_lines=wrapped_text(row.label,label_font,inner_w,2)
+                    local label_h=label_lines*label_font:getHeight()
+                    local requested=row.expanded and row.expanded_lines or row.max_lines
+                    local max_fit=math.max(1,math.floor((band-pad*2-label_h-5*cs)/value_font:getHeight()))
+                    local _,value_lines=wrapped_text(row.value,value_font,inner_w,math.min(requested,max_fit))
+                    local value_h=value_lines*value_font:getHeight()
+                    return math.max(rh,pad+label_h+5*cs+value_h+pad)
+                end
+                while i<=n do
+                    if rows[i].kind=="section" then
+                        local h=measured_height(rows[i],w)
+                        geometry[i]={x=margin,content_y=content_y,w=w,h=h,column=1}
+                        content_y=content_y+h+gap; i=i+1
+                    else
+                        local group={}
+                        while i<=n and rows[i].kind~="section" and #group<columns do
+                            group[#group+1]=i; i=i+1
+                        end
+                        local h=rh
+                        for _,index in ipairs(group) do h=math.max(h,measured_height(rows[index],cell_w)) end
+                        for column,index in ipairs(group) do
+                            geometry[index]={x=margin+(column-1)*(cell_w+gap),content_y=content_y,
+                                w=cell_w,h=h,column=column}
+                        end
+                        content_y=content_y+h+gap
+                    end
+                end
+                total_h=math.max(0,content_y-gap)
+                measurement_cache[page]={signature=signature,geometry=geometry,total_h=total_h}
+                layout_cache_stats.misses=layout_cache_stats.misses+1
+            end
+            local focused=zone=="rows" and geometry[focus_i] or nil
+            if focused then
+                if focused.content_y<scroll_y then scroll_y=focused.content_y
+                elseif focused.content_y+focused.h>scroll_y+band then scroll_y=focused.content_y+focused.h-band end
+            end
+            scroll_y=math.max(0,math.min(scroll_y,math.max(0,total_h-band)))
+            local first,last=n,1
+            for index,g in pairs(geometry) do
+                g.y=content_top+g.content_y-scroll_y
+                if g.y+g.h>content_top and g.y<content_top+band then
+                    first=math.min(first,index); last=math.max(last,index)
+                end
+            end
+            if last<first then first,last=1,0 end
+            return {app=true,dim=port.theme.background_dim or 0.94,cs=cs,x=margin,w=w,
+                side_x=side_x,side_w=side_w,divider_x=side_x-13*cs,top=content_top,
+                rh=rh,gap=gap,first=first,last=last,band=band,band_top=content_top,n=n,
+                scroll=total_h>band,has_sidebar=true,geometry=geometry,total_h=total_h,
+                scroll_y=scroll_y,row_layout_mode=mode,columns=columns}
+        end
         local per=math.max(1,math.floor((band+gap)/(rh+gap)))
         if focus_i and focus_i<scroll_top then scroll_top=focus_i end
         if focus_i and focus_i>scroll_top+per-1 then scroll_top=focus_i-per+1 end
@@ -451,8 +925,12 @@ local function draw_bar(L)
         local lw,lh=90*cs,54*cs; local lx=W-lw-pad
         panel(lx,18*cs,lw,lh,zone=="bar" and items[bar_i]=="lang",false,true)
         outlined(state.ui_lang=="en" and "中" or "EN",lx,18*cs+vcen(27*cs,lh),27*cs,{1,1,1},"center",lw)
-        local title=t(page.title); local title_px=#title>28 and 26 or (#title>18 and 32 or 40)
         local title_x=pad+157*cs; local title_w=math.max(120*cs,W-title_x*2)
+        local title=t(page.title); local title_px=40; local font=fnt(title_px*cs)
+        while title_px>24 and font:getWidth(title)>title_w do
+            title_px=title_px-2; font=fnt(title_px*cs)
+        end
+        title=clip_ellipsis(title,font,title_w)
         outlined(title,title_x,(bh-fnt(title_px*cs):getHeight())/2+4*cs,title_px*cs,{1,1,1},"center",title_w)
         love.graphics.setColor(1,1,1,0.46); love.graphics.setLineWidth(1)
         love.graphics.line(pad,89*cs,W-pad,89*cs)
@@ -480,13 +958,19 @@ local function draw_bar(L)
     local lfocused = (zone=="bar" and items[bar_i]=="lang")
     panel(lx, (bh-44*cs)/2, lw, 44*cs, lfocused)
     outlined(state.ui_lang=="en" and "中" or "EN", lx, (bh-44*cs)/2+vcen(BTN_PX*cs,44*cs), BTN_PX*cs, {1,1,1}, "center", lw)
-    -- Centred title
-    outlined(t(pages[page_i].title), 0, (bh-fnt(TITLE_PX*cs):getHeight())/2, TITLE_PX*cs, {1,1,1}, "center", W)
+    -- Centred title, constrained between Back and language controls.
+    local title=t(pages[page_i].title); local right_inset=W-(lx-12*cs)
+    local title_inset=secondary and math.max(pad+120*cs,right_inset) or right_inset
+    local title_x=title_inset; local title_w=math.max(80*cs,W-title_inset*2)
+    local title_px=TITLE_PX; local font=fnt(title_px*cs)
+    while title_px>20 and font:getWidth(title)>title_w do title_px=title_px-2; font=fnt(title_px*cs) end
+    title=clip_ellipsis(title,font,title_w)
+    outlined(title,title_x,(bh-font:getHeight())/2,title_px*cs,{1,1,1},"center",title_w)
     -- Detected resolution (small type)
     outlined(string.format(t("detected"), realW, realH), 0, bh+2*cs, SUB_PX*cs, {1,1,1,0.7}, "center", W)
 end
 
-local function sidebar_geometry(L)
+sidebar_geometry=function(L)
     local side,geometry=sidebar(),{}
     local rh,gap=48*L.cs,8*L.cs
     if not L.app then
@@ -604,56 +1088,101 @@ function kit.draw()
     end
 
     local function meta_badge(r)
-        return r.meta and r.meta.badge or nil
+        return r.badge or (r.meta and r.meta.badge) or nil
     end
+    if L.geometry then love.graphics.setScissor(offX+L.x,offY+L.band_top,L.w,L.band) end
     local rows = cur(); local yi=0
     for i=L.first,L.last do
-        local r=rows[i]; local y=L.top+yi*(L.rh+L.gap); yi=yi+1
+        local r=rows[i]; local g=L.geometry and L.geometry[i]
+        local x=g and g.x or L.x; local y=g and g.y or (L.top+yi*(L.rh+L.gap)); yi=yi+1
+        local rw=g and g.w or L.w; local row_h=g and g.h or L.rh
         local focused = (zone=="rows" and i==focus_i)
-        local ty = y + vcen(ROW_PX*L.cs, L.rh)
+        local ty = y + vcen(ROW_PX*L.cs, row_h)
         if r.kind=="section" then
-            outlined(t(r.label),L.x+4*L.cs,ty,21*L.cs,{1.0,0.78,0.36},"left",L.w-8*L.cs)
+            outlined(t(r.label),x+4*L.cs,ty,21*L.cs,{1.0,0.78,0.36},"left",rw-8*L.cs)
             love.graphics.setColor(1.0,0.78,0.36,0.42); love.graphics.setLineWidth(1)
-            love.graphics.line(L.x,y+L.rh-8*L.cs,L.x+L.w,y+L.rh-8*L.cs)
+            love.graphics.line(x,y+row_h-8*L.cs,x+rw,y+row_h-8*L.cs)
         else
-            panel(L.x,y,L.w,L.rh,focused,disabled(r),L.app)
+            panel(x,y,rw,row_h,focused,disabled(r),L.app)
         if r.kind=="picker" then
-            outlined(t(r.label), L.x+18*L.cs, ty, ROW_PX*L.cs, {1,1,1})
-            local disp=r.labels[state[r.key]]
+            local select_w=math.min((L.app and 260 or 230)*L.cs,rw*0.48)
+            local select_h=(L.app and 42 or 38)*L.cs
+            local select_x=x+rw-select_w-16*L.cs
+            local select_y=y+(row_h-select_h)/2
+            local label_w=math.max(1,select_x-x-30*L.cs)
+            local label=clip_ellipsis(tostring(t(r.label) or ""),fnt(ROW_PX*L.cs),label_w)
+            outlined(label,x+18*L.cs,ty,ROW_PX*L.cs,{1,1,1})
+            local disp=r.labels and r.labels[state[r.key]]
             disp = disp and (strings[disp] and t(disp) or disp) or state[r.key]
-            outlined("< "..tostring(disp).." >", L.x, ty, ROW_PX*L.cs, {1,1,1}, "right", L.w-18*L.cs)
+            draw_select(select_x,select_y,select_w,select_h,disp,focused,disabled(r),L.cs)
         elseif r.kind=="checkbox" then
-            local check_px=L.app and 31 or ROW_PX
-            outlined(r.checked and "✓" or "□", L.x+(L.app and 20 or 14)*L.cs, y+vcen(check_px*L.cs,L.rh), check_px*L.cs,
-                r.checked and {0.75,1,0.75} or {0.8,0.8,0.85})
-            local tx=L.x+(L.app and 70 or 48)*L.cs
+            local check_size=(L.app and 32 or 28)*L.cs
+            local check_x=x+(L.app and 20 or 15)*L.cs
+            local check_y=y+(row_h-check_size)/2
+            draw_checkbox(check_x,check_y,check_size,r.checked,focused,disabled(r))
+            local tx=x+(L.app and 70 or 56)*L.cs
             if r.detail then
                 outlined(t(r.label),tx,y+(L.app and 10 or 7)*L.cs,(L.app and 22 or 20)*L.cs,{1,1,1})
                 outlined(t(r.detail),tx,y+(L.app and 39 or 31)*L.cs,(L.app and 18 or 14)*L.cs,{0.78,0.78,0.84})
             else
                 outlined(t(r.label),tx,ty,ROW_PX*L.cs,{1,1,1})
             end
+        elseif r.kind=="switch" then
+            local raw=switch_current(r)
+            local on=raw==r.on_value
+            local track_w,track_h=68*L.cs,30*L.cs
+            local track_x=x+rw-track_w-18*L.cs
+            local track_y=y+(row_h-track_h)/2
+            local optical_y=0.5*L.cs
+            local label_px=ROW_PX*L.cs
+            local label_y=centred_text_y(label_px,y,row_h,optical_y)
+            outlined(t(r.label),x+18*L.cs,label_y,label_px,{1,1,1})
+            love.graphics.setColor(on and 0.48 or 0.24,on and 0.25 or 0.24,on and 0.72 or 0.28,1)
+            love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,track_h/2,track_h/2)
+            local knob=24*L.cs
+            local knob_x=on and track_x+track_w-knob-3*L.cs or track_x+3*L.cs
+            love.graphics.setColor(0.98,0.98,1,1)
+            love.graphics.rectangle("fill",knob_x,track_y+3*L.cs,knob,knob,knob/2,knob/2)
         elseif r.kind=="info" then
-            outlined(t(r.label),L.x+16*L.cs,y+6*L.cs,16*L.cs,{0.72,0.72,0.82})
-            outlined(t(r.value),L.x+16*L.cs,y+27*L.cs,18*L.cs,{1,1,1},"left",L.w-32*L.cs)
+            outlined(t(r.label),x+16*L.cs,y+6*L.cs,16*L.cs,{0.72,0.72,0.82})
+            outlined(t(r.value),x+16*L.cs,y+27*L.cs,18*L.cs,{1,1,1},"left",rw-32*L.cs)
+        elseif r.kind=="textview" then
+            local pad=12*L.cs; local label_font,value_font=fnt(15*L.cs),fnt(17*L.cs); local inner_w=rw-pad*2
+            local label,label_lines=wrapped_text(r.label,label_font,inner_w,2)
+            local label_h=label_lines*label_font:getHeight()
+            local requested=r.expanded and r.expanded_lines or r.max_lines
+            local max_fit=math.max(1,math.floor((row_h-pad*2-label_h-5*L.cs)/value_font:getHeight()))
+            local value=wrapped_text(r.value,value_font,inner_w,math.min(requested,max_fit))
+            outlined(label,x+pad,y+pad,15*L.cs,{0.72,0.72,0.82},"left",inner_w)
+            outlined(value,x+pad,y+pad+label_h+5*L.cs,17*L.cs,{1,1,1},"left",inner_w)
         else
-            outlined(t(r.label), L.x, ty, ROW_PX*L.cs, {1,1,1}, "center", L.w)
+            outlined(t(r.label), x, ty, ROW_PX*L.cs, {1,1,1}, "center", rw)
         end
         local badge=meta_badge(r)
         if badge then
             local color=badge.color or {1,0.78,0.35}
-            outlined(t(badge.text),L.x,L.y or (y+7*L.cs),14*L.cs,color,"right",L.w-14*L.cs)
+            outlined(t(badge.text),x,y+7*L.cs,14*L.cs,color,"right",rw-14*L.cs)
         end
         end
+    end
+    if L.geometry then
+        if letterbox then love.graphics.setScissor(offX,offY,W,H) else love.graphics.setScissor() end
     end
     if L.scroll then
         if L.app then
             local track_x=L.x+L.w+4*L.cs
             love.graphics.setColor(0.18,0.18,0.20,0.92); love.graphics.rectangle("fill",track_x,L.band_top,9*L.cs,L.band)
-            local visible=math.max(1,L.last-L.first+1)
-            local thumb_h=math.max(46*L.cs,L.band*visible/math.max(visible,L.n))
-            local travel=L.band-thumb_h
-            local thumb_y=L.band_top+(L.n>visible and travel*(L.first-1)/(L.n-visible) or 0)
+            local thumb_h,thumb_y
+            if L.geometry then
+                thumb_h=math.max(46*L.cs,L.band*L.band/math.max(L.band,L.total_h))
+                local travel=L.band-thumb_h; local max_scroll=math.max(0,L.total_h-L.band)
+                thumb_y=L.band_top+(max_scroll>0 and travel*L.scroll_y/max_scroll or 0)
+            else
+                local visible=math.max(1,L.last-L.first+1)
+                thumb_h=math.max(46*L.cs,L.band*visible/math.max(visible,L.n))
+                local travel=L.band-thumb_h
+                thumb_y=L.band_top+(L.n>visible and travel*(L.first-1)/(L.n-visible) or 0)
+            end
             love.graphics.setColor(0.42,0.42,0.45,0.94); love.graphics.rectangle("fill",track_x+1*L.cs,thumb_y,7*L.cs,thumb_h,4,4)
         else
             if L.first>1 then outlined("▲",0,L.band_top-2*L.cs,SUB_PX*L.cs,{1,1,1,0.7},"center",W) end
@@ -704,20 +1233,21 @@ function kit.draw()
 end
 
 
-function kit.keypressed(key)
-    if busy then return end
+function kit.input(action)
+    if busy then return false end
     if dialog_state then
-        if key=="left" or key=="up" then dialog_focus=1
-        elseif key=="right" or key=="down" then dialog_focus=2
-        elseif key=="return" or key=="kpenter" then finish_dialog(dialog_focus==1)
-        elseif key=="escape" then finish_dialog(false) end
-        return
+        if action=="left" or action=="up" then dialog_focus=1
+        elseif action=="right" or action=="down" then dialog_focus=2
+        elseif action=="confirm" then finish_dialog(dialog_focus==1)
+        elseif action=="cancel" then finish_dialog(false)
+        else return false end
+        return true
     end
-    if key=="up" then move_v(-1)
-    elseif key=="down" then move_v(1)
-    elseif key=="left" then move_h(-1)
-    elseif key=="right" then move_h(1)
-    elseif key=="return" or key=="kpenter" then
+    if action=="up" then move_v(-1)
+    elseif action=="down" then move_v(1)
+    elseif action=="left" then move_h(-1)
+    elseif action=="right" then move_h(1)
+    elseif action=="confirm" then
         if zone=="bar" then
             local it=bar_items()[bar_i]
             if it=="back" then goto_page(1)
@@ -733,13 +1263,25 @@ function kit.keypressed(key)
             elseif r and r.kind=="checkbox" and not disabled(r) then
                 r.checked=not r.checked
                 if r.on_toggle then r.on_toggle(r.checked,r.meta,r) end
+            elseif r and r.kind=="switch" and not disabled(r) then
+                set_switch(r,switch_current(r)~=r.on_value)
+            elseif r and r.kind=="textview" and r.expandable~=false and not disabled(r) then
+                r.expanded=not r.expanded
+                kit.invalidate_layout(pages[page_i])
             end
         end
-    elseif key=="escape" then
+    elseif action=="cancel" then
         if page_i~=1 then goto_page(1)
         elseif port.on_home_cancel then port.on_home_cancel(kit,state)
         else kit.quit() end
-    end
+    else return false end
+    return true
+end
+
+function kit.keypressed(key)
+    local action=input_map[key]
+    if not action then return false end
+    return kit.input(action)
 end
 
 return kit

@@ -16,8 +16,8 @@ launcher.define {
                 {"12", {en = "Chinese (Traditional)", zh = "繁体中文"}},
             },
         },
-        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "换 A/B:"}, env = "TER_SWAP_AB"},
-        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "换 X/Y:"}, env = "TER_SWAP_XY"},
+        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "TER_SWAP_AB"},
+        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "TER_SWAP_XY"},
     },
     field_order = {"resolution", "language", "swap_ab", "swap_xy"},
     legacy = {

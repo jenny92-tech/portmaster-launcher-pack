@@ -4,6 +4,9 @@
 # This produces the same top-level convention as the other ports:
 #   dist/*.sh      -> device Roms/PORTS/
 #   dist/non-*.sh  -> device Data/ports/sts2/
+#
+# UI_ONLY=1 updates only the assembled launcher and love_ui. It intentionally
+# preserves the existing game payload and needs neither dotnet nor game DLLs.
 
 set -euo pipefail
 
@@ -11,10 +14,35 @@ SRC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT_ROOT="$(cd "$SRC_ROOT/.." && pwd)"
 DIST="$PORT_ROOT/dist"
 DATA="$DIST/data_sts2_linuxbsd_arm64"
+UI_ONLY="${UI_ONLY:-0}"
+KIT_ROOT="$(cd "$PORT_ROOT/../../_kit" && pwd)"
+LOVE_DIR="$PORT_ROOT/love"
 
 red()   { printf "\033[31m%s\033[0m\n" "$*"; }
 green() { printf "\033[32m%s\033[0m\n" "$*"; }
 blue()  { printf "\033[34m%s\033[0m\n" "$*"; }
+
+stage_love_ui() {
+  [ -f "$LOVE_DIR/launcher.sh.template" ] || { red "missing love launcher: $LOVE_DIR/launcher.sh.template"; exit 1; }
+  mkdir -p "$DIST"
+  "$KIT_ROOT/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/Slay the Spire 2.sh"
+  rm -rf "$DIST/love_ui"
+  mkdir -p "$DIST/love_ui"
+  cp "$KIT_ROOT/love/"*.lua "$DIST/love_ui/"
+  [ -f "$KIT_ROOT/love/launcher_bg.png" ] && cp "$KIT_ROOT/love/launcher_bg.png" "$DIST/love_ui/"
+  cp "$KIT_ROOT/love/ui.gptk" "$DIST/love_ui/"
+  for f in main.lua conf.lua ui.gptk launcher_bg.png; do
+    [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
+  done
+  bash -n "$DIST/Slay the Spire 2.sh"
+}
+
+if [ "$UI_ONLY" = "1" ]; then
+  blue "=== STS2 dist: launcher UI only ==="
+  stage_love_ui
+  green ">>> packaged STS2 launcher UI -> $DIST"
+  exit 0
+fi
 
 rm -rf "$DIST"
 mkdir -p "$DIST" "$DATA" "$DIST/gamedata"
@@ -39,16 +67,7 @@ blue "=== STS2 dist: collect deploy files ==="
 # Launcher = the love build (ports/sts2/love/); the godot4 launcher is gone. _kit/assemble.sh
 # inlines the KIT block and stages love_ui/ (shared kit.lua + launcher_bg.png + this port's
 # main/conf/gptk).
-KIT_ROOT="$(cd "$PORT_ROOT/../../_kit" && pwd)"
-LOVE_DIR="$PORT_ROOT/love"
-[ -f "$LOVE_DIR/launcher.sh.template" ] || { red "missing love launcher: $LOVE_DIR/launcher.sh.template"; exit 1; }
-"$KIT_ROOT/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/Slay the Spire 2.sh"
-mkdir -p "$DIST/love_ui"
-cp "$KIT_ROOT/love/kit.lua" "$DIST/love_ui/"
-[ -f "$KIT_ROOT/love/launcher_bg.png" ] && cp "$KIT_ROOT/love/launcher_bg.png" "$DIST/love_ui/"
-for f in main.lua conf.lua ui.gptk launcher_bg.png; do
-  [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
-done
+stage_love_ui
 cp "$SRC_ROOT/linux/data-template/sts2.runtimeconfig.json" "$DATA/"
 cp "$SRC_ROOT/linux/gamedata-README.md" "$DIST/gamedata/README.md"
 [ -f "$PORT_ROOT/LICENSE" ] && cp "$PORT_ROOT/LICENSE" "$DIST/"

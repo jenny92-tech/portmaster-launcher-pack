@@ -23,8 +23,8 @@ launcher.define {
                 {"0", {en = "Ultra", zh = "极致 (不限)"}},
             },
         },
-        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "换 A/B:"}, env = "HSH_SWAP_AB"},
-        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "换 X/Y:"}, env = "HSH_SWAP_XY"},
+        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "HSH_SWAP_AB"},
+        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "HSH_SWAP_XY"},
         launcher.select {
             key = "reduce", label = {en = "Damage Cut:", zh = "减伤:"}, default = "0", env = "HSH_DMG",
             encode = {['0']='1.0', ['20']='0.8', ['40']='0.6', ['60']='0.4', ['80']='0.2', ['100']='0.0'},
