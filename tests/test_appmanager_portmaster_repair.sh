@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup EXIT
 
 "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
-mkdir -p "$TMP/release" "$TMP/archive/PortMaster/pylibs-src" "$TMP/app"
+mkdir -p "$TMP/release" "$TMP/archive/PortMaster/pylibs-src" "$TMP/archive/PortMaster/miniloong" "$TMP/app"
 cp -R "$ROOT/ports/appmanager/dist/PortAppManager/." "$TMP/app/"
 rm -f "$TMP/app/bin/busybox-portable"
 
@@ -29,9 +29,10 @@ printf 'stable\n' > "$TMP/archive/PortMaster/pylibs-src/module.py"
 (cd "$TMP/archive/PortMaster/pylibs-src" && zip -q ../pylibs.zip module.py)
 rm -rf "$TMP/archive/PortMaster/pylibs-src"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/archive/PortMaster/PortMaster.sh"
+printf '#!/bin/sh\nexec "$(dirname "$0")/PortMaster/PortMaster.sh"\n' > "$TMP/archive/PortMaster/miniloong/PortMaster.txt"
 chmod +x "$TMP/archive/PortMaster/PortMaster.sh"
 (cd "$TMP/archive" && zip -qr "$TMP/release/PortMaster.zip" PortMaster)
-cp "$GUI/tools/appmanager-install.sh" "$TMP/release/appmanager-install.sh"
+cp "$GUI/tools/portappmanager-installer.sh" "$TMP/release/portappmanager-installer.sh"
 archive_md5=$(md5 -q "$TMP/release/PortMaster.zip" 2>/dev/null || md5sum "$TMP/release/PortMaster.zip" | awk '{print $1}')
 printf '%s  PortMaster.zip\n' "$archive_md5" > "$TMP/release/PortMaster.zip.md5"
 cat > "$TMP/release/version.json" <<'JSON'
@@ -39,6 +40,22 @@ cat > "$TMP/release/version.json" <<'JSON'
   "stable": {
     "version": "2026.07",
     "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"
+  }
+}
+JSON
+(printf 'hsqs'; printf '%016d' 0) > "$TMP/release/python_3.11.squashfs"
+python_size=$(wc -c < "$TMP/release/python_3.11.squashfs" | tr -d '[:space:]')
+python_md5=$(md5 -q "$TMP/release/python_3.11.squashfs" 2>/dev/null || md5sum "$TMP/release/python_3.11.squashfs" | awk '{print $1}')
+cat > "$TMP/release/ports.json" <<JSON
+{
+  "utils": {
+    "python_3.11.aarch64.squashfs": {
+      "runtime_name": "python_3.11.squashfs",
+      "runtime_arch": "aarch64",
+      "size": $python_size,
+      "md5": "$python_md5",
+      "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/python_3.11.squashfs"
+    }
   }
 }
 JSON
@@ -73,6 +90,8 @@ if [ -n "$out" ]; then
     tail -c "+$((current + 1))" "$source_file" >> "$out"
   elif [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_CORRUPT:-0}" = "1" ]; then
     printf 'corrupt archive\n' > "$out"
+  elif [ "$asset" = "python_3.11.squashfs" ] && [ "${PAM_TEST_CORRUPT_PYTHON:-0}" = "1" ]; then
+    printf 'corrupt runtime\n' > "$out"
   elif [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_SLOW:-0}" = "1" ]; then
     size=$(wc -c < "$source_file" | tr -d '[:space:]')
     half=$((size / 2))
@@ -101,10 +120,15 @@ chmod +x "$TMP/app/bin/curl-portable" "$TMP/app/bin/unzip-portable" "$TMP/app/bi
 
 run_repair() {
   local name=$1 corrupt=${2:-0} cancel_asset=${3:-never} existing=${4:-0} cached=${5:-0} slow=${6:-0}
-  local channel=${7:-official} partial=${8:-0} release_base loong_file
+  local channel=${7:-official} partial=${8:-0} force_python_runtime=${9:-0} corrupt_python=${10:-0} cached_python=${11:-0} release_base loong_file
   local state="$TMP/$name/state" target="$TMP/$name/PortMaster" scripts="$TMP/$name/scripts"
   local observer_pid=0 rc=0
   mkdir -p "$state" "$scripts" "$target/libs"
+  if [ "$cached_python" = 1 ]; then
+    cp "$TMP/release/python_3.11.squashfs" "$target/libs/python_3.11.squashfs"
+    printf 'python_3.11\taarch64\t%s\t%s\thttps://github.com/PortsMaster/PortMaster-New/releases/download/test/python_3.11.squashfs\n' \
+      "$python_size" "$python_md5" > "$state/runtime-metadata.tsv"
+  fi
   if [ "$cached" = 1 ]; then
     mkdir -p "$state/portmaster-download/2026.07"
     cp "$TMP/release/PortMaster.zip" "$state/portmaster-download/2026.07/PortMaster.zip"
@@ -138,11 +162,13 @@ run_repair() {
   fi
   PAM_SOURCE_DIR="$TMP" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$state" \
     PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_DIRECTORY_OVERRIDE="${TMP#/}/$name/data" \
+    PAM_PYTHON3_CMD_OVERRIDE="$([ "$force_python_runtime" = 1 ] && echo /missing/python3 || echo python3)" \
     PAM_DEVICE_CLASS_OVERRIDE=tested PAM_TARGET_CONFIRMED_OVERRIDE=1 \
     PAM_PARAM_DEVICE_OVERRIDE=miniloong \
     PAM_LOONG_VERSION_FILE="$loong_file" PAM_RELEASE_BASE="$release_base" \
     PAM_RUNTIME_CUSTOM_PROXIES='custom|test|https://proxy.invalid' PAM_RUNTIME_PROXIES='' \
     PAM_TEST_RELEASE="$TMP/release" PAM_TEST_CURL_LOG="$TMP/$name/curl.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
+    PAM_TEST_CORRUPT_PYTHON="$corrupt_python" \
     PAM_TEST_PARTIAL="$partial" \
     PAM_TEST_CANCEL_ON_ASSET="$cancel_asset" PAM_TEST_CANCEL_FILE="$state/cancel.request" \
     bash "$ROOT/ports/appmanager/src/launcher.sh" --apply-plan || rc=$?
@@ -159,7 +185,7 @@ grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
 grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
 grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
-grep -Fq 'jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/appmanager-install.sh' "$TMP/success/curl.log"
+grep -Fq 'jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh' "$TMP/success/curl.log"
 ! grep -Fq '/Install.sh' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip.md5' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "$TMP/success/curl.log"
@@ -168,6 +194,26 @@ run_repair miniloong-custom 0 never 0 0 0 custom
 grep -Fq 'jenny92-tech/PortMaster-GUI' "$TMP/miniloong-custom/curl.log"
 ! grep -Fq 'PortsMaster/PortMaster-GUI/releases/download' "$TMP/miniloong-custom/curl.log"
 grep -Fq $'device\tminiloong' "$TMP/miniloong-custom/state/pending-install.tsv"
+
+# Python is a PortMaster dependency. The MiniLoong adapter supplies the shared
+# Runtime fallback when the firmware interpreter is unavailable.
+run_repair python-bootstrap 0 never 0 0 0 custom 0 1
+grep -Fq $'OK\truntime\tpython_3.11\t' "$TMP/python-bootstrap/state/result.txt"
+grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/python-bootstrap/state/result.txt"
+[ -f "$TMP/python-bootstrap/PortMaster/libs/python_3.11.squashfs" ]
+cmp "$TMP/release/python_3.11.squashfs" "$TMP/python-bootstrap/PortMaster/libs/python_3.11.squashfs"
+grep -Fq '/python_3.11.squashfs' "$TMP/python-bootstrap/curl.log"
+
+run_repair python-bootstrap-cached 0 never 0 0 0 custom 0 1 0 1
+! grep -Fq '/ports.json' "$TMP/python-bootstrap-cached/curl.log"
+! grep -Fq '/python_3.11.squashfs' "$TMP/python-bootstrap-cached/curl.log"
+cmp "$TMP/release/python_3.11.squashfs" "$TMP/python-bootstrap-cached/PortMaster/libs/python_3.11.squashfs"
+
+run_repair python-bootstrap-failure 0 never 1 0 0 custom 0 1 1 || true
+grep -Fq $'FAIL\tportmaster\tpython-runtime' "$TMP/python-bootstrap-failure/state/result.txt"
+grep -Fxq old-core "$TMP/python-bootstrap-failure/PortMaster/old.txt"
+grep -Fxq old-control "$TMP/python-bootstrap-failure/PortMaster/control.txt"
+[ ! -f "$TMP/python-bootstrap-failure/state/pending-install.tsv" ]
 
 run_repair cached 0 never 0 1
 ! grep -Fq '/PortMaster.zip' "$TMP/cached/curl.log"

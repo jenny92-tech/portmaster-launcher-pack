@@ -77,7 +77,7 @@ assert_plan() {
 }
 mini_plan=$(PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/mini-plan" \
   PAM_LOONG_VERSION_FILE="$TMP/loong/loong_version" bash "$ROOT/ports/appmanager/src/launcher.sh" --write-install-plan)
-assert_plan "$mini_plan" miniloong /mnt/sdcard/roms/ports/PortMaster "$TMP/source" PortMaster.sh 'PortMaster.sh=PortMaster.sh'
+assert_plan "$mini_plan" miniloong /mnt/sdcard/roms/ports/PortMaster "$TMP/source" PortMaster.sh 'miniloong/PortMaster.txt=PortMaster.sh'
 trim_plan=$(PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/trim-plan" \
   PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$TMP/trimui" bash "$ROOT/ports/appmanager/src/launcher.sh" --write-install-plan)
 assert_plan "$trim_plan" trimui /mnt/SDCARD/Apps/PortMaster/PortMaster /mnt/SDCARD/Apps/PortMaster \

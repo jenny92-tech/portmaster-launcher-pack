@@ -84,12 +84,14 @@ pam_detect_profile() {
   PAM_FRONTEND_DIR_DEFAULT=""
   PAM_FRONTEND_NAMES_DEFAULT="PortMaster.sh"
   PAM_FRONTEND_LAUNCHER_NAME="PortMaster.sh"
+  PAM_PYTHON_RUNTIME_FALLBACK="0"
   if [ -f "${PAM_LOONG_VERSION_FILE:-/loong/loong_version}" ]; then
     CFW_NAME="Loong"; PAM_DEVICE_NAME="MiniLoong Pocket One"; PAM_DEVICE_CLASS="tested"
     param_device="miniloong"; DEVICE_ARCH="aarch64"
     directory="${PAM_DIRECTORY_OVERRIDE:-mnt/sdcard/roms}"
     [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/sdcard/roms/ports/PortMaster"
     PAM_RELEASE_CHANNEL="miniloong-custom"
+    PAM_PYTHON_RUNTIME_FALLBACK="1"
     PAM_TARGET_CONFIRMED="1"
     PAM_GAMEDIRS_DIR_DEFAULT="/mnt/sdcard/roms/ports"
     DISPLAY_WIDTH="${DISPLAY_WIDTH:-960}"; DISPLAY_HEIGHT="${DISPLAY_HEIGHT:-720}"
@@ -230,7 +232,7 @@ RUNTIME_METADATA_URL="https://github.com/PortsMaster/PortMaster-New/releases/lat
 RUNTIME_ROUTE_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L212"
 PAM_CUSTOM_RELEASE_BASE="${PAM_CUSTOM_RELEASE_BASE:-https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download}"
 PAM_RELEASE_BASE="$PAM_CUSTOM_RELEASE_BASE"
-PAM_INSTALLER_SOURCE_URL="https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/appmanager-install.sh"
+PAM_INSTALLER_SOURCE_URL="https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh"
 RUNTIME_CUSTOM_ROUTES="7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb5180219393571951dd293185bf48d406d50d104be338d9608d1753d48cd8"
 RUNTIME_GITHUB_ROUTES="7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350"
 
@@ -327,7 +329,32 @@ pam_core_health() {
   else
     printf damaged; return
   fi
+  pam_portmaster_python_ready || { printf damaged; return; }
   printf healthy
+}
+
+pam_system_python_ready() {
+  local python_cmd="${PAM_PYTHON3_CMD_OVERRIDE:-python3}"
+  command -v "$python_cmd" >/dev/null 2>&1 || return 1
+  "$python_cmd" -c 'import sys, encodings, zipfile, hashlib' >/dev/null 2>&1
+}
+
+pam_python_runtime_path() {
+  printf '%s/python_3.11.squashfs\n' "$LIBS_DIR"
+}
+
+pam_python_runtime_basic_ready() {
+  local runtime
+  runtime=$(pam_python_runtime_path)
+  [ -f "$runtime" ] && [ "$(LC_ALL=C head -c 4 "$runtime" 2>/dev/null)" = "hsqs" ]
+}
+
+pam_portmaster_python_ready() {
+  # Official device launchers keep ownership of their firmware-specific Python
+  # setup. Only a profile that installs our Runtime adapter may use libs here.
+  pam_system_python_ready ||
+    [ "${PAM_PYTHON_RUNTIME_FALLBACK:-0}" != "1" ] ||
+    pam_python_runtime_basic_ready
 }
 
 pam_core_version() {
@@ -663,12 +690,28 @@ RUNTIME_PROGRESS_RUNTIME=""
 RUNTIME_PROGRESS_SOURCE_BASE=0
 RUNTIME_PROGRESS_DETAIL=""
 PORTMASTER_PROGRESS=0
+PORTMASTER_PROGRESS_FLOOR=0
+PORTMASTER_BOOTSTRAP_PROGRESS=0
+PORTMASTER_BOOTSTRAP_BYTES=0
 
 runtime_progress_write() {
   local phase="${1:-preparing}" current="${2:-0}" speed="${3:-0}" detail="${4:-}" tmp
   [ "$RUNTIME_PROGRESS_COUNT" -gt 0 ] || return 0
   case "$current" in ""|*[!0-9]*) current=0 ;; esac
   case "$speed" in ""|*[!0-9]*) speed=0 ;; esac
+  if [ "$PORTMASTER_BOOTSTRAP_PROGRESS" = "1" ] && [ "$PORTMASTER_BOOTSTRAP_BYTES" -gt 0 ]; then
+    current=$((2 + (current * 33 / PORTMASTER_BOOTSTRAP_BYTES)))
+    [ "$current" -le 35 ] || current=35
+    case "$phase" in
+      probing|connected) detail="Checking Python download" ;;
+      downloading) detail="Downloading Python" ;;
+      verifying) detail="Checking Python" ;;
+      installing|finished) detail="Installing Python" ;;
+      failed) detail="Python installation failed" ;;
+    esac
+  elif [ "$PORTMASTER_PROGRESS" = "1" ] && [ "$PORTMASTER_PROGRESS_FLOOR" -gt 0 ]; then
+    current=$((PORTMASTER_PROGRESS_FLOOR + (current * (100 - PORTMASTER_PROGRESS_FLOOR) / 100)))
+  fi
   if [ "$RUNTIME_PROGRESS_TOTAL_BYTES" -gt 0 ] && [ "$current" -gt "$RUNTIME_PROGRESS_TOTAL_BYTES" ]; then
     current=$RUNTIME_PROGRESS_TOTAL_BYTES
   fi
@@ -1083,7 +1126,7 @@ pm_valid_release_url() {
     https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/PortMaster.zip|\
     https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/version.json|\
     https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/SHA256SUMS|\
-    https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/appmanager-install.sh|\
+    https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh|\
     https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip|\
     https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip|\
     https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip.md5) return 0 ;;
@@ -1294,7 +1337,12 @@ pam_write_install_plan() {
       frontend_map='miyoo/control.txt=control.txt'
       remove_core=0; empty_tasksetter=0; core_executable='PortMaster.sh'; frontend_executable='-'
       ;;
-    miniloong|generic)
+    miniloong)
+      names='PortMaster.sh'; primary='PortMaster.sh'; control_source='-'; core_source='-'
+      frontend_map='miniloong/PortMaster.txt=PortMaster.sh'
+      remove_core=0; empty_tasksetter=0; core_executable='PortMaster.sh'; frontend_executable='PortMaster.sh'
+      ;;
+    generic)
       names='PortMaster.sh'; primary='PortMaster.sh'; control_source='-'; core_source='-'
       frontend_map='PortMaster.sh=PortMaster.sh'
       remove_core=0; empty_tasksetter=0; core_executable='PortMaster.sh'; frontend_executable='PortMaster.sh'
@@ -1350,6 +1398,10 @@ install_portmaster_release_inner() {
   rm -f -- "$sums" "$version" "$installer_tmp" "$install_plan"
   RUNTIME_PROGRESS_RUNTIME="PortMaster"
   runtime_progress_write preparing 1 0 "Preparing PortMaster"
+  ensure_portmaster_python_runtime || {
+    printf 'FAIL\tportmaster\tpython-runtime\n' >> "$RESULT_FILE"
+    return 1
+  }
   version_url="$PAM_RELEASE_BASE/version.json"
   pm_select_release_routes "$version_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
   pm_download_url "$version_url" "$version" 5 10 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
@@ -1602,6 +1654,51 @@ install_runtime() {
   $ESUDO rm -f -- "$staged" 2>/dev/null || true
   printf 'FAIL\truntime\t%s\tinstall\n' "$runtime" >> "$RESULT_FILE"
   return 1
+}
+
+runtime_matches_current_metadata() {
+  local runtime="$1" target expected_size expected_md5 actual_size actual_md5
+  target="$LIBS_DIR/$runtime.squashfs"
+  expected_size=$(runtime_expected_size "$runtime")
+  expected_md5=$(runtime_expected_md5 "$runtime")
+  case "$expected_size" in ""|*[!0-9]*|0) return 1 ;; esac
+  [[ "$expected_md5" =~ ^[0-9a-f]{32}$ ]] || return 1
+  runtime_has_magic "$target" || return 1
+  actual_size=$(runtime_file_size "$target")
+  [ "$actual_size" = "$expected_size" ] || return 1
+  actual_md5=$(runtime_md5_file "$target" 2>/dev/null || true)
+  [ "$actual_md5" = "$expected_md5" ]
+}
+
+ensure_portmaster_python_runtime() {
+  local runtime="python_3.11" expected_size
+  pam_system_python_ready && return 0
+  [ "${PAM_PYTHON_RUNTIME_FALLBACK:-0}" = "1" ] || return 0
+
+  # A previously verified official Runtime remains a valid Python bootstrap;
+  # reinstalling PortMaster must not require the network just to rediscover the
+  # same metadata.
+  runtime_matches_current_metadata "$runtime" && return 0
+  runtime_progress_write probing 2 0 "Checking Python Runtime"
+  if ! runtime_metadata_refresh 1; then
+    echo "$LOG_PREFIX unable to refresh Python Runtime information"
+    return 1
+  fi
+  runtime_matches_current_metadata "$runtime" && return 0
+
+  expected_size=$(runtime_expected_size "$runtime")
+  case "$expected_size" in ""|*[!0-9]*|0) return 1 ;; esac
+  PORTMASTER_BOOTSTRAP_BYTES=$expected_size
+  PORTMASTER_BOOTSTRAP_PROGRESS=1
+  if ! install_runtime "$runtime"; then
+    PORTMASTER_BOOTSTRAP_PROGRESS=0
+    PORTMASTER_BOOTSTRAP_BYTES=0
+    return 1
+  fi
+  PORTMASTER_BOOTSTRAP_PROGRESS=0
+  PORTMASTER_BOOTSTRAP_BYTES=0
+  PORTMASTER_PROGRESS_FLOOR=35
+  runtime_matches_current_metadata "$runtime"
 }
 
 apply_plan() {

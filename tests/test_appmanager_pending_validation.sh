@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GUI_ROOT="${PAM_GUI_ROOT_OVERRIDE:-$ROOT/../PortMaster-GUI}"
-INSTALLER="$GUI_ROOT/tools/appmanager-install.sh"
+INSTALLER="$GUI_ROOT/tools/portappmanager-installer.sh"
 TMP="$(mktemp -d)"
 cleanup() {
   local rc=$?
@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TMP/source/PortMaster/pylibs-src" "$TMP/source/PortMaster/trimui" \
+mkdir -p "$TMP/source/PortMaster/pylibs-src" "$TMP/source/PortMaster/trimui" "$TMP/source/PortMaster/miniloong" \
   "$TMP/source/PortMaster/muos" "$TMP/source/PortMaster/batocera" "$TMP/app/bin" "$TMP/app/love_ui"
 mkdir -p "$TMP/loong"
 printf '1.0\n' > "$TMP/loong/loong_version"
@@ -28,6 +28,7 @@ printf 'new-device\n' > "$TMP/source/PortMaster/device_info.txt"
 printf 'new-funcs\n' > "$TMP/source/PortMaster/funcs.txt"
 printf "PORTMASTER_VERSION = '2026.07'\n" > "$TMP/source/PortMaster/pugwash"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/PortMaster.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/miniloong/PortMaster.txt"
 printf 'new-core\n' > "$TMP/source/PortMaster/core.txt"
 printf 'trimui-control\n' > "$TMP/source/PortMaster/trimui/control.txt"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/trimui/PortMaster.txt"
@@ -58,7 +59,7 @@ write_plan() {
     trimui) names='launch.sh,config.json,icon.png'; primary='launch.sh'; control='trimui/control.txt'; core='-'; map='trimui/PortMaster.txt=launch.sh,trimui/config.json=config.json,trimui/icon.png=icon.png'; remove=1; empty=1; core_exec='-'; frontend_exec='launch.sh' ;;
     muos) names='control.txt'; primary='control.txt'; control='muos/control.txt'; core='muos/PortMaster.txt'; map='muos/control.txt=control.txt'; remove=0; empty=1; core_exec='PortMaster.sh'; frontend_exec='-' ;;
     batocera) names='PortMaster.sh'; primary='PortMaster.sh'; control='batocera/control.txt'; core='-'; map='PortMaster.sh=PortMaster.sh'; remove=1; empty=1; core_exec='-'; frontend_exec='PortMaster.sh' ;;
-    miniloong) names='PortMaster.sh'; primary='PortMaster.sh'; control='-'; core='-'; map='PortMaster.sh=PortMaster.sh'; remove=0; empty=0; core_exec='PortMaster.sh'; frontend_exec='PortMaster.sh' ;;
+    miniloong) names='PortMaster.sh'; primary='PortMaster.sh'; control='-'; core='-'; map='miniloong/PortMaster.txt=PortMaster.sh'; remove=0; empty=0; core_exec='PortMaster.sh'; frontend_exec='PortMaster.sh' ;;
   esac
   {
     printf 'schema\t1\ndevice\t%s\ntarget\t%s\nscripts\t%s\nfrontend_dir\t%s\n' "$profile" "$target" "$scripts" "$frontend"
