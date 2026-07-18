@@ -18,6 +18,7 @@ CHECK_UPDATE_ONLY=0
 FORCE_UPDATE_CHECK=0
 VALIDATE_ONLY=0
 RUNTIME_METADATA_ONLY=0
+INSTALL_PLAN_ONLY=0
 case "${1:-}" in
   --apply-plan) APPLY_ONLY=1 ;;
   --scan-sizes) SIZE_ONLY=1 ;;
@@ -26,6 +27,7 @@ case "${1:-}" in
   --check-pm-update-force) CHECK_UPDATE_ONLY=1; FORCE_UPDATE_CHECK=1 ;;
   --validate-pending) VALIDATE_ONLY=1 ;;
   --refresh-runtime-metadata) RUNTIME_METADATA_ONLY=1 ;;
+  --write-install-plan) INSTALL_PLAN_ONLY=1 ;;
 esac
 
 # ── APP-owned bootstrap ──────────────────────────────────────────────────
@@ -46,7 +48,10 @@ portmaster_discover() {
   elif [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
   elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
   elif [ -d "$xdg_data_home/PortMaster/" ]; then controlfolder="$xdg_data_home/PortMaster"
+  elif [ -d "/userdata/system/.local/share/PortMaster/" ]; then controlfolder="/userdata/system/.local/share/PortMaster"
   elif [ -d "/mnt/SDCARD/Apps/PortMaster/PortMaster/" ]; then controlfolder="/mnt/SDCARD/Apps/PortMaster/PortMaster"
+  elif [ -d "/mnt/mmc/MUOS/PortMaster/" ]; then controlfolder="/mnt/mmc/MUOS/PortMaster"
+  elif [ -d "/mnt/sdcard/Roms/.portmaster/PortMaster/" ]; then controlfolder="/mnt/sdcard/Roms/.portmaster/PortMaster"
   elif [ -d "/mnt/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/mnt/sdcard/roms/ports/PortMaster"
   elif [ -d "/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/sdcard/roms/ports/PortMaster"
   else controlfolder=""; fi
@@ -74,6 +79,11 @@ pam_detect_profile() {
   PAM_DEVICE_NAME="Unknown"
   PAM_TARGET_CONFIRMED="0"
   PAM_RELEASE_CHANNEL="official"
+  PAM_GAMEDIRS_DIR_DEFAULT=""
+  PAM_FRONTEND_KIND_DEFAULT="script-internal"
+  PAM_FRONTEND_DIR_DEFAULT=""
+  PAM_FRONTEND_NAMES_DEFAULT="PortMaster.sh"
+  PAM_FRONTEND_LAUNCHER_NAME="PortMaster.sh"
   if [ -f "${PAM_LOONG_VERSION_FILE:-/loong/loong_version}" ]; then
     CFW_NAME="Loong"; PAM_DEVICE_NAME="MiniLoong Pocket One"; PAM_DEVICE_CLASS="tested"
     param_device="miniloong"; DEVICE_ARCH="aarch64"
@@ -81,8 +91,10 @@ pam_detect_profile() {
     [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/sdcard/roms/ports/PortMaster"
     PAM_RELEASE_CHANNEL="miniloong-custom"
     PAM_TARGET_CONFIRMED="1"
+    PAM_GAMEDIRS_DIR_DEFAULT="/mnt/sdcard/roms/ports"
     DISPLAY_WIDTH="${DISPLAY_WIDTH:-960}"; DISPLAY_HEIGHT="${DISPLAY_HEIGHT:-720}"
   elif { [ -n "${PAM_TRIMUI_ROOT:-}" ] && [ -d "$PAM_TRIMUI_ROOT" ]; } ||
+       [ -d "/usr/trimui" ] ||
        [ "${CFW_NAME:-}" = "TrimUI" ] ||
        { case "$PAM_DIR" in /mnt/SDCARD/Roms/PORTS|/mnt/SDCARD/Roms/PORTS/*) true ;; *) false ;; esac; }; then
     CFW_NAME="TrimUI"; PAM_DEVICE_NAME="TrimUI"; PAM_DEVICE_CLASS="tested"
@@ -90,12 +102,53 @@ pam_detect_profile() {
     directory="${PAM_DIRECTORY_OVERRIDE:-mnt/SDCARD/Data}"
     [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/SDCARD/Apps/PortMaster/PortMaster"
     PAM_TARGET_CONFIRMED="1"
-  elif [ -f "$PAM_PORTMASTER_DIR/control.txt" ]; then
-    PAM_DEVICE_NAME="${CFW_NAME:-PortMaster device}"; PAM_DEVICE_CLASS="official-untested"
+    PAM_GAMEDIRS_DIR_DEFAULT="/mnt/SDCARD/Data/ports"
+    PAM_FRONTEND_KIND_DEFAULT="trimui"
+    PAM_FRONTEND_DIR_DEFAULT="${PAM_PORTMASTER_DIR%/PortMaster}"
+    PAM_FRONTEND_NAMES_DEFAULT="launch.sh,config.json,icon.png"
+    PAM_FRONTEND_LAUNCHER_NAME="launch.sh"
+  elif { [ -n "${PAM_MUOS_ROOT:-}" ] && [ -d "$PAM_MUOS_ROOT" ]; } ||
+       [ -d "/mnt/mmc/MUOS" ] || [ "${CFW_NAME:-}" = "muOS" ]; then
+    CFW_NAME="muOS"; PAM_DEVICE_NAME="muOS"; PAM_DEVICE_CLASS="official-untested"
+    param_device="muos"; DEVICE_ARCH="aarch64"
+    [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/mmc/MUOS/PortMaster"
+    PAM_TARGET_CONFIRMED="1"
+    case "$PAM_DIR" in
+      /mnt/sdcard/*) directory="mnt/sdcard"; PAM_GAMEDIRS_DIR_DEFAULT="/mnt/sdcard/ports" ;;
+      *) directory="mnt/mmc"; PAM_GAMEDIRS_DIR_DEFAULT="/mnt/mmc/ports" ;;
+    esac
+    PAM_FRONTEND_KIND_DEFAULT="control-internal"
+    PAM_FRONTEND_DIR_DEFAULT="/roms/ports/PortMaster"
+    PAM_FRONTEND_NAMES_DEFAULT="control.txt"
+    PAM_FRONTEND_LAUNCHER_NAME="control.txt"
+  elif [ -f "${PAM_KNULLI_MARKER:-/userdata/system/knulli.conf}" ] || [ -f "/etc/knulli-version" ]; then
+    CFW_NAME="Knulli"; PAM_DEVICE_NAME="Knulli"; PAM_DEVICE_CLASS="official-untested"
+    param_device="knulli"; DEVICE_ARCH="aarch64"
+    [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/userdata/system/.local/share/PortMaster"
+    PAM_TARGET_CONFIRMED="1"; directory="userdata/roms"; PAM_GAMEDIRS_DIR_DEFAULT="/userdata/roms/ports"
+    PAM_FRONTEND_KIND_DEFAULT="script-external"
+  elif [ -f "${PAM_BATOCERA_VERSION_FILE:-/etc/batocera-version}" ]; then
+    CFW_NAME="Batocera"; PAM_DEVICE_NAME="Batocera"; PAM_DEVICE_CLASS="official-untested"
+    param_device="batocera"; DEVICE_ARCH="aarch64"
+    [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/userdata/system/.local/share/PortMaster"
+    PAM_TARGET_CONFIRMED="1"; directory="userdata/roms"; PAM_GAMEDIRS_DIR_DEFAULT="/userdata/roms/ports"
+    PAM_FRONTEND_KIND_DEFAULT="script-external"
+  elif { [ -n "${PAM_SPRUCE_ROOT:-}" ] && [ -d "$PAM_SPRUCE_ROOT" ]; } || [ -d "/mnt/sdcard/spruce" ]; then
+    CFW_NAME="Miyoo"; PAM_DEVICE_NAME="Miyoo / Spruce"; PAM_DEVICE_CLASS="official-untested"
+    param_device="miyoo"; DEVICE_ARCH="aarch64"
+    [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/sdcard/Roms/.portmaster/PortMaster"
+    PAM_TARGET_CONFIRMED="1"; directory="/mnt/sdcard/Roms/PORTS64/"; PAM_GAMEDIRS_DIR_DEFAULT="/mnt/sdcard/Roms/PORTS64"
+    PAM_FRONTEND_KIND_DEFAULT="control-internal"
+    PAM_FRONTEND_DIR_DEFAULT="/root/.local/share/PortMaster"
+    PAM_FRONTEND_NAMES_DEFAULT="control.txt"
+    PAM_FRONTEND_LAUNCHER_NAME="control.txt"
+  elif [ -n "$PAM_PORTMASTER_DIR" ] && [ -f "$PAM_PORTMASTER_DIR/control.txt" ]; then
+    PAM_DEVICE_NAME="${CFW_NAME:-PortMaster device}"; PAM_DEVICE_CLASS="unsupported-known"
+    param_device="generic"
     PAM_TARGET_CONFIRMED="1"
   elif [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] && [ -n "${PAM_SCRIPTS_DIR_OVERRIDE:-$PAM_DIR}" ]; then
     PAM_DEVICE_NAME="${PAM_DEVICE_NAME_OVERRIDE:-Unverified device}"
-    PAM_DEVICE_CLASS="unsupported-known"; PAM_TARGET_CONFIRMED="1"
+    PAM_DEVICE_CLASS="unsupported-known"; param_device="generic"; PAM_TARGET_CONFIRMED="1"
   fi
   [ -z "${PAM_DEVICE_CLASS_OVERRIDE:-}" ] || PAM_DEVICE_CLASS="$PAM_DEVICE_CLASS_OVERRIDE"
   [ -z "${PAM_DEVICE_NAME_OVERRIDE:-}" ] || PAM_DEVICE_NAME="$PAM_DEVICE_NAME_OVERRIDE"
@@ -104,6 +157,7 @@ pam_detect_profile() {
 }
 
 pam_detect_profile
+[ -z "${PAM_PARAM_DEVICE_OVERRIDE:-}" ] || param_device="$PAM_PARAM_DEVICE_OVERRIDE"
 [ -z "${PAM_DIRECTORY_OVERRIDE:-}" ] || directory="$PAM_DIRECTORY_OVERRIDE"
 
 # APP-owned input is resolved without executing any managed PortMaster file.
@@ -124,20 +178,10 @@ pm_finish() { :; }
 #   ROCKNIX      gamedirs=/storage/roms/ports        scripts=/storage/roms/ports_scripts
 # 所以脚本目录不去查任何配置, 直接认最强的事实: 本脚本自己就躺在脚本目录里。
 SCRIPTS_DIR="${PAM_SCRIPTS_DIR_OVERRIDE:-$PAM_DIR}"
-case "${param_device:-}" in
-  trimui)
-    PAM_FRONTEND_KIND="trimui"
-    PAM_FRONTEND_DIR="${PAM_PORTMASTER_DIR%/PortMaster}"
-    PAM_FRONTEND_LAUNCHER="$PAM_FRONTEND_DIR/launch.sh"
-    PAM_FRONTEND_NAMES="launch.sh,config.json,icon.png"
-    ;;
-  *)
-    PAM_FRONTEND_KIND="script"
-    PAM_FRONTEND_DIR="$SCRIPTS_DIR"
-    PAM_FRONTEND_LAUNCHER="$SCRIPTS_DIR/PortMaster.sh"
-    PAM_FRONTEND_NAMES="PortMaster.sh"
-    ;;
-esac
+PAM_FRONTEND_KIND="${PAM_FRONTEND_KIND_DEFAULT:-script-internal}"
+PAM_FRONTEND_DIR="${PAM_FRONTEND_DIR_OVERRIDE:-${PAM_FRONTEND_DIR_DEFAULT:-$SCRIPTS_DIR}}"
+PAM_FRONTEND_NAMES="${PAM_FRONTEND_NAMES_DEFAULT:-PortMaster.sh}"
+PAM_FRONTEND_LAUNCHER="$PAM_FRONTEND_DIR/${PAM_FRONTEND_LAUNCHER_NAME:-PortMaster.sh}"
 if [ -z "$directory" ]; then
   case "$PAM_DIR" in
     */Roms/PORTS|*/Roms/Ports) directory="${PAM_DIR%/Roms/*}/Data" ;;
@@ -147,10 +191,14 @@ if [ -z "$directory" ]; then
     *) directory="$PAM_DIR" ;;
   esac
 fi
-case "$directory" in
-  */ports|*/PORTS|*/Ports) GAMEDIRS_DIR="/${directory#/}" ;;
-  *) GAMEDIRS_DIR="/${directory#/}/ports" ;;
-esac
+if [ -n "${PAM_GAMEDIRS_DIR_DEFAULT:-}" ] && [ -z "${PAM_DIRECTORY_OVERRIDE:-}" ]; then
+  GAMEDIRS_DIR="$PAM_GAMEDIRS_DIR_DEFAULT"
+else
+  case "$directory" in
+    */ports|*/PORTS|*/Ports) GAMEDIRS_DIR="/${directory#/}" ;;
+    *) GAMEDIRS_DIR="/${directory#/}/ports" ;;
+  esac
+fi
 STATE_DIR="$PAM_APP_ROOT/state"
 [ -n "${PAM_STATE_DIR_OVERRIDE:-}" ] && STATE_DIR="$PAM_STATE_DIR_OVERRIDE"
 GAMEDIR="$PAM_APP_ROOT"
@@ -181,11 +229,8 @@ RUNTIME_METADATA="$CONFDIR/runtime-metadata.tsv"
 RUNTIME_METADATA_URL="https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json"
 RUNTIME_ROUTE_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L212"
 PAM_CUSTOM_RELEASE_BASE="${PAM_CUSTOM_RELEASE_BASE:-https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download}"
-PAM_OFFICIAL_RELEASE_BASE="${PAM_OFFICIAL_RELEASE_BASE:-https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download}"
-if [ -z "${PAM_RELEASE_BASE:-}" ]; then
-  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then PAM_RELEASE_BASE="$PAM_CUSTOM_RELEASE_BASE"
-  else PAM_RELEASE_BASE="$PAM_OFFICIAL_RELEASE_BASE"; fi
-fi
+PAM_RELEASE_BASE="$PAM_CUSTOM_RELEASE_BASE"
+PAM_INSTALLER_SOURCE_URL="https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh"
 RUNTIME_CUSTOM_ROUTES="7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb5180219393571951dd293185bf48d406d50d104be338d9608d1753d48cd8"
 RUNTIME_GITHUB_ROUTES="7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350"
 
@@ -206,7 +251,7 @@ if [ -s "$PORTMASTER_ACTIVE_FILE" ]; then
   fi
 fi
 cd "$PAM_APP_ROOT" || exit 1
-if [ "$HEALTH_ONLY" = "1" ]; then
+if [ "$HEALTH_ONLY" = "1" ] || [ "$INSTALL_PLAN_ONLY" = "1" ]; then
   :
 elif [ "$APPLY_ONLY" = "1" ] || [ "$SIZE_ONLY" = "1" ] || [ "$CHECK_UPDATE_ONLY" = "1" ] ||
      [ "$VALIDATE_ONLY" = "1" ] || [ "$RUNTIME_METADATA_ONLY" = "1" ]; then
@@ -216,7 +261,7 @@ else
 fi
 
 if [ "$APPLY_ONLY" != "1" ] && [ "$SIZE_ONLY" != "1" ] && [ "$CHECK_UPDATE_ONLY" != "1" ] &&
-   [ "$VALIDATE_ONLY" != "1" ] && [ "$RUNTIME_METADATA_ONLY" != "1" ]; then
+   [ "$VALIDATE_ONLY" != "1" ] && [ "$RUNTIME_METADATA_ONLY" != "1" ] && [ "$INSTALL_PLAN_ONLY" != "1" ]; then
   helper_ready=0
   # MiniLoong 用临时 .port.sh 启动，这个文件可能在执行期间就被
   # 前端移除。Bash 仍在 fd 255 持有已打开的脚本；最后再回退到目录里
@@ -242,7 +287,8 @@ if [ "$APPLY_ONLY" != "1" ] && [ "$SIZE_ONLY" != "1" ] && [ "$CHECK_UPDATE_ONLY"
     APPLY_HELPER=""
   fi
 fi
-[ "$HEALTH_ONLY" = "1" ] || echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} scripts=$SCRIPTS_DIR gamedirs=$GAMEDIRS_DIR"
+[ "$HEALTH_ONLY" = "1" ] || [ "$INSTALL_PLAN_ONLY" = "1" ] ||
+  echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} scripts=$SCRIPTS_DIR gamedirs=$GAMEDIRS_DIR"
 
 pam_core_health() {
   [ -d "$PAM_PORTMASTER_DIR" ] || { printf missing; return; }
@@ -252,14 +298,25 @@ pam_core_health() {
   [ -f "$PAM_PORTMASTER_DIR/pugwash" ] || [ -f "$PAM_PORTMASTER_DIR/harbourmaster" ] || {
     printf damaged; return;
   }
-  if [ "$PAM_FRONTEND_KIND" = "trimui" ]; then
-    [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
-    [ -f "$PAM_FRONTEND_DIR/config.json" ] || { printf damaged; return; }
-    [ -f "$PAM_FRONTEND_DIR/icon.png" ] || { printf damaged; return; }
-  else
-    [ -x "$PAM_PORTMASTER_DIR/PortMaster.sh" ] || { printf damaged; return; }
-    [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
-  fi
+  case "$PAM_FRONTEND_KIND" in
+    trimui)
+      [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
+      [ -f "$PAM_FRONTEND_DIR/config.json" ] || { printf damaged; return; }
+      [ -f "$PAM_FRONTEND_DIR/icon.png" ] || { printf damaged; return; }
+      ;;
+    script-external)
+      [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
+      ;;
+    control-internal)
+      [ -x "$PAM_PORTMASTER_DIR/PortMaster.sh" ] || { printf damaged; return; }
+      [ -f "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
+      ;;
+    script-internal)
+      [ -x "$PAM_PORTMASTER_DIR/PortMaster.sh" ] || { printf damaged; return; }
+      [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
+      ;;
+    *) printf damaged; return ;;
+  esac
   if [ -f "$PAM_PORTMASTER_DIR/pylibs.zip" ]; then
     [ -x "$PAM_BIN_DIR/unzip-portable" ] &&
       "$PAM_BIN_DIR/unzip-portable" -tq "$PAM_PORTMASTER_DIR/pylibs.zip" >/dev/null 2>&1 || {
@@ -1024,12 +1081,12 @@ runtime_select_proxy() {
 pm_valid_release_url() {
   case "$1" in
     https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/PortMaster.zip|\
-    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/Install.sh|\
     https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/version.json|\
     https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/SHA256SUMS|\
+    https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh|\
     https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip|\
-    https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download/version.json|\
-    https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
+    https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip|\
+    https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip.md5) return 0 ;;
   esac
   return 1
 }
@@ -1160,6 +1217,13 @@ pm_download_url() {
     if pm_fetch_url "$url" "$out" "$start" "$finish"; then return 0
     else rc=$?; fi
     [ "$rc" != "70" ] || return 70
+    if [ "$rc" = "33" ] && [ -e "$out" ]; then
+      echo "$LOG_PREFIX release server rejected resume; retrying this route from the beginning"
+      rm -f -- "$out"
+      if pm_fetch_url "$url" "$out" "$start" "$finish"; then return 0
+      else rc=$?; fi
+      [ "$rc" != "70" ] || return 70
+    fi
     echo "$LOG_PREFIX release transfer attempt $route_number failed"
   done <<< "$PM_RELEASE_ROUTES"
   return 1
@@ -1191,69 +1255,157 @@ pm_verify_asset() {
 pm_validate_sums() {
   local sums="$1" asset
   [ -s "$sums" ] || return 1
-  for asset in version.json Install.sh PortMaster.zip; do
+  for asset in version.json PortMaster.zip; do
     [ -n "$(pm_checksum_expected "$sums" "$asset")" ] || return 1
   done
 }
 
-pm_valid_stable_archive_url() {
-  case "$PAM_RELEASE_CHANNEL:$1" in
-    miniloong-custom:https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
-    official:https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
+pam_write_install_plan() {
+  local plan="$1" tmp="$plan.tmp.$$"
+  local names primary control_source core_source frontend_map remove_core empty_tasksetter
+  local core_executable frontend_executable
+  [ "$PAM_TARGET_CONFIRMED" = "1" ] || return 1
+  for path in "$PAM_PORTMASTER_DIR" "$SCRIPTS_DIR" "$PAM_FRONTEND_DIR"; do
+    case "$path" in
+      /|""|*'//'|/*/../*|/*/..|/../*|*$'\t'*|*$'\r'*|*$'\n'*) return 1 ;;
+      /*) ;;
+      *) return 1 ;;
+    esac
+  done
+  case "${param_device:-}" in
+    trimui)
+      names='launch.sh,config.json,icon.png'; primary='launch.sh'
+      control_source='trimui/control.txt'; core_source='-'
+      frontend_map='trimui/PortMaster.txt=launch.sh,trimui/config.json=config.json,trimui/icon.png=icon.png'
+      remove_core=1; empty_tasksetter=1; core_executable='-'; frontend_executable='launch.sh'
+      ;;
+    muos)
+      names='control.txt'; primary='control.txt'; control_source='muos/control.txt'; core_source='muos/PortMaster.txt'
+      frontend_map='muos/control.txt=control.txt'
+      remove_core=0; empty_tasksetter=1; core_executable='PortMaster.sh'; frontend_executable='-'
+      ;;
+    batocera|knulli)
+      names='PortMaster.sh'; primary='PortMaster.sh'; control_source="$param_device/control.txt"; core_source='-'
+      frontend_map='PortMaster.sh=PortMaster.sh'
+      remove_core=1; empty_tasksetter=1; core_executable='-'; frontend_executable='PortMaster.sh'
+      ;;
+    miyoo)
+      names='control.txt'; primary='control.txt'; control_source='miyoo/control.txt'; core_source='miyoo/PortMaster.txt'
+      frontend_map='miyoo/control.txt=control.txt'
+      remove_core=0; empty_tasksetter=0; core_executable='PortMaster.sh'; frontend_executable='-'
+      ;;
+    miniloong|generic)
+      names='PortMaster.sh'; primary='PortMaster.sh'; control_source='-'; core_source='-'
+      frontend_map='PortMaster.sh=PortMaster.sh'
+      remove_core=0; empty_tasksetter=0; core_executable='PortMaster.sh'; frontend_executable='PortMaster.sh'
+      ;;
+    *) return 1 ;;
+  esac
+  [ "$PAM_FRONTEND_NAMES" = "$names" ] || return 1
+  [ "$PAM_FRONTEND_LAUNCHER" = "$PAM_FRONTEND_DIR/$primary" ] || return 1
+  {
+    printf 'schema\t1\n'
+    printf 'device\t%s\n' "$param_device"
+    printf 'target\t%s\n' "$PAM_PORTMASTER_DIR"
+    printf 'scripts\t%s\n' "$SCRIPTS_DIR"
+    printf 'frontend_dir\t%s\n' "$PAM_FRONTEND_DIR"
+    printf 'frontend_names\t%s\n' "$names"
+    printf 'primary_frontend\t%s\n' "$primary"
+    printf 'control_source\t%s\n' "$control_source"
+    printf 'core_launcher_source\t%s\n' "$core_source"
+    printf 'frontend_map\t%s\n' "$frontend_map"
+    printf 'remove_core_launcher\t%s\n' "$remove_core"
+    printf 'empty_tasksetter\t%s\n' "$empty_tasksetter"
+    printf 'core_executable\t%s\n' "$core_executable"
+    printf 'frontend_executable\t%s\n' "$frontend_executable"
+  } > "$tmp" && mv -f -- "$tmp" "$plan"
+}
+
+pm_validate_installer() {
+  local installer="$1"
+  [ -s "$installer" ] || return 1
+  grep -Fqx '# PAM_INSTALLER_PROTOCOL=1' "$installer" || return 1
+  grep -Fqx '# PAM_PROFILE_SCHEMA=1' "$installer" || return 1
+  bash -n "$installer" >/dev/null 2>&1
+}
+
+pm_valid_custom_stable_archive_url() {
+  case "$1" in
+    https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
   esac
   return 1
 }
 
+pm_official_md5_expected() {
+  awk '{ name=$2; sub(/^\*/, "", name); if ($1 ~ /^[0-9A-Fa-f]{32}$/ && (name == "" || name == "PortMaster.zip")) {print tolower($1); exit} }' "$1"
+}
+
 install_portmaster_release_inner() {
-  local cache="$CONFDIR/portmaster-download" sums version installer archive rc installer_device
-  local version_url stable_url stable_md5 actual_md5 archive_valid=0
+  local cache="$CONFDIR/portmaster-download" sums version installer installer_tmp install_plan archive archive_dir checksum rc
+  local version_url stable_url stable_version expected_hash actual_hash archive_valid=0
   sums="$cache/SHA256SUMS"; version="$cache/version.json"
-  installer="$cache/Install.sh"; archive="$cache/PortMaster.zip"
+  installer="$cache/PortAppManager-Installer.sh"; installer_tmp="$installer.new"
+  install_plan="$cache/portmaster-install-plan.tsv"
   rm -f -- "$CANCEL_FILE"; mkdir -p "$cache" || return 1
-  rm -f -- "$sums" "$version" "$installer"
+  rm -f -- "$sums" "$version" "$installer_tmp" "$install_plan"
   RUNTIME_PROGRESS_RUNTIME="PortMaster"
   runtime_progress_write preparing 1 0 "Preparing PortMaster"
   version_url="$PAM_RELEASE_BASE/version.json"
   pm_select_release_routes "$version_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
   pm_download_url "$version_url" "$version" 5 10 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
-  stable_url=$(pam_stable_field_from_json "$version" url 2>/dev/null || true)
-  stable_md5=$(pam_stable_field_from_json "$version" md5 2>/dev/null || true)
-  pm_valid_stable_archive_url "$stable_url" || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
-
-  # The enhanced transactional installer is ours on every device. Only the
-  # PortMaster payload channel changes; this preserves one rollback contract.
-  pm_select_release_routes "$PAM_CUSTOM_RELEASE_BASE/version.json" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
   pm_download_url "$PAM_CUSTOM_RELEASE_BASE/SHA256SUMS" "$sums" 10 14 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
   pm_validate_sums "$sums" || { printf 'FAIL\tportmaster\tchecksums\n' >> "$RESULT_FILE"; return 1; }
-  pm_download_url "$PAM_CUSTOM_RELEASE_BASE/Install.sh" "$installer" 14 20 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_verify_asset "$sums" Install.sh "$installer" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
+  pm_verify_asset "$sums" version.json "$version" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
+  stable_version=$(pam_stable_version_from_json "$version" 2>/dev/null || true)
+  stable_url=$(pam_stable_field_from_json "$version" url 2>/dev/null || true)
+  case "$stable_version" in ""|*[!A-Za-z0-9._-]*) printf 'FAIL\tportmaster\tversion\n' >> "$RESULT_FILE"; return 1 ;; esac
+  pm_valid_custom_stable_archive_url "$stable_url" || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
+  case "$stable_url" in */releases/download/"$stable_version"/PortMaster.zip) ;; *) printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1 ;; esac
+  archive_dir="$cache/$stable_version"; archive="$archive_dir/PortMaster.zip"
+  mkdir -p "$archive_dir" || return 1
+
+  # The APP owns profile/path discovery. The branch-maintained helper receives
+  # only that normalized plan and contains no device detection of its own.
+  pm_select_release_routes "$PAM_INSTALLER_SOURCE_URL" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+  pm_download_url "$PAM_INSTALLER_SOURCE_URL" "$installer_tmp" 14 20 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+  pm_validate_installer "$installer_tmp" || { rm -f -- "$installer_tmp"; printf 'FAIL\tportmaster\tinstaller-contract\n' >> "$RESULT_FILE"; return 1; }
+  chmod 0700 "$installer_tmp" && mv -f -- "$installer_tmp" "$installer" || return 1
 
   if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
-    pm_verify_asset "$sums" version.json "$version" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
-    pm_verify_asset "$sums" PortMaster.zip "$archive" && archive_valid=1
+    expected_hash=$(pm_checksum_expected "$sums" PortMaster.zip)
   else
-    case "$stable_md5" in *[!0-9A-Fa-f]*|'') stable_md5="" ;; esac
-    [ "${#stable_md5}" = 32 ] || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
-    actual_md5=$(runtime_md5_file "$archive" 2>/dev/null || true)
-    [ "$actual_md5" = "$(printf '%s' "$stable_md5" | tr '[:upper:]' '[:lower:]')" ] && archive_valid=1
+    stable_url="https://github.com/PortsMaster/PortMaster-GUI/releases/download/$stable_version/PortMaster.zip"
+    checksum="$archive_dir/PortMaster.zip.md5"
+    rm -f -- "$checksum"
+    pm_select_release_routes "$stable_url.md5" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+    pm_download_url "$stable_url.md5" "$checksum" 18 20 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+    expected_hash=$(pm_official_md5_expected "$checksum")
+    [ "${#expected_hash}" = 32 ] || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
+  fi
+  if [ -s "$archive" ]; then
+    if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then actual_hash=$(pm_sha256_file "$archive" 2>/dev/null || true)
+    else actual_hash=$(runtime_md5_file "$archive" 2>/dev/null || true); fi
+    [ "$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')" = "$expected_hash" ] && archive_valid=1
   fi
   if [ "$archive_valid" = "1" ]; then
     runtime_progress_write downloading 78 0 "Using local cache"
   else
-    rm -f -- "$archive"
     pm_select_release_routes "$stable_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
     pm_download_url "$stable_url" "$archive" 20 78 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
   fi
   runtime_progress_write verifying 82 0 "Verifying release assets"
-  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
-    pm_verify_asset "$sums" PortMaster.zip "$archive" || {
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then actual_hash=$(pm_sha256_file "$archive" 2>/dev/null || true)
+  else actual_hash=$(runtime_md5_file "$archive" 2>/dev/null || true); fi
+  if [ "$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')" != "$expected_hash" ]; then
+    # A completed but invalid file is never retained. Retry once without a
+    # range so a bad cache cannot poison later launches.
+    rm -f -- "$archive"
+    pm_download_url "$stable_url" "$archive" 20 78 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+    if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then actual_hash=$(pm_sha256_file "$archive" 2>/dev/null || true)
+    else actual_hash=$(runtime_md5_file "$archive" 2>/dev/null || true); fi
+    [ "$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')" = "$expected_hash" ] || {
       rm -f -- "$archive"; printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1;
     }
-  else
-    actual_md5=$(runtime_md5_file "$archive" 2>/dev/null || true)
-    if [ "$actual_md5" != "$(printf '%s' "$stable_md5" | tr '[:upper:]' '[:lower:]')" ]; then
-      rm -f -- "$archive"; printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1
-    fi
   fi
   if [ ! -s "$archive" ]; then
     echo "$LOG_PREFIX cached PortMaster archive did not match the current stable release; restarting"
@@ -1265,17 +1417,11 @@ install_portmaster_release_inner() {
     printf 'FAIL\tportmaster\tarchive\n' >> "$RESULT_FILE"; return 1;
   }
   pm_cancel_requested && { printf 'FAIL\tportmaster\tcancelled\n' >> "$RESULT_FILE"; return 1; }
-  chmod 0700 "$installer" || return 1
+  pam_write_install_plan "$install_plan" || { printf 'FAIL\tportmaster\tinstall-plan\n' >> "$RESULT_FILE"; return 1; }
   runtime_progress_write installing 88 0 "Installing PortMaster"
-  case "$PAM_DEVICE_CLASS" in
-    tested) installer_device="${param_device:-auto}" ;;
-    official-untested|unsupported-known) installer_device="$PAM_DEVICE_CLASS" ;;
-    *) installer_device="auto" ;;
-  esac
   PAM_CANCEL_FILE="$CANCEL_FILE" PAM_UNZIP="$PAM_BIN_DIR/unzip-portable" \
     PAM_SHA256="$PAM_BIN_DIR/sha256sum-portable" \
-    bash "$installer" --archive "$archive" --target "$PAM_PORTMASTER_DIR" \
-      --scripts "$SCRIPTS_DIR" --state-dir "$CONFDIR" --device "$installer_device" || {
+    bash "$installer" --archive "$archive" --plan "$install_plan" --state-dir "$CONFDIR" || {
         rc=$?; printf 'FAIL\tportmaster\tinstaller-%s\n' "$rc" >> "$RESULT_FILE"; return 1;
       }
   [ -s "$CONFDIR/pending-install.tsv" ] && [ -s "$CONFDIR/pending-manifest.tsv" ] &&
@@ -1757,10 +1903,12 @@ pending_core_valid() {
   fi
   case "$launcher_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
   [ "${#launcher_hash}" = 64 ] || return 1
-  case "$expected_device" in miniloong|trimui|unknown|official-untested|unsupported|unsupported-known) ;; *) return 1 ;; esac
+  case "$expected_device" in miniloong|trimui|muos|batocera|knulli|miyoo|generic|unknown|official-untested|unsupported|unsupported-known) ;; *) return 1 ;; esac
   case "$expected_device" in
     miniloong) [ "$param_device" = "miniloong" ] || return 1 ;;
     trimui) [ "$param_device" = "trimui" ] || return 1 ;;
+    muos|batocera|knulli|miyoo) [ "$param_device" = "$expected_device" ] || return 1 ;;
+    generic) [ "$param_device" = "generic" ] || return 1 ;;
     official-untested) [ "$PAM_DEVICE_CLASS" = "official-untested" ] || return 1 ;;
     unsupported|unsupported-known) [ "$PAM_DEVICE_CLASS" = "unsupported-known" ] || return 1 ;;
     unknown) [ "$PAM_DEVICE_CLASS" = "unsupported-known" ] || return 1 ;;
@@ -2157,6 +2305,13 @@ fi
 
 if [ "$HEALTH_ONLY" = "1" ]; then
   printf '%s\t%s\t%s\t%s\n' "$(pam_core_health)" "$(pam_core_version)" "$PAM_DEVICE_CLASS" "$PAM_PORTMASTER_DIR"
+  exit 0
+fi
+
+if [ "$INSTALL_PLAN_ONLY" = "1" ]; then
+  install_plan="$CONFDIR/portmaster-install-plan.tsv"
+  pam_write_install_plan "$install_plan" || exit 1
+  cat "$install_plan"
   exit 0
 fi
 

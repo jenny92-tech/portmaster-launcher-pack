@@ -620,7 +620,7 @@ EOF
       grep -Fq '"display_height": "720"' "$app/conf/env.json"
       grep -Fq '"device_arch": "aarch64"' "$app/conf/env.json"
       grep -Fq '"device": ""' "$app/conf/env.json"
-      grep -Fq '"param_device": ""' "$app/conf/env.json"
+      grep -Fq '"param_device": "generic"' "$app/conf/env.json"
       grep -Fq '"analog_sticks": "2"' "$app/conf/env.json"
       grep -Fq '"lowres": "N"' "$app/conf/env.json"
       grep -Fq '"cur_tty": "/dev/tty0"' "$app/conf/env.json"

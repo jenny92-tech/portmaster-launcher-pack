@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GUI_ROOT="${PAM_GUI_ROOT_OVERRIDE:-$ROOT/../PortMaster-GUI}"
-INSTALLER="$GUI_ROOT/tools/appmanager-install.sh"
+INSTALLER="$GUI_ROOT/tools/portappmanager-installer.sh"
 TMP="$(mktemp -d)"
 cleanup() {
   local rc=$?
@@ -19,7 +19,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TMP/source/PortMaster/pylibs-src" "$TMP/source/PortMaster/trimui" "$TMP/app/bin" "$TMP/app/love_ui"
+mkdir -p "$TMP/source/PortMaster/pylibs-src" "$TMP/source/PortMaster/trimui" \
+  "$TMP/source/PortMaster/muos" "$TMP/source/PortMaster/batocera" "$TMP/app/bin" "$TMP/app/love_ui"
 mkdir -p "$TMP/loong"
 printf '1.0\n' > "$TMP/loong/loong_version"
 printf 'new-control\n' > "$TMP/source/PortMaster/control.txt"
@@ -32,6 +33,10 @@ printf 'trimui-control\n' > "$TMP/source/PortMaster/trimui/control.txt"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/trimui/PortMaster.txt"
 printf '{"label":"PortMaster"}\n' > "$TMP/source/PortMaster/trimui/config.json"
 printf 'trimui-icon\n' > "$TMP/source/PortMaster/trimui/icon.png"
+printf 'muos-control\n' > "$TMP/source/PortMaster/muos/control.txt"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/muos/PortMaster.txt"
+printf 'batocera-control\n' > "$TMP/source/PortMaster/batocera/control.txt"
+printf 'generic-tasksetter\n' > "$TMP/source/PortMaster/tasksetter"
 printf 'module\n' > "$TMP/source/PortMaster/pylibs-src/module.py"
 (cd "$TMP/source/PortMaster/pylibs-src" && zip -q ../pylibs.zip module.py)
 rm -rf "$TMP/source/PortMaster/pylibs-src"
@@ -46,6 +51,22 @@ exec unzip "$@"
 UNZIP
 chmod +x "$TMP/app/bin/sha256sum-portable" "$TMP/app/bin/unzip-portable"
 
+write_plan() {
+  local profile=$1 target=$2 scripts=$3 frontend=$4 plan=$5
+  local names primary control core map remove empty core_exec frontend_exec
+  case "$profile" in
+    trimui) names='launch.sh,config.json,icon.png'; primary='launch.sh'; control='trimui/control.txt'; core='-'; map='trimui/PortMaster.txt=launch.sh,trimui/config.json=config.json,trimui/icon.png=icon.png'; remove=1; empty=1; core_exec='-'; frontend_exec='launch.sh' ;;
+    muos) names='control.txt'; primary='control.txt'; control='muos/control.txt'; core='muos/PortMaster.txt'; map='muos/control.txt=control.txt'; remove=0; empty=1; core_exec='PortMaster.sh'; frontend_exec='-' ;;
+    batocera) names='PortMaster.sh'; primary='PortMaster.sh'; control='batocera/control.txt'; core='-'; map='PortMaster.sh=PortMaster.sh'; remove=1; empty=1; core_exec='-'; frontend_exec='PortMaster.sh' ;;
+    miniloong) names='PortMaster.sh'; primary='PortMaster.sh'; control='-'; core='-'; map='PortMaster.sh=PortMaster.sh'; remove=0; empty=0; core_exec='PortMaster.sh'; frontend_exec='PortMaster.sh' ;;
+  esac
+  {
+    printf 'schema\t1\ndevice\t%s\ntarget\t%s\nscripts\t%s\nfrontend_dir\t%s\n' "$profile" "$target" "$scripts" "$frontend"
+    printf 'frontend_names\t%s\nprimary_frontend\t%s\ncontrol_source\t%s\ncore_launcher_source\t%s\n' "$names" "$primary" "$control" "$core"
+    printf 'frontend_map\t%s\nremove_core_launcher\t%s\nempty_tasksetter\t%s\ncore_executable\t%s\nfrontend_executable\t%s\n' "$map" "$remove" "$empty" "$core_exec" "$frontend_exec"
+  } > "$plan"
+}
+
 install_case() {
   local name=$1 mode=$2 root target
   root="$TMP/$name"; target="$root/PortMaster"
@@ -59,8 +80,9 @@ install_case() {
     printf 'old-core\n' > "$target/old.txt"
     printf 'old-launcher\n' > "$root/scripts/PortMaster.sh"
   fi
-  "$INSTALLER" --archive "$TMP/PortMaster.zip" --target "$target" --scripts "$root/scripts" \
-    --state-dir "$root/state" --device miniloong >/dev/null
+  write_plan miniloong "$target" "$root/scripts" "$root/scripts" "$root/install-plan.tsv"
+  "$INSTALLER" --archive "$TMP/PortMaster.zip" --plan "$root/install-plan.tsv" \
+    --state-dir "$root/state" >/dev/null
 }
 
 validate_case() {
@@ -90,8 +112,9 @@ install_trimui_case() {
     printf 'old-config\n' > "$frontend/config.json"
     printf 'old-icon\n' > "$frontend/icon.png"
   fi
-  "$INSTALLER" --archive "$TMP/PortMaster.zip" --target "$target" --scripts "$scripts" \
-    --state-dir "$root/state" --device trimui >/dev/null
+  write_plan trimui "$target" "$scripts" "$frontend" "$root/install-plan.tsv"
+  "$INSTALLER" --archive "$TMP/PortMaster.zip" --plan "$root/install-plan.tsv" \
+    --state-dir "$root/state" >/dev/null
 }
 
 validate_trimui_case() {
@@ -102,6 +125,36 @@ validate_trimui_case() {
     PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$root/trimui-root" \
     PAM_DIRECTORY_OVERRIDE="${root#/}/Data" \
     bash "$ROOT/ports/appmanager/src/launcher.sh" --validate-pending
+}
+
+install_official_case() {
+  local name=$1 profile=$2 root target frontend scripts
+  root="$TMP/$name"; target="$root/PortMaster"; scripts="$root/scripts"
+  if [ "$profile" = muos ]; then frontend="$root/control-hack"; else frontend="$scripts"; fi
+  mkdir -p "$target/libs" "$frontend" "$scripts" "$root/state"
+  printf 'runtime-sentinel\n' > "$target/libs/keep.squashfs"
+  write_plan "$profile" "$target" "$scripts" "$frontend" "$root/install-plan.tsv"
+  "$INSTALLER" --archive "$TMP/PortMaster.zip" --plan "$root/install-plan.tsv" \
+    --state-dir "$root/state" >/dev/null
+}
+
+validate_official_case() {
+  local name=$1 profile=$2 root target frontend
+  root="$TMP/$name"; target="$root/PortMaster"
+  if [ "$profile" = muos ]; then frontend="$root/control-hack"; else frontend="$root/scripts"; fi
+  if [ "$profile" = muos ]; then
+    PAM_MUOS_ROOT="$root/muos-marker" PAM_KNULLI_MARKER="$TMP/no-knulli" PAM_BATOCERA_VERSION_FILE="$TMP/no-batocera" \
+      PAM_SOURCE_DIR="$root/scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$root/state" \
+      PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_FRONTEND_DIR_OVERRIDE="$frontend" \
+      PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$TMP/no-trim" \
+      bash "$ROOT/ports/appmanager/src/launcher.sh" --validate-pending
+  else
+    PAM_MUOS_ROOT="$TMP/no-muos" PAM_KNULLI_MARKER="$TMP/no-knulli" PAM_BATOCERA_VERSION_FILE="$root/batocera-version" \
+      PAM_SOURCE_DIR="$root/scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$root/state" \
+      PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_FRONTEND_DIR_OVERRIDE="$frontend" \
+      PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$TMP/no-trim" \
+      bash "$ROOT/ports/appmanager/src/launcher.sh" --validate-pending
+  fi
 }
 
 install_case success install
@@ -121,6 +174,21 @@ grep -Fq $'1\tvalid\t' "$TMP/trimui-success/state/validation-result.tsv"
 [ -f "$TMP/trimui-success/Apps/PortMaster/config.json" ]
 [ -f "$TMP/trimui-success/Apps/PortMaster/icon.png" ]
 [ ! -e "$TMP/trimui-success/Roms/PORTS/PortMaster.sh" ]
+
+mkdir -p "$TMP/muos-success/muos-marker"
+install_official_case muos-success muos
+validate_official_case muos-success muos
+grep -Fq $'1\tvalid\t' "$TMP/muos-success/state/validation-result.tsv"
+[ -x "$TMP/muos-success/PortMaster/PortMaster.sh" ]
+[ -f "$TMP/muos-success/control-hack/control.txt" ]
+
+mkdir -p "$TMP/batocera-success"
+printf 'batocera\n' > "$TMP/batocera-success/batocera-version"
+install_official_case batocera-success batocera
+validate_official_case batocera-success batocera
+grep -Fq $'1\tvalid\t' "$TMP/batocera-success/state/validation-result.tsv"
+[ ! -e "$TMP/batocera-success/PortMaster/PortMaster.sh" ]
+[ -x "$TMP/batocera-success/scripts/PortMaster.sh" ]
 
 install_trimui_case trimui-rollback update
 rm -f "$TMP/trimui-rollback/Apps/PortMaster/PortMaster/funcs.txt"
@@ -222,9 +290,9 @@ printf '#!/bin/sh\nexit 0\n' > "$crash_root/PortMaster/PortMaster.sh"
 printf 'old-core\n' > "$crash_root/PortMaster/old.txt"
 printf 'runtime-sentinel\n' > "$crash_root/PortMaster/libs/keep.squashfs"
 printf 'old-launcher\n' > "$crash_root/scripts/PortMaster.sh"
+write_plan miniloong "$crash_root/PortMaster" "$crash_root/scripts" "$crash_root/scripts" "$crash_root/install-plan.tsv"
 if PAM_TEST_CRASH_AFTER_BACKUP=1 "$INSTALLER" --archive "$TMP/PortMaster.zip" \
-  --target "$crash_root/PortMaster" --scripts "$crash_root/scripts" --state-dir "$crash_root/state" \
-  --device miniloong >/dev/null 2>&1; then
+  --plan "$crash_root/install-plan.tsv" --state-dir "$crash_root/state" >/dev/null 2>&1; then
   echo "simulated crash unexpectedly succeeded" >&2
   exit 1
 fi
