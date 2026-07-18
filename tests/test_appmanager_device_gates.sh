@@ -15,7 +15,17 @@ case "$mini" in missing$'\t\t'tested$'\t/mnt/sdcard/roms/ports/PortMaster') ;; *
 trim=$(PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/trim-state" \
   PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$TMP/trimui" \
   bash "$ROOT/ports/appmanager/src/launcher.sh" --health-check)
-case "$trim" in missing$'\t\t'tested$'\t/mnt/SDCARD/Data/ports/PortMaster') ;; *) echo "bad TrimUI profile: $trim" >&2; exit 1 ;; esac
+case "$trim" in missing$'\t\t'tested$'\t/mnt/SDCARD/Apps/PortMaster/PortMaster') ;; *) echo "bad TrimUI profile: $trim" >&2; exit 1 ;; esac
+
+PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/mini-env" \
+  PAM_LOONG_VERSION_FILE="$TMP/loong/loong_version" bash "$ROOT/ports/appmanager/src/launcher.sh" --scan
+PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/trim-env" \
+  PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$TMP/trimui" \
+  bash "$ROOT/ports/appmanager/src/launcher.sh" --scan
+grep -Fq '"portmaster_release_channel": "miniloong-custom"' "$TMP/mini-env/env.json"
+grep -Fq '"portmaster_release_channel": "official"' "$TMP/trim-env/env.json"
+grep -Fq '"portmaster_frontend_kind": "trimui"' "$TMP/trim-env/env.json"
+grep -Fq '"portmaster_frontend_dir": "/mnt/SDCARD/Apps/PortMaster"' "$TMP/trim-env/env.json"
 
 official="$TMP/official/PortMaster"
 mkdir -p "$official"

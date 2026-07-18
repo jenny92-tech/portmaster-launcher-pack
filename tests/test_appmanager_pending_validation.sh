@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$TMP/source/PortMaster/pylibs-src" "$TMP/app/bin" "$TMP/app/love_ui"
+mkdir -p "$TMP/source/PortMaster/pylibs-src" "$TMP/source/PortMaster/trimui" "$TMP/app/bin" "$TMP/app/love_ui"
 mkdir -p "$TMP/loong"
 printf '1.0\n' > "$TMP/loong/loong_version"
 printf 'new-control\n' > "$TMP/source/PortMaster/control.txt"
@@ -28,6 +28,10 @@ printf 'new-funcs\n' > "$TMP/source/PortMaster/funcs.txt"
 printf "PORTMASTER_VERSION = '2026.07'\n" > "$TMP/source/PortMaster/pugwash"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/PortMaster.sh"
 printf 'new-core\n' > "$TMP/source/PortMaster/core.txt"
+printf 'trimui-control\n' > "$TMP/source/PortMaster/trimui/control.txt"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/source/PortMaster/trimui/PortMaster.txt"
+printf '{"label":"PortMaster"}\n' > "$TMP/source/PortMaster/trimui/config.json"
+printf 'trimui-icon\n' > "$TMP/source/PortMaster/trimui/icon.png"
 printf 'module\n' > "$TMP/source/PortMaster/pylibs-src/module.py"
 (cd "$TMP/source/PortMaster/pylibs-src" && zip -q ../pylibs.zip module.py)
 rm -rf "$TMP/source/PortMaster/pylibs-src"
@@ -70,6 +74,36 @@ validate_case() {
     bash "$ROOT/ports/appmanager/src/launcher.sh" --validate-pending
 }
 
+install_trimui_case() {
+  local name=$1 mode=$2 root target frontend scripts
+  root="$TMP/$name"; target="$root/Apps/PortMaster/PortMaster"
+  frontend="$root/Apps/PortMaster"; scripts="$root/Roms/PORTS"
+  mkdir -p "$target/libs" "$frontend" "$scripts" "$root/state" "$root/trimui-root"
+  printf 'runtime-sentinel\n' > "$target/libs/keep.squashfs"
+  if [ "$mode" = update ]; then
+    printf 'old-control\n' > "$target/control.txt"
+    printf 'old-device\n' > "$target/device_info.txt"
+    printf 'old-funcs\n' > "$target/funcs.txt"
+    printf "PORTMASTER_VERSION = '2026.06'\n" > "$target/pugwash"
+    printf 'old-core\n' > "$target/old.txt"
+    printf 'old-launcher\n' > "$frontend/launch.sh"
+    printf 'old-config\n' > "$frontend/config.json"
+    printf 'old-icon\n' > "$frontend/icon.png"
+  fi
+  "$INSTALLER" --archive "$TMP/PortMaster.zip" --target "$target" --scripts "$scripts" \
+    --state-dir "$root/state" --device trimui >/dev/null
+}
+
+validate_trimui_case() {
+  local name=$1 root target
+  root="$TMP/$name"; target="$root/Apps/PortMaster/PortMaster"
+  PAM_SOURCE_DIR="$root/Roms/PORTS" PAM_APP_ROOT_OVERRIDE="$TMP/app" \
+    PAM_STATE_DIR_OVERRIDE="$root/state" PAM_PORTMASTER_DIR_OVERRIDE="$target" \
+    PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$root/trimui-root" \
+    PAM_DIRECTORY_OVERRIDE="${root#/}/Data" \
+    bash "$ROOT/ports/appmanager/src/launcher.sh" --validate-pending
+}
+
 install_case success install
 validate_case success
 grep -Fq $'1\tvalid\t' "$TMP/success/state/validation-result.tsv"
@@ -77,6 +111,26 @@ grep -Fq $'1\tvalid\t' "$TMP/success/state/validation-result.tsv"
 [ ! -e "$TMP/success/PortMaster/.appmanager-rollback" ]
 grep -Fxq new-core "$TMP/success/PortMaster/core.txt"
 grep -Fxq runtime-sentinel "$TMP/success/PortMaster/libs/keep.squashfs"
+
+# TrimUI uses the official Apps/PortMaster frontend contract instead of a
+# generic launcher under Roms/PORTS. All four locations validate together.
+install_trimui_case trimui-success install
+validate_trimui_case trimui-success
+grep -Fq $'1\tvalid\t' "$TMP/trimui-success/state/validation-result.tsv"
+[ -x "$TMP/trimui-success/Apps/PortMaster/launch.sh" ]
+[ -f "$TMP/trimui-success/Apps/PortMaster/config.json" ]
+[ -f "$TMP/trimui-success/Apps/PortMaster/icon.png" ]
+[ ! -e "$TMP/trimui-success/Roms/PORTS/PortMaster.sh" ]
+
+install_trimui_case trimui-rollback update
+rm -f "$TMP/trimui-rollback/Apps/PortMaster/PortMaster/funcs.txt"
+validate_trimui_case trimui-rollback || true
+grep -Fq $'1\trestored\t' "$TMP/trimui-rollback/state/validation-result.tsv"
+grep -Fxq old-core "$TMP/trimui-rollback/Apps/PortMaster/PortMaster/old.txt"
+grep -Fxq old-launcher "$TMP/trimui-rollback/Apps/PortMaster/launch.sh"
+grep -Fxq old-config "$TMP/trimui-rollback/Apps/PortMaster/config.json"
+grep -Fxq old-icon "$TMP/trimui-rollback/Apps/PortMaster/icon.png"
+[ ! -e "$TMP/trimui-rollback/Roms/PORTS/PortMaster.sh" ]
 
 install_case rollback update
 rm -f "$TMP/rollback/PortMaster/funcs.txt"
@@ -86,6 +140,21 @@ grep -Fxq old-core "$TMP/rollback/PortMaster/old.txt"
 grep -Fxq old-launcher "$TMP/rollback/scripts/PortMaster.sh"
 grep -Fxq runtime-sentinel "$TMP/rollback/PortMaster/libs/keep.squashfs"
 [ ! -e "$TMP/rollback/state/pending-install.tsv" ]
+
+# Devices updating from the previously released v2 transaction format must
+# still roll back safely after this launcher upgrade.
+install_case legacy-v2 update
+sed -e 's/^version\t3$/version\t2/' -e '/^frontend_/d' \
+  "$TMP/legacy-v2/state/pending-install.tsv" > "$TMP/legacy-v2/state/pending-v2.tmp"
+mv "$TMP/legacy-v2/state/pending-v2.tmp" "$TMP/legacy-v2/state/pending-install.tsv"
+mv "$TMP/legacy-v2/PortMaster/.appmanager-rollback/frontend/PortMaster.sh" \
+  "$TMP/legacy-v2/PortMaster/.appmanager-rollback/PortMaster.sh"
+rm -f "$TMP/legacy-v2/state/pending-frontend-manifest.tsv"
+rm -f "$TMP/legacy-v2/PortMaster/funcs.txt"
+validate_case legacy-v2 || true
+grep -Fq $'1\trestored\t' "$TMP/legacy-v2/state/validation-result.tsv"
+grep -Fxq old-core "$TMP/legacy-v2/PortMaster/old.txt"
+grep -Fxq old-launcher "$TMP/legacy-v2/scripts/PortMaster.sh"
 
 install_case first-failure install
 rm -f "$TMP/first-failure/PortMaster/funcs.txt"

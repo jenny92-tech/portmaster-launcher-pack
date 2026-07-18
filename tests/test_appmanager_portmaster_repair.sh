@@ -19,6 +19,7 @@ trap cleanup EXIT
 "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
 mkdir -p "$TMP/release" "$TMP/archive/PortMaster/pylibs-src" "$TMP/app"
 cp -R "$ROOT/ports/appmanager/dist/PortAppManager/." "$TMP/app/"
+rm -f "$TMP/app/bin/busybox-portable"
 
 printf 'controlfolder=/unused\n' > "$TMP/archive/PortMaster/control.txt"
 printf 'device\n' > "$TMP/archive/PortMaster/device_info.txt"
@@ -31,7 +32,24 @@ printf '#!/bin/sh\nexit 0\n' > "$TMP/archive/PortMaster/PortMaster.sh"
 chmod +x "$TMP/archive/PortMaster/PortMaster.sh"
 (cd "$TMP/archive" && zip -qr "$TMP/release/PortMaster.zip" PortMaster)
 cp "$GUI/tools/appmanager-install.sh" "$TMP/release/Install.sh"
-printf '%s\n' '{"stable":{"version":"2026.07"}}' > "$TMP/release/version.json"
+archive_md5=$(md5 -q "$TMP/release/PortMaster.zip" 2>/dev/null || md5sum "$TMP/release/PortMaster.zip" | awk '{print $1}')
+cat > "$TMP/release/official-version.json" <<JSON
+{
+  "stable": {
+    "version": "2026.07",
+    "url": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",
+    "md5": "$archive_md5"
+  }
+}
+JSON
+cat > "$TMP/release/version.json" <<'JSON'
+{
+  "stable": {
+    "version": "2026.07",
+    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"
+  }
+}
+JSON
 (cd "$TMP/release" && shasum -a 256 version.json Install.sh PortMaster.zip > SHA256SUMS)
 
 cat > "$TMP/app/bin/curl-portable" <<'CURL'
@@ -48,22 +66,28 @@ while [ "$#" -gt 0 ]; do
 done
 asset=${url##*/}
 [ -f "$PAM_TEST_RELEASE/$asset" ] || exit 22
+source_file="$PAM_TEST_RELEASE/$asset"
+case "$url:$asset" in
+  */PortsMaster/PortMaster-GUI/*:version.json|*github.com/PortsMaster/PortMaster-GUI*:version.json)
+    source_file="$PAM_TEST_RELEASE/official-version.json"
+    ;;
+esac
 if [ -n "$out" ]; then
   if [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_CORRUPT:-0}" = "1" ]; then
     printf 'corrupt archive\n' > "$out"
   elif [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_SLOW:-0}" = "1" ]; then
-    size=$(wc -c < "$PAM_TEST_RELEASE/$asset" | tr -d '[:space:]')
+    size=$(wc -c < "$source_file" | tr -d '[:space:]')
     half=$((size / 2))
     : > "$out"
     sleep 1
-    head -c "$half" "$PAM_TEST_RELEASE/$asset" >> "$out"
+    head -c "$half" "$source_file" >> "$out"
     sleep 2
-    tail -c "+$((half + 1))" "$PAM_TEST_RELEASE/$asset" >> "$out"
+    tail -c "+$((half + 1))" "$source_file" >> "$out"
   else
-    cp "$PAM_TEST_RELEASE/$asset" "$out"
+    cp "$source_file" "$out"
   fi
 else
-  head -c 16 "$PAM_TEST_RELEASE/$asset"
+  head -c 16 "$source_file"
 fi
 if [ "$asset" = "${PAM_TEST_CANCEL_ON_ASSET:-never}" ]; then : > "$PAM_TEST_CANCEL_FILE"; fi
 CURL
@@ -79,6 +103,7 @@ chmod +x "$TMP/app/bin/curl-portable" "$TMP/app/bin/unzip-portable" "$TMP/app/bi
 
 run_repair() {
   local name=$1 corrupt=${2:-0} cancel_asset=${3:-never} existing=${4:-0} cached=${5:-0} slow=${6:-0}
+  local channel=${7:-official} release_base loong_file
   local state="$TMP/$name/state" target="$TMP/$name/PortMaster" scripts="$TMP/$name/scripts"
   local observer_pid=0 rc=0
   mkdir -p "$state" "$scripts" "$target/libs"
@@ -96,6 +121,14 @@ run_repair() {
     printf 'old-launcher\n' > "$scripts/PortMaster.sh"
   fi
   printf '# plan\nINSTALL_PORTMASTER\tstable\n' > "$state/plan.txt"
+  if [ "$channel" = custom ]; then
+    mkdir -p "$TMP/loong"; printf '1.0\n' > "$TMP/loong/loong_version"
+    release_base="https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download"
+    loong_file="$TMP/loong/loong_version"
+  else
+    release_base="https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download"
+    loong_file="$TMP/no-loong"
+  fi
   if [ "$slow" = 1 ]; then
     (
       for _ in $(seq 1 80); do
@@ -109,7 +142,7 @@ run_repair() {
   PAM_SOURCE_DIR="$TMP" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$state" \
     PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_DIRECTORY_OVERRIDE="${TMP#/}/$name/data" \
     PAM_DEVICE_CLASS_OVERRIDE=tested PAM_TARGET_CONFIRMED_OVERRIDE=1 \
-    PAM_RELEASE_BASE="https://source.invalid/releases/latest/download" \
+    PAM_LOONG_VERSION_FILE="$loong_file" PAM_RELEASE_BASE="$release_base" \
     PAM_RUNTIME_CUSTOM_PROXIES='custom|test|https://proxy.invalid' PAM_RUNTIME_PROXIES='' \
     PAM_TEST_RELEASE="$TMP/release" PAM_TEST_CURL_LOG="$TMP/$name/curl.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
     PAM_TEST_CANCEL_ON_ASSET="$cancel_asset" PAM_TEST_CANCEL_FILE="$state/cancel.request" \
@@ -126,6 +159,10 @@ run_repair success
 grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
 grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
+
+run_repair miniloong-custom 0 never 0 0 0 custom
+grep -Fq 'jenny92-tech/PortMaster-GUI' "$TMP/miniloong-custom/curl.log"
+grep -Fq $'device\tminiloong' "$TMP/miniloong-custom/state/pending-install.tsv"
 
 run_repair cached 0 never 0 1
 ! grep -Fq '/PortMaster.zip' "$TMP/cached/curl.log"

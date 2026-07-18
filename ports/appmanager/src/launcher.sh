@@ -46,6 +46,7 @@ portmaster_discover() {
   elif [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
   elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
   elif [ -d "$xdg_data_home/PortMaster/" ]; then controlfolder="$xdg_data_home/PortMaster"
+  elif [ -d "/mnt/SDCARD/Apps/PortMaster/PortMaster/" ]; then controlfolder="/mnt/SDCARD/Apps/PortMaster/PortMaster"
   elif [ -d "/mnt/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/mnt/sdcard/roms/ports/PortMaster"
   elif [ -d "/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/sdcard/roms/ports/PortMaster"
   else controlfolder=""; fi
@@ -72,18 +73,22 @@ pam_detect_profile() {
   PAM_DEVICE_CLASS="unknown-path"
   PAM_DEVICE_NAME="Unknown"
   PAM_TARGET_CONFIRMED="0"
+  PAM_RELEASE_CHANNEL="official"
   if [ -f "${PAM_LOONG_VERSION_FILE:-/loong/loong_version}" ]; then
     CFW_NAME="Loong"; PAM_DEVICE_NAME="MiniLoong Pocket One"; PAM_DEVICE_CLASS="tested"
     param_device="miniloong"; DEVICE_ARCH="aarch64"
     directory="${PAM_DIRECTORY_OVERRIDE:-mnt/sdcard/roms}"
     [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/sdcard/roms/ports/PortMaster"
+    PAM_RELEASE_CHANNEL="miniloong-custom"
     PAM_TARGET_CONFIRMED="1"
     DISPLAY_WIDTH="${DISPLAY_WIDTH:-960}"; DISPLAY_HEIGHT="${DISPLAY_HEIGHT:-720}"
-  elif [ -d "${PAM_TRIMUI_ROOT:-/mnt/SDCARD}" ] || [ "${CFW_NAME:-}" = "TrimUI" ]; then
-    CFW_NAME="${CFW_NAME:-TrimUI}"; PAM_DEVICE_NAME="TrimUI"; PAM_DEVICE_CLASS="tested"
+  elif { [ -n "${PAM_TRIMUI_ROOT:-}" ] && [ -d "$PAM_TRIMUI_ROOT" ]; } ||
+       [ "${CFW_NAME:-}" = "TrimUI" ] ||
+       { case "$PAM_DIR" in /mnt/SDCARD/Roms/PORTS|/mnt/SDCARD/Roms/PORTS/*) true ;; *) false ;; esac; }; then
+    CFW_NAME="TrimUI"; PAM_DEVICE_NAME="TrimUI"; PAM_DEVICE_CLASS="tested"
     param_device="trimui"
     directory="${PAM_DIRECTORY_OVERRIDE:-mnt/SDCARD/Data}"
-    [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/SDCARD/Data/ports/PortMaster"
+    [ -n "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || PAM_PORTMASTER_DIR="/mnt/SDCARD/Apps/PortMaster/PortMaster"
     PAM_TARGET_CONFIRMED="1"
   elif [ -f "$PAM_PORTMASTER_DIR/control.txt" ]; then
     PAM_DEVICE_NAME="${CFW_NAME:-PortMaster device}"; PAM_DEVICE_CLASS="official-untested"
@@ -119,6 +124,20 @@ pm_finish() { :; }
 #   ROCKNIX      gamedirs=/storage/roms/ports        scripts=/storage/roms/ports_scripts
 # 所以脚本目录不去查任何配置, 直接认最强的事实: 本脚本自己就躺在脚本目录里。
 SCRIPTS_DIR="${PAM_SCRIPTS_DIR_OVERRIDE:-$PAM_DIR}"
+case "${param_device:-}" in
+  trimui)
+    PAM_FRONTEND_KIND="trimui"
+    PAM_FRONTEND_DIR="${PAM_PORTMASTER_DIR%/PortMaster}"
+    PAM_FRONTEND_LAUNCHER="$PAM_FRONTEND_DIR/launch.sh"
+    PAM_FRONTEND_NAMES="launch.sh,config.json,icon.png"
+    ;;
+  *)
+    PAM_FRONTEND_KIND="script"
+    PAM_FRONTEND_DIR="$SCRIPTS_DIR"
+    PAM_FRONTEND_LAUNCHER="$SCRIPTS_DIR/PortMaster.sh"
+    PAM_FRONTEND_NAMES="PortMaster.sh"
+    ;;
+esac
 if [ -z "$directory" ]; then
   case "$PAM_DIR" in
     */Roms/PORTS|*/Roms/Ports) directory="${PAM_DIR%/Roms/*}/Data" ;;
@@ -161,7 +180,12 @@ SIZE_FILE="$CONFDIR/sizes.tsv"
 RUNTIME_METADATA="$CONFDIR/runtime-metadata.tsv"
 RUNTIME_METADATA_URL="https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json"
 RUNTIME_ROUTE_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L212"
-PAM_RELEASE_BASE="${PAM_RELEASE_BASE:-https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download}"
+PAM_CUSTOM_RELEASE_BASE="${PAM_CUSTOM_RELEASE_BASE:-https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download}"
+PAM_OFFICIAL_RELEASE_BASE="${PAM_OFFICIAL_RELEASE_BASE:-https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download}"
+if [ -z "${PAM_RELEASE_BASE:-}" ]; then
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then PAM_RELEASE_BASE="$PAM_CUSTOM_RELEASE_BASE"
+  else PAM_RELEASE_BASE="$PAM_OFFICIAL_RELEASE_BASE"; fi
+fi
 RUNTIME_CUSTOM_ROUTES="7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb5180219393571951dd293185bf48d406d50d104be338d9608d1753d48cd8"
 RUNTIME_GITHUB_ROUTES="7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350"
 
@@ -228,8 +252,14 @@ pam_core_health() {
   [ -f "$PAM_PORTMASTER_DIR/pugwash" ] || [ -f "$PAM_PORTMASTER_DIR/harbourmaster" ] || {
     printf damaged; return;
   }
-  [ -x "$PAM_PORTMASTER_DIR/PortMaster.sh" ] || { printf damaged; return; }
-  [ -x "$SCRIPTS_DIR/PortMaster.sh" ] || { printf damaged; return; }
+  if [ "$PAM_FRONTEND_KIND" = "trimui" ]; then
+    [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
+    [ -f "$PAM_FRONTEND_DIR/config.json" ] || { printf damaged; return; }
+    [ -f "$PAM_FRONTEND_DIR/icon.png" ] || { printf damaged; return; }
+  else
+    [ -x "$PAM_PORTMASTER_DIR/PortMaster.sh" ] || { printf damaged; return; }
+    [ -x "$PAM_FRONTEND_LAUNCHER" ] || { printf damaged; return; }
+  fi
   if [ -f "$PAM_PORTMASTER_DIR/pylibs.zip" ]; then
     [ -x "$PAM_BIN_DIR/unzip-portable" ] &&
       "$PAM_BIN_DIR/unzip-portable" -tq "$PAM_PORTMASTER_DIR/pylibs.zip" >/dev/null 2>&1 || {
@@ -314,6 +344,11 @@ write_env() {
   "portmaster_health": "$(json_escape "$(pam_core_health)")",
   "portmaster_version": "$(json_escape "$(pam_core_version)")",
   "portmaster_target": "$(json_escape "$PAM_PORTMASTER_DIR")",
+  "portmaster_release_channel": "$(json_escape "$PAM_RELEASE_CHANNEL")",
+  "portmaster_frontend_kind": "$(json_escape "$PAM_FRONTEND_KIND")",
+  "portmaster_frontend_dir": "$(json_escape "$PAM_FRONTEND_DIR")",
+  "portmaster_frontend_launcher": "$(json_escape "$PAM_FRONTEND_LAUNCHER")",
+  "portmaster_frontend_names": "$(json_escape "$PAM_FRONTEND_NAMES")",
   "device_name": "$(json_escape "$PAM_DEVICE_NAME")",
   "device_class": "$(json_escape "$PAM_DEVICE_CLASS")",
   "target_confirmed": "$(json_escape "$PAM_TARGET_CONFIRMED")",
@@ -825,10 +860,11 @@ runtime_metadata_refresh() {
   [ -s "$RUNTIME_METADATA" ]
 }
 
-pam_stable_version_from_json() {
-  awk '
+pam_stable_field_from_json() {
+  local field="$2"
+  awk -v field="$field" '
     /"stable"[[:space:]]*:/ { stable=1; next }
-    stable && /"version"[[:space:]]*:/ {
+    stable && $0 ~ "\"" field "\"[[:space:]]*:" {
       line=$0
       sub(/^[^:]*:[[:space:]]*"/, "", line)
       sub(/".*/, "", line)
@@ -837,6 +873,8 @@ pam_stable_version_from_json() {
     }
   ' "$1"
 }
+
+pam_stable_version_from_json() { pam_stable_field_from_json "$1" version; }
 
 pam_cache_mtime() {
   stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf 0
@@ -854,8 +892,8 @@ pam_check_update() {
   rm -f -- "$CANCEL_FILE"
   if [ -n "${PAM_VERSION_URL:-}" ] && runtime_prepare_downloader; then
     "$RUNTIME_CURL" -fsSL --connect-timeout 8 --max-time 20 -o "$tmp" "$PAM_VERSION_URL" 2>/dev/null || true
-  elif pm_select_release_routes; then
-    pm_download_asset version.json "$tmp" 0 0 || true
+  elif pm_select_release_routes "$PAM_RELEASE_BASE/version.json"; then
+    pm_download_url "$PAM_RELEASE_BASE/version.json" "$tmp" 0 0 || true
   fi
   latest=$(pam_stable_version_from_json "$tmp" 2>/dev/null || true)
   case "$latest" in ""|*[!A-Za-z0-9._-]*) latest="" ;; *) status="ok" ;; esac
@@ -983,13 +1021,29 @@ runtime_select_proxy() {
 # but release assets are ordinary files rather than squashfs images. The
 # selected route is never written to progress.tsv, so the UI only exposes a
 # connection phase and useful transfer metrics.
+pm_valid_release_url() {
+  case "$1" in
+    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/PortMaster.zip|\
+    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/Install.sh|\
+    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/version.json|\
+    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/SHA256SUMS|\
+    https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip|\
+    https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download/version.json|\
+    https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
+  esac
+  return 1
+}
+
 pm_release_url() {
-  local format="$1" base="$2" asset="$3" direct="$PAM_RELEASE_BASE/$asset"
-  case "$asset" in PortMaster.zip|Install.sh|version.json|SHA256SUMS) ;; *) return 1 ;; esac
+  local format="$1" base="$2" direct="$3" path
+  pm_valid_release_url "$direct" || return 1
   case "$format" in
     direct) printf '%s\n' "$direct" ;;
     github|full) printf '%s/%s\n' "${base%/}" "$direct" ;;
-    custom) printf '%s/jenny92-tech/PortMaster-GUI/releases/latest/download/%s\n' "${base%/}" "$asset" ;;
+    custom)
+      path=${direct#https://github.com/}
+      printf '%s/%s\n' "${base%/}" "$path"
+      ;;
     *) return 1 ;;
   esac
 }
@@ -1004,7 +1058,8 @@ pm_probe_release_url() {
 }
 
 pm_select_release_routes() {
-  local root candidates format name base url id=0 start=1 count=0 verified="" batch_size=5
+  local probe_url="$1" root candidates format name base url id=0 start=1 count=0 verified="" batch_size=5
+  pm_valid_release_url "$probe_url" || return 1
   runtime_prepare_downloader || return 1
   root="$CONFDIR/pm-probe.$$"
   rm -rf -- "$root"; mkdir -p "$root" || return 1
@@ -1013,7 +1068,7 @@ pm_select_release_routes() {
     [ -n "$format" ] && [ -n "$name" ] || continue
     id=$((id + 1)); count=$((count + 1))
     (
-      url=$(pm_release_url "$format" "$base" version.json) || exit 1
+      url=$(pm_release_url "$format" "$base" "$probe_url") || exit 1
       if pm_probe_release_url "$url" "$root/probe.$id"; then
         : > "$root/ok.$id"
         if mkdir "$root/winner.lock" 2>/dev/null; then printf '%s\n' "$id" > "$root/winner"; fi
@@ -1033,7 +1088,7 @@ pm_select_release_routes() {
     wait
     verified=$(runtime_probe_batch_results "$root" "$start" "$id" "$candidates" 2>/dev/null || true)
   fi
-  if pm_probe_release_url "$(pm_release_url direct "" version.json)" "$root/direct"; then
+  if pm_probe_release_url "$(pm_release_url direct "" "$probe_url")" "$root/direct"; then
     verified+="${verified:+$'\n'}direct"$'\torigin\t'
   fi
   rm -rf -- "$root"
@@ -1094,17 +1149,18 @@ pm_fetch_url() {
   runtime_progress_write downloading "$finish" "$final_speed" "$final_detail"
 }
 
-pm_download_asset() {
-  local asset="$1" out="$2" start="$3" finish="$4" format name base url route_number=0 rc
+pm_download_url() {
+  local direct="$1" out="$2" start="$3" finish="$4" format name base url route_number=0 rc
+  pm_valid_release_url "$direct" || return 1
   while IFS=$'\t' read -r format name base; do
     [ -n "$format" ] && [ -n "$name" ] || continue
     route_number=$((route_number + 1))
-    url=$(pm_release_url "$format" "$base" "$asset") || continue
-    echo "$LOG_PREFIX release transfer attempt $route_number for $asset"
+    url=$(pm_release_url "$format" "$base" "$direct") || continue
+    echo "$LOG_PREFIX release transfer attempt $route_number"
     if pm_fetch_url "$url" "$out" "$start" "$finish"; then return 0
     else rc=$?; fi
     [ "$rc" != "70" ] || return 70
-    echo "$LOG_PREFIX release transfer attempt $route_number failed for $asset"
+    echo "$LOG_PREFIX release transfer attempt $route_number failed"
   done <<< "$PM_RELEASE_ROUTES"
   return 1
 }
@@ -1140,36 +1196,69 @@ pm_validate_sums() {
   done
 }
 
+pm_valid_stable_archive_url() {
+  case "$PAM_RELEASE_CHANNEL:$1" in
+    miniloong-custom:https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
+    official:https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
+  esac
+  return 1
+}
+
 install_portmaster_release_inner() {
   local cache="$CONFDIR/portmaster-download" sums version installer archive rc installer_device
+  local version_url stable_url stable_md5 actual_md5 archive_valid=0
   sums="$cache/SHA256SUMS"; version="$cache/version.json"
   installer="$cache/Install.sh"; archive="$cache/PortMaster.zip"
   rm -f -- "$CANCEL_FILE"; mkdir -p "$cache" || return 1
   rm -f -- "$sums" "$version" "$installer"
   RUNTIME_PROGRESS_RUNTIME="PortMaster"
   runtime_progress_write preparing 1 0 "Preparing PortMaster"
-  pm_select_release_routes || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_download_asset SHA256SUMS "$sums" 5 10 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+  version_url="$PAM_RELEASE_BASE/version.json"
+  pm_select_release_routes "$version_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+  pm_download_url "$version_url" "$version" 5 10 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+  stable_url=$(pam_stable_field_from_json "$version" url 2>/dev/null || true)
+  stable_md5=$(pam_stable_field_from_json "$version" md5 2>/dev/null || true)
+  pm_valid_stable_archive_url "$stable_url" || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
+
+  # The enhanced transactional installer is ours on every device. Only the
+  # PortMaster payload channel changes; this preserves one rollback contract.
+  pm_select_release_routes "$PAM_CUSTOM_RELEASE_BASE/version.json" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+  pm_download_url "$PAM_CUSTOM_RELEASE_BASE/SHA256SUMS" "$sums" 10 14 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
   pm_validate_sums "$sums" || { printf 'FAIL\tportmaster\tchecksums\n' >> "$RESULT_FILE"; return 1; }
-  pm_download_asset version.json "$version" 10 15 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_download_asset Install.sh "$installer" 15 22 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  if pm_verify_asset "$sums" PortMaster.zip "$archive"; then
+  pm_download_url "$PAM_CUSTOM_RELEASE_BASE/Install.sh" "$installer" 14 20 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+  pm_verify_asset "$sums" Install.sh "$installer" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
+
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
+    pm_verify_asset "$sums" version.json "$version" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
+    pm_verify_asset "$sums" PortMaster.zip "$archive" && archive_valid=1
+  else
+    case "$stable_md5" in *[!0-9A-Fa-f]*|'') stable_md5="" ;; esac
+    [ "${#stable_md5}" = 32 ] || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
+    actual_md5=$(runtime_md5_file "$archive" 2>/dev/null || true)
+    [ "$actual_md5" = "$(printf '%s' "$stable_md5" | tr '[:upper:]' '[:lower:]')" ] && archive_valid=1
+  fi
+  if [ "$archive_valid" = "1" ]; then
     runtime_progress_write downloading 78 0 "Using local cache"
   else
-    pm_download_asset PortMaster.zip "$archive" 22 78 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+    rm -f -- "$archive"
+    pm_select_release_routes "$stable_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+    pm_download_url "$stable_url" "$archive" 20 78 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
   fi
   runtime_progress_write verifying 82 0 "Verifying release assets"
-  pm_verify_asset "$sums" version.json "$version" &&
-    pm_verify_asset "$sums" Install.sh "$installer" || {
-      printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1;
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
+    pm_verify_asset "$sums" PortMaster.zip "$archive" || {
+      rm -f -- "$archive"; printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1;
     }
-  if ! pm_verify_asset "$sums" PortMaster.zip "$archive"; then
+  else
+    actual_md5=$(runtime_md5_file "$archive" 2>/dev/null || true)
+    if [ "$actual_md5" != "$(printf '%s' "$stable_md5" | tr '[:upper:]' '[:lower:]')" ]; then
+      rm -f -- "$archive"; printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1
+    fi
+  fi
+  if [ ! -s "$archive" ]; then
     echo "$LOG_PREFIX cached PortMaster archive did not match the current stable release; restarting"
     rm -f -- "$archive"
-    pm_download_asset PortMaster.zip "$archive" 22 78 && pm_verify_asset "$sums" PortMaster.zip "$archive" || {
-      rm -f -- "$archive"
-      printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1;
-    }
+    printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1
   fi
   [ -x "$PAM_BIN_DIR/unzip-portable" ] || { printf 'FAIL\tportmaster\tunzip\n' >> "$RESULT_FILE"; return 1; }
   "$PAM_BIN_DIR/unzip-portable" -t "$archive" >/dev/null 2>&1 || {
@@ -1189,7 +1278,8 @@ install_portmaster_release_inner() {
       --scripts "$SCRIPTS_DIR" --state-dir "$CONFDIR" --device "$installer_device" || {
         rc=$?; printf 'FAIL\tportmaster\tinstaller-%s\n' "$rc" >> "$RESULT_FILE"; return 1;
       }
-  [ -s "$CONFDIR/pending-install.tsv" ] && [ -s "$CONFDIR/pending-manifest.tsv" ] || {
+  [ -s "$CONFDIR/pending-install.tsv" ] && [ -s "$CONFDIR/pending-manifest.tsv" ] &&
+    [ -s "$CONFDIR/pending-frontend-manifest.tsv" ] || {
     printf 'FAIL\tportmaster\tpending-validation\n' >> "$RESULT_FILE"; return 1;
   }
   runtime_progress_write complete 100 0 "Installation complete; reopen required"
@@ -1613,9 +1703,40 @@ pending_manifest_valid() {
   [ "$count" = "$expected_count" ]
 }
 
+frontend_name_allowed() {
+  case ",$PAM_FRONTEND_NAMES," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+
+pending_frontend_manifest_valid() {
+  local file="$CONFDIR/pending-install.tsv" manifest="$CONFDIR/pending-frontend-manifest.tsv"
+  local expected_hash expected_count actual hash name count=0
+  [ -s "$manifest" ] || return 1
+  expected_hash=$(state_value "$file" frontend_manifest_sha256) || return 1
+  expected_count=$(state_value "$file" frontend_manifest_count) || return 1
+  case "$expected_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
+  [ "${#expected_hash}" = 64 ] || return 1
+  case "$expected_count" in ''|*[!0-9]*|0) return 1 ;; esac
+  actual=$(pm_sha256_file "$manifest" 2>/dev/null || true)
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
+    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
+  while IFS=$'\t' read -r hash name; do
+    case "$hash" in ""|*[!0-9A-Fa-f]*) return 1 ;; esac
+    [ "${#hash}" = 64 ] || return 1
+    case "$name" in ""|*/*|.|..) return 1 ;; esac
+    frontend_name_allowed "$name" || return 1
+    [ -f "$PAM_FRONTEND_DIR/$name" ] || return 1
+    actual=$(pm_sha256_file "$PAM_FRONTEND_DIR/$name" 2>/dev/null || true)
+    [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
+      "$(printf '%s' "$hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
+    count=$((count + 1))
+  done < "$manifest"
+  [ "$count" = "$expected_count" ]
+}
+
 pending_core_valid() {
   local file="$CONFDIR/pending-install.tsv" expected_target expected_scripts expected_device expected_rollback
-  local version metadata_version mode launcher_hash actual
+  local version metadata_version mode launcher_hash actual expected_frontend_dir expected_frontend_names
   metadata_version=$(state_value "$file" version) || return 1
   mode=$(state_value "$file" mode) || return 1
   expected_target=$(state_value "$file" target) || return 1
@@ -1623,11 +1744,17 @@ pending_core_valid() {
   expected_device=$(state_value "$file" device) || return 1
   expected_rollback=$(state_value "$file" rollback) || return 1
   launcher_hash=$(state_value "$file" launcher_sha256) || return 1
-  [ "$metadata_version" = "2" ] || return 1
+  case "$metadata_version" in 2|3) ;; *) return 1 ;; esac
   case "$mode" in install|update) ;; *) return 1 ;; esac
   [ -n "$expected_target" ] && [ "$expected_target" = "$PAM_PORTMASTER_DIR" ] || return 1
   [ -n "$expected_scripts" ] && [ "$expected_scripts" = "$SCRIPTS_DIR" ] || return 1
   [ "$expected_rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
+  if [ "$metadata_version" = "3" ]; then
+    expected_frontend_dir=$(state_value "$file" frontend_dir) || return 1
+    expected_frontend_names=$(state_value "$file" frontend_names) || return 1
+    [ "$expected_frontend_dir" = "$PAM_FRONTEND_DIR" ] || return 1
+    [ "$expected_frontend_names" = "$PAM_FRONTEND_NAMES" ] || return 1
+  fi
   case "$launcher_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
   [ "${#launcher_hash}" = 64 ] || return 1
   case "$expected_device" in miniloong|trimui|unknown|official-untested|unsupported|unsupported-known) ;; *) return 1 ;; esac
@@ -1641,10 +1768,12 @@ pending_core_valid() {
   [ "$(pam_core_health)" = "healthy" ] || return 1
   version=$(pam_core_version); [ -n "$version" ] || return 1
   [ -f "$PAM_PORTMASTER_DIR/pugwash" ] || [ -f "$PAM_PORTMASTER_DIR/harbourmaster" ] || return 1
-  actual=$(pm_sha256_file "$SCRIPTS_DIR/PortMaster.sh" 2>/dev/null || true)
+  if [ "$metadata_version" = "3" ]; then actual=$(pm_sha256_file "$PAM_FRONTEND_LAUNCHER" 2>/dev/null || true)
+  else actual=$(pm_sha256_file "$SCRIPTS_DIR/PortMaster.sh" 2>/dev/null || true); fi
   [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
     "$(printf '%s' "$launcher_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-  pending_manifest_valid
+  pending_manifest_valid || return 1
+  [ "$metadata_version" = "2" ] || pending_frontend_manifest_valid
 }
 
 remove_current_managed_core() {
@@ -1669,6 +1798,15 @@ rollback_has_core() {
   return 1
 }
 
+rollback_has_frontend() {
+  local rollback="$1" item
+  for item in "$rollback/frontend"/* "$rollback/frontend"/.[!.]* "$rollback/frontend"/..?*; do
+    [ -e "$item" ] || [ -L "$item" ] || continue
+    return 0
+  done
+  [ -e "$rollback/PortMaster.sh" ] || [ -L "$rollback/PortMaster.sh" ]
+}
+
 rollback_toplist_valid() {
   local rollback="$1" expected_count="$2" expected_hash="$3" actual count name
   case "$expected_count" in ''|*[!0-9]*) return 1 ;; esac
@@ -1685,11 +1823,45 @@ rollback_toplist_valid() {
   [ "$count" = "$expected_count" ]
 }
 
+rollback_frontend_list_valid() {
+  local rollback="$1" expected_count="$2" expected_hash="$3" actual count=0 name
+  case "$expected_count" in ''|*[!0-9]*) return 1 ;; esac
+  case "$expected_hash" in ''|*[!0-9A-Fa-f]*) return 1 ;; esac
+  [ "${#expected_hash}" = 64 ] && [ -f "$rollback/frontend-existing.tsv" ] || return 1
+  actual=$(pm_sha256_file "$rollback/frontend-existing.tsv" 2>/dev/null || true)
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
+    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
+  while IFS= read -r name; do
+    case "$name" in ''|*/*|.|..) return 1 ;; esac
+    frontend_name_allowed "$name" || return 1
+    count=$((count + 1))
+  done < "$rollback/frontend-existing.tsv"
+  [ "$count" = "$expected_count" ]
+}
+
+rollback_frontend_was_present() {
+  grep -Fqx "$2" "$1/frontend-existing.tsv" 2>/dev/null
+}
+
+remove_current_frontend() {
+  local name failed=0
+  IFS=',' read -r -a frontend_items <<< "$PAM_FRONTEND_NAMES"
+  for name in "${frontend_items[@]}"; do
+    [ -n "$name" ] || continue
+    rm -f -- "$PAM_FRONTEND_DIR/$name" || failed=1
+  done
+  [ "$failed" = "0" ]
+}
+
 restore_rollback() {
-  local rollback="$1" sweep="$2" had_launcher="$3" expected_count="$4" expected_hash="$5"
-  local item top failed=0 restored=0 restore_count=0
+  local rollback="$1" sweep="$2" metadata_version="$3" had_launcher="$4" expected_count="$5" expected_hash="$6"
+  local frontend_count="${7:--}" frontend_hash="${8:--}"
+  local item top name backup live failed=0 restored=0 restore_count=0
   if [ "$expected_count" != "-" ]; then
     rollback_toplist_valid "$rollback" "$expected_count" "$expected_hash" || return 1
+  fi
+  if [ "$metadata_version" = "3" ]; then
+    rollback_frontend_list_valid "$rollback" "$frontend_count" "$frontend_hash" || return 1
   fi
   if [ -e "$rollback/restoring" ]; then
     sweep=0
@@ -1698,7 +1870,8 @@ restore_rollback() {
   if [ "$sweep" = "1" ]; then
     : > "$rollback/sweeping" || return 1
     remove_current_managed_core || failed=1
-    rm -f -- "$SCRIPTS_DIR/PortMaster.sh" || failed=1
+    if [ "$metadata_version" = "3" ]; then remove_current_frontend || failed=1
+    else rm -f -- "$SCRIPTS_DIR/PortMaster.sh" || failed=1; fi
     [ "$failed" = "0" ] || return 1
     mv -f -- "$rollback/sweeping" "$rollback/restoring" || return 1
   fi
@@ -1715,7 +1888,21 @@ restore_rollback() {
       if [ "${PAM_TEST_FAIL_RESTORE_AFTER:-0}" = "$restore_count" ]; then return 1; fi
     done
   fi
-  if [ "$had_launcher" = "1" ]; then
+  if [ "$metadata_version" = "3" ]; then
+    IFS=',' read -r -a frontend_items <<< "$PAM_FRONTEND_NAMES"
+    for name in "${frontend_items[@]}"; do
+      [ -n "$name" ] || continue
+      backup="$rollback/frontend/$name"; live="$PAM_FRONTEND_DIR/$name"
+      if [ -e "$backup" ] || [ -L "$backup" ]; then
+        if [ -e "$live" ] || [ -L "$live" ]; then failed=1
+        else mv -- "$backup" "$live" || failed=1; restored=1; fi
+      elif rollback_frontend_was_present "$rollback" "$name"; then
+        [ -e "$live" ] || [ -L "$live" ] || failed=1
+      elif [ "$sweep" = "1" ] || [ -e "$rollback/restoring" ]; then
+        [ ! -e "$live" ] && [ ! -L "$live" ] || failed=1
+      fi
+    done
+  elif [ "$had_launcher" = "1" ]; then
     if [ -f "$rollback/PortMaster.sh" ] || [ -L "$rollback/PortMaster.sh" ]; then
       if [ -e "$SCRIPTS_DIR/PortMaster.sh" ] || [ -L "$SCRIPTS_DIR/PortMaster.sh" ]; then failed=1
       else mv -- "$rollback/PortMaster.sh" "$SCRIPTS_DIR/PortMaster.sh" || failed=1; fi
@@ -1728,6 +1915,7 @@ restore_rollback() {
     else mv -- "$rollback/PortMaster.sh" "$SCRIPTS_DIR/PortMaster.sh" || failed=1; restored=1; fi
   fi
   rollback_has_core "$rollback" && failed=1
+  if [ "$metadata_version" = "3" ]; then rollback_has_frontend "$rollback" && failed=1; fi
   if [ "$expected_count" != "-" ]; then
     while IFS= read -r top; do
       [ -e "$PAM_PORTMASTER_DIR/$top" ] || [ -L "$PAM_PORTMASTER_DIR/$top" ] || failed=1
@@ -1740,16 +1928,28 @@ restore_rollback() {
 }
 
 rollback_pending_core() {
-  local file="$CONFDIR/pending-install.tsv" mode rollback had_launcher backup_count backup_hash
+  local file="$CONFDIR/pending-install.tsv" mode rollback had_launcher backup_count backup_hash metadata_version
+  local frontend_count frontend_hash recorded_frontend_dir recorded_frontend_names
   local sweep=1 rc recorded_target recorded_scripts
   recorded_target=$(state_value "$file" target 2>/dev/null || true)
   recorded_scripts=$(state_value "$file" scripts 2>/dev/null || true)
   [ "$recorded_target" = "$PAM_PORTMASTER_DIR" ] && [ "$recorded_scripts" = "$SCRIPTS_DIR" ] || return 1
+  metadata_version=$(state_value "$file" version 2>/dev/null || true)
+  case "$metadata_version" in 2|3) ;; *) return 1 ;; esac
   mode=$(state_value "$file" mode 2>/dev/null || true)
   rollback=$(state_value "$file" rollback 2>/dev/null || true)
   had_launcher=$(state_value "$file" had_launcher 2>/dev/null || true)
   backup_count=$(state_value "$file" backup_top_count 2>/dev/null || true)
   backup_hash=$(state_value "$file" backup_top_sha256 2>/dev/null || true)
+  if [ "$metadata_version" = "3" ]; then
+    recorded_frontend_dir=$(state_value "$file" frontend_dir 2>/dev/null || true)
+    recorded_frontend_names=$(state_value "$file" frontend_names 2>/dev/null || true)
+    [ "$recorded_frontend_dir" = "$PAM_FRONTEND_DIR" ] && [ "$recorded_frontend_names" = "$PAM_FRONTEND_NAMES" ] || return 1
+    frontend_count=$(state_value "$file" frontend_backup_count 2>/dev/null || true)
+    frontend_hash=$(state_value "$file" frontend_backup_sha256 2>/dev/null || true)
+  else
+    frontend_count="-"; frontend_hash="-"
+  fi
   case "$rollback" in
     "$PAM_PORTMASTER_DIR/.appmanager-rollback"|"$CONFDIR/rollback") ;;
     *) rollback="$PAM_PORTMASTER_DIR/.appmanager-rollback" ;;
@@ -1763,10 +1963,12 @@ rollback_pending_core() {
   esac
   # The existence of backup content is safer evidence than damaged mode
   # metadata. It prevents a truncated update record from becoming first-install cleanup.
-  if rollback_has_core "$rollback" || [ "$had_launcher" = "1" ]; then mode=update; else mode=install; fi
-  restore_rollback "$rollback" "$sweep" "$had_launcher" "$backup_count" "$backup_hash"; rc=$?
+  if rollback_has_core "$rollback" || rollback_has_frontend "$rollback" || [ "$had_launcher" = "1" ]; then mode=update; else mode=install; fi
+  restore_rollback "$rollback" "$sweep" "$metadata_version" "$had_launcher" "$backup_count" "$backup_hash" \
+    "$frontend_count" "$frontend_hash"; rc=$?
   [ "$rc" = "1" ] && return 1
   rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
+    "$CONFDIR/pending-frontend-manifest.tsv" \
     "$CONFDIR/install-transaction.tsv" || return 1
   [ "$rc" = "0" ] && return 0
   return 2
@@ -1774,7 +1976,7 @@ rollback_pending_core() {
 
 recover_interrupted_transaction() {
   local file="$CONFDIR/install-transaction.tsv" version phase mode target scripts rollback had_launcher
-  local backup_count backup_hash sweep rc
+  local backup_count backup_hash frontend_count frontend_hash frontend_dir frontend_names sweep rc
   version=$(state_value "$file" version) || return 1
   phase=$(state_value "$file" phase) || return 1
   mode=$(state_value "$file" mode) || return 1
@@ -1784,7 +1986,17 @@ recover_interrupted_transaction() {
   had_launcher=$(state_value "$file" had_launcher) || return 1
   backup_count=$(state_value "$file" backup_top_count) || return 1
   backup_hash=$(state_value "$file" backup_top_sha256) || return 1
-  [ "$version" = "2" ] && [ "$target" = "$PAM_PORTMASTER_DIR" ] && [ "$scripts" = "$SCRIPTS_DIR" ] || return 1
+  case "$version" in 2|3) ;; *) return 1 ;; esac
+  [ "$target" = "$PAM_PORTMASTER_DIR" ] && [ "$scripts" = "$SCRIPTS_DIR" ] || return 1
+  if [ "$version" = "3" ]; then
+    frontend_dir=$(state_value "$file" frontend_dir) || return 1
+    frontend_names=$(state_value "$file" frontend_names) || return 1
+    frontend_count=$(state_value "$file" frontend_backup_count) || return 1
+    frontend_hash=$(state_value "$file" frontend_backup_sha256) || return 1
+    [ "$frontend_dir" = "$PAM_FRONTEND_DIR" ] && [ "$frontend_names" = "$PAM_FRONTEND_NAMES" ] || return 1
+  else
+    frontend_count="-"; frontend_hash="-"
+  fi
   [ "$rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
   case "$mode:$had_launcher" in install:0|install:1|update:0|update:1) ;; *) return 1 ;; esac
   case "$phase" in
@@ -1792,9 +2004,11 @@ recover_interrupted_transaction() {
     backed-up) sweep=1 ;;
     *) return 1 ;;
   esac
-  restore_rollback "$rollback" "$sweep" "$had_launcher" "$backup_count" "$backup_hash"; rc=$?
+  restore_rollback "$rollback" "$sweep" "$version" "$had_launcher" "$backup_count" "$backup_hash" \
+    "$frontend_count" "$frontend_hash"; rc=$?
   [ "$rc" = "1" ] && return 1
-  rm -f -- "$file" "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" || return 1
+  rm -f -- "$file" "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
+    "$CONFDIR/pending-frontend-manifest.tsv" || return 1
   if [ "$rc" = "0" ] || { [ "$phase" = "prepared" ] && [ "$mode" = "update" ]; }; then return 0; fi
   return 2
 }
@@ -1824,6 +2038,7 @@ validate_pending_install_inner() {
   fi
   if pending_core_valid; then
     rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
+      "$CONFDIR/pending-frontend-manifest.tsv" \
       "$CONFDIR/install-transaction.tsv" || {
         validation_write interrupted "Validated core could not finalize its pending state"
         return 75
