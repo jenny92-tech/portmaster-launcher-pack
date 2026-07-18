@@ -51,6 +51,14 @@ asset=${url##*/}
 if [ -n "$out" ]; then
   if [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_CORRUPT:-0}" = "1" ]; then
     printf 'corrupt archive\n' > "$out"
+  elif [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_SLOW:-0}" = "1" ]; then
+    size=$(wc -c < "$PAM_TEST_RELEASE/$asset" | tr -d '[:space:]')
+    half=$((size / 2))
+    : > "$out"
+    sleep 1
+    head -c "$half" "$PAM_TEST_RELEASE/$asset" >> "$out"
+    sleep 2
+    tail -c "+$((half + 1))" "$PAM_TEST_RELEASE/$asset" >> "$out"
   else
     cp "$PAM_TEST_RELEASE/$asset" "$out"
   fi
@@ -70,9 +78,14 @@ SHA
 chmod +x "$TMP/app/bin/curl-portable" "$TMP/app/bin/unzip-portable" "$TMP/app/bin/sha256sum-portable"
 
 run_repair() {
-  local name=$1 corrupt=${2:-0} cancel_asset=${3:-never} existing=${4:-0}
+  local name=$1 corrupt=${2:-0} cancel_asset=${3:-never} existing=${4:-0} cached=${5:-0} slow=${6:-0}
   local state="$TMP/$name/state" target="$TMP/$name/PortMaster" scripts="$TMP/$name/scripts"
+  local observer_pid=0 rc=0
   mkdir -p "$state" "$scripts" "$target/libs"
+  if [ "$cached" = 1 ]; then
+    mkdir -p "$state/portmaster-download"
+    cp "$TMP/release/PortMaster.zip" "$state/portmaster-download/PortMaster.zip"
+  fi
   printf 'runtime sentinel\n' > "$target/libs/keep.squashfs"
   if [ "$existing" = 1 ]; then
     printf 'old-control\n' > "$target/control.txt"
@@ -83,14 +96,26 @@ run_repair() {
     printf 'old-launcher\n' > "$scripts/PortMaster.sh"
   fi
   printf '# plan\nINSTALL_PORTMASTER\tstable\n' > "$state/plan.txt"
+  if [ "$slow" = 1 ]; then
+    (
+      for _ in $(seq 1 80); do
+        speed=$(awk -F '\t' '$2 == "downloading" {print $8}' "$state/progress.tsv" 2>/dev/null | tail -n 1 || true)
+        case "$speed" in ""|0|*[!0-9]*) ;; *) : > "$TMP/$name/speed-observed"; exit 0 ;; esac
+        sleep 0.1
+      done
+    ) &
+    observer_pid=$!
+  fi
   PAM_SOURCE_DIR="$TMP" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$state" \
     PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_DIRECTORY_OVERRIDE="${TMP#/}/$name/data" \
     PAM_DEVICE_CLASS_OVERRIDE=tested PAM_TARGET_CONFIRMED_OVERRIDE=1 \
     PAM_RELEASE_BASE="https://source.invalid/releases/latest/download" \
     PAM_RUNTIME_CUSTOM_PROXIES='custom|test|https://proxy.invalid' PAM_RUNTIME_PROXIES='' \
-    PAM_TEST_RELEASE="$TMP/release" PAM_TEST_CURL_LOG="$TMP/$name/curl.log" PAM_TEST_CORRUPT="$corrupt" \
+    PAM_TEST_RELEASE="$TMP/release" PAM_TEST_CURL_LOG="$TMP/$name/curl.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
     PAM_TEST_CANCEL_ON_ASSET="$cancel_asset" PAM_TEST_CANCEL_FILE="$state/cancel.request" \
-    bash "$ROOT/ports/appmanager/src/launcher.sh" --apply-plan
+    bash "$ROOT/ports/appmanager/src/launcher.sh" --apply-plan || rc=$?
+  if [ "$observer_pid" != 0 ]; then wait "$observer_pid" || true; fi
+  return "$rc"
 }
 
 run_repair success
@@ -101,6 +126,12 @@ run_repair success
 grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
 grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
+
+run_repair cached 0 never 0 1
+! grep -Fq '/PortMaster.zip' "$TMP/cached/curl.log"
+
+run_repair speed 0 never 0 0 1
+[ -e "$TMP/speed/speed-observed" ]
 
 run_repair update 0 never 1
 grep -Fq $'mode\tupdate' "$TMP/update/state/pending-install.tsv"

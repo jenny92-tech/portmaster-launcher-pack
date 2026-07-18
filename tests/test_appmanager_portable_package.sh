@@ -65,8 +65,8 @@ grep -Fq 'PAM_APP_ROOT/runtime/love.aarch64' "$DIST/APP Manager.sh"
 grep -Fq 'candidate="$PAM_BIN_DIR/curl-portable"' "$DIST/APP Manager.sh"
 [ "$(grep -Ec '^[ab] = enter$' "$APP/love_ui/ui.gptk")" = "2" ]
 grep -Fq 'if env.portmaster_health=="healthy" then' "$APP/love_ui/main.lua"
-grep -Fq 'L("Environment Management","环境管理")' "$APP/love_ui/main.lua"
-grep -Fq 'L("Environment repair","环境修复")' "$APP/love_ui/main.lua"
+grep -Fq 'L("Environment Management","环境管理")' "$APP/love_ui/app_environment.lua"
+grep -Fq 'L("PortMaster required","需要安装 PortMaster")' "$APP/love_ui/app_environment.lua"
 grep -Fq ' --check-pm-update >/dev/null 2>&1 &' "$APP/love_ui/main.lua"
 
 python3 - "$DIST/port.json" <<'PY'

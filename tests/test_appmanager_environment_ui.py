@@ -10,17 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 KIT = ROOT / "_kit" / "love"
 APP = ROOT / "ports" / "appmanager" / "love"
 
-source = (APP / "main.lua").read_text(encoding="utf-8")
+source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(APP.glob("*.lua")))
 for contract in (
     'id="manage:latest"', 'id="manage:check"', 'id="manage:update"',
     'L("Update now","立即更新")', 'L("Up to date","已是最新版")',
     'L("Reinstall","重新安装")', '--check-pm-update-force',
     'local actions={', 'sidebar_title=L("Maintenance","维护")',
     'sidebar=actions', 'row_layout={mode="grid",columns=2}',
-    'for _,item in ipairs(confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
+    'for _,item in ipairs(self.confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
     'file_exists(env.install_transaction)', 'file_exists(env.portmaster_active)',
-    'task={kind="active-repair"',
-    'L("Cached","使用缓存")', 'L("Starting…","正在开始…")',
+    'operations.task={kind="active-repair"',
+    'L("Cached","使用缓存")', 'L("Downloading…","下载中…")',
 ):
     assert contract in source, contract
 
@@ -93,7 +93,7 @@ def run_case(health: str):
                     "result_file": str(root / "state" / "result.txt"),
                     "progress_file": str(root / "state" / "progress.tsv"),
                     "size_file": str(root / "state" / "sizes.tsv"),
-                    "runtime_catalog_file": str(root / "runtime_catalog.tsv"),
+                    "runtime_metadata_file": str(root / "state" / "runtime-metadata.tsv"),
                     "apply_script": "",
                     "ignore_dirs": ["PortMaster", "images", "appmanager"],
                     "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"],
@@ -121,7 +121,7 @@ def run_case(health: str):
 
 healthy = run_case("healthy")
 assert healthy.eval('require("kit").debug_page().title') == "Port App Manager"
-healthy.execute('require("kit").goto_page(6)')
+healthy.execute('require("kit").input("up"); require("kit").input("confirm")')
 page = healthy.eval('require("kit").debug_page()')
 assert page["title"] == "环境管理"
 assert page["section_count"] == 1
@@ -130,7 +130,36 @@ assert page["row_count"] == 6
 for state in ("missing", "damaged"):
     runtime = run_case(state)
     page = runtime.eval('require("kit").debug_page()')
-    assert page["title"] == "环境修复", state
+    assert page["title"] == "需要安装 PortMaster", state
     assert page["row_count"] == 3, state
+
+with tempfile.TemporaryDirectory() as temporary:
+    progress_path = Path(temporary) / "progress.tsv"
+    healthy.globals().PROGRESS_PATH = str(progress_path)
+
+    progress_path.write_text(
+        "1\tdownloading\tPortMaster\t1\t1\t22\t100\t4096\tDownloading verified release assets\n",
+        encoding="utf-8",
+    )
+    healthy.execute(r'''
+        local model=require("app_model").new(require("kit"),require("json"),require("scan"))
+        model.env.progress_file=PROGRESS_PATH
+        local progress=model.runtime_progress()
+        assert(progress.stage.zh=="正在下载 PortMaster")
+        assert(progress.footer_right.zh=="4.0 KB/秒")
+        assert(progress.detail=="")
+    ''')
+
+    progress_path.write_text(
+        "1\tdownloading\tPortMaster\t1\t1\t78\t100\t0\tUsing local cache\n",
+        encoding="utf-8",
+    )
+    healthy.execute(r'''
+        local model=require("app_model").new(require("kit"),require("json"),require("scan"))
+        model.env.progress_file=PROGRESS_PATH
+        local progress=model.runtime_progress()
+        assert(progress.stage.zh=="正在下载 PortMaster")
+        assert(progress.footer_right.zh=="使用缓存")
+    ''')
 
 print("appmanager environment UI tests: PASS")

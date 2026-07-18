@@ -41,17 +41,6 @@ print(manifest.get("script") or manifest.get("dist", {}).get("script") or f"{por
 PY
 )"
 
-BOOTSTRAP_MANIFEST="$(python3 - "$MANIFEST" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as fh:
-    manifest = json.load(fh)
-value = manifest.get("bootstrap_pck")
-print(value if isinstance(value, str) else "")
-PY
-)"
-
 PORTABLE_DIR="$(python3 - "$MANIFEST" <<'PY'
 import json
 import sys
@@ -108,11 +97,6 @@ if [ -n "$USE_LOVE" ]; then
   [ -f "$ROOT/_kit/love/launcher_bg.png" ] && cp "$ROOT/_kit/love/launcher_bg.png" "$APP_DIST_ROOT/love_ui/"
   # Port-specific Lua modules and optional asset overrides.
   cp "$LOVE_DIR/"*.lua "$APP_DIST_ROOT/love_ui/"
-  # Optional data catalogs consumed by a port-specific LÖVE UI and its shell
-  # helper. Runtime repair uses a generated, versioned PortMaster mapping here.
-  for f in "$LOVE_DIR/"*.tsv; do
-    [ -f "$f" ] && cp "$f" "$APP_DIST_ROOT/love_ui/"
-  done
   for f in conf.lua ui.gptk launcher_bg.png; do
     [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$APP_DIST_ROOT/love_ui/"
   done
@@ -125,11 +109,6 @@ fi
 # reach into another repository or an installed PortMaster tree.
 if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
   cp -R "$PORT_DIR/portable/." "$APP_DIST_ROOT/"
-fi
-
-# bootstrap.pck 只给 frt/godot 启动器用; love 启动器不需要, 跳过。
-if [ -z "$USE_LOVE" ] && [ -n "$BOOTSTRAP_MANIFEST" ] && [ -f "$PORT_DIR/$BOOTSTRAP_MANIFEST" ]; then
-  python3 "$ROOT/_kit/pck_builder.py" "$PORT_DIR/$BOOTSTRAP_MANIFEST"
 fi
 
 [ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"

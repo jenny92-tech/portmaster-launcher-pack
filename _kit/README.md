@@ -14,8 +14,7 @@ launcher fail to start.
 | `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
 | `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
-| `launcher_unity_common.sh` | **Unity-loader only**: button remap and game launch. Legacy Godot stage-1 helpers remain for compatibility. |
-| `pck_builder.py` | Build a Godot pck (godot 3 `format_version=1` or godot 4 `format_version=3`) from a manifest.json. |
+| `launcher_unity_common.sh` | **Unity-loader only**: configuration, button remap and game launch. |
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
 

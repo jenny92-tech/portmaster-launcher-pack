@@ -30,7 +30,7 @@ standard filename `screenshot.png` in both the port root and `dist/`.
 
 LÖVE launchers package the shared `kit.lua`, declarative launcher schema, common
 `conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. APP Manager
-uses the same component kit; the Godot PCK builder remains only for game-runtime tooling.
+uses the same component kit. Godot game-runtime tooling stays inside the relevant port.
 
 ## Dist a port
 
@@ -46,11 +46,10 @@ _kit/dist_port.sh sts2
 See [`_kit/README.md`](_kit/README.md) for the helpers each port can pull in:
 
 - `love/kit.lua` — shared LÖVE layout, input, state, and env handoff layer.
-- `pck_builder.py` — legacy/game-tool Godot PCK builder.
 - `portmaster_common.sh` — engine-agnostic device helpers (audio_setup with
   per-CFW branching, memory/sync/dmesg). Any port.
-- `launcher_unity_common.sh` — Unity-loader layer (button remap and
-  `run_unity_game`; legacy Godot UI helpers remain for compatibility).
+- `launcher_unity_common.sh` — Unity-loader configuration, button remap and
+  `run_unity_game`.
 - `assemble.sh` — stitches a port's shell template + the `_kit` libs
   into one self-contained device script inside `dist/`. See `_kit/README.md`
   for the full build → deploy recipe.

@@ -509,6 +509,14 @@ with tempfile.TemporaryDirectory() as source:
         encoding="utf-8",
     )
     env_path = app / "conf/env.json"
+    runtime_metadata = app / "conf/runtime-metadata.tsv"
+    runtime_metadata.write_text(
+        "godot_4.5\taarch64\t20\t03569a31f137dcf994ed737352cb746a\t"
+        "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs\n"
+        "godot_4.6.3\taarch64\t20\t00000000000000000000000000000000\t"
+        "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.6.3.squashfs\n",
+        encoding="utf-8",
+    )
     env_path.write_text(json.dumps({
         "controlfolder": str(base / "PortMaster"), "scripts_dir": str(scripts),
         "gamedirs_dir": str(data), "images_dir": str(base / "images"),
@@ -516,10 +524,11 @@ with tempfile.TemporaryDirectory() as source:
         "home": str(base), "cfw": "test", "free_bytes": 1024,
         "display_width": "960", "display_height": "720", "device_arch": "aarch64",
         "device": "test", "plan_file": str(app / "conf/plan.txt"),
+        "portmaster_health": "healthy", "portmaster_version": "2026.07",
         "result_file": str(app / "conf/result.txt"), "apply_script": "",
         "progress_file": str(app / "conf/progress.tsv"),
         "size_file": str(app / "conf/sizes.tsv"),
-        "runtime_catalog_file": str(root / "ports/appmanager/love/runtime_catalog.tsv"),
+        "runtime_metadata_file": str(runtime_metadata),
         "ignore_dirs": ["PortMaster", "images", "appmanager"],
         "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "appmanager"
     }), encoding="utf-8")
@@ -632,7 +641,16 @@ with tempfile.TemporaryDirectory() as source:
     # values, then a counted compact list of installed runtimes.
     lua.execute(r'''
         local k=require("kit")
+        -- Open Environment Management from the Home header, then choose its
+        -- Environment Details action. The details page is intentionally no
+        -- longer a direct Home destination.
         love.keypressed("up"); love.keypressed("return")
+        assert(k.debug_page().index==6)
+        love.keypressed("right"); love.keypressed("right")
+        assert(k.debug_focus().zone=="sidebar")
+        for _=1,3 do love.keypressed("down") end
+        assert(k.debug_focus().sidebar_i==4)
+        love.keypressed("return")
         local page=k.debug_page()
         assert(page.index==4 and page.section_count==3 and page.row_count==25)
         assert(page.section_labels[3]=="已安装 Runtime（2）")
@@ -658,8 +676,8 @@ with tempfile.TemporaryDirectory() as source:
         assert(k.debug_focus().focus_i==5)
         love.draw(); love.keypressed("escape")
     ''')
-    # Missing Runtimes have their own selectable repair page. The official
-    # catalog controls whether the current architecture can repair each item.
+    # Missing Runtimes have their own selectable repair page. Current official
+    # metadata is a refreshable state cache rather than a packaged inventory.
     lua.execute(r'''
         local k=require("kit")
         k.goto_page(1); love.keypressed("right")

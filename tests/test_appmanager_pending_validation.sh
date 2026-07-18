@@ -41,7 +41,6 @@ cat > "$TMP/app/bin/unzip-portable" <<'UNZIP'
 exec unzip "$@"
 UNZIP
 chmod +x "$TMP/app/bin/sha256sum-portable" "$TMP/app/bin/unzip-portable"
-printf 'return {}\n' > "$TMP/app/love_ui/runtime_catalog.tsv"
 
 install_case() {
   local name=$1 mode=$2 root target

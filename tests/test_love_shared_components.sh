@@ -47,46 +47,50 @@ for main in "$ROOT"/ports/*/love/main.lua; do
     ! grep -Fq 'zh = "换 X/Y:"' "$main"
   fi
 done
-grep -Fq '"zh": "交换 A/B:"' "$ROOT/_kit/launcher_base.gd"
-grep -Fq '"zh": "交换 X/Y:"' "$ROOT/_kit/launcher_base.gd"
-
 # APP Manager must consume the same kit rather than carrying a second renderer.
-grep -Fq 'require("kit")' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.checkbox' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.checkbox(display_name(script),{' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'on_change=' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.set_busy' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.toast' "$ROOT/ports/appmanager/love/main.lua"
+app_lua="$ROOT/ports/appmanager/love"
+grep -Fq 'require("kit")' "$app_lua/main.lua"
+for module in app_model app_operations app_pages app_environment; do
+  grep -Fq "require(\"$module\")" "$app_lua/main.lua"
+done
+[ "$(wc -l < "$app_lua/main.lua")" -lt 220 ]
+grep -Fq 'kit.checkbox' "$app_lua"/*.lua
+grep -Fq 'kit.checkbox(model.display_name(script),{' "$app_lua/app_pages.lua"
+grep -Fq 'on_change=' "$app_lua"/*.lua
+grep -Fq 'kit.set_busy' "$app_lua"/*.lua
+grep -Fq 'kit.toast' "$app_lua"/*.lua
 grep -Fq 'type(busy_info.on_cancel)=="function"' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'busy_info.cancel_requested=true' "$ROOT/_kit/love/kit.lua"
-! grep -Fq 'status_message' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'theme={kind="app"' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'sidebar_title=' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'half=true' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'group="bottom"' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.dialog' "$ROOT/ports/appmanager/love/main.lua"
-! grep -Fq 'CONFIRM' "$ROOT/ports/appmanager/love/main.lua"
+! grep -Fq 'status_message' "$app_lua"/*.lua
+grep -Fq 'theme={kind="app"' "$app_lua/main.lua"
+grep -Fq 'sidebar_title=' "$app_lua"/*.lua
+grep -Fq 'half=true' "$app_lua/app_pages.lua"
+grep -Fq 'group="bottom"' "$app_lua"/*.lua
+grep -Fq 'kit.dialog' "$app_lua"/*.lua
+! grep -Fq 'CONFIRM' "$app_lua"/*.lua
 grep -Fq 'function kit.debug_layout' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_layout_cache' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_dialog' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_focus' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_page' "$ROOT/_kit/love/kit.lua"
-grep -Fq 'preserve_focus=' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'on_home_cancel=show_exit_dialog' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'button(L("Quit","退出"),show_exit_dialog' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'row_layout={mode="grid",columns=2}' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.textview' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'kit.list_item(name' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'Installed Runtimes (%d)' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq '已安装 Runtime（%d）' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'INSTALL_RUNTIME' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'runtime_catalog.tsv' "$ROOT/ports/appmanager/src/launcher.sh"
-catalog="$ROOT/ports/appmanager/love/runtime_catalog.tsv"
-catalog_ref=$(sed -n 's/^# Source commit: //p' "$catalog")
-[ -n "$catalog_ref" ]
-grep -Fq "RUNTIME_SOURCE_REF=\"$catalog_ref\"" "$ROOT/ports/appmanager/src/launcher.sh"
-awk -F '\t' '!/^#/ { if (NF != 5 || $1 !~ /^[A-Za-z0-9._+-]+$/ || $2 !~ /^(aarch64|armhf|x86_64)$/ || $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+(,[0-9]+)*$/) exit 1; sources=split($3,a,","); sizes=split($5,b,","); if (sources != sizes) exit 1; total=0; for (i=1;i<=sizes;i++) total+=b[i]; if (total != $4) exit 1 }' "$catalog"
-! grep -Fq '"Runtime "..index.."/"..#runtimes' "$ROOT/ports/appmanager/love/main.lua"
+grep -Fq 'preserve_focus=' "$app_lua/app_pages.lua"
+grep -Fq 'on_home_cancel=operations.show_exit_dialog' "$app_lua/main.lua"
+grep -Fq 'button(L("Quit","退出"),operations.show_exit_dialog' "$app_lua/app_pages.lua"
+grep -Fq 'row_layout={mode="grid",columns=2}' "$app_lua"/*.lua
+grep -Fq 'kit.textview' "$app_lua/app_pages.lua"
+grep -Fq 'kit.list_item(name' "$app_lua/app_pages.lua"
+grep -Fq 'Installed Runtimes (%d)' "$app_lua/app_pages.lua"
+grep -Fq '已安装 Runtime（%d）' "$app_lua/app_pages.lua"
+grep -Fq 'INSTALL_RUNTIME' "$app_lua/app_pages.lua"
+launcher="$ROOT/ports/appmanager/src/launcher.sh"
+[ ! -e "$ROOT/ports/appmanager/love/runtime_catalog.tsv" ]
+grep -Fq 'releases/latest/download/ports.json' "$launcher"
+grep -Fq 'runtime_metadata_refresh()' "$launcher"
+grep -Fq 'runtime_expected_md5()' "$launcher"
+grep -Fq 'runtime_md5_file()' "$launcher"
+grep -Fq '[ "$VALIDATE_ONLY" = "1" ] || [ "$RUNTIME_METADATA_ONLY" = "1" ]' "$launcher"
+! grep -Fq 'RUNTIME_SOURCE_REF' "$launcher"
+! grep -Fq '"Runtime "..index.."/"..#runtimes' "$app_lua"/*.lua
 grep -Fq 'mode=="flow"' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'font:getWidth(title)>title_w' "$ROOT/_kit/love/kit.lua"
 ! grep -Fq 'local title_px=#title' "$ROOT/_kit/love/kit.lua"
@@ -100,12 +104,14 @@ for retired in bootstrap.pck appmanager.gptk runtime hacksdl; do
     exit 1
   }
 done
-for current in love_ui/kit.lua love_ui/main.lua love_ui/scan.lua love_ui/ui.gptk love_ui/runtime_catalog.tsv; do
+for current in love_ui/kit.lua love_ui/main.lua love_ui/app_model.lua love_ui/app_operations.lua \
+  love_ui/app_pages.lua love_ui/app_environment.lua love_ui/scan.lua love_ui/ui.gptk; do
   [ -f "$ROOT/ports/appmanager/dist/PortAppManager/$current" ] || {
     echo "appmanager dist: missing $current" >&2
     exit 1
   }
 done
+[ ! -e "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/runtime_catalog.tsv" ]
 
 # Ordinary launchers accept either primary face button as confirm.
 for mapping in 'a = enter' 'b = enter' 'x = esc' 'y = esc'; do

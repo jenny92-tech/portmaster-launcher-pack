@@ -55,9 +55,9 @@ grep -Fq $'FAIL\tportmaster\tdevice-acks-required' "$TMP/unsupported-one-ack-sta
 run_rejected_plan unknown-path unknown-path "$TMP/guessed" 'INSTALL_PORTMASTER\tstable\n'
 grep -Fq $'FAIL\tportmaster\tunknown-target' "$TMP/unknown-path-state/result.txt"
 
-grep -Fq 'id="risk:modify"' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'id="risk:support"' "$ROOT/ports/appmanager/love/main.lua"
-grep -Fq 'disabled=not ready' "$ROOT/ports/appmanager/love/main.lua"
+grep -Fq 'id="risk:modify"' "$ROOT/ports/appmanager/love/app_environment.lua"
+grep -Fq 'id="risk:support"' "$ROOT/ports/appmanager/love/app_environment.lua"
+grep -Fq 'disabled=not ready' "$ROOT/ports/appmanager/love/app_environment.lua"
 grep -Fq 'batch_size=5' "$ROOT/ports/appmanager/src/launcher.sh"
 
 echo "appmanager device gate tests: PASS"

@@ -153,9 +153,9 @@ end
 
 -- Runtime presence alone is not enough: an interrupted/manual copy can leave a
 -- file with the canonical name that PortMaster will still try to mount.  The
--- catalog supplies the exact upstream byte count; checking it together with
--- the SquashFS magic is cheap (seek does not read the whole image) and catches
--- the partial/corrupt files that Runtime repair can safely replace.
+-- The SquashFS magic is a cheap local sanity check. Current size and checksum
+-- come from online PortMaster release metadata only when a repair starts, so a
+-- stale APP build cannot label a newer official Runtime as outdated.
 local function runtime_file_health(path,expected_bytes)
     local f=path and io.open(path,"rb")
     if not f then return "missing",0 end

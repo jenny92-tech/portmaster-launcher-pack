@@ -76,15 +76,13 @@ install_exit_trap() {
   ' EXIT INT TERM
 }
 
-# ── love stage-1 UI (replaces run_launcher_ui frt3) ──────────────────────
-# Per port: swap `run_launcher_ui frt3 "$GAMEDIR/bootstrap.pck"` for
-# `run_love_launcher_ui` and point stage-2's env at `$LAUNCH_ENV`; stage-2 is
-# otherwise untouched.
+# ── LÖVE stage-1 UI ──────────────────────────────────────────────────────
+# Run the shared settings UI and point stage-2 at `$LAUNCH_ENV`.
 #
 # UI files live in $GAMEDIR/love_ui/ (main.lua/kit.lua/conf.lua/ui.gptk/
 # launcher_bg.png). The CJK font is taken from PortMaster's own NotoSansSC and
 # passed to LÖVE by its validated real path (see _kit/love/README.md).
-# Exit codes match run_launcher_ui: 0 = back to menu, 42 = start game.
+# Exit codes: 0 = back to menu, 42 = start game.
 
 _love_valid_font() { [ -f "$1" ] && [ "$(wc -c < "$1" 2>/dev/null || echo 0)" -gt 1000000 ]; }
 _love_noto_src() {
