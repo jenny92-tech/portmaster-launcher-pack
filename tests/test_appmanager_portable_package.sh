@@ -42,6 +42,8 @@ done
 [ -x "$APP/bin/sha256sum-portable" ]
 grep -Fq 'runtime/musl' "$APP/bin/curl-portable"
 grep -Fq 'runtime/musl' "$APP/bin/busybox-portable"
+grep -Fq 'if [ "$#" -eq 2 ] && [ "$1" = "-Z1" ]' "$APP/bin/unzip-portable"
+grep -Fq 'unzip -lq "$2"' "$APP/bin/unzip-portable"
 
 file "$APP/runtime/love.aarch64" | grep -Fq 'ARM aarch64'
 file "$APP/bin/gptokeyb" | grep -Fq 'ARM aarch64'

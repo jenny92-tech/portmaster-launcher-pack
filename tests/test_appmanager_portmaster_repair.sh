@@ -104,7 +104,7 @@ grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
 
 run_repair update 0 never 1
 grep -Fq $'mode\tupdate' "$TMP/update/state/pending-install.tsv"
-[ -f "$TMP/update/state/rollback/core/old.txt" ]
+[ -f "$TMP/update/PortMaster/.appmanager-rollback/core/old.txt" ]
 grep -Fq "PORTMASTER_VERSION = '2026.07'" "$TMP/update/PortMaster/pugwash"
 grep -Fxq 'runtime sentinel' "$TMP/update/PortMaster/libs/keep.squashfs"
 

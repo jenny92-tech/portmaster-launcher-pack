@@ -109,7 +109,9 @@ local function runtime_progress()
     end
     local right
     if phase=="downloading" then
-        right=speed>0 and L(human(speed).."/s",human(speed).."/秒") or L("Calculating speed…","正在计算网速…")
+        if fields[9]=="Using local cache" then right=L("Cached","使用缓存")
+        elseif speed>0 then right=L(human(speed).."/s",human(speed).."/秒")
+        else right=L("Starting…","正在开始…") end
     elseif phase=="probing" then right=L("Checking…","检测中…")
     else right="—" end
     local detail=fields[9]
@@ -273,7 +275,10 @@ local function start_apply()
         kit.goto_page(confirm_return); return
     end
     if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
-    local portmaster=confirm_plan[1] and confirm_plan[1].kind=="INSTALL_PORTMASTER"
+    local portmaster=false
+    for _,item in ipairs(confirm_plan) do
+        if item.kind=="INSTALL_PORTMASTER" then portmaster=true; break end
+    end
     if portmaster then
         if env.cancel_file and env.cancel_file~="" then os.remove(env.cancel_file) end
         kit.set_busy(true,L("Repairing PortMaster…","正在修复 PortMaster…"),{
@@ -861,11 +866,27 @@ local function finish_validation(status,detail)
                 "未完成的首次安装已清理。请退出并重新打开 APP，返回环境修复。"),
             confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
             on_confirm=kit.quit,on_cancel=kit.quit})
+    elseif status=="timeout" then
+        kit.dialog({title=L("Validation is still running","环境校验仍在进行"),message=provided(detail),
+            confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
+            on_confirm=kit.quit,on_cancel=kit.quit})
     else
         kit.dialog({title=L("Validation was interrupted","校验已中断"),message=provided(detail),
             confirm=L("Retry","重试"),cancel=L("Exit","退出"),default_focus="confirm",danger=false,
             on_confirm=start_pending_validation,on_cancel=kit.quit})
     end
+end
+
+local function start_active_repair_wait()
+    kit.set_page(HOME,L("Environment repair","环境修复"),{
+        kit.info(L("PortMaster repair is already running","PortMaster 修复正在进行"),
+            L("A background repair started by an earlier App Manager instance is still active. Home remains locked until it finishes.",
+                "之前 APP 实例启动的后台修复仍在运行。完成前不能进入首页。")),
+    },{row_layout={mode="flow",max_columns=1,min_width=420}})
+    kit.set_busy(true,L("Repairing PortMaster…","正在修复 PortMaster…"),{
+        progress=0,stage=L("Waiting for the active repair","正在等待现有修复完成"),detail="",
+        footer_left=L("Background operation","后台操作"),footer_right="—",cancel_disabled=true})
+    task={kind="active-repair",elapsed=0,poll=0,timeout=1800}
 end
 
 local port={
@@ -885,8 +906,10 @@ local port={
                 sidebar={button(L("Quit","退出"),show_exit_dialog,{group="bottom"})}})
             return
         end
-        if file_exists(env.pending_install) then
+        if file_exists(env.pending_install) or file_exists(env.install_transaction) then
             start_pending_validation()
+        elseif file_exists(env.portmaster_active) then
+            start_active_repair_wait()
         else
             refresh_scan()
         if env.portmaster_health=="healthy" then
@@ -916,20 +939,50 @@ local port={
                 kit.toast(L("Update check timed out.","更新检查超时。"),{kind="error"})
             end
             return
+        elseif task.kind=="active-repair" then
+            if not file_exists(env.portmaster_active) then
+                kit.set_busy(false); task=nil; load_env()
+                if file_exists(env.pending_install) or file_exists(env.install_transaction) then
+                    start_pending_validation()
+                else
+                    refresh_scan()
+                    if env.portmaster_health=="healthy" then build_home(); kit.goto_page(HOME)
+                    else build_repair_gate(); kit.goto_page(HOME) end
+                end
+            elseif task.elapsed>(task.timeout or 1800) then
+                kit.set_busy(false); task=nil
+                kit.dialog({title=L("Environment repair is still running","环境修复仍在进行"),
+                    message=L("Exit App Manager and reopen it later. Home will remain unavailable until the background repair finishes.",
+                        "请退出 APP，稍后重新打开。后台修复完成前首页不会开放。"),
+                    confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
+                    on_confirm=kit.quit,on_cancel=kit.quit})
+            else
+                local progress=runtime_progress()
+                if progress then progress.cancel_disabled=true; kit.set_busy(true,L("Repairing PortMaster…","正在修复 PortMaster…"),progress) end
+            end
+            return
         elseif task.kind=="validation" then
             local status,detail=validation_result()
             if status=="valid" or status=="restored" or status=="no-usable" or status=="interrupted" then
                 finish_validation(status,detail)
             elseif task.elapsed>(task.timeout or 120) then
-                finish_validation("interrupted",L("Validation timed out without changing the pending installation.",
-                    "校验超时，待校验安装未被修改。"))
+                finish_validation("timeout",L("Validation is taking longer than expected. Exit App Manager and reopen it later; do not start another repair while the background check finishes.",
+                    "校验耗时超出预期。请退出 APP，稍后重新打开；后台检查完成前不要再次开始修复。"))
             end
             return
         elseif not file_exists(env.plan_file) then finish_task()
         elseif task.elapsed>(task.timeout or 45) then
+            local timed_out_task=task
             kit.set_busy(false); task=nil
-            kit.toast(L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。"),{kind="error"})
-            if confirm_return==RUNTIME then build_runtime(); kit.goto_page(RUNTIME)
+            if timed_out_task and timed_out_task.kind=="portmaster" then
+                kit.dialog({title=L("Environment repair is still running","环境修复仍在进行"),
+                    message=L("Exit App Manager and reopen it later. Do not start another repair while the background installation finishes.",
+                        "请退出 APP，稍后重新打开；后台安装完成前不要再次开始修复。"),
+                    confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
+                    on_confirm=kit.quit,on_cancel=kit.quit})
+            elseif confirm_return==RUNTIME then
+                kit.toast(L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。"),{kind="error"})
+                build_runtime(); kit.goto_page(RUNTIME)
             else build_home(); kit.goto_page(HOME) end
         elseif confirm_return==RUNTIME or task.kind=="portmaster" then
             local progress=runtime_progress()

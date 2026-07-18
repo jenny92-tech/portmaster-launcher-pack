@@ -17,6 +17,10 @@ for contract in (
     'L("Reinstall","重新安装")', '--check-pm-update-force',
     'local actions={', 'sidebar_title=L("Maintenance","维护")',
     'sidebar=actions', 'row_layout={mode="grid",columns=2}',
+    'for _,item in ipairs(confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
+    'file_exists(env.install_transaction)', 'file_exists(env.portmaster_active)',
+    'task={kind="active-repair"',
+    'L("Cached","使用缓存")', 'L("Starting…","正在开始…")',
 ):
     assert contract in source, contract
 

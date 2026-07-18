@@ -152,6 +152,8 @@ PROGRESS_FILE="$CONFDIR/progress.tsv"
 CANCEL_FILE="$CONFDIR/cancel.request"
 UPDATE_CACHE_FILE="$CONFDIR/portmaster-update.tsv"
 VALIDATION_RESULT_FILE="$CONFDIR/validation-result.tsv"
+PORTMASTER_ACTIVE_FILE="$CONFDIR/portmaster-active.tsv"
+PORTMASTER_ACTIVE_LOCK="$CONFDIR/portmaster-active.lock"
 APPLY_HELPER="$CONFDIR/apply-helper.sh"
 SIZE_FILE="$CONFDIR/sizes.tsv"
 RUNTIME_CATALOG="$PAM_APP_ROOT/love_ui/runtime_catalog.tsv"
@@ -163,6 +165,21 @@ RUNTIME_CUSTOM_ROUTES="7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3
 RUNTIME_GITHUB_ROUTES="7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350"
 
 mkdir -p "$PAM_APP_ROOT" "$CONFDIR" "$TRASH_DIR"
+PORTMASTER_ACTIVE=0
+
+# A killed UI must not make an in-flight background repair invisible. Remove
+# only demonstrably stale markers; a live helper keeps the next APP instance
+# blocked until it finishes and publishes pending-validation state.
+if [ -s "$PORTMASTER_ACTIVE_FILE" ]; then
+  active_pid=$(awk -F '\t' '$1 == "pid" {print $2; exit}' "$PORTMASTER_ACTIVE_FILE" 2>/dev/null || true)
+  case "$active_pid" in ''|*[!0-9]*) active_pid=0 ;; esac
+  if [ "$active_pid" -le 1 ] || ! kill -0 "$active_pid" 2>/dev/null; then
+    rm -f -- "$PORTMASTER_ACTIVE_FILE"
+    rm -rf -- "$PORTMASTER_ACTIVE_LOCK"
+  else
+    PORTMASTER_ACTIVE=1
+  fi
+fi
 cd "$PAM_APP_ROOT" || exit 1
 if [ "$HEALTH_ONLY" = "1" ]; then
   :
@@ -177,14 +194,16 @@ if [ "$APPLY_ONLY" != "1" ] && [ "$SIZE_ONLY" != "1" ] && [ "$CHECK_UPDATE_ONLY"
   # MiniLoong 用临时 .port.sh 启动，这个文件可能在执行期间就被
   # 前端移除。Bash 仍在 fd 255 持有已打开的脚本；最后再回退到目录里
   # 稳定的 APP Manager.sh，不假设任何一个文件名在这一瞬间必然存在。
-  for helper_source in "$PAM_LAUNCHER_SOURCE" "/proc/$$/fd/255" "$PAM_DIR/APP Manager.sh"; do
-    [ -f "$helper_source" ] || continue
-    [ "$helper_source" = "$APPLY_HELPER" ] && continue
-    if cp -f "$helper_source" "$APPLY_HELPER" 2>/dev/null; then
-      helper_ready=1
-      break
-    fi
-  done
+  if [ "$PORTMASTER_ACTIVE" = "0" ]; then
+    for helper_source in "$PAM_LAUNCHER_SOURCE" "/proc/$$/fd/255" "$PAM_DIR/APP Manager.sh"; do
+      [ -f "$helper_source" ] || continue
+      [ "$helper_source" = "$APPLY_HELPER" ] && continue
+      if cp -f "$helper_source" "$APPLY_HELPER" 2>/dev/null; then
+        helper_ready=1
+        break
+      fi
+    done
+  fi
   # 设备上已有一份完整 helper 时绝不因临时源文件消失就把
   # apply_script 清空。但必须检查函数标记，不复用截断的坏文件。
   if [ "$helper_ready" = "0" ] && grep -q '^apply_plan()' "$APPLY_HELPER" 2>/dev/null; then
@@ -206,6 +225,18 @@ pam_core_health() {
   [ -f "$PAM_PORTMASTER_DIR/pugwash" ] || [ -f "$PAM_PORTMASTER_DIR/harbourmaster" ] || {
     printf damaged; return;
   }
+  [ -x "$PAM_PORTMASTER_DIR/PortMaster.sh" ] || { printf damaged; return; }
+  [ -x "$SCRIPTS_DIR/PortMaster.sh" ] || { printf damaged; return; }
+  if [ -f "$PAM_PORTMASTER_DIR/pylibs.zip" ]; then
+    [ -x "$PAM_BIN_DIR/unzip-portable" ] &&
+      "$PAM_BIN_DIR/unzip-portable" -tq "$PAM_PORTMASTER_DIR/pylibs.zip" >/dev/null 2>&1 || {
+        printf damaged; return;
+      }
+  elif [ -d "$PAM_PORTMASTER_DIR/pylibs" ]; then
+    [ -n "$(find "$PAM_PORTMASTER_DIR/pylibs" -type f -print -quit 2>/dev/null)" ] || { printf damaged; return; }
+  else
+    printf damaged; return
+  fi
   printf healthy
 }
 
@@ -284,6 +315,8 @@ write_env() {
   "device_class": "$(json_escape "$PAM_DEVICE_CLASS")",
   "target_confirmed": "$(json_escape "$PAM_TARGET_CONFIRMED")",
   "pending_install": "$(json_escape "$CONFDIR/pending-install.tsv")",
+  "install_transaction": "$(json_escape "$CONFDIR/install-transaction.tsv")",
+  "portmaster_active": "$(json_escape "$PORTMASTER_ACTIVE_FILE")",
   "validation_result_file": "$(json_escape "$VALIDATION_RESULT_FILE")",
   "update_cache_file": "$(json_escape "$UPDATE_CACHE_FILE")",
   "update_checked": $update_checked,
@@ -921,21 +954,28 @@ pm_cancel_requested() { [ -e "$CANCEL_FILE" ]; }
 
 pm_fetch_url() {
   local url="$1" out="$2" start="$3" finish="$4" fetch_pid monitor_pid rc=0
+  local before started now current elapsed transferred final_speed=0 final_detail speed_file
   runtime_prepare_downloader || return 1
+  before=$(runtime_file_size "$out")
+  started=$(date +%s)
+  speed_file="$CONFDIR/.pm-speed.$$"
+  rm -f -- "$speed_file"
   "$RUNTIME_CURL" -fsSL --connect-timeout 8 --retry 2 --retry-delay 1 -C - -o "$out" "$url" 2>/dev/null &
   fetch_pid=$!
   (
-    local before now last_time last_size current delta elapsed span percent
-    last_time=$(date +%s); last_size=$(runtime_file_size "$out"); before=$last_size
+    local now last_time last_size current delta elapsed span percent speed
+    last_time=$(date +%s); last_size=$before
     while kill -0 "$fetch_pid" 2>/dev/null; do
       sleep 1
       if pm_cancel_requested; then kill "$fetch_pid" 2>/dev/null || true; exit 70; fi
       now=$(date +%s); current=$(runtime_file_size "$out")
       elapsed=$((now - last_time)); delta=$((current - last_size)); [ "$elapsed" -gt 0 ] || elapsed=1
       [ "$delta" -ge 0 ] || delta=0
+      speed=$((delta / elapsed))
+      [ "$speed" -le 0 ] || printf '%s\n' "$speed" > "$speed_file"
       span=$((finish - start)); percent=$start
       if [ "$current" -gt "$before" ]; then percent=$((start + span / 2)); fi
-      runtime_progress_write downloading "$percent" "$((delta / elapsed))" "Downloading verified release assets"
+      runtime_progress_write downloading "$percent" "$speed" "Downloading verified release assets"
       last_time=$now; last_size=$current
     done
   ) &
@@ -943,9 +983,23 @@ pm_fetch_url() {
   wait "$fetch_pid" || rc=$?
   kill "$monitor_pid" 2>/dev/null || true
   wait "$monitor_pid" 2>/dev/null || true
-  pm_cancel_requested && return 70
-  [ "$rc" = "0" ] || return "$rc"
-  runtime_progress_write downloading "$finish" 0 "Downloading verified release assets"
+  if pm_cancel_requested; then rm -f -- "$speed_file"; return 70; fi
+  if [ "$rc" != "0" ]; then rm -f -- "$speed_file"; return "$rc"; fi
+  now=$(date +%s); current=$(runtime_file_size "$out")
+  elapsed=$((now - started)); [ "$elapsed" -gt 0 ] || elapsed=1
+  transferred=$((current - before)); [ "$transferred" -ge 0 ] || transferred=0
+  if [ -s "$speed_file" ]; then final_speed=$(sed -n '1p' "$speed_file" 2>/dev/null || echo 0); fi
+  case "$final_speed" in ""|*[!0-9]*) final_speed=0 ;; esac
+  if [ "$transferred" -gt 0 ]; then
+    [ "$final_speed" -gt 0 ] || final_speed=$((transferred / elapsed))
+    final_detail="Downloading verified release assets"
+  elif [ "$before" -gt 0 ]; then
+    final_detail="Using local cache"
+  else
+    final_detail="Download complete"
+  fi
+  rm -f -- "$speed_file"
+  runtime_progress_write downloading "$finish" "$final_speed" "$final_detail"
 }
 
 pm_download_asset() {
@@ -994,7 +1048,7 @@ pm_validate_sums() {
   done
 }
 
-install_portmaster_release() {
+install_portmaster_release_inner() {
   local cache="$CONFDIR/portmaster-download" sums version installer archive rc installer_device
   sums="$cache/SHA256SUMS"; version="$cache/version.json"
   installer="$cache/Install.sh"; archive="$cache/PortMaster.zip"
@@ -1044,6 +1098,33 @@ install_portmaster_release() {
   }
   runtime_progress_write complete 100 0 "Installation complete; reopen required"
   printf 'OK\tportmaster\tpending-validation\n' >> "$RESULT_FILE"
+}
+
+install_portmaster_release() {
+  local existing_pid rc
+  if ! mkdir "$PORTMASTER_ACTIVE_LOCK" 2>/dev/null; then
+    existing_pid=$(awk -F '\t' '$1 == "pid" {print $2; exit}' "$PORTMASTER_ACTIVE_FILE" 2>/dev/null || true)
+    case "$existing_pid" in ''|*[!0-9]*) existing_pid=0 ;; esac
+    if [ "$existing_pid" -gt 1 ] && kill -0 "$existing_pid" 2>/dev/null; then
+      printf 'FAIL\tportmaster\talready-running\n' >> "$RESULT_FILE"
+      return 1
+    fi
+    rm -rf -- "$PORTMASTER_ACTIVE_LOCK" || return 1
+    mkdir "$PORTMASTER_ACTIVE_LOCK" || return 1
+  fi
+  {
+    printf 'version\t1\n'
+    printf 'pid\t%s\n' "$$"
+    printf 'started\t%s\n' "$(date +%s 2>/dev/null || echo 0)"
+  } > "$PORTMASTER_ACTIVE_FILE.tmp.$$" &&
+    mv -f -- "$PORTMASTER_ACTIVE_FILE.tmp.$$" "$PORTMASTER_ACTIVE_FILE" || {
+      rm -rf -- "$PORTMASTER_ACTIVE_LOCK"
+      return 1
+    }
+  install_portmaster_release_inner; rc=$?
+  rm -f -- "$PORTMASTER_ACTIVE_FILE"
+  rm -rf -- "$PORTMASTER_ACTIVE_LOCK"
+  return "$rc"
 }
 
 runtime_download_source() {
@@ -1412,6 +1493,11 @@ pending_value() {
   awk -F '\t' -v key="$key" '$1 == key {sub(/^[^\t]*\t/, ""); print; exit}' "$file"
 }
 
+state_value() {
+  local file="$1" key="$2"
+  awk -F '\t' -v key="$key" '$1 == key {sub(/^[^\t]*\t/, ""); print; count++} END {if (count != 1) exit 1}' "$file"
+}
+
 validation_write() {
   local status="$1" detail="$2" tmp="$VALIDATION_RESULT_FILE.tmp.$$"
   detail=${detail//$'\t'/ }; detail=${detail//$'\r'/ }; detail=${detail//$'\n'/ }
@@ -1419,8 +1505,16 @@ validation_write() {
 }
 
 pending_manifest_valid() {
-  local manifest="$CONFDIR/pending-manifest.tsv" hash relative actual
+  local manifest="$CONFDIR/pending-manifest.tsv" hash relative actual expected_hash expected_count count=0
   [ -s "$manifest" ] || return 1
+  expected_hash=$(state_value "$CONFDIR/pending-install.tsv" manifest_sha256) || return 1
+  expected_count=$(state_value "$CONFDIR/pending-install.tsv" manifest_count) || return 1
+  case "$expected_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
+  [ "${#expected_hash}" = 64 ] || return 1
+  case "$expected_count" in ''|*[!0-9]*|0) return 1 ;; esac
+  actual=$(pm_sha256_file "$manifest" 2>/dev/null || true)
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
+    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
   while IFS=$'\t' read -r hash relative; do
     case "$hash" in ""|*[!0-9A-Fa-f]*) return 1 ;; esac
     [ "${#hash}" = 64 ] || return 1
@@ -1429,15 +1523,28 @@ pending_manifest_valid() {
     actual=$(pm_sha256_file "$PAM_PORTMASTER_DIR/$relative" 2>/dev/null || true)
     [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
       "$(printf '%s' "$hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
+    count=$((count + 1))
   done < "$manifest"
+  [ "$count" = "$expected_count" ]
 }
 
 pending_core_valid() {
-  local expected_target expected_scripts expected_device version
-  expected_target=$(pending_value target); expected_scripts=$(pending_value scripts)
-  expected_device=$(pending_value device)
+  local file="$CONFDIR/pending-install.tsv" expected_target expected_scripts expected_device expected_rollback
+  local version metadata_version mode launcher_hash actual
+  metadata_version=$(state_value "$file" version) || return 1
+  mode=$(state_value "$file" mode) || return 1
+  expected_target=$(state_value "$file" target) || return 1
+  expected_scripts=$(state_value "$file" scripts) || return 1
+  expected_device=$(state_value "$file" device) || return 1
+  expected_rollback=$(state_value "$file" rollback) || return 1
+  launcher_hash=$(state_value "$file" launcher_sha256) || return 1
+  [ "$metadata_version" = "2" ] || return 1
+  case "$mode" in install|update) ;; *) return 1 ;; esac
   [ -n "$expected_target" ] && [ "$expected_target" = "$PAM_PORTMASTER_DIR" ] || return 1
   [ -n "$expected_scripts" ] && [ "$expected_scripts" = "$SCRIPTS_DIR" ] || return 1
+  [ "$expected_rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
+  case "$launcher_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
+  [ "${#launcher_hash}" = 64 ] || return 1
   case "$expected_device" in miniloong|trimui|unknown|official-untested|unsupported|unsupported-known) ;; *) return 1 ;; esac
   case "$expected_device" in
     miniloong) [ "$param_device" = "miniloong" ] || return 1 ;;
@@ -1449,48 +1556,181 @@ pending_core_valid() {
   [ "$(pam_core_health)" = "healthy" ] || return 1
   version=$(pam_core_version); [ -n "$version" ] || return 1
   [ -f "$PAM_PORTMASTER_DIR/pugwash" ] || [ -f "$PAM_PORTMASTER_DIR/harbourmaster" ] || return 1
+  actual=$(pm_sha256_file "$SCRIPTS_DIR/PortMaster.sh" 2>/dev/null || true)
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
+    "$(printf '%s' "$launcher_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
   pending_manifest_valid
 }
 
-remove_pending_core() {
-  local relative top seen="$CONFDIR/.validation-tops.$$"
-  : > "$seen" || return 1
-  while IFS=$'\t' read -r _ relative; do
-    case "$relative" in ""|/*|../*|*/../*|*/..) continue ;; esac
-    top=${relative%%/*}
-    case "$top" in ""|libs|config|themes|logs|cache|.appmanager-state) continue ;; esac
-    grep -Fqx "$top" "$seen" 2>/dev/null || printf '%s\n' "$top" >> "$seen"
-  done < "$CONFDIR/pending-manifest.tsv"
-  while IFS= read -r top; do rm -rf -- "$PAM_PORTMASTER_DIR/$top" || true; done < "$seen"
-  rm -f -- "$seen" "$SCRIPTS_DIR/PortMaster.sh"
+remove_current_managed_core() {
+  local item top failed=0
+  for item in "$PAM_PORTMASTER_DIR"/* "$PAM_PORTMASTER_DIR"/.[!.]* "$PAM_PORTMASTER_DIR"/..?*; do
+    [ -e "$item" ] || [ -L "$item" ] || continue
+    top=$(basename "$item")
+    case "$top" in
+      libs|config|themes|logs|cache|log.txt|pugwash.txt|harbourmaster.txt|.appmanager-state|.appmanager-rollback) continue ;;
+    esac
+    rm -rf -- "$item" || failed=1
+  done
+  [ "$failed" = "0" ]
+}
+
+rollback_has_core() {
+  local rollback="$1" item
+  for item in "$rollback/core"/* "$rollback/core"/.[!.]* "$rollback/core"/..?*; do
+    [ -e "$item" ] || [ -L "$item" ] || continue
+    return 0
+  done
+  return 1
+}
+
+rollback_toplist_valid() {
+  local rollback="$1" expected_count="$2" expected_hash="$3" actual count name
+  case "$expected_count" in ''|*[!0-9]*) return 1 ;; esac
+  case "$expected_hash" in ''|*[!0-9A-Fa-f]*) return 1 ;; esac
+  [ "${#expected_hash}" = 64 ] && [ -f "$rollback/expected-tops.tsv" ] || return 1
+  actual=$(pm_sha256_file "$rollback/expected-tops.tsv" 2>/dev/null || true)
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
+    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
+  count=0
+  while IFS= read -r name; do
+    case "$name" in ''|*/*|.|..) return 1 ;; esac
+    count=$((count + 1))
+  done < "$rollback/expected-tops.tsv"
+  [ "$count" = "$expected_count" ]
+}
+
+restore_rollback() {
+  local rollback="$1" sweep="$2" had_launcher="$3" expected_count="$4" expected_hash="$5"
+  local item top failed=0 restored=0 restore_count=0
+  if [ "$expected_count" != "-" ]; then
+    rollback_toplist_valid "$rollback" "$expected_count" "$expected_hash" || return 1
+  fi
+  if [ -e "$rollback/restoring" ]; then
+    sweep=0
+    restored=1
+  fi
+  if [ "$sweep" = "1" ]; then
+    : > "$rollback/sweeping" || return 1
+    remove_current_managed_core || failed=1
+    rm -f -- "$SCRIPTS_DIR/PortMaster.sh" || failed=1
+    [ "$failed" = "0" ] || return 1
+    mv -f -- "$rollback/sweeping" "$rollback/restoring" || return 1
+  fi
+  if [ -d "$rollback/core" ]; then
+    for item in "$rollback/core"/* "$rollback/core"/.[!.]* "$rollback/core"/..?*; do
+      [ -e "$item" ] || [ -L "$item" ] || continue
+      top=$(basename "$item")
+      if [ -e "$PAM_PORTMASTER_DIR/$top" ] || [ -L "$PAM_PORTMASTER_DIR/$top" ]; then
+        failed=1; continue
+      fi
+      mv -- "$item" "$PAM_PORTMASTER_DIR/" || { failed=1; continue; }
+      restored=1
+      restore_count=$((restore_count + 1))
+      if [ "${PAM_TEST_FAIL_RESTORE_AFTER:-0}" = "$restore_count" ]; then return 1; fi
+    done
+  fi
+  if [ "$had_launcher" = "1" ]; then
+    if [ -f "$rollback/PortMaster.sh" ] || [ -L "$rollback/PortMaster.sh" ]; then
+      if [ -e "$SCRIPTS_DIR/PortMaster.sh" ] || [ -L "$SCRIPTS_DIR/PortMaster.sh" ]; then failed=1
+      else mv -- "$rollback/PortMaster.sh" "$SCRIPTS_DIR/PortMaster.sh" || failed=1; fi
+    elif [ "$sweep" = "1" ] || { [ ! -f "$SCRIPTS_DIR/PortMaster.sh" ] && [ ! -L "$SCRIPTS_DIR/PortMaster.sh" ]; }; then
+      failed=1
+    fi
+  elif [ -f "$rollback/PortMaster.sh" ] || [ -L "$rollback/PortMaster.sh" ]; then
+    # Corrupt metadata must never make us discard an actual launcher backup.
+    if [ -e "$SCRIPTS_DIR/PortMaster.sh" ] || [ -L "$SCRIPTS_DIR/PortMaster.sh" ]; then failed=1
+    else mv -- "$rollback/PortMaster.sh" "$SCRIPTS_DIR/PortMaster.sh" || failed=1; restored=1; fi
+  fi
+  rollback_has_core "$rollback" && failed=1
+  if [ "$expected_count" != "-" ]; then
+    while IFS= read -r top; do
+      [ -e "$PAM_PORTMASTER_DIR/$top" ] || [ -L "$PAM_PORTMASTER_DIR/$top" ] || failed=1
+    done < "$rollback/expected-tops.tsv"
+  fi
+  [ "$failed" = "0" ] || return 1
+  rm -rf -- "$rollback" || return 1
+  [ "$restored" = "1" ] && return 0
+  return 2
 }
 
 rollback_pending_core() {
-  local mode item restored=0
-  mode=$(pending_value mode)
-  remove_pending_core
-  if [ "$mode" = "update" ]; then
-    [ -d "$CONFDIR/rollback/core" ] || {
-      rm -rf -- "$CONFDIR/rollback"
-      rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv"
-      return 1
-    }
-    for item in "$CONFDIR/rollback/core"/* "$CONFDIR/rollback/core"/.[!.]* "$CONFDIR/rollback/core"/..?*; do
-      [ -e "$item" ] || [ -L "$item" ] || continue
-      mv -- "$item" "$PAM_PORTMASTER_DIR/" || return 1
-    done
-    if [ -f "$CONFDIR/rollback/PortMaster.sh" ]; then
-      mv -f -- "$CONFDIR/rollback/PortMaster.sh" "$SCRIPTS_DIR/PortMaster.sh" || return 1
-    fi
-    restored=1
-  fi
-  rm -rf -- "$CONFDIR/rollback"
-  rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv"
-  [ "$restored" = "1" ]
+  local file="$CONFDIR/pending-install.tsv" mode rollback had_launcher backup_count backup_hash
+  local sweep=1 rc recorded_target recorded_scripts
+  recorded_target=$(state_value "$file" target 2>/dev/null || true)
+  recorded_scripts=$(state_value "$file" scripts 2>/dev/null || true)
+  [ "$recorded_target" = "$PAM_PORTMASTER_DIR" ] && [ "$recorded_scripts" = "$SCRIPTS_DIR" ] || return 1
+  mode=$(state_value "$file" mode 2>/dev/null || true)
+  rollback=$(state_value "$file" rollback 2>/dev/null || true)
+  had_launcher=$(state_value "$file" had_launcher 2>/dev/null || true)
+  backup_count=$(state_value "$file" backup_top_count 2>/dev/null || true)
+  backup_hash=$(state_value "$file" backup_top_sha256 2>/dev/null || true)
+  case "$rollback" in
+    "$PAM_PORTMASTER_DIR/.appmanager-rollback"|"$CONFDIR/rollback") ;;
+    *) rollback="$PAM_PORTMASTER_DIR/.appmanager-rollback" ;;
+  esac
+  case "$had_launcher" in
+    0|1) ;;
+    *)
+      if [ -f "$rollback/PortMaster.sh" ] || [ -L "$rollback/PortMaster.sh" ]; then had_launcher=1
+      else had_launcher=0; fi
+      ;;
+  esac
+  # The existence of backup content is safer evidence than damaged mode
+  # metadata. It prevents a truncated update record from becoming first-install cleanup.
+  if rollback_has_core "$rollback" || [ "$had_launcher" = "1" ]; then mode=update; else mode=install; fi
+  restore_rollback "$rollback" "$sweep" "$had_launcher" "$backup_count" "$backup_hash"; rc=$?
+  [ "$rc" = "1" ] && return 1
+  rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
+    "$CONFDIR/install-transaction.tsv" || return 1
+  [ "$rc" = "0" ] && return 0
+  return 2
 }
 
-validate_pending_install() {
-  local mode
+recover_interrupted_transaction() {
+  local file="$CONFDIR/install-transaction.tsv" version phase mode target scripts rollback had_launcher
+  local backup_count backup_hash sweep rc
+  version=$(state_value "$file" version) || return 1
+  phase=$(state_value "$file" phase) || return 1
+  mode=$(state_value "$file" mode) || return 1
+  target=$(state_value "$file" target) || return 1
+  scripts=$(state_value "$file" scripts) || return 1
+  rollback=$(state_value "$file" rollback) || return 1
+  had_launcher=$(state_value "$file" had_launcher) || return 1
+  backup_count=$(state_value "$file" backup_top_count) || return 1
+  backup_hash=$(state_value "$file" backup_top_sha256) || return 1
+  [ "$version" = "2" ] && [ "$target" = "$PAM_PORTMASTER_DIR" ] && [ "$scripts" = "$SCRIPTS_DIR" ] || return 1
+  [ "$rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
+  case "$mode:$had_launcher" in install:0|install:1|update:0|update:1) ;; *) return 1 ;; esac
+  case "$phase" in
+    prepared) sweep=0; backup_count="-"; backup_hash="-" ;;
+    backed-up) sweep=1 ;;
+    *) return 1 ;;
+  esac
+  restore_rollback "$rollback" "$sweep" "$had_launcher" "$backup_count" "$backup_hash"; rc=$?
+  [ "$rc" = "1" ] && return 1
+  rm -f -- "$file" "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" || return 1
+  if [ "$rc" = "0" ] || { [ "$phase" = "prepared" ] && [ "$mode" = "update" ]; }; then return 0; fi
+  return 2
+}
+
+validate_pending_install_inner() {
+  local mode rc
+  if [ ! -s "$CONFDIR/pending-install.tsv" ] && [ -s "$CONFDIR/install-transaction.tsv" ]; then
+    validation_write checking "Recovering an interrupted PortMaster transaction"
+    if recover_interrupted_transaction; then
+      validation_write restored "The previous PortMaster environment was restored"
+      return 1
+    else
+      rc=$?
+      if [ "$rc" = "2" ]; then
+        validation_write no-usable "The incomplete first installation was removed"
+      else
+        validation_write interrupted "Automatic recovery could not complete; recovery state was preserved"
+      fi
+      return 1
+    fi
+  fi
   [ -s "$CONFDIR/pending-install.tsv" ] || { validation_write none "No pending installation"; return 0; }
   validation_write checking "Validating installed PortMaster core"
   if [ "${PAM_TEST_INTERRUPT_VALIDATION:-0}" = "1" ]; then
@@ -1498,19 +1738,44 @@ validate_pending_install() {
     return 75
   fi
   if pending_core_valid; then
-    rm -rf -- "$CONFDIR/rollback"
-    rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv"
+    rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
+      "$CONFDIR/install-transaction.tsv" || {
+        validation_write interrupted "Validated core could not finalize its pending state"
+        return 75
+      }
+    rm -rf -- "$PAM_PORTMASTER_DIR/.appmanager-rollback" "$CONFDIR/rollback"
     validation_write valid "PortMaster environment validated"
     return 0
   fi
   mode=$(pending_value mode)
-  if rollback_pending_core; then
+  rollback_pending_core; rc=$?
+  if [ "$rc" = "0" ]; then
     validation_write restored "The previous PortMaster environment was restored"
-  else
+  elif [ "$rc" = "2" ]; then
     validation_write no-usable "The incomplete first installation was removed"
+  else
+    validation_write interrupted "Automatic rollback could not complete; recovery state was preserved"
   fi
   echo "$LOG_PREFIX pending PortMaster validation failed (mode=$mode)"
   return 1
+}
+
+validate_pending_install() {
+  local lock="$CONFDIR/validation.lock" pid rc
+  if ! mkdir "$lock" 2>/dev/null; then
+    pid=$(sed -n '1p' "$lock/pid" 2>/dev/null || true)
+    case "$pid" in ''|*[!0-9]*) pid=0 ;; esac
+    if [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then
+      validation_write checking "Another validation process is still running"
+      return 75
+    fi
+    rm -rf -- "$lock" || return 75
+    mkdir "$lock" || return 75
+  fi
+  printf '%s\n' "$$" > "$lock/pid" || { rm -rf -- "$lock"; return 75; }
+  validate_pending_install_inner; rc=$?
+  rm -rf -- "$lock"
+  return "$rc"
 }
 
 # ── 主入口 ────────────────────────────────────────────────────────────
