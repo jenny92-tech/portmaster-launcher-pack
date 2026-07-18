@@ -31,7 +31,7 @@ rm -rf "$TMP/archive/PortMaster/pylibs-src"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/archive/PortMaster/PortMaster.sh"
 chmod +x "$TMP/archive/PortMaster/PortMaster.sh"
 (cd "$TMP/archive" && zip -qr "$TMP/release/PortMaster.zip" PortMaster)
-cp "$GUI/tools/portappmanager-installer.sh" "$TMP/release/portappmanager-installer.sh"
+cp "$GUI/tools/appmanager-install.sh" "$TMP/release/appmanager-install.sh"
 archive_md5=$(md5 -q "$TMP/release/PortMaster.zip" 2>/dev/null || md5sum "$TMP/release/PortMaster.zip" | awk '{print $1}')
 printf '%s  PortMaster.zip\n' "$archive_md5" > "$TMP/release/PortMaster.zip.md5"
 cat > "$TMP/release/version.json" <<'JSON'
@@ -159,7 +159,7 @@ grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
 grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
 grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
-grep -Fq 'jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh' "$TMP/success/curl.log"
+grep -Fq 'jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/appmanager-install.sh' "$TMP/success/curl.log"
 ! grep -Fq '/Install.sh' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip.md5' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "$TMP/success/curl.log"
