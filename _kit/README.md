@@ -12,7 +12,7 @@ launcher fail to start.
 |---|---|
 | `love/kit.lua` | Shared LÖVE UI: pages, items, buttons, split layout, focus, localization and busy state. |
 | `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
-| `github_proxy.sh` | Capability-aware GitHub transport: Release/Raw/Archive/API/Gist downloads and Git clone, with per-proxy URL formatters, bounded probing, same-route resume, validation and fallback. |
+| `github_proxy.sh` | Capability-aware GitHub transport and bundled default registry: Release/Raw/Archive/API/Gist downloads and Git clone, with per-proxy URL formatters, bounded probing, same-route resume, validation and fallback. |
 | `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
 | `launcher_unity_common.sh` | **Unity-loader only**: configuration, button remap and game launch. |
@@ -35,8 +35,16 @@ probes at most five routes at once, downloads through responsive routes, and
 accepts a route only after the caller's content validator succeeds.
 `github_proxy_clone` performs the equivalent flow for Git clone. Range data is
 resumed only from the same route ID; changing routes discards the old partial.
+After a validated success, each capability remembers that route in a plain
+shell variable for the lifetime of the current process. Later operations try it
+first and fall back normally on failure; exiting or restarting clears it.
 New endpoints can be appended as TSV rows through
 `GITHUB_PROXY_REGISTRY_EXTRA`; callers do not edit the download operations.
+The bundled defaults and their maintenance-source comment also live in
+this module; applications only source the module. Generic consumers may replace
+the two groups with `GITHUB_PROXY_CUSTOM_PROXIES` and
+`GITHUB_PROXY_FULL_PROXIES`; the older APP Manager override names remain
+supported for compatibility.
 
 Git LFS, GitHub Packages, and GHCR are intentionally not modeled as file
 downloads: they have separate authenticated protocols. Add them as distinct
@@ -80,9 +88,10 @@ run_love_launcher_ui
 run_unity_game x.toml
 ```
 
-The KIT block runs as-is in the repo (sources from `_kit/`) AND gets inlined by
-`assemble.sh` for the device — so the template is both testable here and
-deployable as one file.
+The KIT block runs as-is in the repo and gets inlined by `assemble.sh` for the
+device. Shared modules use `source "$KIT/<file>"`; port-private modules use
+`source "$PORT_SRC/<file>"`. Both remain testable here and deployable as one
+file.
 
 ## Build → dist → deploy
 

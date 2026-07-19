@@ -14,9 +14,9 @@
 #     source "$KIT/portmaster_common.sh"
 #     source "$KIT/launcher_unity_common.sh"
 #     #@KIT-END
-# Each `source "$KIT/<file>"` inside it is replaced by that file's contents
-# (minus shebang); the KIT= line and the markers are dropped. The result is a
-# single script that runs anywhere with no _kit dependency.
+# Each `source "$KIT/<file>"` or `source "$PORT_SRC/<file>"` inside it is
+# replaced by that file's contents (minus shebang); assignments and markers are
+# dropped. The result is a single script with no external module dependency.
 #
 # Usage:
 #   _kit/assemble.sh ports/<port>/src/launcher.sh [output.sh]
@@ -60,7 +60,7 @@ inline_kit() {
     case "$line" in
       *'#@KIT-BEGIN'*)
         in_block=1
-        echo "# ─── inlined from _kit/ by assemble.sh — do not edit on device ───"
+        echo "# ─── modules inlined by assemble.sh — do not edit on device ───"
         continue ;;
       *'#@KIT-END'*)
         in_block=0
@@ -76,6 +76,13 @@ inline_kit() {
           tail -n +2 "$ROOT/_kit/$f"   # strip shebang, keep the rest
           echo
           ;;
+        *'source "$PORT_SRC/'*)
+          f="${line#*\$PORT_SRC/}"; f="${f%%\"*}"
+          [ -f "$SRC_DIR/$f" ] || { echo "missing port source module: $SRC_DIR/$f" >&2; exit 1; }
+          echo "# ── $PORT/src/$f ──"
+          tail -n +2 "$SRC_DIR/$f"
+          echo
+          ;;
         *) : ;;   # drop the KIT= assignment and anything else in the block
       esac
     else
@@ -88,8 +95,8 @@ inline_kit > "$OUT"
 chmod +x "$OUT"
 
 # sanity: no unresolved markers / external source left behind, and it parses
-if grep -qE '#@KIT|source "\$KIT/' "$OUT"; then
-  echo "!! unresolved KIT references remain in $OUT" >&2
+if grep -qE '#@KIT|source "\$(KIT|PORT_SRC)/' "$OUT"; then
+  echo "!! unresolved module references remain in $OUT" >&2
   exit 1
 fi
 bash -n "$OUT" || { echo "!! assembled script has syntax errors: $OUT" >&2; exit 1; }

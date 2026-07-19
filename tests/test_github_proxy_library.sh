@@ -8,6 +8,15 @@ trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=../_kit/github_proxy.sh
 source "$ROOT/_kit/github_proxy.sh"
 
+# The reusable module owns a non-empty bundled default registry. Applications
+# consume it without carrying their own proxy data.
+[ "${#GITHUB_PROXY_CUSTOM_ROUTES}" -gt 200 ]
+[ "${#GITHUB_PROXY_FULL_ROUTES}" -gt 1000 ]
+default_registry=$(github_proxy_registry)
+[ "$(grep -c '^c' <<< "$default_registry")" -ge 4 ]
+[ "$(grep -c '^g' <<< "$default_registry")" -ge 30 ]
+grep -Fq $'origin\tdirect\t' <<< "$default_registry"
+
 GITHUB_PROXY_REGISTRY_OVERRIDE=$(printf '%s\n' \
   $'full-a\tfull\trelease,raw,archive,clone,gist\thttps://full.example' \
   $'mirror-a\tmirror\trelease,raw,archive\thttps://mirror.example' \
@@ -85,11 +94,33 @@ GITHUB_PROXY_REGISTRY_OVERRIDE=$(printf '%s\n' \
 out="$TMP/file.txt"
 github_proxy_fetch raw "$raw" "$out" validate_payload
 grep -Fq 'VALID payload' "$out"
+[ "$GITHUB_PROXY_LAST_RAW" = "cdn-a" ]
 [ "$(wc -l < "$PROBE_LOG" | tr -d ' ')" = 4 ]
 [ "$(wc -l < "$TRANSFER_LOG" | tr -d ' ')" = 3 ]
 grep -Fq 'bad-a.example' "$TRANSFER_LOG"
 grep -Fq 'bad-b.example' "$TRANSFER_LOG"
 grep -Fq 'cdn.example' "$TRANSFER_LOG"
+
+# The validated route is preferred again only inside this shell process. It is
+# kept separately per capability and no preference file is written.
+: > "$PROBE_LOG"; : > "$TRANSFER_LOG"
+out="$TMP/file-cached.txt"
+github_proxy_fetch raw "$raw" "$out" validate_payload
+grep -Fq 'VALID payload' "$out"
+[ "$(wc -l < "$TRANSFER_LOG" | tr -d ' ')" = 1 ]
+grep -Fq 'cdn.example' "$TRANSFER_LOG"
+[ -z "${GITHUB_PROXY_LAST_RELEASE:-}" ]
+! find "$GITHUB_PROXY_STATE_DIR" -maxdepth 1 -name 'github-proxy-preferred.*' | grep -q .
+
+# A remembered route is only a hint. If it stops validating, the same call
+# continues through normal batches and replaces the hint with the new winner.
+GITHUB_PROXY_LAST_RAW=bad-a
+: > "$PROBE_LOG"; : > "$TRANSFER_LOG"
+out="$TMP/file-failover.txt"
+github_proxy_fetch raw "$raw" "$out" validate_payload
+grep -Fq 'bad-a.example' "$TRANSFER_LOG"
+grep -Fq 'cdn.example' "$TRANSFER_LOG"
+[ "$GITHUB_PROXY_LAST_RAW" = "cdn-a" ]
 
 # Resume state belongs to one route only. Switching route IDs discards bytes
 # from the previous endpoint instead of combining two potentially different
@@ -123,6 +154,7 @@ github_proxy_clone_hook() {
 }
 github_proxy_clone "$clone" "$TMP/clone"
 [ -d "$TMP/clone/.git" ]
+[ "$GITHUB_PROXY_LAST_CLONE" = "clone-good" ]
 [ "$(wc -l < "$CLONE_PROBE_LOG" | tr -d ' ')" = 2 ]
 [ "$(wc -l < "$CLONE_ATTEMPT_LOG" | tr -d ' ')" = 2 ]
 ! grep -Fq 'cdn.example' "$CLONE_PROBE_LOG"

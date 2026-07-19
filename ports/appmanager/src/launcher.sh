@@ -228,17 +228,11 @@ PORTMASTER_ACTIVE_LOCK="$CONFDIR/portmaster-active.lock"
 APPLY_HELPER="$CONFDIR/apply-helper.sh"
 SIZE_FILE="$CONFDIR/sizes.tsv"
 RUNTIME_METADATA="$CONFDIR/runtime-metadata.tsv"
-RUNTIME_METADATA_URL="https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json"
-# Proxy-list maintenance source (consult only when refreshing the bundled list):
-# https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L174
-PAM_CUSTOM_RELEASE_BASE="${PAM_CUSTOM_RELEASE_BASE:-https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download}"
-PAM_RELEASE_BASE="$PAM_CUSTOM_RELEASE_BASE"
-PAM_INSTALLER_SOURCE_URL="https://raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/appmanager-installer.sh"
-RUNTIME_CUSTOM_ROUTES="7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb5180219393571951dd293185bf48d406d50d104be338d9608d1753d48cd8"
-RUNTIME_GITHUB_ROUTES="7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350"
 
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+PORT_SRC="$(cd "$(dirname "$0")" && pwd)"
+source "$PORT_SRC/appmanager_sources.sh"
 source "$KIT/github_proxy.sh"
 #@KIT-END
 
@@ -779,7 +773,7 @@ runtime_download_url() { runtime_metadata_field "$1" 5; }
 
 runtime_valid_download_url() {
   case "$1" in
-    https://github.com/PortsMaster/PortMaster-New/releases/download/*/*.squashfs) return 0 ;;
+    "$PAM_RUNTIME_RELEASES_URL"/download/*/*.squashfs) return 0 ;;
   esac
   return 1
 }
@@ -1156,7 +1150,7 @@ pm_validate_installer() {
 
 pm_valid_custom_stable_archive_url() {
   case "$1" in
-    https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip) return 0 ;;
+    "$PAM_FORK_RELEASES_URL"/download/*/PortMaster.zip) return 0 ;;
   esac
   return 1
 }
@@ -1220,7 +1214,7 @@ install_portmaster_release_inner() {
   if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
     expected_hash=$(pm_checksum_expected "$sums" PortMaster.zip)
   else
-    stable_url="https://github.com/PortsMaster/PortMaster-GUI/releases/download/$stable_version/PortMaster.zip"
+    stable_url="$PAM_OFFICIAL_RELEASES_URL/download/$stable_version/PortMaster.zip"
     checksum="$archive_dir/PortMaster.zip.md5"
     rm -f -- "$checksum"
     pm_download_url release "$stable_url.md5" "$checksum" 18 20 pm_validate_md5_download || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }

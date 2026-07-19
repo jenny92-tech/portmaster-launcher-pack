@@ -28,11 +28,11 @@ grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI_DIR/app_pages.lua"
 grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI_DIR/app_pages.lua"
 grep -Fq 'env.progress_file' "$APP_UI_DIR/app_operations.lua"
 grep -Fq 'GITHUB_PROXY_BATCH_SIZE:-5' "$LAUNCHER"
-grep -Fq 'github_proxy_decode' "$LAUNCHER"
+grep -Fq 'github_proxy_read' "$LAUNCHER"
 grep -Fq '# Proxy-list maintenance source (consult only when refreshing the bundled list):' "$LAUNCHER"
 ! grep -Fq 'RUNTIME_ROUTE_CONTACT=' "$LAUNCHER"
-custom_blob=$(sed -n 's/^RUNTIME_CUSTOM_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
-github_blob=$(sed -n 's/^RUNTIME_GITHUB_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
+custom_blob=$(sed -n 's/^GITHUB_PROXY_CUSTOM_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
+github_blob=$(sed -n 's/^GITHUB_PROXY_FULL_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
 [ "${#custom_blob}" -gt 200 ] && [ "${#github_blob}" -gt 1000 ]
 ! grep -Fq "custom_rows='" "$LAUNCHER"
 ! grep -Fq "github_rows='" "$LAUNCHER"
