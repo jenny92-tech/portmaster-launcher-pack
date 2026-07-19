@@ -65,6 +65,10 @@ page; pass `preserve_focus=true` when a selection-only rebuild must keep the cur
 row/sidebar control and scroll position. Give dynamic rows a stable `id` (checkbox
 metadata may use `id`, `path` or `paths`) so insertions and sorting preserve the same
 logical item; a removed item falls back to its nearest focusable neighbour.
+Use `kit.push_page(index)` for user-driven drill-down navigation and
+`kit.back_page()` for an explicit Back button. The header and semantic Cancel action
+use the same history stack, restoring the previous page and focused Item ID;
+`kit.goto_page(index)` remains the non-stacking API for task/state transitions.
 `kit.set_busy` blocks input behind a progress overlay during background Shell work.
 
 Input inside the Kit is semantic. `love.keypressed` translates raw keys through the
@@ -105,6 +109,8 @@ card above bottom sidebar actions; descriptions stay correct across sorting and 
 reflow because they never depend on row indices. `sidebar_footer={lines={...}}` renders
 small non-focusable identity/contact text directly above bottom actions without adding
 items to the controller focus chain.
+An app page with `sidebar={}` is rendered as a centred single pane; no empty action
+column or divider is reserved.
 
 Read-only content uses `kit.textview(label, value, opts)`. A TextView measures wrapped
 label/value text and grows its card instead of overflowing a fixed-height row. Values

@@ -143,6 +143,36 @@ page = healthy.eval('require("kit").debug_page()')
 assert page["title"] == "环境管理"
 assert page["section_count"] == 1
 assert page["row_count"] == 6
+assert page["sidebar_count"] == 4
+assert healthy.eval('require("kit").debug_navigation().depth') == 1
+
+# Environment Management is a parent page: opening Runtime repair and using
+# either the header/cancel action must return to it, not skip back to Home.
+healthy.execute(r'''
+    local k=require("kit")
+    for _=1,4 do
+        if k.debug_focus().zone=="sidebar" then break end
+        k.input("right")
+    end
+    assert(k.debug_focus().zone=="sidebar")
+    while k.debug_focus().sidebar_i<3 do k.input("down") end
+    k.input("confirm")
+    assert(k.debug_page().title=="Runtime 修复")
+    assert(k.debug_navigation().depth==2)
+    k.input("cancel")
+    assert(k.debug_page().title=="环境管理")
+    assert(k.debug_navigation().depth==1)
+
+    -- The visible top-left Back control uses the same stack.
+    while k.debug_focus().zone~="sidebar" do k.input("right") end
+    while k.debug_focus().sidebar_i<3 do k.input("down") end
+    k.input("confirm")
+    k.input("up")
+    assert(k.debug_focus().zone=="bar")
+    k.input("confirm")
+    assert(k.debug_page().title=="环境管理")
+    assert(k.debug_navigation().depth==1)
+''')
 
 for state, expected_title in (
     ("missing", "需要安装 PortMaster"),
@@ -152,7 +182,11 @@ for state, expected_title in (
     page = runtime.eval('require("kit").debug_page()')
     assert page["title"] == expected_title, state
     assert page["row_count"] == 3, state
+    assert page["sidebar_count"] == 0, state
     assert page["row_kinds"][1] == "textview", state
+    layout = runtime.eval('require("kit").debug_layout()')
+    assert not layout["has_sidebar"], state
+    assert layout["columns"] == 1, state
     focus = runtime.eval('require("kit").debug_focus()')
     assert focus["zone"] == "rows", state
     assert focus["focus_i"] == 2, state
@@ -165,7 +199,11 @@ pending = run_case("healthy", pending=True)
 page = pending.eval('require("kit").debug_page()')
 assert page["title"] == "检查 PortMaster"
 assert page["row_count"] == 2
+assert page["sidebar_count"] == 0
 assert page["row_kinds"][1] == "textview"
+layout = pending.eval('require("kit").debug_layout()')
+assert not layout["has_sidebar"]
+assert layout["columns"] == 1
 focus = pending.eval('require("kit").debug_focus()')
 assert focus["zone"] == "rows"
 assert focus["focus_i"] == 2

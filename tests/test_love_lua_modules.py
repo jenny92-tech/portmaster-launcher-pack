@@ -189,6 +189,36 @@ with tempfile.TemporaryDirectory() as source:
         assert(not k.debug_toast().open)
         k.input("up")
         assert(k.debug_focus().focus_i==2)
+
+        -- User navigation keeps a real history stack. Back/cancel restores the
+        -- previous page and its focused control instead of always jumping Home.
+        k.push_page(2)
+        assert(k.debug_page().index==2 and k.debug_navigation().depth==1)
+        k.input("cancel")
+        assert(k.debug_page().index==1 and k.debug_navigation().depth==0)
+    ''')
+
+# App pages without sidebar controls use the full single-pane layout. This is
+# distinct from an empty but still reserved right-hand operation column.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            k.add_page("Notice",{
+                k.textview("Status","PortMaster is not installed.",{focusable=false,expandable=false}),
+                k.button("Repair",function() end),
+            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+        end})
+        love.load()
+        local page=k.debug_page()
+        local layout=k.debug_layout()
+        assert(page.sidebar_count==0)
+        assert(not layout.has_sidebar and layout.columns==1)
+        assert(layout.x==(960-layout.w)/2)
     ''')
 
 # Checkbox visuals are drawn as a real control, not font-dependent square/check

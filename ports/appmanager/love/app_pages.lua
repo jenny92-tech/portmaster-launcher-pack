@@ -89,19 +89,19 @@ function Pages.new(model,operations)
         kit.set_page(page.HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
             preserve_focus=preserve_focus,sidebar_title=L("Quick Tools","快捷工具"),
             sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
-            header_action=button(L("Environment","环境管理"),function() environment.build_manage(); kit.goto_page(page.MANAGE) end,
+            header_action=button(L("Environment","环境管理"),function() environment.build_manage(); kit.push_page(page.MANAGE) end,
                 {badge=model.update_state()=="update" and kit.badge(L("Update","可升级"),{0.62,0.64,0.69}) or nil}),
             sidebar={
             button(model.dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,
                 {id="uninstall",disabled=empty(selected_home)}),
             button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
-                function() self.build_trash(); kit.goto_page(page.TRASH) end,{id="trash"}),
+                function() self.build_trash(); kit.push_page(page.TRASH) end,{id="trash"}),
             button(L("Select all","全选"),function() select_all_home(true) end,{half=true,id="select-all"}),
             button(L("Select none","全不选"),function() select_all_home(false) end,{half=true,id="select-none"}),
             button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
-                function() self.build_junk(); kit.goto_page(page.JUNK) end,{id="leftovers"}),
+                function() self.build_junk(); kit.push_page(page.JUNK) end,{id="leftovers"}),
             button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
-                function() self.build_runtime(); kit.goto_page(page.RUNTIME) end,{id="runtime-repair-entry"}),
+                function() self.build_runtime(); kit.push_page(page.RUNTIME) end,{id="runtime-repair-entry"}),
             button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"}),
         }})
     end
@@ -186,7 +186,7 @@ function Pages.new(model,operations)
                 {id="runtime-repair",disabled=empty(selected_runtime)}),
             button(L("Select all","全选"),function() select_all_runtime(true) end,{half=true}),
             button(L("Select none","全不选"),function() select_all_runtime(false) end,{half=true}),
-            button(L("Back","返回"),function() environment.build_manage(); kit.goto_page(page.MANAGE) end,{group="bottom"}),
+            button(L("Back","返回"),kit.back_page,{group="bottom"}),
         }})
     end
 
@@ -227,7 +227,7 @@ function Pages.new(model,operations)
             button(model.dynamic_count("Move to Trash (%d)","移入回收站 (%d)",selected_junk),remove_junk,{disabled=empty(selected_junk)}),
             button(L("Select all","全选"),function() select_all_junk(true) end,{half=true}),
             button(L("Select none","全不选"),function() select_all_junk(false) end,{half=true}),
-            button(L("Back","返回"),function() kit.goto_page(page.HOME) end,{group="bottom"}),
+            button(L("Back","返回"),kit.back_page,{group="bottom"}),
         }})
     end
 
@@ -290,7 +290,7 @@ function Pages.new(model,operations)
             button(model.dynamic_count("Delete forever (%d)","永久删除 (%d)",selected_trash),function() trash_action("DELETE_ITEM",L("Permanently delete selected items","永久删除所选项目")) end,{disabled=empty(selected_trash)}),
             button(L("Select all","全选"),function() select_all_trash(true) end,{half=true}),
             button(L("Select none","全不选"),function() select_all_trash(false) end,{half=true}),
-            button(L("Back","返回"),function() kit.goto_page(page.HOME) end,{group="bottom"}),
+            button(L("Back","返回"),kit.back_page,{group="bottom"}),
         }})
     end
 
@@ -356,7 +356,7 @@ function Pages.new(model,operations)
         end
         kit.set_page(page.ENV,L("Environment details","环境详情"),rows,{row_layout={mode="grid",columns=2},
             sidebar_title=L("Explanation","说明"),sidebar_details=details,sidebar={
-            button(L("Back","返回"),function() environment.build_manage(); kit.goto_page(page.MANAGE) end,{group="bottom"})
+            button(L("Back","返回"),kit.back_page,{group="bottom"})
         }})
     end
 

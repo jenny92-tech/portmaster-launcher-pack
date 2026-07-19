@@ -48,6 +48,7 @@ local port, strings, state = nil, {}, {}
 local fonts, bg_img = {}, nil
 local external_font_data, external_font_checked = nil, false
 local pages, page_i = {}, 1
+local navigation_stack = {}
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
 local busy, busy_message, busy_info = false, nil, nil
@@ -456,8 +457,10 @@ function kit.debug_page()
     end
     return {index=page_i,title=t(page.title or ""),row_count=#rows,section_count=sections,
         section_labels=section_labels,row_kinds=row_kinds,row_font_px=row_font_px,
-        row_label_px=row_label_px,row_value_px=row_value_px,sidebar_footer_lines=footer_lines}
+        row_label_px=row_label_px,row_value_px=row_value_px,sidebar_count=#(page.sidebar or {}),
+        sidebar_footer_lines=footer_lines}
 end
+function kit.debug_navigation() return {depth=#navigation_stack} end
 function kit.debug_sidebar_detail()
     local detail,key
     if current_sidebar_detail then detail,key=current_sidebar_detail() end
@@ -804,7 +807,26 @@ local function goto_page(n)
     if not pages[n] then return end
     page_i=n; zone="rows"; focus_i=focusables(cur())[1] or 1; sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
 end
-function kit.goto_page(n) goto_page(n) end
+function kit.goto_page(n)
+    if n==1 then navigation_stack={} end
+    goto_page(n)
+end
+function kit.push_page(n)
+    if not pages[n] or n==page_i then return false end
+    navigation_stack[#navigation_stack+1]=capture_focus()
+    goto_page(n)
+    return true
+end
+function kit.back_page()
+    local snapshot=table.remove(navigation_stack)
+    if snapshot and pages[snapshot.page_i] then
+        restore_focus(snapshot)
+        return true
+    end
+    navigation_stack={}
+    goto_page(1)
+    return false
+end
 local function toggle_lang()
     state.ui_lang=(state.ui_lang=="en") and "zh" or "en"
     kit.invalidate_layout()
@@ -825,7 +847,7 @@ local function do_action(a)
                 on_confirm=function() do_action("start") end})
         end
     elseif a=="quit" then kit.quit()
-    elseif type(a)=="string" and a:match("^page:") then goto_page(tonumber(a:match("%d+")))
+    elseif type(a)=="string" and a:match("^page:") then kit.push_page(tonumber(a:match("%d+")))
     elseif type(a)=="function" then a(kit) end
 end
 
@@ -849,7 +871,7 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2; focus_stack={}; toast_state=nil
+    dialog_state,dialog_focus=nil,2; focus_stack={}; navigation_stack={}; toast_state=nil
     input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
     for key,action in pairs(port.input_map or {}) do input_map[key]=action end
     measurement_cache=setmetatable({}, {__mode="k"})
@@ -877,10 +899,13 @@ layout=function()
     if is_app() then
         local cs=math.max(0.72,math.min(1,H/720))
         local margin=18*cs
-        local side_w=math.min(280*cs,W*0.27)
-        local side_gap=37*cs
-        local w=math.max(260*cs,W-margin*2-side_w-side_gap)
-        local side_x=margin+w+side_gap
+        local has_sidebar=#sidebar()>0
+        local side_w=has_sidebar and math.min(280*cs,W*0.27) or 0
+        local side_gap=has_sidebar and 37*cs or 0
+        local w=has_sidebar and math.max(260*cs,W-margin*2-side_w-side_gap) or
+            math.min(W-margin*2,ROW_MAX_W)
+        local content_x=has_sidebar and margin or (W-w)/2
+        local side_x=content_x+w+side_gap
         local content_top=97*cs
         local bottom=20*cs
         local band=H-content_top-bottom
@@ -901,7 +926,7 @@ layout=function()
             local cell_w=(w-gap*(columns-1))/columns
             local signature=table.concat({tostring(W),tostring(H),tostring(state.ui_lang or ""),mode,
                 tostring(columns),tostring(n),tostring(cs),tostring(w),tostring(band),
-                tostring(cell_w),tostring(gap)},"|")
+                tostring(cell_w),tostring(gap),tostring(content_x)},"|")
             local cached=measurement_cache[page]
             local geometry,total_h
             if cached and cached.signature==signature then
@@ -937,7 +962,7 @@ layout=function()
                 while i<=n do
                     if rows[i].kind=="section" then
                         local h=measured_height(rows[i],w)
-                        geometry[i]={x=margin,content_y=content_y,w=w,h=h,column=1}
+                        geometry[i]={x=content_x,content_y=content_y,w=w,h=h,column=1}
                         content_y=content_y+h+gap; i=i+1
                     else
                         local group={}
@@ -947,7 +972,7 @@ layout=function()
                         local h=0
                         for _,index in ipairs(group) do h=math.max(h,measured_height(rows[index],cell_w)) end
                         for column,index in ipairs(group) do
-                            geometry[index]={x=margin+(column-1)*(cell_w+gap),content_y=content_y,
+                            geometry[index]={x=content_x+(column-1)*(cell_w+gap),content_y=content_y,
                                 w=cell_w,h=h,column=column}
                         end
                         content_y=content_y+h+gap
@@ -971,10 +996,10 @@ layout=function()
                 end
             end
             if last<first then first,last=1,0 end
-            return {app=true,dim=port.theme.background_dim or 0.94,cs=cs,x=margin,w=w,
+            return {app=true,dim=port.theme.background_dim or 0.94,cs=cs,x=content_x,w=w,
                 side_x=side_x,side_w=side_w,divider_x=side_x-13*cs,top=content_top,
                 rh=rh,gap=gap,first=first,last=last,band=band,band_top=content_top,n=n,
-                scroll=total_h>band,has_sidebar=true,geometry=geometry,total_h=total_h,
+                scroll=total_h>band,has_sidebar=has_sidebar,geometry=geometry,total_h=total_h,
                 scroll_y=scroll_y,row_layout_mode=mode,columns=columns}
         end
         local per=math.max(1,math.floor((band+gap)/(rh+gap)))
@@ -982,10 +1007,10 @@ layout=function()
         if focus_i and focus_i>scroll_top+per-1 then scroll_top=focus_i-per+1 end
         scroll_top=math.max(1,math.min(scroll_top,math.max(1,n-per+1)))
         local first,last=scroll_top,math.min(n,scroll_top+per-1)
-        return {app=true,dim=port.theme.background_dim or 0.94,cs=cs,x=margin,w=w,
+        return {app=true,dim=port.theme.background_dim or 0.94,cs=cs,x=content_x,w=w,
             side_x=side_x,side_w=side_w,divider_x=side_x-13*cs,top=content_top,
             rh=rh,gap=gap,first=first,last=last,band=band,band_top=content_top,n=n,
-            scroll=n>per,has_sidebar=true}
+            scroll=n>per,has_sidebar=has_sidebar}
     end
     local n_cred = port.credits and #port.credits or 0
     local function topH(cs)  return (BAR_H + SUB_PX + 12) * cs end
@@ -1556,7 +1581,7 @@ function kit.input(action)
     elseif action=="confirm" then
         if zone=="bar" then
             local it=bar_items()[bar_i]
-            if it=="back" then goto_page(1)
+            if it=="back" then kit.back_page()
             elseif it=="header" then
                 local action=pages[page_i].header_action
                 if action and not disabled(action) then do_action(action.action) end
@@ -1582,7 +1607,7 @@ function kit.input(action)
             end
         end
     elseif action=="cancel" then
-        if page_i~=1 then goto_page(1)
+        if page_i~=1 then kit.back_page()
         elseif port.on_home_cancel then port.on_home_cancel(kit,state)
         else kit.quit() end
     else return false end

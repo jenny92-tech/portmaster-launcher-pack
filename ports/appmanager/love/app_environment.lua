@@ -125,8 +125,8 @@ function Environment.new(model,operations,pages_ui)
         actions[#actions+1]=button(function()
             local count=model.runtime_issue_count()
             return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",count) or string.format("Runtime repair (%d)",count)
-        end,function() pages_ui.build_runtime(); kit.goto_page(page.RUNTIME) end,{id="manage:runtimes"})
-        actions[#actions+1]=button(L("Environment details","环境详情"),function() pages_ui.build_env(); kit.goto_page(page.ENV) end,{id="manage:details"})
+        end,function() pages_ui.build_runtime(); kit.push_page(page.RUNTIME) end,{id="manage:runtimes"})
+        actions[#actions+1]=button(L("Environment details","环境详情"),function() pages_ui.build_env(); kit.push_page(page.ENV) end,{id="manage:details"})
         kit.set_page(page.MANAGE,L("Environment Management","环境管理"),rows,
             {preserve_focus=preserve,sidebar_title=L("Maintenance","维护"),sidebar=actions,row_layout={mode="grid",columns=2}})
     end
