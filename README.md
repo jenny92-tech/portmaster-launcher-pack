@@ -1,4 +1,4 @@
-# portmaster-launcher-pack
+# PortMaster Launcher Pack
 
 PortMaster-style launchers for handheld arm64 game ports. The normal stage-1
 UI uses PortMaster's bundled LÖVE 11.5 runtime so players can pick language,
@@ -14,7 +14,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
-| [`appmanager`](ports/appmanager) | Launcher manager | LÖVE 11.5 | Shared LÖVE UI kit | TrimUI, MiniLoong |
+| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled LÖVE 11.5 | Shared LÖVE UI kit | TrimUI, MiniLoong |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
@@ -30,7 +30,17 @@ standard filename `screenshot.png` in both the port root and `dist/`.
 
 LÖVE launchers package the shared `kit.lua`, declarative launcher schema, common
 `conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. APP Manager
-uses the same component kit. Godot game-runtime tooling stays inside the relevant port.
+uses the same component kit but packages its own bootstrap runtime so it can repair a
+missing PortMaster environment. Godot game-runtime tooling stays inside the relevant port.
+
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — current cross-repository ownership,
+  download routing, installation safety and PortMaster Fork release flow.
+- [`_kit/README.md`](_kit/README.md) — build system and shared Shell modules.
+- [`_kit/love/README.md`](_kit/love/README.md) — public UIKit and launcher contract.
+- [`ports/appmanager/README.md`](ports/appmanager/README.md) — Port App Manager behavior,
+  resource sources and safety boundaries.
 
 ## Dist a port
 

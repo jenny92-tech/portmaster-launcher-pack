@@ -105,13 +105,11 @@ file.
 _kit/dist_port.sh heishenhua
 _kit/dist_port.sh hk
 
-# 2. Push to the device from dist/ only.
-#    MiniLoong (adb 10.10.1.90):
-adb -s 10.10.1.90:5555 push ports/heishenhua/dist/[中]黑神话悟空-像素版.sh "/mnt/sdcard/roms/ports/[中]黑神话悟空-像素版.sh"
-adb -s 10.10.1.90:5555 push ports/heishenhua/dist/love_ui /mnt/sdcard/roms/ports/heishenhua/
-#    TrimUI (ssh 10.10.1.91):
-scp ports/heishenhua/dist/[中]黑神话悟空-像素版.sh "root@10.10.1.91:/mnt/sdcard/mmcblk1p1/Roms/PORTS/[中]黑神话悟空-像素版.sh"
-rsync -a --exclude='*.sh' ports/heishenhua/dist/ root@10.10.1.91:/mnt/sdcard/mmcblk1p1/Data/ports/heishenhua/
+# 2. Deploy only the generated dist directory.
+# MiniLoong: script -> /mnt/sdcard/roms/ports/
+#              data -> /mnt/sdcard/roms/ports/<port>/
+# TrimUI:     script -> Roms/PORTS/
+#              data -> Data/ports/<port>/
 ```
 
 **One assembled script serves both devices** — `audio_setup` branches on
@@ -127,3 +125,8 @@ lives in the device's game dir and is NOT part of the launcher — don't overwri
 background, then overlays the port's Lua modules and optional asset overrides into
 `dist/love_ui/`. The CJK font is provisioned from PortMaster on first launch.
 See [`love/README.md`](love/README.md) for the component and device details.
+
+Port App Manager is packaged differently: it includes a private bootstrap runtime,
+font, input and network tools next to its UI. See
+[`../docs/architecture.md`](../docs/architecture.md) for the repository boundary and
+publication routing.
