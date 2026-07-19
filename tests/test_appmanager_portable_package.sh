@@ -110,11 +110,13 @@ done
 printf '%s\n' called >> "$PAM_TEST_CURL_LOG"
 if [ -n "$out" ]; then
   printf '%s\n' '{' '  "stable": {' '    "version": "2026.07",' \
-    '    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"' \
+    '    "url": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",' \
+    '    "md5": "00000000000000000000000000000000"' \
     '  }' '}' > "$out"
 else
   printf '%s\n' '{' '  "stable": {' '    "version": "2026.07",' \
-    '    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"' \
+    '    "url": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",' \
+    '    "md5": "00000000000000000000000000000000"' \
     '  }' '}'
 fi
 CURL

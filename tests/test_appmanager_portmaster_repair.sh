@@ -34,12 +34,21 @@ chmod +x "$TMP/archive/PortMaster/PortMaster.sh"
 (cd "$TMP/archive" && zip -qr "$TMP/release/PortMaster.zip" PortMaster)
 cp "$GUI/tools/appmanager-installer.sh" "$TMP/release/appmanager-installer.sh"
 archive_md5=$(md5 -q "$TMP/release/PortMaster.zip" 2>/dev/null || md5sum "$TMP/release/PortMaster.zip" | awk '{print $1}')
-printf '%s  PortMaster.zip\n' "$archive_md5" > "$TMP/release/PortMaster.zip.md5"
 cat > "$TMP/release/version.json" <<'JSON'
 {
   "stable": {
     "version": "2026.07",
-    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"
+    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",
+    "md5": "00000000000000000000000000000000"
+  }
+}
+JSON
+cat > "$TMP/release/official-version.json" <<JSON
+{
+  "stable": {
+    "version": "2026.07",
+    "url": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",
+    "md5": "$archive_md5"
   }
 }
 JSON
@@ -75,8 +84,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 asset=${url##*/}
-[ -f "$PAM_TEST_RELEASE/$asset" ] || exit 22
-source_file="$PAM_TEST_RELEASE/$asset"
+if [ "$asset" = version.json ] && printf '%s\n' "$url" | grep -Fq 'github.com/PortsMaster/PortMaster-GUI/'; then
+  source_file="$PAM_TEST_RELEASE/official-version.json"
+else
+  source_file="$PAM_TEST_RELEASE/$asset"
+fi
+[ -f "$source_file" ] || exit 22
 if [ -n "$out" ]; then
   if [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_PARTIAL:-0}" = "1" ]; then
     if [ ! -s "$out" ]; then
@@ -120,7 +133,7 @@ chmod +x "$TMP/app/bin/curl-portable" "$TMP/app/bin/unzip-portable" "$TMP/app/bi
 
 run_repair() {
   local name=$1 corrupt=${2:-0} cancel_asset=${3:-never} existing=${4:-0} cached=${5:-0} slow=${6:-0}
-  local channel=${7:-official} partial=${8:-0} force_python_runtime=${9:-0} corrupt_python=${10:-0} cached_python=${11:-0} release_base loong_file
+  local channel=${7:-official} partial=${8:-0} force_python_runtime=${9:-0} corrupt_python=${10:-0} cached_python=${11:-0} loong_file
   local state="$TMP/$name/state" target="$TMP/$name/PortMaster" scripts="$TMP/$name/scripts"
   local observer_pid=0 rc=0
   mkdir -p "$state" "$scripts" "$target/libs"
@@ -149,7 +162,6 @@ run_repair() {
   else
     loong_file="$TMP/no-loong"
   fi
-  release_base="https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download"
   if [ "$slow" = 1 ]; then
     (
       for _ in $(seq 1 80); do
@@ -165,7 +177,7 @@ run_repair() {
     PAM_PYTHON3_CMD_OVERRIDE="$([ "$force_python_runtime" = 1 ] && echo /missing/python3 || echo python3)" \
     PAM_DEVICE_CLASS_OVERRIDE=tested PAM_TARGET_CONFIRMED_OVERRIDE=1 \
     PAM_PARAM_DEVICE_OVERRIDE=miniloong \
-    PAM_LOONG_VERSION_FILE="$loong_file" PAM_RELEASE_BASE="$release_base" \
+    PAM_LOONG_VERSION_FILE="$loong_file" \
     PAM_RUNTIME_CUSTOM_PROXIES='custom|test|https://proxy.invalid' PAM_RUNTIME_PROXIES='' \
     PAM_TEST_RELEASE="$TMP/release" PAM_TEST_CURL_LOG="$TMP/$name/curl.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
     PAM_TEST_CORRUPT_PYTHON="$corrupt_python" \
@@ -184,14 +196,16 @@ run_repair success
 grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
 grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
-grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
+grep -Fq 'PortsMaster/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
+! grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
+! grep -Fq '/SHA256SUMS' "$TMP/success/curl.log"
 grep -Fq 'raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/appmanager-installer.sh' "$TMP/success/curl.log"
 ! grep -Fq '/Install.sh' "$TMP/success/curl.log"
-grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip.md5' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "$TMP/success/curl.log"
 
 run_repair miniloong-custom 0 never 0 0 0 custom
-grep -Fq 'jenny92-tech/PortMaster-GUI' "$TMP/miniloong-custom/curl.log"
+grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/miniloong-custom/curl.log"
+grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/SHA256SUMS' "$TMP/miniloong-custom/curl.log"
 ! grep -Fq 'PortsMaster/PortMaster-GUI/releases/download' "$TMP/miniloong-custom/curl.log"
 grep -Fq $'device\tminiloong' "$TMP/miniloong-custom/state/pending-install.tsv"
 

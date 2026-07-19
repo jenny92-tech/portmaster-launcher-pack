@@ -11,7 +11,6 @@ end
 
 function Model.new(kit,json,scanner)
     local self={
-        kit=kit,json=json,scanner=scanner,
         env={},report={},size_map={},runtime_metadata={},
         pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6},
     }
@@ -166,19 +165,10 @@ function Model.new(kit,json,scanner)
         end
     end
 
-    local function dump_debug()
-        if not self.env.gamedir then return end
-        local state_dir=tostring(self.env.plan_file or ""):match("^(.*)/[^/]+$")
-        local path=(state_dir or self.env.gamedir).."/scan_debug.json"
-        local f=io.open(path,"wb"); if not f then return end
-        f:write(json.encode(self.report)); f:close()
-    end
-
     function self.refresh_scan()
         load_sizes()
         self.load_runtime_metadata()
         replace(self.report,scanner.run(self.env))
-        dump_debug()
     end
 
     function self.missing_runtime(script)

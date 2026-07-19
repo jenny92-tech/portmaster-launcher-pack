@@ -1,4 +1,4 @@
--- Small JSON codec for APP Manager's shell-generated env/debug files.
+-- Small JSON codec for APP Manager's shell-generated state files.
 local json = {}
 
 local function skip(s,i)

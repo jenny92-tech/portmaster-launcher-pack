@@ -895,12 +895,16 @@ pam_stable_field_from_json() {
 pam_stable_version_from_json() { pam_stable_field_from_json "$1" version; }
 
 pm_validate_version_download() {
-  local version url
+  local version url md5
   version=$(pam_stable_version_from_json "$1" 2>/dev/null || true)
   case "$version" in ""|*[!A-Za-z0-9._-]*) return 1 ;; esac
   url=$(pam_stable_field_from_json "$1" url 2>/dev/null || true)
-  pm_valid_custom_stable_archive_url "$url" || return 1
+  pm_valid_stable_archive_url "$url" || return 1
   case "$url" in */releases/download/"$version"/PortMaster.zip) ;; *) return 1 ;; esac
+  if [ "$PAM_RELEASE_CHANNEL" != "miniloong-custom" ]; then
+    md5=$(pam_stable_field_from_json "$1" md5 2>/dev/null || true)
+    pm_valid_md5 "$md5" || return 1
+  fi
 }
 
 pam_cache_mtime() {
@@ -917,11 +921,7 @@ pam_check_update() {
   tmp="$CONFDIR/.portmaster-version.$$"
   rm -f -- "$tmp"
   rm -f -- "$CANCEL_FILE"
-  if [ -n "${PAM_VERSION_URL:-}" ] && runtime_prepare_downloader; then
-    "$RUNTIME_CURL" -fsSL --connect-timeout 8 --max-time 20 -o "$tmp" "$PAM_VERSION_URL" 2>/dev/null || true
-  else
-    pm_download_url release "$PAM_RELEASE_BASE/version.json" "$tmp" 0 0 pm_validate_version_download || true
-  fi
+  pm_download_url release "$(pm_release_version_url)" "$tmp" 0 0 pm_validate_version_download || true
   latest=$(pam_stable_version_from_json "$tmp" 2>/dev/null || true)
   case "$latest" in ""|*[!A-Za-z0-9._-]*) latest="" ;; *) status="ok" ;; esac
   printf '%s\t%s\t%s\n' "$now" "$status" "$latest" > "$UPDATE_CACHE_FILE.tmp" &&
@@ -1170,14 +1170,32 @@ pm_valid_custom_stable_archive_url() {
   return 1
 }
 
-pm_official_md5_expected() {
-  awk '{ name=$2; sub(/^\*/, "", name); if ($1 ~ /^[0-9A-Fa-f]{32}$/ && (name == "" || name == "PortMaster.zip")) {print tolower($1); exit} }' "$1"
+pm_valid_official_stable_archive_url() {
+  case "$1" in
+    "$PAM_OFFICIAL_RELEASES_URL"/download/*/PortMaster.zip) return 0 ;;
+  esac
+  return 1
 }
 
-pm_validate_md5_download() {
-  local expected
-  expected=$(pm_official_md5_expected "$1")
-  [ "${#expected}" = 32 ]
+pm_release_version_url() {
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
+    printf '%s\n' "$PAM_CUSTOM_VERSION_URL"
+  else
+    printf '%s\n' "$PAM_OFFICIAL_VERSION_URL"
+  fi
+}
+
+pm_valid_stable_archive_url() {
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
+    pm_valid_custom_stable_archive_url "$1"
+  else
+    pm_valid_official_stable_archive_url "$1"
+  fi
+}
+
+pm_valid_md5() {
+  case "$1" in ""|*[!0-9A-Fa-f]*) return 1 ;; esac
+  [ "${#1}" = 32 ]
 }
 
 pm_validate_archive_download() {
@@ -1191,7 +1209,7 @@ pm_validate_archive_download() {
 }
 
 install_portmaster_release_inner() {
-  local cache="$CONFDIR/portmaster-download" sums version installer installer_tmp install_plan archive archive_dir checksum rc
+  local cache="$CONFDIR/portmaster-download" sums version installer installer_tmp install_plan archive archive_dir rc
   local version_url stable_url stable_version expected_hash actual_hash archive_valid=0 reason
   sums="$cache/SHA256SUMS"; version="$cache/version.json"
   installer="$cache/appmanager-installer.sh"; installer_tmp="$installer.new"
@@ -1204,15 +1222,17 @@ install_portmaster_release_inner() {
     printf 'FAIL\tportmaster\tpython-runtime\n' >> "$RESULT_FILE"
     return 1
   }
-  version_url="$PAM_RELEASE_BASE/version.json"
+  version_url=$(pm_release_version_url)
   pm_download_url release "$version_url" "$version" 5 10 pm_validate_version_download || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
-  pm_download_url release "$PAM_CUSTOM_RELEASE_BASE/SHA256SUMS" "$sums" 10 14 pm_validate_sums || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_validate_sums "$sums" || { printf 'FAIL\tportmaster\tchecksums\n' >> "$RESULT_FILE"; return 1; }
-  pm_verify_asset "$sums" version.json "$version" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
+  if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
+    pm_download_url release "$PAM_CUSTOM_CHECKSUMS_URL" "$sums" 10 14 pm_validate_sums || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+    pm_validate_sums "$sums" || { printf 'FAIL\tportmaster\tchecksums\n' >> "$RESULT_FILE"; return 1; }
+    pm_verify_asset "$sums" version.json "$version" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
+  fi
   stable_version=$(pam_stable_version_from_json "$version" 2>/dev/null || true)
   stable_url=$(pam_stable_field_from_json "$version" url 2>/dev/null || true)
   case "$stable_version" in ""|*[!A-Za-z0-9._-]*) printf 'FAIL\tportmaster\tversion\n' >> "$RESULT_FILE"; return 1 ;; esac
-  pm_valid_custom_stable_archive_url "$stable_url" || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
+  pm_valid_stable_archive_url "$stable_url" || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
   case "$stable_url" in */releases/download/"$stable_version"/PortMaster.zip) ;; *) printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1 ;; esac
   archive_dir="$cache/$stable_version"; archive="$archive_dir/PortMaster.zip"
   mkdir -p "$archive_dir" || return 1
@@ -1229,12 +1249,9 @@ install_portmaster_release_inner() {
   if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
     expected_hash=$(pm_checksum_expected "$sums" PortMaster.zip)
   else
-    stable_url="$PAM_OFFICIAL_RELEASES_URL/download/$stable_version/PortMaster.zip"
-    checksum="$archive_dir/PortMaster.zip.md5"
-    rm -f -- "$checksum"
-    pm_download_url release "$stable_url.md5" "$checksum" 18 20 pm_validate_md5_download || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-    expected_hash=$(pm_official_md5_expected "$checksum")
-    [ "${#expected_hash}" = 32 ] || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
+    expected_hash=$(pam_stable_field_from_json "$version" md5 2>/dev/null || true)
+    pm_valid_md5 "$expected_hash" || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
+    expected_hash=$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')
   fi
   if [ -s "$archive" ]; then
     if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then actual_hash=$(pm_sha256_file "$archive" 2>/dev/null || true)

@@ -201,8 +201,3 @@ hacksdl 或共享 Runtime 镜像。
 
 设备发布前按 [SMOKE_TEST.md](SMOKE_TEST.md) 分别记录 MiniLoong 和 TrimUI 的独立启动、
 修复、退出重开校验、Runtime 修复和正常管理操作。
-
-## 排障
-
-`state/scan_debug.json` 是每次启动时落盘的完整扫描判定（归属表 / 引用计数 / 孤儿 /
-失效脚本 / runtime）。用户报"它把我游戏删了"或"它没认出某个残留项"时，先要这个文件。
