@@ -292,6 +292,16 @@ fi
 [ "$HEALTH_ONLY" = "1" ] || [ "$INSTALL_PLAN_ONLY" = "1" ] ||
   echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} scripts=$SCRIPTS_DIR gamedirs=$GAMEDIRS_DIR"
 
+pam_miniloong_fonts_complete() {
+  local font size
+  for font in HK JP KR SC TC; do
+    [ -f "$PAM_PORTMASTER_DIR/pylibs/resources/NotoSans${font}-Regular.ttf" ] || return 1
+    size=$(wc -c < "$PAM_PORTMASTER_DIR/pylibs/resources/NotoSans${font}-Regular.ttf" 2>/dev/null | tr -d '[:space:]')
+    case "$size" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$size" -gt 1048576 ] || return 1
+  done
+}
+
 pam_core_health() {
   [ -d "$PAM_PORTMASTER_DIR" ] || { printf missing; return; }
   [ -f "$PAM_PORTMASTER_DIR/control.txt" ] || { printf damaged; return; }
@@ -326,6 +336,12 @@ pam_core_health() {
       }
   elif [ -d "$PAM_PORTMASTER_DIR/pylibs" ]; then
     [ -n "$(find "$PAM_PORTMASTER_DIR/pylibs" -type f -print -quit 2>/dev/null)" ] || { printf damaged; return; }
+    if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
+      pam_miniloong_fonts_complete ||
+        [ -s "$PAM_PORTMASTER_DIR/pylibs/resources/NotoSans.tar.xz" ] || {
+          printf damaged; return;
+        }
+    fi
   else
     printf damaged; return
   fi

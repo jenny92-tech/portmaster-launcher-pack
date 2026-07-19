@@ -14,6 +14,42 @@ mini=$(PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_D
   PAM_LOONG_VERSION_FILE="$TMP/loong/loong_version" bash "$ROOT/ports/appmanager/src/launcher.sh" --health-check)
 case "$mini" in missing$'\t\t'tested$'\t/mnt/sdcard/roms/ports/PortMaster') ;; *) echo "bad MiniLoong profile: $mini" >&2; exit 1 ;; esac
 
+# An extracted MiniLoong pylibs tree is only usable when the font bootstrap is
+# complete or still recoverable from its source archive. Random files alone
+# must not hide the exact half-extracted state that makes pugwash crash.
+mini_core="$TMP/mini-core/PortMaster"
+mini_scripts="$TMP/mini-core/scripts"
+mkdir -p "$mini_core/pylibs/resources" "$mini_scripts"
+printf 'control\n' > "$mini_core/control.txt"
+printf 'device\n' > "$mini_core/device_info.txt"
+printf 'funcs\n' > "$mini_core/funcs.txt"
+printf "PORTMASTER_VERSION = 'test'\n" > "$mini_core/pugwash"
+printf '#!/bin/sh\nexit 0\n' > "$mini_core/PortMaster.sh"
+printf '#!/bin/sh\nexit 0\n' > "$mini_scripts/PortMaster.sh"
+printf 'partial\n' > "$mini_core/pylibs/resources/NotoSansJP-Regular.ttf"
+chmod +x "$mini_core/PortMaster.sh" "$mini_scripts/PortMaster.sh"
+mini_partial=$(PAM_SOURCE_DIR="$mini_scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" \
+  PAM_STATE_DIR_OVERRIDE="$TMP/mini-partial-state" PAM_PORTMASTER_DIR_OVERRIDE="$mini_core" \
+  PAM_LOONG_VERSION_FILE="$TMP/loong/loong_version" \
+  bash "$ROOT/ports/appmanager/src/launcher.sh" --health-check)
+case "$mini_partial" in damaged$'\t'test$'\t'tested$'\t'"$mini_core") ;; *) echo "bad partial pylibs result: $mini_partial" >&2; exit 1 ;; esac
+printf 'recoverable\n' > "$mini_core/pylibs/resources/NotoSans.tar.xz"
+mini_recoverable=$(PAM_SOURCE_DIR="$mini_scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" \
+  PAM_STATE_DIR_OVERRIDE="$TMP/mini-recoverable-state" PAM_PORTMASTER_DIR_OVERRIDE="$mini_core" \
+  PAM_LOONG_VERSION_FILE="$TMP/loong/loong_version" \
+  bash "$ROOT/ports/appmanager/src/launcher.sh" --health-check)
+case "$mini_recoverable" in healthy$'\t'test$'\t'tested$'\t'"$mini_core") ;; *) echo "bad recoverable pylibs result: $mini_recoverable" >&2; exit 1 ;; esac
+rm -f "$mini_core/pylibs/resources/NotoSans.tar.xz"
+for font in HK JP KR SC TC; do
+  dd if=/dev/zero of="$mini_core/pylibs/resources/NotoSans${font}-Regular.ttf" \
+    bs=1024 count=1025 2>/dev/null
+done
+mini_complete=$(PAM_SOURCE_DIR="$mini_scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" \
+  PAM_STATE_DIR_OVERRIDE="$TMP/mini-complete-state" PAM_PORTMASTER_DIR_OVERRIDE="$mini_core" \
+  PAM_LOONG_VERSION_FILE="$TMP/loong/loong_version" \
+  bash "$ROOT/ports/appmanager/src/launcher.sh" --health-check)
+case "$mini_complete" in healthy$'\t'test$'\t'tested$'\t'"$mini_core") ;; *) echo "bad complete pylibs result: $mini_complete" >&2; exit 1 ;; esac
+
 trim=$(PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/trim-state" \
   PAM_LOONG_VERSION_FILE="$TMP/no-loong" PAM_TRIMUI_ROOT="$TMP/trimui" \
   bash "$ROOT/ports/appmanager/src/launcher.sh" --health-check)
