@@ -37,7 +37,12 @@ accepts a route only after the caller's content validator succeeds.
 resumed only from the same route ID; changing routes discards the old partial.
 After a validated success, each capability remembers that route in a plain
 shell variable for the lifetime of the current process. Later operations try it
-first and fall back normally on failure; exiting or restarting clears it.
+first; a failed probe or transfer clears the hint and continues through every
+remaining batch. Exiting or restarting clears all hints. Probe scratch files
+live under `${TMPDIR:-/tmp}` and are removed after each operation. A
+`.part.route` sidecar may remain only beside an incomplete download. It stores
+a non-reversible fingerprint of the fully formatted URL, so proxy-list changes
+cannot mix bytes across endpoints; it does not affect candidate priority.
 New endpoints can be appended as TSV rows through
 `GITHUB_PROXY_REGISTRY_EXTRA`; callers do not edit the download operations.
 The bundled defaults and their maintenance-source comment also live in

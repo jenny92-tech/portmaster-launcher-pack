@@ -218,14 +218,16 @@ grep -Fxq old-control "$TMP/python-bootstrap-failure/PortMaster/control.txt"
 run_repair cached 0 never 0 1
 ! grep -Fq '/PortMaster.zip' "$TMP/cached/curl.log"
 
-# A failed operation keeps its version-scoped partial archive. The next APP
-# launch resumes that exact stable release instead of starting over.
+# A failed operation keeps its version-scoped partial archive. A later launch
+# resumes only when normal probing selects the same route; otherwise it safely
+# restarts instead of treating the route sidecar as persistent preference.
 run_repair resume 0 never 0 0 0 official 1 || true
 grep -Fq $'FAIL\tportmaster\tnetwork' "$TMP/resume/state/result.txt"
 [ -s "$TMP/resume/state/portmaster-download/2026.07/PortMaster.zip.part" ]
 run_repair resume
-grep -Fq 'resume-from=' "$TMP/resume/curl.log"
 grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/resume/state/result.txt"
+[ ! -e "$TMP/resume/state/portmaster-download/2026.07/PortMaster.zip.part" ]
+[ ! -e "$TMP/resume/state/portmaster-download/2026.07/PortMaster.zip.part.route" ]
 
 run_repair speed 0 never 0 0 1
 [ -e "$TMP/speed/speed-observed" ]

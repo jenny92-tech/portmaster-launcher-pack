@@ -1031,7 +1031,6 @@ github_proxy_download() {
   local capability="$1" source="$2" out="$3" validator="$4" start="$5" finish="$6" mode="${7:-plain}"
   runtime_prepare_downloader || return 1
   GITHUB_PROXY_CURL="$RUNTIME_CURL"
-  GITHUB_PROXY_STATE_DIR="$CONFDIR"
   GITHUB_PROXY_TRANSFER_MODE="$mode"
   GITHUB_PROXY_PROGRESS_START="$start"
   GITHUB_PROXY_PROGRESS_FINISH="$finish"

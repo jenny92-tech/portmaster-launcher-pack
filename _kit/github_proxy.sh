@@ -193,6 +193,18 @@ github_proxy_batch_size() {
   printf '%s\n' "$size"
 }
 
+# Stable, non-reversible identity for resumable bytes. The route list's g1/c1
+# labels are deliberately excluded: reordering that list must never make an
+# old partial look as if it belongs to a different formatted URL.
+github_proxy_route_fingerprint() {
+  local url="$1" crc bytes
+  case "$url" in ""|*$'\t'*|*$'\r'*|*$'\n'*) return 1 ;; esac
+  command -v cksum >/dev/null 2>&1 || return 1
+  read -r crc bytes _ < <(printf '%s' "$url" | LC_ALL=C cksum) || return 1
+  case "$crc:$bytes" in *[!0-9:]*) return 1 ;; esac
+  printf 'v1-%s-%s\n' "$crc" "$bytes"
+}
+
 # Process-local route memory. Nothing is written to disk or exported; all
 # preferences disappear when the current launcher/helper process exits.
 github_proxy_preferred_read() {
@@ -221,6 +233,21 @@ github_proxy_preferred_write() {
   esac
 }
 
+github_proxy_preferred_clear() {
+  local capability="$1" expected="$2" current
+  current=$(github_proxy_preferred_read "$capability" 2>/dev/null || true)
+  [ -z "$expected" ] || [ "$current" = "$expected" ] || return 0
+  case "$capability" in
+    release) GITHUB_PROXY_LAST_RELEASE="" ;;
+    raw) GITHUB_PROXY_LAST_RAW="" ;;
+    archive) GITHUB_PROXY_LAST_ARCHIVE="" ;;
+    clone) GITHUB_PROXY_LAST_CLONE="" ;;
+    api) GITHUB_PROXY_LAST_API="" ;;
+    gist) GITHUB_PROXY_LAST_GIST="" ;;
+    *) return 1 ;;
+  esac
+}
+
 github_proxy_probe_one() {
   local id="$1" url="$2" root="$3" out="$root/probe.$id"
   : > "$out" || return 1
@@ -238,16 +265,20 @@ github_proxy_probe_one() {
 }
 
 github_proxy_transfer_one() {
-  local id="$1" url="$2" out="$3" validator="$4" part route rc=0
+  local id="$1" url="$2" out="$3" validator="$4" part route fingerprint rc=0
   part="$out.part"; route="$out.part.route"
-  if [ -s "$route" ] && [ "$(sed -n '1p' "$route" 2>/dev/null)" = "$id" ]; then :
+  fingerprint=$(github_proxy_route_fingerprint "$url") || return 1
+  if [ -s "$route" ] && [ "$(sed -n '1p' "$route" 2>/dev/null)" = "$fingerprint" ]; then :
   else rm -f -- "$part" "$route"; fi
-  printf '%s\n' "$id" > "$route" || return 1
+  printf '%s\n' "$fingerprint" > "$route" || return 1
 
   if declare -F github_proxy_transfer_hook >/dev/null 2>&1; then
     github_proxy_transfer_hook "$url" "$part" || rc=$?
   else
-    github_proxy_prepare_curl || return 1
+    if ! github_proxy_prepare_curl; then
+      [ -s "$part" ] || rm -f -- "$part" "$route"
+      return 1
+    fi
     if [ -s "$part" ]; then
       "$GITHUB_PROXY_CURL" -fsSL --connect-timeout "${GITHUB_PROXY_CONNECT_TIMEOUT:-8}" \
         --retry 2 --retry-delay 1 -C - -o "$part" "$url" 2>/dev/null || rc=$?
@@ -265,7 +296,10 @@ github_proxy_transfer_one() {
         --retry 2 --retry-delay 1 -o "$part" "$url" 2>/dev/null || rc=$?
     fi
   fi
-  [ "$rc" = "0" ] || return "$rc"
+  if [ "$rc" != "0" ]; then
+    [ -s "$part" ] || rm -f -- "$part" "$route"
+    return "$rc"
+  fi
   "$validator" "$part" || { rm -f -- "$part" "$route"; return 65; }
   mv -f -- "$part" "$out" || return 1
   rm -f -- "$route"
@@ -286,30 +320,24 @@ github_proxy_order_batch() {
 
 github_proxy_fetch() {
   local capability="$1" source="$2" out="$3" validator="$4"
-  local state_root root candidates preferred preferred_line resume_preferred batch_size index=0 batch_start=1 id url current rc content_failed=0
+  local temp_root root candidates preferred preferred_line batch_size index=0 batch_start=1 id url current rc content_failed=0
   local batch_file ordered_file
   github_proxy_validate_source "$capability" "$source" || return 64
   declare -F "$validator" >/dev/null 2>&1 || return 64
   batch_size=$(github_proxy_batch_size)
-  state_root="${GITHUB_PROXY_STATE_DIR:-${TMPDIR:-/tmp}}"
-  root="$state_root/github-proxy-probe.$$"; mkdir -p "$root" || return 1
+  temp_root="${GITHUB_PROXY_TEMP_DIR:-${TMPDIR:-/tmp}}"
+  root="$temp_root/github-proxy-probe.$$"; mkdir -p "$root" || return 1
   candidates=$(github_proxy_candidates "$capability" "$source") || { rm -rf -- "$root"; return 1; }
-  # Resume the same endpoint first on the next launch. Bytes are still never
-  # combined across routes; an unavailable preferred route falls back to the
-  # normal capability-filtered order.
-  resume_preferred=$(sed -n '1p' "$out.part.route" 2>/dev/null || true)
-  preferred="$resume_preferred"
+  # Only the process-local winner is preferred. The .part.route URL
+  # fingerprint protects resumable bytes from being mixed across endpoints;
+  # it never changes candidate order.
+  preferred=$(github_proxy_preferred_read "$capability" 2>/dev/null || true)
   preferred_line=""
-  if [ -n "$preferred" ]; then
-    preferred_line=$(awk -F '\t' -v id="$preferred" '$1 == id {print; exit}' <<< "$candidates")
-  fi
-  if [ -z "$preferred_line" ]; then
-    preferred=$(github_proxy_preferred_read "$capability" 2>/dev/null || true)
-    [ -z "$preferred" ] || preferred_line=$(awk -F '\t' -v id="$preferred" '$1 == id {print; exit}' <<< "$candidates")
-  fi
+  [ -z "$preferred" ] || preferred_line=$(awk -F '\t' -v id="$preferred" '$1 == id {print; exit}' <<< "$candidates")
   if [ -n "$preferred_line" ]; then
     candidates="$preferred_line"$'\n'"$(awk -F '\t' -v id="$preferred" '$1 != id' <<< "$candidates")"
   else
+    github_proxy_preferred_clear "$capability" "$preferred" || true
     preferred=""
   fi
   batch_file="$root/batch.tsv"; ordered_file="$root/ordered.tsv"; : > "$batch_file"
@@ -320,6 +348,9 @@ github_proxy_fetch() {
     github_proxy_probe_one "$id" "$url" "$root" &
     if [ $((index - batch_start + 1)) -lt "$batch_size" ]; then continue; fi
     wait || true
+    if [ -n "$preferred" ] && [ ! -e "$root/ok.$preferred" ]; then
+      github_proxy_preferred_clear "$capability" "$preferred" || true; preferred=""
+    fi
     github_proxy_order_batch "$root" "$batch_file" "$ordered_file" "$preferred"
     while IFS=$'\t' read -r current url; do
       if github_proxy_transfer_one "$current" "$url" "$out" "$validator"; then
@@ -327,6 +358,9 @@ github_proxy_fetch() {
         rm -rf -- "$root"; return 0
       else rc=$?; fi
       if [ "$rc" = "70" ]; then rm -rf -- "$root"; return 70; fi
+      if [ "$current" = "$preferred" ]; then
+        github_proxy_preferred_clear "$capability" "$preferred" || true; preferred=""
+      fi
       [ "$rc" != "65" ] || content_failed=1
     done < "$ordered_file"
     rm -rf -- "$root/winner.lock"; rm -f -- "$root/winner" "$root"/ok.* "$root"/probe.*
@@ -335,6 +369,9 @@ github_proxy_fetch() {
 
   if [ -s "$batch_file" ]; then
     wait || true
+    if [ -n "$preferred" ] && [ ! -e "$root/ok.$preferred" ]; then
+      github_proxy_preferred_clear "$capability" "$preferred" || true; preferred=""
+    fi
     github_proxy_order_batch "$root" "$batch_file" "$ordered_file" "$preferred"
     while IFS=$'\t' read -r current url; do
       if github_proxy_transfer_one "$current" "$url" "$out" "$validator"; then
@@ -342,6 +379,9 @@ github_proxy_fetch() {
         rm -rf -- "$root"; return 0
       else rc=$?; fi
       if [ "$rc" = "70" ]; then rm -rf -- "$root"; return 70; fi
+      if [ "$current" = "$preferred" ]; then
+        github_proxy_preferred_clear "$capability" "$preferred" || true; preferred=""
+      fi
       [ "$rc" != "65" ] || content_failed=1
     done < "$ordered_file"
   fi
@@ -390,13 +430,13 @@ github_proxy_clone_one() {
 # the same capability registry and bounded first-response race, then gives
 # each responsive route one clean clone attempt.
 github_proxy_clone() {
-  local source="$1" destination="$2" state_root root candidates batch_size index=0 batch_start=1
+  local source="$1" destination="$2" temp_root root candidates batch_size index=0 batch_start=1
   local id url current rc batch_file ordered_file preferred preferred_line
   github_proxy_validate_source clone "$source" || return 64
   [ ! -e "$destination" ] && [ ! -L "$destination" ] || return 64
   batch_size=$(github_proxy_batch_size)
-  state_root="${GITHUB_PROXY_STATE_DIR:-${TMPDIR:-/tmp}}"
-  root="$state_root/github-proxy-clone.$$"; mkdir -p "$root" || return 1
+  temp_root="${GITHUB_PROXY_TEMP_DIR:-${TMPDIR:-/tmp}}"
+  root="$temp_root/github-proxy-clone.$$"; mkdir -p "$root" || return 1
   candidates=$(github_proxy_candidates clone "$source") || { rm -rf -- "$root"; return 1; }
   preferred=$(github_proxy_preferred_read clone 2>/dev/null || true)
   preferred_line=""
@@ -404,6 +444,7 @@ github_proxy_clone() {
   if [ -n "$preferred_line" ]; then
     candidates="$preferred_line"$'\n'"$(awk -F '\t' -v id="$preferred" '$1 != id' <<< "$candidates")"
   else
+    github_proxy_preferred_clear clone "$preferred" || true
     preferred=""
   fi
   batch_file="$root/batch.tsv"; ordered_file="$root/ordered.tsv"; : > "$batch_file"
@@ -414,6 +455,9 @@ github_proxy_clone() {
     github_proxy_clone_probe_one "$id" "$url" "$root" &
     if [ $((index - batch_start + 1)) -lt "$batch_size" ]; then continue; fi
     wait || true
+    if [ -n "$preferred" ] && [ ! -e "$root/ok.$preferred" ]; then
+      github_proxy_preferred_clear clone "$preferred" || true; preferred=""
+    fi
     github_proxy_order_batch "$root" "$batch_file" "$ordered_file" "$preferred"
     while IFS=$'\t' read -r current url; do
       if github_proxy_clone_one "$url" "$destination"; then
@@ -421,6 +465,9 @@ github_proxy_clone() {
         rm -rf -- "$root"; return 0
       else rc=$?; fi
       [ "$rc" != 70 ] || { rm -rf -- "$root"; return 70; }
+      if [ "$current" = "$preferred" ]; then
+        github_proxy_preferred_clear clone "$preferred" || true; preferred=""
+      fi
     done < "$ordered_file"
     rm -rf -- "$root/winner.lock"; rm -f -- "$root/winner" "$root"/ok.* "$root"/probe.*
     : > "$batch_file"; batch_start=$((index + 1))
@@ -428,6 +475,9 @@ github_proxy_clone() {
 
   if [ -s "$batch_file" ]; then
     wait || true
+    if [ -n "$preferred" ] && [ ! -e "$root/ok.$preferred" ]; then
+      github_proxy_preferred_clear clone "$preferred" || true; preferred=""
+    fi
     github_proxy_order_batch "$root" "$batch_file" "$ordered_file" "$preferred"
     while IFS=$'\t' read -r current url; do
       if github_proxy_clone_one "$url" "$destination"; then
@@ -435,6 +485,9 @@ github_proxy_clone() {
         rm -rf -- "$root"; return 0
       else rc=$?; fi
       [ "$rc" != 70 ] || { rm -rf -- "$root"; return 70; }
+      if [ "$current" = "$preferred" ]; then
+        github_proxy_preferred_clear clone "$preferred" || true; preferred=""
+      fi
     done < "$ordered_file"
   fi
   rm -rf -- "$root"

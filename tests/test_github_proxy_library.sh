@@ -63,8 +63,8 @@ assert_eq $'origin\thttps://api.github.com/repos/acme/demo/releases/latest' \
 # batch here probes successfully but all full downloads are poisoned. Fetch
 # must continue to the next bounded batch and accept its validated payload.
 GITHUB_PROXY_BATCH_SIZE=2
-GITHUB_PROXY_STATE_DIR="$TMP/state"
-mkdir -p "$GITHUB_PROXY_STATE_DIR"
+GITHUB_PROXY_TEMP_DIR="$TMP/proxy-tmp"
+mkdir -p "$GITHUB_PROXY_TEMP_DIR"
 PROBE_LOG="$TMP/probes.log"
 TRANSFER_LOG="$TMP/transfers.log"
 
@@ -77,6 +77,10 @@ github_proxy_probe_hook() {
 github_proxy_transfer_hook() {
   local url="$1" out="$2"
   printf '%s\n' "$url" >> "$TRANSFER_LOG"
+  if [ "${TEST_APPEND_TRANSFER:-0}" = "1" ]; then
+    printf 'payload\n' >> "$out"
+    return 0
+  fi
   case "$url" in
     https://cdn.example/*) printf 'VALID payload\n' > "$out" ;;
     *) printf 'proxy error page\n' > "$out" ;;
@@ -110,7 +114,7 @@ grep -Fq 'VALID payload' "$out"
 [ "$(wc -l < "$TRANSFER_LOG" | tr -d ' ')" = 1 ]
 grep -Fq 'cdn.example' "$TRANSFER_LOG"
 [ -z "${GITHUB_PROXY_LAST_RELEASE:-}" ]
-! find "$GITHUB_PROXY_STATE_DIR" -maxdepth 1 -name 'github-proxy-preferred.*' | grep -q .
+! find "$GITHUB_PROXY_TEMP_DIR" -maxdepth 1 -name 'github-proxy-preferred.*' | grep -q .
 
 # A remembered route is only a hint. If it stops validating, the same call
 # continues through normal batches and replaces the hint with the new winner.
@@ -122,12 +126,43 @@ grep -Fq 'bad-a.example' "$TRANSFER_LOG"
 grep -Fq 'cdn.example' "$TRANSFER_LOG"
 [ "$GITHUB_PROXY_LAST_RAW" = "cdn-a" ]
 
-# Resume state belongs to one route only. Switching route IDs discards bytes
-# from the previous endpoint instead of combining two potentially different
-# responses into one file.
+# If every responsive route fails validation, all candidates are attempted,
+# the stale in-process hint is cleared, and only then does fetch report error.
+GITHUB_PROXY_REGISTRY_OVERRIDE=$(printf '%s\n' \
+  $'bad-a\tfull\traw\thttps://bad-a.example' \
+  $'bad-b\tmirror\traw\thttps://bad-b.example')
+GITHUB_PROXY_LAST_RAW=bad-a
+: > "$PROBE_LOG"; : > "$TRANSFER_LOG"
+out="$TMP/file-all-fail.txt"
+if github_proxy_fetch raw "$raw" "$out" validate_payload; then
+  echo "all-invalid routes unexpectedly succeeded" >&2; exit 1
+else
+  rc=$?
+fi
+[ "$rc" = 65 ]
+[ "$(wc -l < "$TRANSFER_LOG" | tr -d ' ')" = 2 ]
+grep -Fq 'bad-a.example' "$TRANSFER_LOG"
+grep -Fq 'bad-b.example' "$TRANSFER_LOG"
+[ -z "${GITHUB_PROXY_LAST_RAW:-}" ]
+[ ! -e "$out.part.route" ]
+[ ! -e "$out.part" ]
+! find "$GITHUB_PROXY_TEMP_DIR" -mindepth 1 -maxdepth 1 | grep -q .
+
+# A partial download can still resume when the naturally selected route owns
+# it. The sidecar protects byte identity; it is not a persistent route hint.
+printf 'VALID ' > "$TMP/resume.part"
+github_proxy_route_fingerprint https://cdn.example/gh/x > "$TMP/resume.part.route"
+TEST_APPEND_TRANSFER=1
+github_proxy_transfer_one same-route https://cdn.example/gh/x "$TMP/resume" validate_payload
+TEST_APPEND_TRANSFER=0
+grep -Fxq 'VALID payload' "$TMP/resume"
+[ ! -e "$TMP/resume.part.route" ]
+
+# Resume state belongs to one formatted URL. Even when a reordered registry
+# reuses the same route ID, changing endpoints discards the previous bytes.
 printf 'old partial' > "$TMP/switch.part"
-printf 'old-route\n' > "$TMP/switch.part.route"
-github_proxy_transfer_one new-route https://cdn.example/gh/x "$TMP/switch" validate_payload
+github_proxy_route_fingerprint https://cdn.example/gh/old > "$TMP/switch.part.route"
+github_proxy_transfer_one same-route https://cdn.example/gh/x "$TMP/switch" validate_payload
 grep -Fxq 'VALID payload' "$TMP/switch"
 [ ! -e "$TMP/switch.part.route" ]
 

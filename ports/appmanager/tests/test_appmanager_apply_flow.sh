@@ -236,6 +236,13 @@ fi
 if [ "${TEST_MODE:-}" = "runtime_direct" ] && printf '%s' "$url" | grep -Fq 'proxy.test'; then
   exit 22
 fi
+# Make the same proxy the normal responsive winner in the two resume cases.
+# The .part.route file itself must not reorder candidates across launches.
+if [ -z "$out" ] && { [ "${TEST_MODE:-}" = "runtime_resume" ] ||
+   [ "${TEST_MODE:-}" = "runtime_resume_reset" ]; } &&
+   printf '%s' "$url" | grep -Eq '^https://github\.com/'; then
+  exit 22
+fi
 if [ -n "$out" ]; then
   payload='hsqs-runtime-payload'
   if printf '%s' "$url" | grep -Fq 'gmtoolkit.squashfs'; then
@@ -414,8 +421,10 @@ EOF
     if [ "$mode" = "runtime_cached" ]; then
       printf 'hsqs-runtime-payload' > "$runtime_cache/runtime.download"
     else
+      runtime_route='https://proxy.test/https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs'
+      read -r runtime_route_crc runtime_route_bytes _ < <(printf '%s' "$runtime_route" | LC_ALL=C cksum)
       printf 'hsqs-run' > "$runtime_cache/runtime.download.part"
-      printf 'g1\n' > "$runtime_cache/runtime.download.part.route"
+      printf 'v1-%s-%s\n' "$runtime_route_crc" "$runtime_route_bytes" > "$runtime_cache/runtime.download.part.route"
     fi
   fi
 
