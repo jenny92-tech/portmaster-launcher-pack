@@ -37,7 +37,7 @@ function Operations.new(model)
         local result=model.read_all(env.result_file or "")
         local failed=result and result:match("FAIL")
         if failed then
-            kit.toast(L("The operation reported a failure. See log.txt.","操作有项目失败，请查看 log.txt。"),{kind="error"})
+            kit.toast(L("The operation failed. See log.txt.","操作失败，请查看 log.txt。"),{kind="error"})
         else
             kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
         end
@@ -46,13 +46,12 @@ function Operations.new(model)
             if failed then
                 environment.build_manage(); kit.goto_page(pages.MANAGE)
                 kit.dialog({title=L("PortMaster installation failed","PortMaster 安装失败"),
-                    message=L("The new PortMaster installation was not activated. Check log.txt, then retry when the connection is available.",
-                        "新的 PortMaster 没有启用。请查看 log.txt，并在网络可用后重试。"),
+                    message=L("Check log.txt, then try again.","请查看 log.txt 后重试。"),
                     confirm=L("Retry later","稍后重试"),cancel=L("Back","返回"),danger=false})
             else
-                kit.dialog({title=L("Installation complete","安装完成"),
-                    message=L("PortMaster was installed and is waiting for validation. Exit Port App Manager, then reopen it to finish the check.",
-                        "PortMaster 已安装并等待校验。请退出 Port App Manager，再重新打开以完成检查。"),
+                kit.dialog({title=L("PortMaster installed","PortMaster 已安装"),
+                    message=L("Exit and reopen App Manager to finish the check.",
+                        "请退出并重新打开 APP，完成最后检查。"),
                     confirm=L("Exit now","立即退出"),cancel=L("Exit","退出"),default_focus="confirm",danger=false,
                     on_confirm=kit.quit,on_cancel=kit.quit})
             end
@@ -76,7 +75,7 @@ function Operations.new(model)
     function self.start_apply()
         if not self.confirm_plan or #self.confirm_plan==0 then return end
         if not write_plan(self.confirm_plan) or not env.apply_script or env.apply_script=="" then
-            kit.toast(L("Cannot start the privileged helper.","无法启动提权操作助手。"),{kind="error"})
+            kit.toast(L("Cannot start the operation.","无法开始操作。"),{kind="error"})
             kit.goto_page(self.confirm_return); return
         end
         if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
@@ -89,7 +88,7 @@ function Operations.new(model)
             kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster…"),{
                 progress=0,stage=L("Preparing PortMaster","正在准备 PortMaster"),detail="",
                 footer_left="0%",footer_right=L("Preparing…","准备中…"),
-                cancel=L("Cancel before installation","安装前取消"),on_cancel=self.request_portmaster_cancel})
+                cancel=L("Cancel installation","取消安装"),on_cancel=self.request_portmaster_cancel})
         elseif self.confirm_return==pages.RUNTIME then
             kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),{
                 progress=0,stage=L("Starting repair","正在启动修复"),detail="",

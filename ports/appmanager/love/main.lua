@@ -9,6 +9,16 @@ operations.bind(pages,environment)
 
 local L,page,env=model.L,model.pages,model.env
 
+local function blocking_notice(title,message,id)
+    kit.set_busy(false)
+    kit.set_page(page.HOME,title,{
+        kit.textview(L("What to do","请执行"),message,{id=id..":note",focusable=false,
+            expandable=false,max_lines=4,expanded_lines=4,label_px=16,value_px=20}),
+        kit.button(L("Exit","退出"),kit.quit,{id=id..":exit"}),
+    },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+    kit.goto_page(page.HOME)
+end
+
 local function poll_task(dt)
     local task=operations.task
     if not task then return end
@@ -21,14 +31,13 @@ local function poll_task(dt)
         if status=="ok" or status=="error" then
             operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
             if status=="ok" then
-                kit.toast(L("Stable release check completed.","稳定版检查完成。"),{kind="success"})
+                kit.toast(L("Update check completed.","更新检查完成。"),{kind="success"})
             else
-                kit.toast(L("Unable to check the stable release. Normal App Manager use is still available.",
-                    "无法检查稳定版；APP Manager 的其他功能仍可正常使用。"),{kind="error"})
+                kit.toast(L("Update check failed. Try again later.","检查更新失败，请稍后重试。"),{kind="error"})
             end
         elseif task.elapsed>(task.timeout or 35) then
             operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
-            kit.toast(L("Update check timed out.","更新检查超时。"),{kind="error"})
+            kit.toast(L("Update check timed out. Try again later.","检查更新超时，请稍后重试。"),{kind="error"})
         end
         return
     end
@@ -44,15 +53,10 @@ local function poll_task(dt)
                 else environment.build_repair_gate(); kit.goto_page(page.HOME) end
             end
         elseif task.elapsed>(task.timeout or 1800) then
-            kit.set_busy(false); operations.task=nil
-            kit.dialog({title=L("PortMaster installation is still running","PortMaster 仍在安装"),
-                message=L("Exit App Manager and reopen it later. Home will remain unavailable until PortMaster finishes installing.",
-                    "请退出 APP，稍后重新打开。PortMaster 安装完成前不能进入首页。"),
-                confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
-                on_confirm=kit.quit,on_cancel=kit.quit})
-        else
-            local progress=model.runtime_progress()
-            if progress then progress.cancel_disabled=true; kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster…"),progress) end
+            operations.task=nil
+            blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
+                L("Exit and reopen App Manager later. Do not start another installation.",
+                    "请退出并稍后重新打开 APP，不要重复安装。"),"install-timeout")
         end
         return
     end
@@ -62,8 +66,8 @@ local function poll_task(dt)
         if status=="valid" or status=="restored" or status=="no-usable" or status=="interrupted" then
             environment.finish_validation(status,detail)
         elseif task.elapsed>(task.timeout or 120) then
-            environment.finish_validation("timeout",L("Validation is taking longer than expected. Exit App Manager and reopen it later; do not start another repair while the background check finishes.",
-                "校验耗时超出预期。请退出 APP，稍后重新打开；后台检查完成前不要再次开始修复。"))
+            environment.finish_validation("timeout",L("The check is taking longer than expected. Exit and reopen App Manager later. Do not reinstall PortMaster while it is still running.",
+                "检查时间较长。请退出并稍后重新打开 APP，检查完成前不要重复安装。"))
         end
         return
     end
@@ -73,20 +77,18 @@ local function poll_task(dt)
     elseif task.elapsed>(task.timeout or 45) then
         kit.set_busy(false); operations.task=nil
         if task.kind=="portmaster" then
-            kit.dialog({title=L("PortMaster installation is still running","PortMaster 仍在安装"),
-                message=L("Exit App Manager and reopen it later. Do not start another repair while the background installation finishes.",
-                    "请退出 APP，稍后重新打开；后台安装完成前不要再次开始修复。"),
-                confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
-                on_confirm=kit.quit,on_cancel=kit.quit})
+            blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
+                L("Exit and reopen App Manager later. Do not start another installation.",
+                    "请退出并稍后重新打开 APP，不要重复安装。"),"install-timeout")
         elseif operations.confirm_return==page.RUNTIME then
-            kit.toast(L("Operation timed out; no further action was taken by the UI.","操作超时；界面未继续执行其他动作。"),{kind="error"})
+            kit.toast(L("The operation timed out. Try again later.","操作超时，请稍后重试。"),{kind="error"})
             pages.build_runtime(); kit.goto_page(page.RUNTIME)
         else pages.build_home(); kit.goto_page(page.HOME) end
     elseif operations.confirm_return==page.RUNTIME or task.kind=="portmaster" then
         local progress=model.runtime_progress()
         if progress then
             if task.kind=="portmaster" then
-                progress.cancel=L("Cancel before installation","安装前取消")
+                progress.cancel=L("Cancel installation","取消安装")
                 progress.on_cancel=operations.request_portmaster_cancel
                 progress.cancel_requested=task.cancel_requested==true
                 progress.cancelling_label=L("Cancelling…","正在取消…")
@@ -105,15 +107,17 @@ local port={
     strings={working=L("Working…","处理中…")},
     on_home_cancel=operations.show_exit_dialog,
     build_pages=function(k)
-        for _=1,6 do k.add_page(L("Loading…","正在加载…"),{k.info("Port App Manager",L("Scanning…","正在扫描…"))}) end
+        for _=1,6 do k.add_page(L("Loading…","正在加载…"),{
+            k.textview(L("Status","状态"),L("Loading…","正在加载……"),{focusable=false,expandable=false})}) end
     end,
     on_load=function()
         local ok,err=model.load_env()
         if not ok then
-            kit.set_page(page.HOME,{en="Port App Manager",zh="Port App Manager"},{kit.info(L("Startup error","启动失败"),err)},
-                {sidebar_title=L("Quick Tools","快捷工具"),
-                sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
-                sidebar={kit.button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"})}})
+            kit.set_page(page.HOME,L("Cannot start Port App Manager","Port App Manager 启动失败"),{
+                kit.textview(L("Error","错误"),model.provided(err),{id="startup:error",focusable=false,
+                    expandable=false,max_lines=4,expanded_lines=4}),
+                kit.button(L("Exit","退出"),operations.show_exit_dialog,{id="startup:exit"}),
+            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
             return
         end
         if model.file_exists(env.pending_install) or model.file_exists(env.install_transaction) then

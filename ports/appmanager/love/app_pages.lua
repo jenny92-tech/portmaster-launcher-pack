@@ -13,6 +13,10 @@ function Pages.new(model,operations)
     local selected_home,selected_junk,selected_trash,selected_runtime={},{},{},{}
 
     local function button(label,action,opts) return kit.button(label,action,opts) end
+    local function note(label,value,id)
+        return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=3,
+            expanded_lines=3,label_px=16,value_px=19})
+    end
     local function empty(values) return function() return model.selected_count(values)==0 end end
 
     function self.bind_environment(value) environment=value end
@@ -78,7 +82,7 @@ function Pages.new(model,operations)
                 badge=missing~="" and kit.badge(L("Runtime missing","缺少 Runtime")) or nil,
             })
         end
-        if #rows==0 then rows[1]=kit.info(L("Ports","端口"),L("No managed ports found.","没有找到可管理的端口。")) end
+        if #rows==0 then rows[1]=note(L("Status","状态"),L("No ports are available to manage.","没有可管理的游戏。"),"home:empty") end
         local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
         local trash_count=#self.collect_trash()
         local runtime_count=model.runtime_issue_count()
@@ -151,11 +155,11 @@ function Pages.new(model,operations)
                     kit.badge(L("Installed","已安装"),{0.48,0.90,0.62})),
             })
             local health
-            if item.missing then health=L("Local file is missing.","本地文件不存在。")
-            elseif item.health=="invalid_magic" then health=L("Validation failed: not a SquashFS image.","校验失败：不是有效的 SquashFS 镜像。")
+            if item.missing then health=L("The Runtime is not installed.","尚未安装这个 Runtime。")
+            elseif item.health=="invalid_magic" then health=L("The Runtime file is invalid.","Runtime 文件已损坏。")
             else
-                health=L(string.format("The installed file has a valid SquashFS header (%s). Select it to download the current official version again.",model.human(item.bytes)),
-                    string.format("已安装文件具有有效的 SquashFS 文件头（%s）。如需重新下载当前官方版本，可以勾选它。",model.human(item.bytes)))
+                health=L(string.format("Installed and ready (%s). Select it to download the latest official version again.",model.human(item.bytes)),
+                    string.format("已安装并可正常使用（%s）。勾选后可以重新下载官方最新版。",model.human(item.bytes)))
             end
             local remote=metadata and L(string.format("\n\nCurrent official download: %s",model.human(metadata.bytes)),
                 string.format("\n\n当前官方下载大小：%s",model.human(metadata.bytes))) or
@@ -167,13 +171,13 @@ function Pages.new(model,operations)
 
         if #required>0 then
             rows[#rows+1]=kit.section(L(string.format("Needs repair (%d)",#repair_needed),string.format("需要修复（%d）",#repair_needed)),{font_px=22})
-            if #repair_needed==0 then rows[#rows+1]=kit.info(L("Status","状态"),L("All required Runtimes passed validation.","所有必需 Runtime 均已通过校验。"))
+            if #repair_needed==0 then rows[#rows+1]=note(L("Status","状态"),L("All required Runtimes are ready.","游戏所需的 Runtime 均可正常使用。"),"runtime:all-ready")
             else for _,item in ipairs(repair_needed) do add_runtime(item) end end
             rows[#rows+1]=kit.section(L(string.format("Installed (%d)",#installed),string.format("已安装（%d）",#installed)),{font_px=22})
-            if #installed==0 then rows[#rows+1]=kit.info(L("Runtimes","运行环境"),L("No required Runtime is currently installed.","当前没有已安装的必需 Runtime。"))
+            if #installed==0 then rows[#rows+1]=note(L("Status","状态"),L("No required Runtime is installed yet.","还没有安装游戏所需的 Runtime。"),"runtime:none-installed")
             else for _,item in ipairs(installed) do add_runtime(item) end end
         else
-            rows[1]=kit.info(L("Runtimes","运行环境"),L("No managed port declares a shared Runtime.","当前游戏没有声明共享 Runtime。"))
+            rows[1]=note(L("Status","状态"),L("The current games do not need an additional Runtime.","当前游戏不需要额外安装 Runtime。"),"runtime:not-required")
         end
         kit.set_page(page.RUNTIME,L("Runtime repair","Runtime 修复"),rows,{preserve_focus=preserve_focus,
             row_layout={mode="flow",min_width=360,max_columns=1},sidebar_details=details,
@@ -216,7 +220,7 @@ function Pages.new(model,operations)
         for _,item in ipairs(report.dead_scripts or {}) do
             add(model.display_name(item.script),L("Missing data: ","数据目录缺失：")[kit.get_state().ui_lang]..item.missing_dir,env.scripts_dir.."/"..item.script)
         end
-        if #rows==0 then rows[1]=kit.info(L("Leftovers","残留"),L("No leftovers found.","没有发现残留项。")) end
+        if #rows==0 then rows[1]=note(L("Status","状态"),L("No leftovers were found.","没有发现残留内容。"),"leftovers:empty") end
         kit._junk_rows=rows
         kit.set_page(page.JUNK,L("Leftover cleanup","残留清理"),rows,{preserve_focus=preserve_focus,
             sidebar_title=L("Quick Tools","快捷工具"),sidebar={
@@ -279,7 +283,7 @@ function Pages.new(model,operations)
                 on_change=function(value) for _,path in ipairs(item.paths) do selected_trash[path]=value end end,
             })
         end
-        if #rows==0 then rows[1]=kit.info(L("Trash","回收站"),L("Trash is empty.","回收站是空的。")) end
+        if #rows==0 then rows[1]=note(L("Status","状态"),L("Trash is empty.","回收站为空。"),"trash:empty") end
         kit.set_page(page.TRASH,L("Trash","回收站"),rows,{preserve_focus=preserve_focus,
             sidebar_title=L("Quick Tools","快捷工具"),sidebar={
             button(model.dynamic_count("Restore (%d)","放回 (%d)",selected_trash),function() trash_action("RESTORE_ITEM",L("Restore selected items","放回所选项目")) end,{disabled=empty(selected_trash)}),

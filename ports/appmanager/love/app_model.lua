@@ -94,15 +94,15 @@ function Model.new(kit,json,scanner)
         local portmaster=runtime=="PortMaster"
         local stages=portmaster and {
             preparing=L("Preparing PortMaster","正在准备 PortMaster"),probing=L("Checking network","正在检查网络"),
-            connected=L("Network connected","网络连接正常"),downloading=L("Downloading PortMaster","正在下载 PortMaster"),
-            verifying=L("Checking downloaded files","正在校验下载文件"),installing=L("Installing PortMaster","正在安装 PortMaster"),
+            connected=L("Network connected","网络连接成功"),downloading=L("Downloading PortMaster","正在下载 PortMaster"),
+            verifying=L("Checking downloaded files","正在检查下载文件"),installing=L("Installing PortMaster","正在安装 PortMaster"),
             failed=L("PortMaster installation failed","PortMaster 安装失败"),cancelled=L("Installation cancelled","已取消安装"),
-            complete=L("PortMaster installed","PortMaster 安装完成"),
+            complete=L("PortMaster installed","PortMaster 已安装"),
         } or {
-            preparing=L("Preparing download","准备下载"),probing=L("Checking connection","正在检测连接"),
-            connected=L("Connection ready","连接检测完成，正在使用"),downloading=L("Downloading","正在下载"),
-            verifying=L("Verifying Runtime image","正在校验 Runtime"),installing=L("Installing Runtime","正在安装 Runtime"),
-            finished=L("Runtime completed","当前 Runtime 已完成"),
+            preparing=L("Preparing download","正在准备下载"),probing=L("Checking connection","正在检查网络"),
+            connected=L("Connection ready","网络连接成功"),downloading=L("Downloading","正在下载"),
+            verifying=L("Checking Runtime file","正在检查 Runtime 文件"),installing=L("Installing Runtime","正在安装 Runtime"),
+            finished=L("Runtime completed","当前 Runtime 完成"),
             failed=L("Runtime repair failed","Runtime 修复失败"),complete=L("Finishing Runtime repair","正在完成 Runtime 修复"),
         }
         local stage=stages[phase] or L("Working","处理中")

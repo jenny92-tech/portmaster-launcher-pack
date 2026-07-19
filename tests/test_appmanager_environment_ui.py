@@ -11,6 +11,15 @@ KIT = ROOT / "_kit" / "love"
 APP = ROOT / "ports" / "appmanager" / "love"
 
 source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(APP.glob("*.lua")))
+assert "Port App Manager 使用自带 UI 环境，因此仍可运行" not in source
+assert "无法启动提权操作助手" not in source
+assert "SquashFS 镜像" not in source
+assert "kit.info" not in source
+assert 'L("PortMaster is not installed. Repair it first.","未安装 PortMaster，请先修复。")' in source
+assert 'L("PortMaster is damaged. Repair it first.","PortMaster 已损坏，请先修复。")' in source
+assert 'L("Checking PortMaster","检查 PortMaster")' in source
+assert "正在检查刚安装的 PortMaster。完成后会自动进入首页。" in source
+assert "focusable=false" in source
 for contract in (
     'id="manage:latest"', 'id="manage:check"', 'id="manage:update"',
     'L("Update now","立即更新")', 'L("Up to date","已是最新版")',
@@ -66,12 +75,16 @@ package.loaded.scan = {
 '''
 
 
-def run_case(health: str):
+def run_case(health: str, pending: bool = False):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         for name in ("scripts", "games", "images", "libs", "state", "trash"):
             (root / name).mkdir()
         env_path = root / "state" / "env.json"
+        pending_path = root / "state" / "pending-install.tsv"
+        validation_path = root / "state" / "validation-result.tsv"
+        if pending:
+            pending_path.write_text("pending\n", encoding="utf-8")
         env_path.write_text(
             json.dumps(
                 {
@@ -94,7 +107,11 @@ def run_case(health: str):
                     "progress_file": str(root / "state" / "progress.tsv"),
                     "size_file": str(root / "state" / "sizes.tsv"),
                     "runtime_metadata_file": str(root / "state" / "runtime-metadata.tsv"),
-                    "apply_script": "",
+                    "apply_script": "/bin/true" if pending else "",
+                    "pending_install": str(pending_path),
+                    "install_transaction": str(root / "state" / "install-transaction.tsv"),
+                    "portmaster_active": str(root / "state" / "portmaster-active.tsv"),
+                    "validation_result_file": str(validation_path),
                     "ignore_dirs": ["PortMaster", "images", "appmanager"],
                     "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"],
                     "self_port": "appmanager",
@@ -127,11 +144,31 @@ assert page["title"] == "环境管理"
 assert page["section_count"] == 1
 assert page["row_count"] == 6
 
-for state in ("missing", "damaged"):
+for state, expected_title in (
+    ("missing", "需要安装 PortMaster"),
+    ("damaged", "修复 PortMaster"),
+):
     runtime = run_case(state)
     page = runtime.eval('require("kit").debug_page()')
-    assert page["title"] == "需要安装 PortMaster", state
+    assert page["title"] == expected_title, state
     assert page["row_count"] == 3, state
+    assert page["row_kinds"][1] == "textview", state
+    focus = runtime.eval('require("kit").debug_focus()')
+    assert focus["zone"] == "rows", state
+    assert focus["focus_i"] == 2, state
+    runtime.execute('require("kit").input("confirm")')
+    dialog = runtime.eval('require("kit").debug_dialog()')
+    assert dialog["open"], state
+    assert dialog["title"] == ("修复 PortMaster" if state == "damaged" else "安装 PortMaster"), state
+
+pending = run_case("healthy", pending=True)
+page = pending.eval('require("kit").debug_page()')
+assert page["title"] == "检查 PortMaster"
+assert page["row_count"] == 2
+assert page["row_kinds"][1] == "textview"
+focus = pending.eval('require("kit").debug_focus()')
+assert focus["zone"] == "rows"
+assert focus["focus_i"] == 2
 
 with tempfile.TemporaryDirectory() as temporary:
     progress_path = Path(temporary) / "progress.tsv"
