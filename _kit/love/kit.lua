@@ -1255,7 +1255,9 @@ function kit.draw()
     draw_bar(L)
     if L.app then
         love.graphics.setColor(1,1,1,0.42); love.graphics.setLineWidth(1)
-        love.graphics.line(L.divider_x,L.band_top,L.divider_x,L.band_top+L.band)
+        if L.has_sidebar then
+            love.graphics.line(L.divider_x,L.band_top,L.divider_x,L.band_top+L.band)
+        end
         love.graphics.line(18*L.cs,L.band_top+L.band,W-18*L.cs,L.band_top+L.band)
     end
 
@@ -1276,7 +1278,9 @@ function kit.draw()
             love.graphics.setColor(1.0,0.78,0.36,0.42); love.graphics.setLineWidth(1)
             love.graphics.line(x,y+row_h-8*L.cs,x+rw,y+row_h-8*L.cs)
         else
-            panel(x,y,rw,row_h,focused,disabled(r),L.app)
+            if not (r.kind=="textview" and r.surface==false) then
+                panel(x,y,rw,row_h,focused,disabled(r),L.app)
+            end
         if r.kind=="picker" then
             local select_w=math.min((L.app and 260 or 230)*L.cs,rw*0.48)
             local select_h=(L.app and 42 or 38)*L.cs

@@ -13,7 +13,7 @@ local function blocking_notice(title,message,id)
     kit.set_busy(false)
     kit.set_page(page.HOME,title,{
         kit.textview(L("What to do","请执行"),message,{id=id..":note",focusable=false,
-            expandable=false,max_lines=4,expanded_lines=4,label_px=16,value_px=20}),
+            expandable=false,max_lines=4,expanded_lines=4,label_px=16,value_px=20,surface=false}),
         kit.button(L("Exit","退出"),kit.quit,{id=id..":exit"}),
     },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
     kit.goto_page(page.HOME)
@@ -108,14 +108,14 @@ local port={
     on_home_cancel=operations.show_exit_dialog,
     build_pages=function(k)
         for _=1,6 do k.add_page(L("Loading…","正在加载…"),{
-            k.textview(L("Status","状态"),L("Loading…","正在加载……"),{focusable=false,expandable=false})}) end
+            k.textview(L("Status","状态"),L("Loading…","正在加载……"),{focusable=false,expandable=false,surface=false})}) end
     end,
     on_load=function()
         local ok,err=model.load_env()
         if not ok then
             kit.set_page(page.HOME,L("Cannot start Port App Manager","Port App Manager 启动失败"),{
                 kit.textview(L("Error","错误"),model.provided(err),{id="startup:error",focusable=false,
-                    expandable=false,max_lines=4,expanded_lines=4}),
+                    expandable=false,max_lines=4,expanded_lines=4,surface=false}),
                 kit.button(L("Exit","退出"),operations.show_exit_dialog,{id="startup:exit"}),
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
             return

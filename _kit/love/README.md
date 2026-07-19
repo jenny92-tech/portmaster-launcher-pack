@@ -117,7 +117,8 @@ label/value text and grows its card instead of overflowing a fixed-height row. V
 default to two lines with an ellipsis; A expands/collapses up to eight lines, capped to
 the viewport. Override `max_lines`, `expanded_lines` or `expandable` when needed;
 `label_px` and `value_px` provide page-specific readability tuning. `list_item` and
-`section` similarly accept `font_px`. Set the
+`section` similarly accept `font_px`. Set `surface=false` for a non-interactive status
+or explanatory block that should render as plain text without a card background. Set the
 page option `row_layout={mode="grid",columns=2}` for a fixed, equal-width two-column
 grid (two columns are the default when `columns` is omitted), or
 `row_layout={mode="flow",min_width=260}` to derive the number of equal-width columns

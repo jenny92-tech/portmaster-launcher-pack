@@ -206,11 +206,18 @@ with tempfile.TemporaryDirectory() as source:
     lua.execute(mock)
     lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
     lua.execute(r'''
+        local outline_rects,vertical_lines=0,0
+        love.graphics.rectangle=function(mode,...)
+            if mode=="line" then outline_rects=outline_rects+1 end
+        end
+        love.graphics.line=function(x1,y1,x2,y2)
+            if x1==x2 then vertical_lines=vertical_lines+1 end
+        end
         local k=require("kit")
         k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
             k.add_page("Notice",{
-                k.textview("Status","PortMaster is not installed.",{focusable=false,expandable=false}),
-                k.button("Repair",function() end),
+                k.textview("Status","PortMaster is not installed.",{
+                    focusable=false,expandable=false,surface=false}),
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
         end})
         love.load()
@@ -219,6 +226,9 @@ with tempfile.TemporaryDirectory() as source:
         assert(page.sidebar_count==0)
         assert(not layout.has_sidebar and layout.columns==1)
         assert(layout.x==(960-layout.w)/2)
+        love.draw()
+        assert(outline_rects==1,"plain TextView must not draw a button-like panel")
+        assert(vertical_lines==0,"single-pane app must not draw a sidebar divider")
     ''')
 
 # Checkbox visuals are drawn as a real control, not font-dependent square/check

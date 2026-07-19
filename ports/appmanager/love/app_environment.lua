@@ -8,7 +8,7 @@ function Environment.new(model,operations,pages_ui)
     local function button(label,action,opts) return kit.button(label,action,opts) end
     local function note(label,value,id)
         return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=4,
-            expanded_lines=4,label_px=16,value_px=20})
+            expanded_lines=4,label_px=16,value_px=20,surface=false})
     end
 
     local function health_label()

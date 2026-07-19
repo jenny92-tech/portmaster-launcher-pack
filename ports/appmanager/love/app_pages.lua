@@ -15,7 +15,7 @@ function Pages.new(model,operations)
     local function button(label,action,opts) return kit.button(label,action,opts) end
     local function note(label,value,id)
         return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=3,
-            expanded_lines=3,label_px=16,value_px=19})
+            expanded_lines=3,label_px=16,value_px=19,surface=false})
     end
     local function empty(values) return function() return model.selected_count(values)==0 end end
 
