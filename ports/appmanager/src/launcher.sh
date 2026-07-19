@@ -232,9 +232,14 @@ RUNTIME_METADATA_URL="https://github.com/PortsMaster/PortMaster-New/releases/lat
 RUNTIME_ROUTE_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L212"
 PAM_CUSTOM_RELEASE_BASE="${PAM_CUSTOM_RELEASE_BASE:-https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download}"
 PAM_RELEASE_BASE="$PAM_CUSTOM_RELEASE_BASE"
-PAM_INSTALLER_SOURCE_URL="https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh"
+PAM_INSTALLER_SOURCE_URL="https://raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/portappmanager-installer.sh"
 RUNTIME_CUSTOM_ROUTES="7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb5180219393571951dd293185bf48d406d50d104be338d9608d1753d48cd8"
 RUNTIME_GITHUB_ROUTES="7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350"
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/github_proxy.sh"
+#@KIT-END
 
 mkdir -p "$PAM_APP_ROOT" "$CONFDIR" "$TRASH_DIR"
 PORTMASTER_ACTIVE=0
@@ -778,63 +783,6 @@ runtime_valid_download_url() {
   return 1
 }
 
-runtime_blob_decode() {
-  local hex="$1" key=(91 37 204 113 18 167 62 209 84 9 231)
-  local i=0 pair value oct ch out=""
-  while [ -n "$hex" ]; do
-    pair="${hex:0:2}"; hex="${hex:2}"
-    value=$((16#$pair ^ key[i % ${#key[@]}] ^ ((i * 29 + 71) & 255)))
-    printf -v oct '%03o' "$value"
-    printf -v ch "\\$oct"
-    out+="$ch"
-    i=$((i + 1))
-  done
-  printf '%s' "$out"
-}
-
-runtime_proxy_candidates() {
-  local custom_rows github_rows format name base route_index=0
-  if [ "${PAM_RUNTIME_CUSTOM_PROXIES+x}" = "x" ]; then
-    custom_rows="$PAM_RUNTIME_CUSTOM_PROXIES"
-  else
-    custom_rows=$(runtime_blob_decode "$RUNTIME_CUSTOM_ROUTES") || return 1
-  fi
-  while IFS='|' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] && [ -n "$base" ] || continue
-    case "$format" in custom|full|jsdelivr) ;; *) continue ;; esac
-    case "$base" in https://*) ;; *) continue ;; esac
-    printf '%s\t%s\t%s\n' "$format" "$name" "${base%/}"
-  done <<< "$custom_rows"
-
-  if [ "${PAM_RUNTIME_PROXIES+x}" = "x" ]; then
-    github_rows="$PAM_RUNTIME_PROXIES"
-  else
-    github_rows=$(runtime_blob_decode "$RUNTIME_GITHUB_ROUTES") || return 1
-  fi
-  while IFS= read -r base; do
-    [ -n "$base" ] || continue
-    case "$base" in https://*) ;; *) continue ;; esac
-    route_index=$((route_index + 1)); name="r$route_index"
-    printf 'github\t%s\t%s\n' "$name" "${base%/}"
-  done <<< "$github_rows"
-}
-
-runtime_asset_url() {
-  local format="$1" base="$2" direct="$3" path
-  runtime_valid_download_url "$direct" || return 1
-  case "$format" in
-    direct) printf '%s\n' "$direct" ;;
-    github|full)
-      printf '%s/%s\n' "${base%/}" "$direct"
-      ;;
-    custom)
-      path=${direct#https://github.com/}
-      printf '%s/%s\n' "${base%/}" "$path"
-      ;;
-    *) return 1 ;;
-  esac
-}
-
 runtime_has_magic() {
   [ -f "$1" ] && [ "$(LC_ALL=C head -c 4 "$1" 2>/dev/null)" = "hsqs" ]
 }
@@ -848,23 +796,6 @@ runtime_prepare_downloader() {
   fi
   RUNTIME_CURL=""
   return 1
-}
-
-runtime_metadata_url() {
-  local format="$1" base="$2" path
-  case "$RUNTIME_METADATA_URL" in
-    https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json) ;;
-    *) return 1 ;;
-  esac
-  case "$format" in
-    direct) printf '%s\n' "$RUNTIME_METADATA_URL" ;;
-    github|full) printf '%s/%s\n' "${base%/}" "$RUNTIME_METADATA_URL" ;;
-    custom)
-      path=${RUNTIME_METADATA_URL#https://github.com/}
-      printf '%s/%s\n' "${base%/}" "$path"
-      ;;
-    *) return 1 ;;
-  esac
 }
 
 runtime_metadata_parse() {
@@ -906,58 +837,34 @@ runtime_metadata_parse() {
 }
 
 runtime_metadata_refresh() {
-  local force="${1:-0}" now mtime root candidates format name base url id=0 start=1 count=0 verified="" batch_size=5
-  local json_tmp metadata_tmp rc=1
+  local force="${1:-0}" now mtime root json_tmp metadata_tmp
   if [ "$force" != "1" ] && [ -s "$RUNTIME_METADATA" ]; then
     now=$(date +%s 2>/dev/null || printf 0)
     mtime=$(pam_cache_mtime "$RUNTIME_METADATA")
     case "$now:$mtime" in *[!0-9:]*|:) mtime=0 ;; esac
     [ "$mtime" -le 0 ] || [ $((now - mtime)) -ge 86400 ] || return 0
   fi
-  runtime_prepare_downloader || return 1
   root="$CONFDIR/runtime-metadata.$$"
   rm -rf -- "$root"; mkdir -p "$root" || return 1
-  candidates=$(runtime_proxy_candidates | awk -F '\t' '$1 != "jsdelivr"')
-  while IFS=$'\t' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] || continue
-    id=$((id + 1)); count=$((count + 1))
-    (
-      url=$(runtime_metadata_url "$format" "$base") || exit 1
-      if pm_probe_release_url "$url" "$root/probe.$id"; then
-        : > "$root/ok.$id"
-        if mkdir "$root/winner.lock" 2>/dev/null; then printf '%s\n' "$id" > "$root/winner"; fi
-      fi
-    ) &
-    if [ "$count" -ge "$batch_size" ]; then
-      runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Checking official Runtime information"
-      wait
-      verified=$(runtime_probe_batch_results "$root" "$start" "$id" "$candidates" 2>/dev/null || true)
-      [ -z "$verified" ] || break
-      rm -rf -- "$root/winner.lock"; rm -f -- "$root/winner"
-      start=$((id + 1)); count=0
-    fi
-  done <<< "$candidates"
-  if [ -z "$verified" ] && [ "$count" -gt 0 ]; then
-    wait
-    verified=$(runtime_probe_batch_results "$root" "$start" "$id" "$candidates" 2>/dev/null || true)
-  fi
-  if pm_probe_release_url "$(runtime_metadata_url direct "")" "$root/direct"; then
-    verified+="${verified:+$'\n'}direct"$'\torigin\t'
-  fi
   json_tmp="$root/ports.json"; metadata_tmp="$root/runtime-metadata.tsv"
-  while IFS=$'\t' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] || continue
-    url=$(runtime_metadata_url "$format" "$base") || continue
-    if "$RUNTIME_CURL" -fsSL --connect-timeout 8 --max-time 60 --retry 2 --retry-delay 1 -o "$json_tmp" "$url" 2>/dev/null &&
-       runtime_metadata_parse "$json_tmp" "$metadata_tmp"; then
-      mv -f -- "$metadata_tmp" "$RUNTIME_METADATA"
-      rc=$?; break
-    fi
-  done <<< "$verified"
+  GITHUB_PROXY_TRANSFER_MODE="plain"
+  if github_proxy_download release "$RUNTIME_METADATA_URL" "$json_tmp" runtime_validate_metadata_download 0 0 &&
+     runtime_metadata_parse "$json_tmp" "$metadata_tmp"; then
+    mv -f -- "$metadata_tmp" "$RUNTIME_METADATA"
+  else
+    rm -rf -- "$root"
+    [ "$force" != "1" ] && [ -s "$RUNTIME_METADATA" ]
+    return
+  fi
   rm -rf -- "$root"
-  [ "$rc" = "0" ] && return 0
-  [ "$force" != "1" ] || return 1
-  [ -s "$RUNTIME_METADATA" ]
+  return 0
+}
+
+runtime_validate_metadata_download() {
+  local parsed="$1.parsed.$$" rc
+  runtime_metadata_parse "$1" "$parsed"; rc=$?
+  rm -f -- "$parsed"
+  return "$rc"
 }
 
 pam_stable_field_from_json() {
@@ -976,6 +883,15 @@ pam_stable_field_from_json() {
 
 pam_stable_version_from_json() { pam_stable_field_from_json "$1" version; }
 
+pm_validate_version_download() {
+  local version url
+  version=$(pam_stable_version_from_json "$1" 2>/dev/null || true)
+  case "$version" in ""|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  url=$(pam_stable_field_from_json "$1" url 2>/dev/null || true)
+  pm_valid_custom_stable_archive_url "$url" || return 1
+  case "$url" in */releases/download/"$version"/PortMaster.zip) ;; *) return 1 ;; esac
+}
+
 pam_cache_mtime() {
   stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf 0
 }
@@ -992,8 +908,8 @@ pam_check_update() {
   rm -f -- "$CANCEL_FILE"
   if [ -n "${PAM_VERSION_URL:-}" ] && runtime_prepare_downloader; then
     "$RUNTIME_CURL" -fsSL --connect-timeout 8 --max-time 20 -o "$tmp" "$PAM_VERSION_URL" 2>/dev/null || true
-  elif pm_select_release_routes "$PAM_RELEASE_BASE/version.json"; then
-    pm_download_url "$PAM_RELEASE_BASE/version.json" "$tmp" 0 0 || true
+  else
+    pm_download_url release "$PAM_RELEASE_BASE/version.json" "$tmp" 0 0 pm_validate_version_download || true
   fi
   latest=$(pam_stable_version_from_json "$tmp" 2>/dev/null || true)
   case "$latest" in ""|*[!A-Za-z0-9._-]*) latest="" ;; *) status="ok" ;; esac
@@ -1001,14 +917,6 @@ pam_check_update() {
     mv -f "$UPDATE_CACHE_FILE.tmp" "$UPDATE_CACHE_FILE"
   rm -f -- "$tmp"
   [ "$status" = "ok" ]
-}
-
-runtime_probe_url() {
-  local url="$1" out="$2"
-  : > "$out" || return 1
-  runtime_prepare_downloader || return 1
-  "$RUNTIME_CURL" -fsSL --connect-timeout 3 --max-time 5 --range 0-3 "$url" 2>/dev/null | head -c 4 > "$out"
-  runtime_has_magic "$out"
 }
 
 runtime_fetch_url() {
@@ -1045,156 +953,6 @@ runtime_fetch_url() {
 runtime_file_size() {
   [ -f "$1" ] || { echo 0; return; }
   wc -c < "$1" | tr -d '[:space:]'
-}
-
-runtime_probe_batch_results() {
-  local root="$1" first="$2" last="$3" candidates="$4" winner id line
-  [ -s "$root/winner" ] || return 1
-  winner=$(cat "$root/winner")
-  [ -e "$root/ok.$winner" ] || return 1
-  line=$(sed -n "${winner}p" <<< "$candidates")
-  [ -n "$line" ] || return 1
-  printf '%s\n' "$line"
-  id=$first
-  while [ "$id" -le "$last" ]; do
-    if [ "$id" != "$winner" ] && [ -e "$root/ok.$id" ]; then
-      line=$(sed -n "${id}p" <<< "$candidates")
-      [ -z "$line" ] || printf '%s\n' "$line"
-    fi
-    id=$((id + 1))
-  done
-}
-
-runtime_select_proxy() {
-  local official_url="$1" probe_root candidates format name base url selected_format selected_base id=0 batch_start=1 batch_count=0
-  local batch_size=5 verified=""
-  runtime_valid_download_url "$official_url" || return 1
-  runtime_prepare_downloader || return 1
-  probe_root="$CONFDIR/proxy-probe.$$"
-  rm -rf "$probe_root"; mkdir -p "$probe_root" || return 1
-  candidates=$(runtime_proxy_candidates | awk -F '\t' '$1 != "jsdelivr"')
-  while IFS=$'\t' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] || continue
-    id=$((id + 1))
-    batch_count=$((batch_count + 1))
-    (
-      url=$(runtime_asset_url "$format" "$base" "$official_url") || exit 1
-      if runtime_probe_url "$url" "$probe_root/probe.$id"; then
-        : > "$probe_root/ok.$id"
-        if mkdir "$probe_root/winner.lock" 2>/dev/null; then
-          printf '%s\n' "$id" > "$probe_root/winner"
-        fi
-      fi
-    ) &
-    if [ "$batch_count" -ge "$batch_size" ]; then
-      runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Checking connection"
-      wait
-      verified=$(runtime_probe_batch_results "$probe_root" "$batch_start" "$id" "$candidates" 2>/dev/null || true)
-      [ -z "$verified" ] || break
-      rm -rf "$probe_root/winner.lock"; rm -f "$probe_root/winner"
-      batch_start=$((id + 1)); batch_count=0
-    fi
-  done <<< "$candidates"
-
-  if [ -z "$verified" ] && [ "$batch_count" -gt 0 ]; then
-    runtime_progress_write probing "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Checking connection"
-    wait
-    verified=$(runtime_probe_batch_results "$probe_root" "$batch_start" "$id" "$candidates" 2>/dev/null || true)
-  fi
-
-  if [ -n "$verified" ]; then
-    RUNTIME_VERIFIED_PROXIES="$verified"$'\ndirect\torigin\t'
-  elif runtime_probe_url "$(runtime_asset_url direct "" "$official_url")" "$probe_root/direct"; then
-    RUNTIME_VERIFIED_PROXIES=$'direct\torigin\t'
-  else
-    rm -rf "$probe_root"
-    return 1
-  fi
-  IFS=$'\t' read -r selected_format RUNTIME_PROXY_NAME selected_base <<< "$RUNTIME_VERIFIED_PROXIES"
-  echo "$LOG_PREFIX Runtime connection ready"
-  runtime_progress_write connected "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Connection ready"
-  rm -rf "$probe_root"
-  RUNTIME_PROXY_READY=1
-}
-
-# PortMaster core repair uses the same bounded proxy pool as Runtime repair,
-# but release assets are ordinary files rather than squashfs images. The
-# selected route is never written to progress.tsv, so the UI only exposes a
-# connection phase and useful transfer metrics.
-pm_valid_release_url() {
-  case "$1" in
-    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/PortMaster.zip|\
-    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/version.json|\
-    https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/SHA256SUMS|\
-    https://github.com/jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh|\
-    https://github.com/jenny92-tech/PortMaster-GUI/releases/download/*/PortMaster.zip|\
-    https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip|\
-    https://github.com/PortsMaster/PortMaster-GUI/releases/download/*/PortMaster.zip.md5) return 0 ;;
-  esac
-  return 1
-}
-
-pm_release_url() {
-  local format="$1" base="$2" direct="$3" path
-  pm_valid_release_url "$direct" || return 1
-  case "$format" in
-    direct) printf '%s\n' "$direct" ;;
-    github|full) printf '%s/%s\n' "${base%/}" "$direct" ;;
-    custom)
-      path=${direct#https://github.com/}
-      printf '%s/%s\n' "${base%/}" "$path"
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-pm_probe_release_url() {
-  local url="$1" out="$2"
-  : > "$out" || return 1
-  runtime_prepare_downloader || return 1
-  "$RUNTIME_CURL" -fsSL --connect-timeout 3 --max-time 5 --range 0-15 "$url" 2>/dev/null |
-    head -c 16 > "$out"
-  [ -s "$out" ]
-}
-
-pm_select_release_routes() {
-  local probe_url="$1" root candidates format name base url id=0 start=1 count=0 verified="" batch_size=5
-  pm_valid_release_url "$probe_url" || return 1
-  runtime_prepare_downloader || return 1
-  root="$CONFDIR/pm-probe.$$"
-  rm -rf -- "$root"; mkdir -p "$root" || return 1
-  candidates=$(runtime_proxy_candidates | awk -F '\t' '$1 != "jsdelivr"')
-  while IFS=$'\t' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] || continue
-    id=$((id + 1)); count=$((count + 1))
-    (
-      url=$(pm_release_url "$format" "$base" "$probe_url") || exit 1
-      if pm_probe_release_url "$url" "$root/probe.$id"; then
-        : > "$root/ok.$id"
-        if mkdir "$root/winner.lock" 2>/dev/null; then printf '%s\n' "$id" > "$root/winner"; fi
-      fi
-    ) &
-    if [ "$count" -ge "$batch_size" ]; then
-      runtime_progress_write probing 3 0 "Checking connection"
-      wait
-      verified=$(runtime_probe_batch_results "$root" "$start" "$id" "$candidates" 2>/dev/null || true)
-      [ -z "$verified" ] || break
-      rm -rf -- "$root/winner.lock"; rm -f -- "$root/winner"
-      start=$((id + 1)); count=0
-    fi
-  done <<< "$candidates"
-  if [ -z "$verified" ] && [ "$count" -gt 0 ]; then
-    runtime_progress_write probing 3 0 "Checking connection"
-    wait
-    verified=$(runtime_probe_batch_results "$root" "$start" "$id" "$candidates" 2>/dev/null || true)
-  fi
-  if pm_probe_release_url "$(pm_release_url direct "" "$probe_url")" "$root/direct"; then
-    verified+="${verified:+$'\n'}direct"$'\torigin\t'
-  fi
-  rm -rf -- "$root"
-  [ -n "$verified" ] || return 1
-  PM_RELEASE_ROUTES="$verified"
-  runtime_progress_write connected 5 0 "Connection ready"
 }
 
 pm_cancel_requested() { [ -e "$CANCEL_FILE" ]; }
@@ -1249,27 +1007,45 @@ pm_fetch_url() {
   runtime_progress_write downloading "$finish" "$final_speed" "$final_detail"
 }
 
+# One transport adapter serves PortMaster releases, repository files and
+# Runtime assets. The proxy module owns capability filtering and route
+# fallback; this layer contributes only APP-specific progress and validation.
+github_proxy_transfer_hook() {
+  local url="$1" out="$2" resume=0
+  case "${GITHUB_PROXY_TRANSFER_MODE:-plain}" in
+    portmaster)
+      pm_fetch_url "$url" "$out" "$GITHUB_PROXY_PROGRESS_START" "$GITHUB_PROXY_PROGRESS_FINISH"
+      ;;
+    runtime)
+      [ -s "$out" ] && resume=1
+      runtime_fetch_url "$url" "$out" "$resume"
+      ;;
+    plain)
+      runtime_prepare_downloader || return 1
+      if [ -s "$out" ]; then
+        "$RUNTIME_CURL" -fsSL --connect-timeout 8 --max-time 60 --retry 2 --retry-delay 1 -C - -o "$out" "$url" 2>/dev/null
+      else
+        "$RUNTIME_CURL" -fsSL --connect-timeout 8 --max-time 60 --retry 2 --retry-delay 1 -o "$out" "$url" 2>/dev/null
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+github_proxy_download() {
+  local capability="$1" source="$2" out="$3" validator="$4" start="$5" finish="$6" mode="${7:-plain}"
+  runtime_prepare_downloader || return 1
+  GITHUB_PROXY_CURL="$RUNTIME_CURL"
+  GITHUB_PROXY_STATE_DIR="$CONFDIR"
+  GITHUB_PROXY_TRANSFER_MODE="$mode"
+  GITHUB_PROXY_PROGRESS_START="$start"
+  GITHUB_PROXY_PROGRESS_FINISH="$finish"
+  runtime_progress_write probing "$start" 0 "Checking connection"
+  github_proxy_fetch "$capability" "$source" "$out" "$validator"
+}
+
 pm_download_url() {
-  local direct="$1" out="$2" start="$3" finish="$4" format name base url route_number=0 rc
-  pm_valid_release_url "$direct" || return 1
-  while IFS=$'\t' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] || continue
-    route_number=$((route_number + 1))
-    url=$(pm_release_url "$format" "$base" "$direct") || continue
-    echo "$LOG_PREFIX release transfer attempt $route_number"
-    if pm_fetch_url "$url" "$out" "$start" "$finish"; then return 0
-    else rc=$?; fi
-    [ "$rc" != "70" ] || return 70
-    if [ "$rc" = "33" ] && [ -e "$out" ]; then
-      echo "$LOG_PREFIX release server rejected resume; retrying this route from the beginning"
-      rm -f -- "$out"
-      if pm_fetch_url "$url" "$out" "$start" "$finish"; then return 0
-      else rc=$?; fi
-      [ "$rc" != "70" ] || return 70
-    fi
-    echo "$LOG_PREFIX release transfer attempt $route_number failed"
-  done <<< "$PM_RELEASE_ROUTES"
-  return 1
+  github_proxy_download "$1" "$2" "$3" "$6" "$4" "$5" portmaster
 }
 
 pm_sha256_file() {
@@ -1388,9 +1164,25 @@ pm_official_md5_expected() {
   awk '{ name=$2; sub(/^\*/, "", name); if ($1 ~ /^[0-9A-Fa-f]{32}$/ && (name == "" || name == "PortMaster.zip")) {print tolower($1); exit} }' "$1"
 }
 
+pm_validate_md5_download() {
+  local expected
+  expected=$(pm_official_md5_expected "$1")
+  [ "${#expected}" = 32 ]
+}
+
+pm_validate_archive_download() {
+  local actual
+  if [ "${PM_ARCHIVE_HASH_KIND:-sha256}" = "md5" ]; then
+    actual=$(runtime_md5_file "$1" 2>/dev/null || true)
+  else
+    actual=$(pm_sha256_file "$1" 2>/dev/null || true)
+  fi
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = "$PM_EXPECTED_ARCHIVE_HASH" ]
+}
+
 install_portmaster_release_inner() {
   local cache="$CONFDIR/portmaster-download" sums version installer installer_tmp install_plan archive archive_dir checksum rc
-  local version_url stable_url stable_version expected_hash actual_hash archive_valid=0
+  local version_url stable_url stable_version expected_hash actual_hash archive_valid=0 reason
   sums="$cache/SHA256SUMS"; version="$cache/version.json"
   installer="$cache/PortAppManager-Installer.sh"; installer_tmp="$installer.new"
   install_plan="$cache/portmaster-install-plan.tsv"
@@ -1403,9 +1195,8 @@ install_portmaster_release_inner() {
     return 1
   }
   version_url="$PAM_RELEASE_BASE/version.json"
-  pm_select_release_routes "$version_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_download_url "$version_url" "$version" 5 10 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
-  pm_download_url "$PAM_CUSTOM_RELEASE_BASE/SHA256SUMS" "$sums" 10 14 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+  pm_download_url release "$version_url" "$version" 5 10 pm_validate_version_download || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+  pm_download_url release "$PAM_CUSTOM_RELEASE_BASE/SHA256SUMS" "$sums" 10 14 pm_validate_sums || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
   pm_validate_sums "$sums" || { printf 'FAIL\tportmaster\tchecksums\n' >> "$RESULT_FILE"; return 1; }
   pm_verify_asset "$sums" version.json "$version" || { printf 'FAIL\tportmaster\tchecksum\n' >> "$RESULT_FILE"; return 1; }
   stable_version=$(pam_stable_version_from_json "$version" 2>/dev/null || true)
@@ -1418,9 +1209,11 @@ install_portmaster_release_inner() {
 
   # The APP owns profile/path discovery. The branch-maintained helper receives
   # only that normalized plan and contains no device detection of its own.
-  pm_select_release_routes "$PAM_INSTALLER_SOURCE_URL" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_download_url "$PAM_INSTALLER_SOURCE_URL" "$installer_tmp" 14 20 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-  pm_validate_installer "$installer_tmp" || { rm -f -- "$installer_tmp"; printf 'FAIL\tportmaster\tinstaller-contract\n' >> "$RESULT_FILE"; return 1; }
+  pm_download_url raw "$PAM_INSTALLER_SOURCE_URL" "$installer_tmp" 14 20 pm_validate_installer || {
+    rc=$?
+    case "$rc" in 70) reason=cancelled ;; 65) reason=installer-contract ;; *) reason=network ;; esac
+    printf 'FAIL\tportmaster\t%s\n' "$reason" >> "$RESULT_FILE"; return 1
+  }
   chmod 0700 "$installer_tmp" && mv -f -- "$installer_tmp" "$installer" || return 1
 
   if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then
@@ -1429,8 +1222,7 @@ install_portmaster_release_inner() {
     stable_url="https://github.com/PortsMaster/PortMaster-GUI/releases/download/$stable_version/PortMaster.zip"
     checksum="$archive_dir/PortMaster.zip.md5"
     rm -f -- "$checksum"
-    pm_select_release_routes "$stable_url.md5" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-    pm_download_url "$stable_url.md5" "$checksum" 18 20 || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
+    pm_download_url release "$stable_url.md5" "$checksum" 18 20 pm_validate_md5_download || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
     expected_hash=$(pm_official_md5_expected "$checksum")
     [ "${#expected_hash}" = 32 ] || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
   fi
@@ -1442,8 +1234,14 @@ install_portmaster_release_inner() {
   if [ "$archive_valid" = "1" ]; then
     runtime_progress_write downloading 78 0 "Using local cache"
   else
-    pm_select_release_routes "$stable_url" || { printf 'FAIL\tportmaster\tnetwork\n' >> "$RESULT_FILE"; return 1; }
-    pm_download_url "$stable_url" "$archive" 20 78 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+    PM_EXPECTED_ARCHIVE_HASH="$expected_hash"
+    if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then PM_ARCHIVE_HASH_KIND="sha256"
+    else PM_ARCHIVE_HASH_KIND="md5"; fi
+    pm_download_url release "$stable_url" "$archive" 20 78 pm_validate_archive_download || {
+      rc=$?
+      case "$rc" in 70) reason=cancelled ;; 65) reason=checksum ;; *) reason=network ;; esac
+      printf 'FAIL\tportmaster\t%s\n' "$reason" >> "$RESULT_FILE"; return 1
+    }
   fi
   runtime_progress_write verifying 82 0 "Verifying release assets"
   if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then actual_hash=$(pm_sha256_file "$archive" 2>/dev/null || true)
@@ -1452,7 +1250,11 @@ install_portmaster_release_inner() {
     # A completed but invalid file is never retained. Retry once without a
     # range so a bad cache cannot poison later launches.
     rm -f -- "$archive"
-    pm_download_url "$stable_url" "$archive" 20 78 || { rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ "$rc" = 70 ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1; }
+    pm_download_url release "$stable_url" "$archive" 20 78 pm_validate_archive_download || {
+      rc=$?
+      case "$rc" in 70) reason=cancelled ;; 65) reason=checksum ;; *) reason=network ;; esac
+      printf 'FAIL\tportmaster\t%s\n' "$reason" >> "$RESULT_FILE"; return 1
+    }
     if [ "$PAM_RELEASE_CHANNEL" = "miniloong-custom" ]; then actual_hash=$(pm_sha256_file "$archive" 2>/dev/null || true)
     else actual_hash=$(runtime_md5_file "$archive" 2>/dev/null || true); fi
     [ "$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')" = "$expected_hash" ] || {
@@ -1512,62 +1314,25 @@ install_portmaster_release() {
 }
 
 runtime_download_source() {
-  local official_url="$1" expected="$2" out="$3" format name base url actual rc
+  local official_url="$1" expected="$2" out="$3" actual rc
   runtime_valid_download_url "$official_url" || return 1
   case "$expected" in ""|*[!0-9]*|0) return 1 ;; esac
   if [ -L "$out" ]; then rm -f -- "$out" || return 1; fi
   actual=$(runtime_file_size "$out")
-  if [ "$actual" = "$expected" ]; then
+  if [ "$actual" = "$expected" ] && runtime_validate_download "$out"; then
     echo "$LOG_PREFIX using complete Runtime cache"
     [ -n "${RUNTIME_DOWNLOAD_VIA:-}" ] || RUNTIME_DOWNLOAD_VIA="Cache"
     runtime_progress_write downloading "$((RUNTIME_PROGRESS_SOURCE_BASE + expected))" 0 "Using local cache"
     return 0
   fi
-  if [ "$actual" -gt "$expected" ]; then
-    echo "$LOG_PREFIX discarding oversized Runtime cache"
-    rm -f -- "$out" || return 1
-    actual=0
-  elif [ "$actual" -gt 0 ]; then
-    echo "$LOG_PREFIX resuming Runtime download from $actual of $expected bytes"
-  fi
-
-  while IFS=$'\t' read -r format name base; do
-    [ -n "$format" ] && [ -n "$name" ] || continue
-    url=$(runtime_asset_url "$format" "$base" "$official_url") || continue
-    echo "$LOG_PREFIX downloading Runtime payload"
-    RUNTIME_PROGRESS_DETAIL="Connection ready"
-    actual=$(runtime_file_size "$out")
-    rc=0
-    if [ "$actual" -gt 0 ]; then
-      runtime_fetch_url "$url" "$out" 1 || rc=$?
-    else
-      runtime_fetch_url "$url" "$out" 0 || rc=$?
-    fi
-    actual=$(runtime_file_size "$out")
-    if [ "$rc" = "0" ] && [ "$actual" = "$expected" ]; then
-      RUNTIME_DOWNLOAD_VIA="network"
-      return 0
-    fi
-    if [ "$actual" -gt "$expected" ]; then
-      rm -f -- "$out"
-      actual=0
-    fi
-    # curl 33 means the endpoint rejected the requested resume offset. Retry
-    # that same source cleanly once; exact size validation still gates success.
-    if [ "$rc" = "33" ]; then
-      echo "$LOG_PREFIX source cannot resume; restarting Runtime download"
-      rm -f -- "$out" || return 1
-      rc=0
-      runtime_fetch_url "$url" "$out" 0 || rc=$?
-      actual=$(runtime_file_size "$out")
-      if [ "$rc" = "0" ] && [ "$actual" = "$expected" ]; then
-        RUNTIME_DOWNLOAD_VIA="network"
-        return 0
-      fi
-      [ "$actual" -le "$expected" ] || rm -f -- "$out"
-    fi
-  done <<< "$RUNTIME_VERIFIED_PROXIES"
-  return 1
+  [ "$actual" = 0 ] || rm -f -- "$out"
+  RUNTIME_PROGRESS_DETAIL="Downloading Runtime"
+  if github_proxy_download release "$official_url" "$out" runtime_validate_download \
+       "$RUNTIME_PROGRESS_DONE_BYTES" "$((RUNTIME_PROGRESS_DONE_BYTES + expected))" runtime; then
+    RUNTIME_DOWNLOAD_VIA="network"
+    return 0
+  else rc=$?; fi
+  return "$rc"
 }
 
 runtime_md5_file() {
@@ -1579,9 +1344,15 @@ runtime_md5_file() {
   fi
 }
 
+runtime_validate_download() {
+  [ "$(runtime_file_size "$1")" = "$RUNTIME_EXPECTED_SIZE" ] || return 1
+  runtime_has_magic "$1" || return 1
+  [ "$(runtime_md5_file "$1" 2>/dev/null || true)" = "$RUNTIME_EXPECTED_MD5" ]
+}
+
 install_runtime() {
   local runtime="$1" source_url expected_size expected_md5 actual_md5 target staged cache_root cache_dir download
-  local RUNTIME_DOWNLOAD_VIA=""
+  local RUNTIME_DOWNLOAD_VIA="" download_rc reason
   case "$runtime" in
     ""|*[!A-Za-z0-9._+-]*|.*|*..*)
       printf 'FAIL\truntime\t%s\tinvalid-name\n' "$runtime" >> "$RESULT_FILE"
@@ -1615,18 +1386,16 @@ install_runtime() {
   }
   download="$cache_dir/runtime.download"
   RUNTIME_PROGRESS_SOURCE_BASE=$RUNTIME_PROGRESS_DONE_BYTES
-  # Probe against each Runtime's exact release asset. A route that worked for
-  # one tag is not assumed to work for another Runtime release.
-  RUNTIME_PROXY_READY=0
-  RUNTIME_VERIFIED_PROXIES=""
+  RUNTIME_EXPECTED_SIZE="$expected_size"
+  RUNTIME_EXPECTED_MD5="$expected_md5"
   if [ -L "$download" ]; then rm -f -- "$download" || return 1; fi
-  if [ "$(runtime_file_size "$download")" != "$expected_size" ] &&
-     [ "${RUNTIME_PROXY_READY:-0}" != "1" ] && ! runtime_select_proxy "$source_url"; then
-    printf 'FAIL\truntime\t%s\tno-source\n' "$runtime" >> "$RESULT_FILE"
-    return 1
-  fi
-  if ! runtime_download_source "$source_url" "$expected_size" "$download"; then
-    printf 'FAIL\truntime\t%s\tdownload\n' "$runtime" >> "$RESULT_FILE"
+  if runtime_download_source "$source_url" "$expected_size" "$download"; then :
+  else
+    download_rc=$?
+    if [ "$download_rc" = 65 ]; then reason=checksum
+    elif [ "$download_rc" = 70 ]; then reason=cancelled
+    else reason=download; fi
+    printf 'FAIL\truntime\t%s\t%s\n' "$runtime" "$reason" >> "$RESULT_FILE"
     return 1
   fi
   runtime_progress_write verifying "$((RUNTIME_PROGRESS_DONE_BYTES + expected_size))" 0 "$runtime"
@@ -1646,7 +1415,7 @@ install_runtime() {
      $ESUDO mv -- "$download" "$staged" &&
      $ESUDO chmod 0644 "$staged" &&
      $ESUDO mv -f -- "$staged" "$target"; then
-    printf 'OK\truntime\t%s\t%s\n' "$runtime" "${RUNTIME_DOWNLOAD_VIA:-$RUNTIME_PROXY_NAME}" >> "$RESULT_FILE"
+    printf 'OK\truntime\t%s\t%s\n' "$runtime" "${RUNTIME_DOWNLOAD_VIA:-network}" >> "$RESULT_FILE"
     echo "$LOG_PREFIX Runtime installed: $runtime"
     rm -rf "$cache_dir"
     return 0

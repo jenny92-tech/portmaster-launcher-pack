@@ -12,11 +12,35 @@ launcher fail to start.
 |---|---|
 | `love/kit.lua` | Shared LÖVE UI: pages, items, buttons, split layout, focus, localization and busy state. |
 | `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
+| `github_proxy.sh` | Capability-aware GitHub transport: Release/Raw/Archive/API/Gist downloads and Git clone, with per-proxy URL formatters, bounded probing, same-route resume, validation and fallback. |
 | `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
 | `launcher_unity_common.sh` | **Unity-loader only**: configuration, button remap and game launch. |
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
+
+## GitHub transport
+
+`github_proxy.sh` treats a proxy as a registry row instead of assuming every
+endpoint supports every GitHub URL:
+
+```text
+id<TAB>formatter<TAB>release,raw,archive,clone,api,gist<TAB>base-url
+```
+
+Formatters currently include `direct`, `full` (prefix the complete source
+URL), `mirror` (replace `github.com`), `jsdelivr` (Raw files only), and
+`gitclone` (Git smart HTTP only). `github_proxy_fetch` filters by capability,
+probes at most five routes at once, downloads through responsive routes, and
+accepts a route only after the caller's content validator succeeds.
+`github_proxy_clone` performs the equivalent flow for Git clone. Range data is
+resumed only from the same route ID; changing routes discards the old partial.
+New endpoints can be appended as TSV rows through
+`GITHUB_PROXY_REGISTRY_EXTRA`; callers do not edit the download operations.
+
+Git LFS, GitHub Packages, and GHCR are intentionally not modeled as file
+downloads: they have separate authenticated protocols. Add them as distinct
+operations if the APP ever needs them.
 
 ## How a port's launcher.sh is structured (a template)
 

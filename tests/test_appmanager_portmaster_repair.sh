@@ -185,7 +185,7 @@ grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
 grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
 grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
-grep -Fq 'jenny92-tech/PortMaster-GUI/raw/refs/heads/miniloong-support/tools/portappmanager-installer.sh' "$TMP/success/curl.log"
+grep -Fq 'raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/portappmanager-installer.sh' "$TMP/success/curl.log"
 ! grep -Fq '/Install.sh' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip.md5' "$TMP/success/curl.log"
 grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "$TMP/success/curl.log"
@@ -222,7 +222,7 @@ run_repair cached 0 never 0 1
 # launch resumes that exact stable release instead of starting over.
 run_repair resume 0 never 0 0 0 official 1 || true
 grep -Fq $'FAIL\tportmaster\tnetwork' "$TMP/resume/state/result.txt"
-[ -s "$TMP/resume/state/portmaster-download/2026.07/PortMaster.zip" ]
+[ -s "$TMP/resume/state/portmaster-download/2026.07/PortMaster.zip.part" ]
 run_repair resume
 grep -Fq 'resume-from=' "$TMP/resume/curl.log"
 grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/resume/state/result.txt"

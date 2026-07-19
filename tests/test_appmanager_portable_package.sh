@@ -63,6 +63,9 @@ grep -Fq 'PAM_APP_ROOT/runtime/love.aarch64' "$DIST/APP Manager.sh"
 ! grep -Fq 'RUNTIME_WGET' "$DIST/APP Manager.sh"
 ! grep -Fq 'RUNTIME_DOWNLOADER' "$DIST/APP Manager.sh"
 grep -Fq 'candidate="$PAM_BIN_DIR/curl-portable"' "$DIST/APP Manager.sh"
+grep -Fq 'github_proxy_fetch()' "$DIST/APP Manager.sh"
+grep -Fq 'github_proxy_clone()' "$DIST/APP Manager.sh"
+! grep -Fq 'source "$KIT/github_proxy.sh"' "$DIST/APP Manager.sh"
 [ "$(grep -Ec '^[ab] = enter$' "$APP/love_ui/ui.gptk")" = "2" ]
 grep -Fq 'if env.portmaster_health=="healthy" then' "$APP/love_ui/main.lua"
 grep -Fq 'L("Environment Management","环境管理")' "$APP/love_ui/app_environment.lua"
@@ -106,9 +109,13 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' called >> "$PAM_TEST_CURL_LOG"
 if [ -n "$out" ]; then
-  printf '%s\n' '{' '  "stable": {' '    "version": "2026.07"' '  }' '}' > "$out"
+  printf '%s\n' '{' '  "stable": {' '    "version": "2026.07",' \
+    '    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"' \
+    '  }' '}' > "$out"
 else
-  printf '%s\n' '{' '  "stable": {' '    "version": "2026.07"' '  }' '}'
+  printf '%s\n' '{' '  "stable": {' '    "version": "2026.07",' \
+    '    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip"' \
+    '  }' '}'
 fi
 CURL
 chmod +x "$SPACED/PortAppManager/bin/curl-portable"

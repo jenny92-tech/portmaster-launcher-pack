@@ -147,6 +147,6 @@ grep -Fq $'FAIL\tportmaster\tunknown-target' "$TMP/unknown-path-state/result.txt
 grep -Fq 'id="risk:modify"' "$ROOT/ports/appmanager/love/app_environment.lua"
 grep -Fq 'id="risk:support"' "$ROOT/ports/appmanager/love/app_environment.lua"
 grep -Fq 'disabled=not ready' "$ROOT/ports/appmanager/love/app_environment.lua"
-grep -Fq 'batch_size=5' "$ROOT/ports/appmanager/src/launcher.sh"
+grep -Fq 'GITHUB_PROXY_BATCH_SIZE:-5' "$ROOT/_kit/github_proxy.sh"
 
 echo "appmanager device gate tests: PASS"
