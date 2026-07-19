@@ -7,7 +7,8 @@
 # module owns capability filtering, URL formatting, bounded probing, retry,
 # resume and content-aware fallback.
 
-GITHUB_PROXY_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L174"
+# Proxy-list maintenance source (consult only when refreshing the bundled list):
+# https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L174
 
 github_proxy_decode() {
   local hex="$1" key=(91 37 204 113 18 167 62 209 84 9 231)

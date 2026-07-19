@@ -27,9 +27,9 @@ grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI_DIR/main.lua"
 grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI_DIR/app_pages.lua"
 grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI_DIR/app_pages.lua"
 grep -Fq 'env.progress_file' "$APP_UI_DIR/app_operations.lua"
-grep -Fq 'local batch_size=5' "$LAUNCHER"
-grep -Fq 'runtime_blob_decode' "$LAUNCHER"
-grep -Fq 'RUNTIME_ROUTE_SOURCE="https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L212"' "$LAUNCHER"
+grep -Fq 'GITHUB_PROXY_BATCH_SIZE:-5' "$LAUNCHER"
+grep -Fq 'github_proxy_decode' "$LAUNCHER"
+grep -Fq '# Proxy-list maintenance source (consult only when refreshing the bundled list):' "$LAUNCHER"
 ! grep -Fq 'RUNTIME_ROUTE_CONTACT=' "$LAUNCHER"
 custom_blob=$(sed -n 's/^RUNTIME_CUSTOM_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
 github_blob=$(sed -n 's/^RUNTIME_GITHUB_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
@@ -40,7 +40,7 @@ github_blob=$(sed -n 's/^RUNTIME_GITHUB_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER
 ! grep -Fq 'Source: $RUNTIME_PROXY_NAME' "$LAUNCHER"
 ! grep -Fq '$source · $name' "$LAUNCHER"
 ! grep -Fq 'candidate.$id' "$LAUNCHER"
-grep -Fq '正在检测连接' "$APP_UI_DIR/app_model.lua"
+grep -Fq '正在检查网络' "$APP_UI_DIR/app_model.lua"
 grep -Fq '连接已就绪，正在使用' "$APP_UI_DIR/app_model.lua"
 if grep -Eq 'githubfast\.com|gitclone\.com' "$LAUNCHER"; then
   echo "unusable Git clone-only/403 services must not be Runtime candidates" >&2
@@ -414,7 +414,8 @@ EOF
     if [ "$mode" = "runtime_cached" ]; then
       printf 'hsqs-runtime-payload' > "$runtime_cache/runtime.download"
     else
-      printf 'hsqs-run' > "$runtime_cache/runtime.download"
+      printf 'hsqs-run' > "$runtime_cache/runtime.download.part"
+      printf 'g1\n' > "$runtime_cache/runtime.download.part.route"
     fi
   fi
 
@@ -603,8 +604,8 @@ EOF
       ;;
     runtime_fail)
       grep -Fxq 'old-runtime' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'FAIL\truntime\tgodot_4.5\tno-source' "$app/conf/result.txt"
-      grep -Fxq 'hsqs-run' "$runtime_cache/runtime.download"
+      grep -Fq $'FAIL\truntime\tgodot_4.5\tdownload' "$app/conf/result.txt"
+      grep -Fxq 'hsqs-run' "$runtime_cache/runtime.download.part"
       ;;
     invalid)
       [ -e "$TEST_OUTSIDE" ]

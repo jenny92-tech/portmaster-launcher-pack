@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GUI_ROOT="${PAM_GUI_ROOT_OVERRIDE:-$ROOT/../PortMaster-GUI}"
-INSTALLER="$GUI_ROOT/tools/portappmanager-installer.sh"
+INSTALLER="$GUI_ROOT/tools/appmanager-installer.sh"
 TMP="$(mktemp -d)"
 cleanup() {
   local rc=$?
