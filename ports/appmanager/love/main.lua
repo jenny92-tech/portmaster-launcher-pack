@@ -9,13 +9,15 @@ operations.bind(pages,environment)
 
 local L,page,env=model.L,model.pages,model.env
 
-local function blocking_notice(title,message,id)
+local function blocking_notice(title,message,id,on_wait)
     kit.set_busy(false)
-    kit.set_page(page.HOME,title,{
+    local rows={
         kit.textview(L("What to do","请执行"),message,{id=id..":note",focusable=false,
             expandable=false,max_lines=4,expanded_lines=4,label_px=16,value_px=20,surface=false}),
-        kit.button(L("Exit","退出"),kit.quit,{id=id..":exit"}),
-    },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+    }
+    if on_wait then rows[#rows+1]=kit.button(L("Keep waiting","继续等待"),on_wait,{id=id..":wait"}) end
+    rows[#rows+1]=kit.button(L("Exit","退出"),operations.show_exit_dialog,{id=id..":exit"})
+    kit.set_page(page.HOME,title,rows,{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
     kit.goto_page(page.HOME)
 end
 
@@ -55,8 +57,9 @@ local function poll_task(dt)
         elseif task.elapsed>(task.timeout or 1800) then
             operations.task=nil
             blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
-                L("Exit and reopen App Manager later. Do not start another installation.",
-                    "请退出并稍后重新打开 APP，不要重复安装。"),"install-timeout")
+                L("Keep waiting, or exit and reopen App Manager later. Do not start another installation.",
+                    "请继续等待，或稍后退出并重新打开 APP。不要重复安装。"),"install-timeout",
+                environment.start_active_repair_wait)
         end
         return
     end
@@ -78,8 +81,9 @@ local function poll_task(dt)
         kit.set_busy(false); operations.task=nil
         if task.kind=="portmaster" then
             blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
-                L("Exit and reopen App Manager later. Do not start another installation.",
-                    "请退出并稍后重新打开 APP，不要重复安装。"),"install-timeout")
+                L("Keep waiting, or exit and reopen App Manager later. Do not start another installation.",
+                    "请继续等待，或稍后退出并重新打开 APP。不要重复安装。"),"install-timeout",
+                environment.start_active_repair_wait)
         elseif operations.confirm_return==page.RUNTIME then
             kit.toast(L("The operation timed out. Try again later.","操作超时，请稍后重试。"),{kind="error"})
             pages.build_runtime(); kit.goto_page(page.RUNTIME)

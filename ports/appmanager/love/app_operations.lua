@@ -52,8 +52,8 @@ function Operations.new(model)
                 kit.dialog({title=L("PortMaster installed","PortMaster 已安装"),
                     message=L("Exit and reopen App Manager to finish the check.",
                         "请退出并重新打开 APP，完成最后检查。"),
-                    confirm=L("Exit now","立即退出"),cancel=L("Exit","退出"),default_focus="confirm",danger=false,
-                    on_confirm=kit.quit,on_cancel=kit.quit})
+                    confirm=L("Exit now","立即退出"),cancel=L("Stay","暂不退出"),default_focus="cancel",danger=false,
+                    on_confirm=kit.quit})
             end
             return
         end

@@ -157,7 +157,7 @@ function Environment.new(model,operations,pages_ui)
             kit.set_page(page.HOME,L("Cannot check PortMaster","无法检查 PortMaster"),{
                 note(L("What to do","请执行"),
                     L("Reinstall Port App Manager, then try again.","请重新安装 Port App Manager 后重试。"),"validation:error"),
-                button(L("Exit","退出"),kit.quit,{id="validation:exit"}),
+                button(L("Exit","退出"),operations.show_exit_dialog,{id="validation:exit"}),
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
             return
         end
@@ -166,8 +166,13 @@ function Environment.new(model,operations,pages_ui)
             note(L("Please wait","请稍候"),
                 L("Checking the installed PortMaster. Home will open automatically when it finishes.",
                     "正在检查刚安装的 PortMaster。完成后会自动进入首页。"),"validation:running"),
-            button(L("Exit","退出"),kit.quit,{id="validation:exit"}),
         },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+        kit.set_busy(true,L("Checking PortMaster…","正在检查 PortMaster……"),{
+            indeterminate=true,progress=0,
+            stage=L("Checking installed files","正在检查已安装文件"),
+            detail=L("Please wait. App Manager will continue automatically.","请稍候，检查完成后会自动继续。"),
+            footer_left=L("Automatic check","自动检查"),footer_right=L("Please wait…","请稍候……"),
+        })
         os.execute(model.shquote(env.apply_script).." --validate-pending >/dev/null 2>&1 &")
         operations.task={kind="validation",elapsed=0,poll=0,timeout=120}
     end
@@ -179,28 +184,39 @@ function Environment.new(model,operations,pages_ui)
             model.refresh_scan(); pages_ui.reset_selection(); pages_ui.build_home(); kit.goto_page(page.HOME)
             kit.toast(L("PortMaster check completed.","PortMaster 检查完成。"),{kind="success"})
         elseif status=="restored" then
+            local message=L("The new installation could not be used, so the previous version was restored. You may now exit App Manager.",
+                "新安装无法使用，已恢复原来的版本。现在可以退出 APP。")
+            kit.set_page(page.HOME,L("Previous PortMaster restored","已恢复原来的 PortMaster"),{
+                note(L("Status","状态"),message,"validation:restored"),
+                button(L("Exit","退出"),operations.show_exit_dialog,{id="validation:exit"}),
+            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+            kit.goto_page(page.HOME)
             kit.dialog({title=L("Previous PortMaster restored","已恢复原来的 PortMaster"),
-                message=L("The new installation could not be used, so the previous version was restored. Please exit App Manager.",
-                    "新安装无法使用，已恢复原来的版本。请退出 APP。"),
-                confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
-                on_confirm=kit.quit,on_cancel=kit.quit})
+                message=message,confirm=L("Exit now","立即退出"),cancel=L("Stay","暂不退出"),
+                default_focus="cancel",danger=false,on_confirm=kit.quit})
         elseif status=="no-usable" then
+            local message=L("The unusable installation was removed. Exit and reopen App Manager before trying again.",
+                "无法使用的安装已清理。再次尝试前，请退出并重新打开 APP。")
+            kit.set_page(page.HOME,L("PortMaster installation failed","PortMaster 安装失败"),{
+                note(L("Status","状态"),message,"validation:no-usable"),
+                button(L("Exit","退出"),operations.show_exit_dialog,{id="validation:exit"}),
+            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+            kit.goto_page(page.HOME)
             kit.dialog({title=L("PortMaster installation failed","PortMaster 安装失败"),
-                message=L("The unusable installation was removed. Exit and reopen App Manager, then try again.",
-                    "无法使用的安装已清理。请退出并重新打开 APP 后重试。"),
-                confirm=L("Exit","退出"),cancel=L("Exit now","立即退出"),default_focus="confirm",danger=false,
-                on_confirm=kit.quit,on_cancel=kit.quit})
+                message=message,confirm=L("Exit now","立即退出"),cancel=L("Stay","暂不退出"),
+                default_focus="cancel",danger=false,on_confirm=kit.quit})
         elseif status=="timeout" then
             kit.set_page(page.HOME,L("PortMaster check is still running","PortMaster 仍在检查"),{
                 note(L("What to do","请执行"),model.provided(detail),"validation:timeout"),
-                button(L("Exit","退出"),kit.quit,{id="validation:exit"}),
+                button(L("Keep waiting","继续等待"),self.start_pending_validation,{id="validation:wait"}),
+                button(L("Exit","退出"),operations.show_exit_dialog,{id="validation:exit"}),
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
             kit.goto_page(page.HOME)
         else
             kit.set_page(page.HOME,L("PortMaster check was interrupted","PortMaster 检查已中断"),{
                 note(L("Status","状态"),model.provided(detail),"validation:interrupted"),
                 button(L("Retry","重试"),self.start_pending_validation,{id="validation:retry"}),
-                button(L("Exit","退出"),kit.quit,{id="validation:exit"}),
+                button(L("Exit","退出"),operations.show_exit_dialog,{id="validation:exit"}),
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
             kit.goto_page(page.HOME)
         end
@@ -211,8 +227,13 @@ function Environment.new(model,operations,pages_ui)
             note(L("Please wait","请稍候"),
                 L("PortMaster is still installing. Home will open automatically when it finishes.",
                     "PortMaster 仍在安装。完成后会自动进入首页。"),"install:running"),
-            button(L("Exit","退出"),kit.quit,{id="install:exit"}),
         },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+        kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster……"),{
+            indeterminate=true,progress=0,
+            stage=L("Waiting for installation","正在等待安装完成"),
+            detail=L("App Manager will continue automatically.","安装完成后会自动继续。"),
+            footer_left=L("Installation in progress","正在安装"),footer_right=L("Please wait…","请稍候……"),
+        })
         operations.task={kind="active-repair",elapsed=0,poll=0,timeout=1800}
     end
 

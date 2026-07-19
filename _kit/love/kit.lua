@@ -51,7 +51,7 @@ local pages, page_i = {}, 1
 local navigation_stack = {}
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
-local busy, busy_message, busy_info = false, nil, nil
+local busy, busy_message, busy_info, busy_elapsed = false, nil, nil, 0
 local toast_state = nil
 local dialog_state, dialog_focus = nil, 2
 local layout, sidebar_geometry, current_sidebar_detail
@@ -355,14 +355,17 @@ function kit.set_page(index,title,rows,opts)
     return index
 end
 function kit.set_busy(value,message,info)
+    local was_busy=busy
     busy=value and true or false
     busy_message=message
     busy_info=busy and type(info)=="table" and info or nil
+    if not busy or not was_busy then busy_elapsed=0 end
 end
 function kit.debug_busy()
     return {busy=busy,message=t(busy_message or ""),stage=busy_info and t(busy_info.stage or "") or "",
         detail=busy_info and t(busy_info.detail or "") or "",
         progress=busy_info and tonumber(busy_info.progress) or nil,
+        indeterminate=busy_info and busy_info.indeterminate==true or false,
         footer_left=busy_info and t(busy_info.footer_left or "") or "",
         footer_right=busy_info and t(busy_info.footer_right or "") or "",
         cancellable=busy_info and type(busy_info.on_cancel)=="function" and not busy_info.cancel_disabled or false,
@@ -871,7 +874,7 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2; focus_stack={}; navigation_stack={}; toast_state=nil
+    dialog_state,dialog_focus=nil,2; focus_stack={}; navigation_stack={}; toast_state=nil; busy_elapsed=0
     input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
     for key,action in pairs(port.input_map or {}) do input_map[key]=action end
     measurement_cache=setmetatable({}, {__mode="k"})
@@ -885,6 +888,7 @@ function kit.load()
 end
 
 function kit.update(dt)
+    if busy then busy_elapsed=busy_elapsed+(tonumber(dt) or 0) end
     if toast_state then
         toast_state.elapsed=toast_state.elapsed+(tonumber(dt) or 0)
         if toast_state.elapsed>=toast_state.duration then toast_state=nil end
@@ -1483,15 +1487,26 @@ function kit.draw()
             plain(t(busy_message or "working"),bx+pad,by+20*L.cs,23*L.cs,{1,1,1},"left",bw-pad*2)
             plain(t(busy_info.stage or ""),bx+pad,by+55*L.cs,19*L.cs,{0.88,0.82,1},"left",bw-pad*2)
             plain(t(busy_info.detail or ""),bx+pad,by+83*L.cs,16*L.cs,{0.72,0.72,0.80},"left",bw-pad*2)
+            local indeterminate=busy_info.indeterminate==true
             local progress=math.max(0,math.min(1,tonumber(busy_info.progress) or 0))
             local track_x,track_y,track_w,track_h=bx+pad,by+116*L.cs,bw-pad*2,20*L.cs
             love.graphics.setColor(0.12,0.09,0.18,1); love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,6,6)
-            if progress>0 then
+            if indeterminate then
+                local segment=track_w*0.28
+                local offset=(busy_elapsed*0.72%1)*(track_w+segment)-segment
+                local fill_x=math.max(track_x,track_x+offset)
+                local fill_right=math.min(track_x+track_w,track_x+offset+segment)
+                if fill_right>fill_x then
+                    love.graphics.setColor(0.48,0.28,0.75,1)
+                    love.graphics.rectangle("fill",fill_x,track_y,fill_right-fill_x,track_h,6,6)
+                end
+            elseif progress>0 then
                 love.graphics.setColor(0.48,0.28,0.75,1)
                 love.graphics.rectangle("fill",track_x,track_y,track_w*progress,track_h,6,6)
             end
             love.graphics.setColor(1,1,1,0.5); love.graphics.rectangle("line",track_x,track_y,track_w,track_h,6,6)
-            plain(string.format("%d%%",math.floor(progress*100+0.5)),track_x,track_y+vcen(14*L.cs,track_h),14*L.cs,{1,1,1},"center",track_w)
+            plain(indeterminate and "…" or string.format("%d%%",math.floor(progress*100+0.5)),
+                track_x,track_y+vcen(14*L.cs,track_h),14*L.cs,{1,1,1},"center",track_w)
             plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"left",track_w)
             plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"right",track_w)
             if cancellable then
