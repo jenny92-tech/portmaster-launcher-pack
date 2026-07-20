@@ -34,12 +34,12 @@ chmod +x "$TMP/archive/PortMaster/PortMaster.sh"
 (cd "$TMP/archive" && zip -qr "$TMP/release/PortMaster.zip" PortMaster)
 cp "$GUI/tools/appmanager-installer.sh" "$TMP/release/appmanager-installer.sh"
 archive_md5=$(md5 -q "$TMP/release/PortMaster.zip" 2>/dev/null || md5sum "$TMP/release/PortMaster.zip" | awk '{print $1}')
-cat > "$TMP/release/version.json" <<'JSON'
+cat > "$TMP/release/version.json" <<JSON
 {
   "stable": {
     "version": "2026.07",
     "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",
-    "md5": "00000000000000000000000000000000"
+    "md5": "$archive_md5"
   }
 }
 JSON
@@ -68,7 +68,6 @@ cat > "$TMP/release/ports.json" <<JSON
   }
 }
 JSON
-(cd "$TMP/release" && shasum -a 256 version.json PortMaster.zip > SHA256SUMS)
 
 cat > "$TMP/app/bin/curl-portable" <<'CURL'
 #!/bin/sh
@@ -205,7 +204,7 @@ grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "
 
 run_repair miniloong-custom 0 never 0 0 0 custom
 grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/miniloong-custom/curl.log"
-grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/SHA256SUMS' "$TMP/miniloong-custom/curl.log"
+! grep -Fq '/SHA256SUMS' "$TMP/miniloong-custom/curl.log"
 ! grep -Fq 'PortsMaster/PortMaster-GUI/releases/download' "$TMP/miniloong-custom/curl.log"
 grep -Fq $'device\tminiloong' "$TMP/miniloong-custom/state/pending-install.tsv"
 

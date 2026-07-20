@@ -12,7 +12,6 @@ bash -n "$SOURCES"
   [ "$PAM_OFFICIAL_RELEASES_URL" = "https://github.com/PortsMaster/PortMaster-GUI/releases" ]
   [ "$PAM_RUNTIME_RELEASES_URL" = "https://github.com/PortsMaster/PortMaster-New/releases" ]
   [ "$PAM_CUSTOM_VERSION_URL" = "$PAM_FORK_RELEASES_URL/latest/download/version.json" ]
-  [ "$PAM_CUSTOM_CHECKSUMS_URL" = "$PAM_FORK_RELEASES_URL/latest/download/SHA256SUMS" ]
   [ "$PAM_OFFICIAL_VERSION_URL" = "$PAM_OFFICIAL_RELEASES_URL/latest/download/version.json" ]
   [ "$PAM_INSTALLER_SOURCE_URL" = "https://raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/appmanager-installer.sh" ]
   [ "$RUNTIME_METADATA_URL" = "$PAM_RUNTIME_RELEASES_URL/latest/download/ports.json" ]

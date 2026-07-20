@@ -62,10 +62,15 @@ UI 选择并确认
 
 | 内容 | 来源 | 校验 |
 | --- | --- | --- |
-| MiniLoong PortMaster | Jenny92 Fork stable | `SHA256SUMS` |
+| MiniLoong PortMaster | Jenny92 Fork stable | Fork `version.json` 中的 MD5 |
 | 其他设备 PortMaster | 官方 PortMaster-GUI stable | 官方 `version.json` 中的 MD5 |
 | App Manager 安装协议 | Jenny92 Fork 维护分支中的 `tools/appmanager-installer.sh` | 协议标记、语法和内容验证 |
 | Runtime 元数据与镜像 | 官方 PortMaster-New | URL、大小、MD5 和 SquashFS 文件头 |
+
+Port App Manager 与 PortMaster GUI 都读取标准 `version.json` 通道记录；App Manager
+固定读取 `stable`。Jenny92 Release 仍提供官方同名的 `stable`、`beta`、`alpha` 三个
+记录，但现阶段全部指向同一份已验证稳定版。这样 PortMaster 内部切换通道也不会离开
+维护版，将来启用独立测试通道时只需修改 Fork 的 CI 生成策略。
 
 GitHub 下载统一使用 `_kit/github_proxy.sh`。代理按 Release、Raw、Archive、API、Gist 和
 Clone 能力筛选，每批最多探测五条线路。下载成功的线路只在当前进程中优先复用；进程
