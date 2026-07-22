@@ -27,8 +27,6 @@ for file in \
   love_ui/main.lua \
   love_ui/kit.lua \
   runtime/love.aarch64 \
-  runtime/libs.aarch64/liblove-11.5.so \
-  runtime/compat.rocknix.aarch64/libtheoradec.so.1 \
   bin/gptokeyb \
   bin/busybox \
   bin/busybox-portable \
@@ -37,8 +35,7 @@ for file in \
   share/NotoSansSC-Regular.ttf \
   share/gamecontrollerdb.txt \
   share/cacert.pem \
-  licenses/LICENSE-love.txt \
-  licenses/LICENSE-libtheora-BSD-3-Clause.txt \
+  licenses/LICENSE-love-lite-APACHE-2.0.txt \
   licenses/LICENSE-json.lua-MIT.txt \
   licenses/LICENSE-gptokeyb.txt \
   licenses/LICENSE-noto.txt; do
@@ -65,11 +62,6 @@ assert_exact_files() {
 assert_exact_files "$APP/bin" \
   appmanager-cli busybox busybox-portable gptokeyb portkit
 assert_exact_files "$APP/runtime" \
-  compat.rocknix.aarch64/libtheoradec.so.1 \
-  libs.aarch64/liblove-11.5.so \
-  libs.aarch64/libluajit-5.1.so.2 \
-  libs.aarch64/libmodplug.so.1 \
-  libs.aarch64/libogg.so.0 \
   love.aarch64 \
   musl/libc.musl-aarch64.so.1
 assert_exact_files "$APP/licenses" \
@@ -77,11 +69,7 @@ assert_exact_files "$APP/licenses" \
   LICENSE-certifi.txt \
   LICENSE-gptokeyb.txt \
   LICENSE-json.lua-MIT.txt \
-  LICENSE-libmodplug.txt \
-  LICENSE-libogg.txt \
-  LICENSE-libtheora-BSD-3-Clause.txt \
-  LICENSE-love.txt \
-  LICENSE-luajit.txt \
+  LICENSE-love-lite-APACHE-2.0.txt \
   LICENSE-noto.txt \
   THIRD-PARTY-SOURCES.md
 
@@ -89,15 +77,13 @@ cmp "$ROOT/ports/appmanager/love/json.lua" "$APP/love_ui/json.lua"
 grep -Fq 'Copyright (c) 2020 rxi' "$APP/love_ui/json.lua"
 grep -Fq 'local json = { _version = "0.1.2" }' "$APP/love_ui/json.lua"
 grep -Fq 'dbf4b2dd2eb7c23be2773c89eb059dadd6436f94' "$APP/licenses/THIRD-PARTY-SOURCES.md"
-grep -Fq 'c4055ada0f38c34a785e8527d278218e6b77e9d48fff7c4e5b6437b0c5ecac56' "$APP/licenses/THIRD-PARTY-SOURCES.md"
-[ "$(shasum -a 256 "$APP/runtime/compat.rocknix.aarch64/libtheoradec.so.1" | awk '{print $1}')" = \
-  "c4055ada0f38c34a785e8527d278218e6b77e9d48fff7c4e5b6437b0c5ecac56" ]
-file "$APP/runtime/compat.rocknix.aarch64/libtheoradec.so.1" | grep -Fq 'ARM aarch64'
+grep -Fq 'be8930d3c9fd70ab210918218f7cbffd2df1a30a' "$APP/licenses/THIRD-PARTY-SOURCES.md"
 
 [ -x "$APP/bin/busybox-portable" ]
 grep -Fq 'runtime/musl' "$APP/bin/busybox-portable"
 [ ! -e "$APP/bin/.native-revision" ]
 [ ! -e "$APP/native-revision.txt" ]
+[ ! -e "$APP/love-lite-revision.txt" ]
 for removed in curl curl-portable unzip-portable sha256sum-portable; do
   [ ! -e "$APP/bin/$removed" ] || { echo "portable app: obsolete helper $removed was packaged" >&2; exit 1; }
 done
@@ -105,6 +91,8 @@ done
 [ -f "$APP/runtime/musl/libc.musl-aarch64.so.1" ]
 
 file "$APP/runtime/love.aarch64" | grep -Fq 'ARM aarch64'
+! strings "$APP/runtime/love.aarch64" | grep -Fq 'liblove-11.5.so'
+! strings "$APP/runtime/love.aarch64" | grep -Fq 'libluajit-5.1.so.2'
 file "$APP/bin/gptokeyb" | grep -Fq 'ARM aarch64'
 file "$APP/bin/busybox" | grep -Fq 'ARM aarch64'
 file "$APP/bin/portkit" | grep -Fq 'ARM aarch64'
@@ -116,7 +104,11 @@ file "$APP/bin/appmanager-cli" | grep -Fq 'statically linked'
 grep -Fq 'PAM_APP_ROOT="$PAM_DIR/jenny92-appmanager"' "$DIST/APP Manager.sh"
 grep -Fq 'PAM_ENV="$PAM_APP_ROOT/state/env.json"' "$DIST/APP Manager.sh"
 grep -Fq 'PAM_APP_ROOT/runtime/love.aarch64' "$DIST/APP Manager.sh"
-grep -Fq 'PAM_LOVE_LIBRARY_PATH="$PAM_THEORA_COMPAT_DIR:$PAM_LOVE_LIBRARY_PATH"' "$DIST/APP Manager.sh"
+grep -Fq 'LOVE_LITE_FPS=12' "$DIST/APP Manager.sh"
+! grep -Fq 'PAM_LOVE_LIBRARY_PATH' "$DIST/APP Manager.sh"
+! grep -Fq 'resolved_love_library_path' "$DIST/APP Manager.sh"
+! grep -Fq 'runtime/libs.aarch64' "$DIST/APP Manager.sh"
+! grep -Fq 'compat.rocknix.aarch64' "$DIST/APP Manager.sh"
 ! grep -Fq 'runtimes/love_11.5/love.txt' "$DIST/APP Manager.sh"
 ! grep -Eq '(^|[[:space:]])(source|\.)[[:space:]]+.*(control|mod_).*\.txt' "$DIST/APP Manager.sh"
 ! grep -Fq 'LEGACY_GAMEDIR' "$DIST/APP Manager.sh"

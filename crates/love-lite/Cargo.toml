@@ -1,0 +1,24 @@
+[package]
+name = "love-lite"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[features]
+default = []
+sdl-backend = ["dep:sdl2"]
+
+[dependencies]
+anyhow = "1.0"
+love-api = { path = "vendor/love-api" }
+mlua = { version = "0.10", features = ["lua51", "vendored", "send"] }
+sdl2 = { version = "0.38", features = ["use-pkgconfig"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "love-lite"
+path = "src/main.rs"
+required-features = ["sdl-backend"]

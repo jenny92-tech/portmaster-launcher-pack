@@ -83,18 +83,6 @@
           "/usr/lib",
           "/lib"
         ]
-      },
-      "love_private": {
-        "required_sonames": [
-          "liblove-11.5.so",
-          "libluajit-5.1.so.2",
-          "libmodplug.so.1",
-          "libogg.so.0",
-          "libtheoradec.so.1"
-        ],
-        "candidates": [
-          "{app_root}/runtime/libs.aarch64"
-        ]
       }
     }
   },

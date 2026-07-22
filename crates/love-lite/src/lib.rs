@@ -1,0 +1,133 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use love_api::LoveRuntime;
+use love_api::state::{LoveEvent, SharedState};
+use mlua::{Function as LuaFunction, IntoLuaMulti, Table as LuaTable};
+
+pub const DEFAULT_WIDTH: u32 = 960;
+pub const DEFAULT_HEIGHT: u32 = 720;
+const MAX_FRAME_PIXELS: u32 = 4096 * 4096;
+
+pub struct Engine {
+    pub runtime: LoveRuntime,
+    source: PathBuf,
+}
+
+impl Engine {
+    pub fn load(source: impl AsRef<Path>, width: u32, height: u32) -> Result<Self> {
+        let pixels = width
+            .checked_mul(height)
+            .context("LOVE frame dimensions overflow")?;
+        anyhow::ensure!(
+            width > 0 && height > 0,
+            "LOVE frame dimensions must be positive"
+        );
+        anyhow::ensure!(
+            pixels <= MAX_FRAME_PIXELS,
+            "LOVE frame exceeds the experimental 16-megapixel budget"
+        );
+        let source = source
+            .as_ref()
+            .canonicalize()
+            .with_context(|| format!("resolve LOVE source {}", source.as_ref().display()))?;
+        let state = Arc::new(SharedState::new(&source, width, height)?);
+        let runtime = LoveRuntime::new(state)?;
+        let engine = Self { runtime, source };
+        engine.load_lua_file_if_present("conf.lua")?;
+        engine.load_lua_file("main.lua")?;
+        engine.call_optional("load", ())?;
+        Ok(engine)
+    }
+
+    pub fn source(&self) -> &Path {
+        &self.source
+    }
+
+    pub fn key_pressed(&self, key: &str, is_repeat: bool) -> Result<()> {
+        self.runtime.state.keys_down.write().insert(key.to_owned());
+        self.call_optional("keypressed", (key, key, is_repeat))
+    }
+
+    pub fn key_released(&self, key: &str) -> Result<()> {
+        self.runtime.state.keys_down.write().remove(key);
+        self.call_optional("keyreleased", (key, key))
+    }
+
+    pub fn update_and_draw(&self, dt: f64) -> Result<()> {
+        self.call_optional("update", dt)?;
+        let background = *self.runtime.state.background_color.lock();
+        self.runtime.state.pixel_buffer.lock().clear(
+            background[0],
+            background[1],
+            background[2],
+            background[3],
+        );
+        self.call_optional("draw", ())
+    }
+
+    pub fn frame_rgba(&self) -> Vec<u8> {
+        self.runtime.state.pixel_buffer.lock().pixels.clone()
+    }
+
+    pub fn with_frame_rgba<R>(&self, read: impl FnOnce(&[u8]) -> R) -> R {
+        let frame = self.runtime.state.pixel_buffer.lock();
+        read(&frame.pixels)
+    }
+
+    pub fn should_quit(&self) -> bool {
+        *self.runtime.state.should_quit.lock()
+    }
+
+    pub fn take_quit_code(&self) -> Option<i32> {
+        let mut events = self.runtime.state.event_queue.lock();
+        events.drain(..).find_map(|event| match event {
+            LoveEvent::Quit(value) => Some(value),
+            _ => None,
+        })
+    }
+
+    fn load_lua_file_if_present(&self, name: &str) -> Result<()> {
+        let source = self.runtime.state.game_source.lock();
+        let Ok(bytes) = source.read_file(name) else {
+            return Ok(());
+        };
+        drop(source);
+        self.execute_lua(name, &bytes)
+    }
+
+    fn load_lua_file(&self, name: &str) -> Result<()> {
+        let bytes = self
+            .runtime
+            .state
+            .game_source
+            .lock()
+            .read_file(name)
+            .with_context(|| format!("read {name}"))?;
+        self.execute_lua(name, &bytes)
+    }
+
+    fn execute_lua(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        let code = std::str::from_utf8(bytes).with_context(|| format!("decode {name}"))?;
+        self.runtime
+            .lua
+            .load(code)
+            .set_name(format!("@{name}"))
+            .exec()
+            .with_context(|| format!("execute {name}"))
+    }
+
+    fn call_optional<A>(&self, callback: &str, args: A) -> Result<()>
+    where
+        A: IntoLuaMulti,
+    {
+        let love: LuaTable = self.runtime.lua.globals().get("love")?;
+        if let Ok(function) = love.get::<LuaFunction>(callback) {
+            function
+                .call::<()>(args)
+                .with_context(|| format!("love.{callback}"))?;
+        }
+        Ok(())
+    }
+}

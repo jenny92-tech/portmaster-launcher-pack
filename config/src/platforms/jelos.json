@@ -75,31 +75,6 @@
           "/lib/aarch64-linux-gnu",
           "/usr/lib/aarch64-linux-gnu"
         ]
-      },
-      "theora": {
-        "required_sonames": [
-          "libtheoradec.so.1"
-        ],
-        "candidates": [
-          "/lib",
-          "/lib64",
-          "/usr/lib",
-          "/usr/lib64",
-          "/lib/aarch64-linux-gnu",
-          "/usr/lib/aarch64-linux-gnu",
-          "{app_root}/runtime/compat.rocknix.aarch64"
-        ]
-      },
-      "love_private": {
-        "required_sonames": [
-          "liblove-11.5.so",
-          "libluajit-5.1.so.2",
-          "libmodplug.so.1",
-          "libogg.so.0"
-        ],
-        "candidates": [
-          "{app_root}/runtime/libs.aarch64"
-        ]
       }
     }
   },

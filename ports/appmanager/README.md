@@ -1,12 +1,11 @@
 # Port App Manager
 
 Port App Manager 是独立的掌机软件，用来管理 Port 启动项、回收站、残留、
-PortMaster Runtime 和 PortMaster 环境。它随包携带 aarch64 LÖVE、中文字体、
-gptokeyb、controller database、静态 Rust helper 和必要的便携工具；PortMaster
-缺失或损坏时，APP 本身仍能启动。
-
-ROCKNIX 系固件缺少 `libtheoradec.so.1` 时，启动器只为当前 APP 注入随包兼容库；
-系统已有该 SONAME 时继续使用系统版本，不修改设备库目录。
+PortMaster Runtime 和 PortMaster 环境。它随包携带只服务于 APP Manager 的
+aarch64 LOVE-lite、中文字体、gptokeyb、controller database、静态 Rust helper
+和必要的便携工具；PortMaster 缺失或损坏时，APP 本身仍能启动。LOVE-lite 直接
+执行现有 Lua/UIKit，不携带或加载 PortMaster 的 LÖVE、LuaJIT、ModPlug、Ogg、
+Theora 运行库，只要求固件提供基础 glibc 与 SDL2。
 
 ## 功能边界
 
@@ -105,7 +104,7 @@ jenny92-appmanager/
   bin/       static native and portable helpers
   config/    root config and platform details
   love_ui/   UIKit and application Lua modules
-  runtime/   private LÖVE runtime
+  runtime/   APP Manager LOVE-lite runtime and portable BusyBox loader
   share/     font, CA and controller data
   state/     plans, progress and pending validation
   trash/     recoverable uninstall batches
@@ -132,6 +131,7 @@ python3 config/scripts/generate.py --check
 python3 -m unittest -v config.tests.test_config_contract
 cargo test --workspace
 _kit/build_appmanager_native.sh
+_kit/build_appmanager_love_lite.sh
 _kit/dist_port.sh appmanager
 bash tests/test_appmanager_native_packaging.sh
 bash tests/test_appmanager_portable_package.sh

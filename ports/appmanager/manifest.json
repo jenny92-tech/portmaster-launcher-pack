@@ -1,9 +1,9 @@
 {
   "name": "jenny92-appmanager",
   "title": "APP Manager",
-  "engine": "LÖVE 11.5 (Lua)",
-  "runtime": "Bundled LÖVE 11.5 (aarch64)",
-  "launcher": "Self-contained LÖVE 11.5 (Jenny UI kit + classic gptokeyb)",
+  "engine": "LOVE-lite (Rust + Lua 5.1)",
+  "runtime": "Bundled APP Manager runtime (aarch64)",
+  "launcher": "Self-contained LOVE-lite (Jenny UI kit + classic gptokeyb)",
   "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One", "ROCKNIX", "JELOS", "UnofficialOS"],
   "language": ["en", "zh-CN"],
   "license": "CC-BY-NC-SA-4.0",

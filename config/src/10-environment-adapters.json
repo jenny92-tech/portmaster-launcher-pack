@@ -27,8 +27,7 @@
         {"operation": "set", "name": "SSL_CERT_FILE", "value": "{app_root}/share/cacert.pem"},
         {"operation": "set", "name": "CURL_CA_BUNDLE", "value": "{app_root}/share/cacert.pem"}
       ],
-      "runtime": [
-        {"operation": "prepend", "name": "LD_LIBRARY_PATH", "value": "{resolved_love_library_path}", "separator": ":"},
+    "runtime": [
         {"operation": "set", "name": "LOVE_FONT_PATH", "value": "{app_root}/share/NotoSansSC-Regular.ttf"}
       ]
     },
@@ -41,7 +40,7 @@
         ]
       },
       "love_ui": {
-        "profiles": ["graphics", "input", "network", "runtime"],
+      "profiles": ["input", "network", "runtime"],
         "operations": [
           {"operation": "set", "name": "LOVE_IDENTITY", "value": "port_app_manager"},
           {"operation": "set", "name": "LOVE_WINDOW_TITLE", "value": "Port App Manager"}
@@ -55,7 +54,7 @@
         ]
       },
       "runtime_tool": {
-        "profiles": ["network", "runtime"],
+      "profiles": ["network"],
         "operations": [
           {"operation": "set", "name": "SDL_VIDEODRIVER", "value": "dummy"},
           {"operation": "set", "name": "SDL_AUDIODRIVER", "value": "dummy"}

@@ -134,6 +134,17 @@ if [ "$PORT" = "appmanager" ]; then
     echo "stale native helpers; run _kit/build_appmanager_native.sh" >&2
     exit 1
   fi
+  expected_love_lite_revision=$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")
+  packaged_love_lite_revision=$(sed -n '1p' "$PORT_DIR/love-lite-revision.txt" 2>/dev/null || true)
+  if [ -z "$packaged_love_lite_revision" ] || [ "$packaged_love_lite_revision" != "$expected_love_lite_revision" ]; then
+    echo "stale LOVE-lite runtime; run _kit/build_appmanager_love_lite.sh" >&2
+    exit 1
+  fi
+  love_lite_description=$(file "$APP_DIST_ROOT/runtime/love.aarch64")
+  case "$love_lite_description" in
+    *ELF*ARM\ aarch64*) ;;
+    *) echo "invalid LOVE-lite runtime: $love_lite_description" >&2; exit 1 ;;
+  esac
 fi
 
 [ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"

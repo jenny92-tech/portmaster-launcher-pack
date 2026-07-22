@@ -183,24 +183,6 @@ fi
 PAM_NATIVE_PROFILE_ACTIVE=1
 [ -z "${PAM_DIRECTORY_OVERRIDE:-}" ] || directory="$PAM_DIRECTORY_OVERRIDE"
 
-# PortMaster's aarch64 LÖVE package normally relies on the firmware for Theora.
-# ROCKNIX-family images may omit it, so use the adjacent compatibility copy
-# only when this system family does not already provide the SONAME. Other
-# devices keep resolving their firmware library and are never shadowed by it.
-PAM_LOVE_LIBRARY_PATH="$PAM_RUNTIME_DIR/libs.aarch64"
-case "$param_device" in
-  rocknix|jelos|unofficialos)
-    PAM_THEORA_COMPAT_DIR="$PAM_RUNTIME_DIR/compat.rocknix.aarch64"
-    PAM_SYSTEM_THEORA=""
-    for PAM_LIBRARY_DIR in /lib /lib64 /usr/lib /usr/lib64 /lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu; do
-      if [ -e "$PAM_LIBRARY_DIR/libtheoradec.so.1" ]; then PAM_SYSTEM_THEORA=1; break; fi
-    done
-    if [ -z "$PAM_SYSTEM_THEORA" ] && [ -f "$PAM_THEORA_COMPAT_DIR/libtheoradec.so.1" ]; then
-      PAM_LOVE_LIBRARY_PATH="$PAM_THEORA_COMPAT_DIR:$PAM_LOVE_LIBRARY_PATH"
-    fi
-    ;;
-esac
-
 # APP-owned input is resolved without executing any managed PortMaster file.
 GPTOKEYB="$PAM_BIN_DIR/gptokeyb"
 SDL_GAMECONTROLLERCONFIG_FILE="$PAM_SHARE_DIR/gamecontrollerdb.txt"
@@ -2560,18 +2542,15 @@ run_portable_ui() {
   local love_pid key_pid=0 exit_code=1 native_launcher
   local wayland_dir="${XDG_RUNTIME_DIR:-/run}" wayland_name="${WAYLAND_DISPLAY:-wayland-0}"
   if [ ! -x "$PAM_APP_ROOT/runtime/love.aarch64" ] || [ ! -f "$PAM_APP_ROOT/love_ui/main.lua" ]; then
-    echo "$LOG_PREFIX private LÖVE runtime or UI is missing"
+    echo "$LOG_PREFIX APP Manager UI runtime is missing"
     return 1
   fi
   export LOVE_IDENTITY="port_app_manager"
   export LOVE_WINDOW_TITLE="Port App Manager"
   export LOVE_FONT_PATH SDL_GAMECONTROLLERCONFIG_FILE SSL_CERT_FILE CURL_CA_BUNDLE
-  export LIBGL_ES=2 LIBGL_GL=21
-  if [ "$param_device" = "trimui" ]; then
-    # The recommended TrimUI base packages use the GLES backend explicitly.
-    # Keep the private LÖVE runtime aligned with their known-good launchers.
-    export LOVE_GRAPHICS_USE_OPENGLES=1 SDL_VIDEO_GL_DRIVER=libGLESv2.so
-  fi
+  # APP Manager is mostly static UI. Its software renderer deliberately trades
+  # animation rate for much lower CPU usage on low-power handhelds.
+  export LOVE_LITE_FPS=12
   if [ -S "$wayland_dir/$wayland_name" ]; then
     export XDG_RUNTIME_DIR="$wayland_dir" WAYLAND_DISPLAY="$wayland_name" SDL_VIDEODRIVER=wayland
     unset LIBGL_FB
@@ -2591,16 +2570,14 @@ run_portable_ui() {
     set -- env exec --config-dir "$PAM_CONFIG_DIR" --scope love_ui --launcher "$native_launcher" \
       --var "app_root=$PAM_APP_ROOT" \
       --var "state_dir=$CONFDIR" \
-      --var "scripts_dir=$SCRIPTS_DIR" \
-      --var "resolved_love_library_path=$PAM_LOVE_LIBRARY_PATH"
+      --var "scripts_dir=$SCRIPTS_DIR"
     [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
     [ -s "$DEVICE_CONFIG_FILE" ] && set -- "$@" --remote-config "$DEVICE_CONFIG_FILE" --remote-config-dir "$DEVICE_CONFIG_DIR"
     [ -z "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || set -- "$@" --target-override "$PAM_NATIVE_TARGET_DEVICE"
     set -- "$@" -- "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui"
     "$PAM_PORTKIT" "$@" &
   else
-    env LD_LIBRARY_PATH="$PAM_LOVE_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-      "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui" &
+    "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui" &
   fi
   love_pid=$!
   wait "$love_pid"; exit_code=$?

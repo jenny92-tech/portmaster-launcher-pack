@@ -14,7 +14,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
-| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled LÖVE 11.5 + static Rust helpers | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
+| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled LOVE-lite + static Rust helpers | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
@@ -72,6 +72,8 @@ See [`_kit/README.md`](_kit/README.md) for the helpers each port can pull in:
   `port.json` shipped in `dist/`.
 - `build_appmanager_native.sh` — builds the static aarch64 `portkit` and
   `appmanager-cli` helpers embedded in Port App Manager.
+- `build_appmanager_love_lite.sh` — builds APP Manager's small aarch64
+  Rust/Lua UI runtime; other launchers remain on LÖVE 11.5.
 
 ## License
 

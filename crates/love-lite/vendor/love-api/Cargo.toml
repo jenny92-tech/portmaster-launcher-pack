@@ -1,0 +1,17 @@
+[package]
+name = "love-api"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+mlua = { version = "0.10", features = ["lua51", "vendored", "send"] }
+anyhow = "1.0"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+parking_lot = "0.12"
+flate2 = "1.0"
+sprite-to-text = { path = "../sprite-to-text" }
+dirs = "5"
+image = { version = "0.25", default-features = false, features = ["png"] }
+fontdue = "0.9"

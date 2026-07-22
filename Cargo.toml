@@ -1,5 +1,9 @@
 [workspace]
 members = ["crates/*"]
+exclude = [
+    "crates/love-lite/vendor/love-api",
+    "crates/love-lite/vendor/sprite-to-text",
+]
 resolver = "2"
 
 [workspace.package]

@@ -11,8 +11,16 @@ from pathlib import Path
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     files = [root / "Cargo.toml", root / "Cargo.lock"]
-    files.extend(sorted((root / "crates").rglob("*.toml")))
-    files.extend(sorted((root / "crates").rglob("*.rs")))
+    native_crates = (
+        "appmanager-cli",
+        "appmanager-core",
+        "portkit-cli",
+        "portkit-core",
+    )
+    for name in native_crates:
+        crate = root / "crates" / name
+        files.extend(sorted(crate.rglob("*.toml")))
+        files.extend(sorted(crate.rglob("*.rs")))
     files.append(root / "config" / "config.json")
     files.extend(sorted((root / "config" / "platforms").glob("*.json")))
     digest = hashlib.sha256()
