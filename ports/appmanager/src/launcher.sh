@@ -2548,9 +2548,10 @@ run_portable_ui() {
   export LOVE_IDENTITY="port_app_manager"
   export LOVE_WINDOW_TITLE="Port App Manager"
   export LOVE_FONT_PATH SDL_GAMECONTROLLERCONFIG_FILE SSL_CERT_FILE CURL_CA_BUNDLE
-  # APP Manager is mostly static UI. Its software renderer deliberately trades
-  # animation rate for much lower CPU usage on low-power handhelds.
-  export LOVE_LITE_FPS=12
+  # Static pages redraw slowly to save CPU; visible animations temporarily use
+  # the smooth rate and automatically fall back when they finish.
+  export LOVE_LITE_FPS=6
+  export LOVE_LITE_ANIMATION_FPS=30
   if [ -S "$wayland_dir/$wayland_name" ]; then
     export XDG_RUNTIME_DIR="$wayland_dir" WAYLAND_DISPLAY="$wayland_name" SDL_VIDEODRIVER=wayland
     unset LIBGL_FB
@@ -2574,10 +2575,10 @@ run_portable_ui() {
     [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
     [ -s "$DEVICE_CONFIG_FILE" ] && set -- "$@" --remote-config "$DEVICE_CONFIG_FILE" --remote-config-dir "$DEVICE_CONFIG_DIR"
     [ -z "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || set -- "$@" --target-override "$PAM_NATIVE_TARGET_DEVICE"
-    set -- "$@" -- "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui"
+    set -- "$@" -- "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui" "$DISPLAY_WIDTH" "$DISPLAY_HEIGHT"
     "$PAM_PORTKIT" "$@" &
   else
-    "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui" &
+    "$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui" "$DISPLAY_WIDTH" "$DISPLAY_HEIGHT" &
   fi
   love_pid=$!
   wait "$love_pid"; exit_code=$?

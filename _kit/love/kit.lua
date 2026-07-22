@@ -974,6 +974,7 @@ end
 -- ── LÖVE callbacks ───────────────────────────────────────────────────
 function kit.run(cfg)
     port=cfg; love.load=kit.load; love.draw=kit.draw; love.update=kit.update; love.keypressed=kit.keypressed
+    love.isAnimating=kit.is_animating
 end
 function kit.load()
     realW, realH = love.graphics.getDimensions()
@@ -1001,6 +1002,15 @@ function kit.update(dt)
         if toast_state.elapsed>=toast_state.duration then toast_state=nil end
     end
     if port and port.update then port.update(dt,kit,state) end
+end
+
+function kit.is_animating()
+    if busy and busy_info and busy_info.indeterminate==true then return true end
+    if toast_state then
+        local edge=0.22
+        return toast_state.elapsed<edge or toast_state.duration-toast_state.elapsed<edge
+    end
+    return false
 end
 
 
@@ -1771,7 +1781,7 @@ function kit.draw()
             love.graphics.setColor(0.12,0.09,0.18,1); love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,6,6)
             if indeterminate then
                 local segment=track_w*0.28
-                local offset=(busy_elapsed*0.72%1)*(track_w+segment)-segment
+                local offset=(busy_elapsed*0.38%1)*(track_w+segment)-segment
                 local fill_x=math.max(track_x,track_x+offset)
                 local fill_right=math.min(track_x+track_w,track_x+offset+segment)
                 if fill_right>fill_x then

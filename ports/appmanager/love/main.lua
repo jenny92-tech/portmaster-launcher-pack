@@ -151,7 +151,7 @@ finish_initial_load=function(skip_config_refresh)
         os.remove(env.config_refresh_result)
         operations.task={kind="config-refresh",elapsed=0,poll=0,timeout=45}
         kit.set_busy(true,L("Checking device configuration…","正在检查设备配置……"),{
-            progress=0,stage=L("Checking device configuration","正在检查设备配置"),
+            indeterminate=true,stage=L("Checking device configuration","正在检查设备配置"),
             detail=L("The built-in configuration remains available if the network is unavailable.",
                 "网络不可用时会继续使用随包配置。"),footer_left="",footer_right=L("Checking…","检查中……")})
         os.execute(model.shquote(env.apply_script).." --refresh-device-config >/dev/null 2>&1 &")

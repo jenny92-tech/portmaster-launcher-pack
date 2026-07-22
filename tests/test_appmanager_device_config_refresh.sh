@@ -67,6 +67,7 @@ run_refresh() {
   printf '%s\n' "${PAM_TEST_CONFIG_DELAY:-0}" > "$TMP/served/delay"
   env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$ROOT/target/debug/portkit" \
     PORTKIT_GITHUB_ROUTES="http://127.0.0.1:$port" \
+    PAM_DEVICE_CONFIG_URL="https://raw.githubusercontent.com/jenny92-tech/appmanager-config-test-fixture/main/config/config.json" \
     PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' CFW_NAME=TrimUI \
     PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/state" \
     bash "$ROOT/ports/appmanager/src/launcher.sh" --refresh-device-config

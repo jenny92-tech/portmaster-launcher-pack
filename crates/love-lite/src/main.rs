@@ -5,10 +5,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use love_lite::{DEFAULT_HEIGHT, DEFAULT_WIDTH, Engine};
-use sdl2::controller::{Button, GameController};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
+
+const BUILD_REVISION: &str = match option_env!("LOVE_LITE_SOURCE_REVISION") {
+    Some(revision) => revision,
+    None => "development",
+};
 
 fn main() -> ExitCode {
     match run() {
@@ -22,7 +26,14 @@ fn main() -> ExitCode {
 
 fn run() -> Result<i32> {
     let mut args = env::args().skip(1);
-    let source = args.next().unwrap_or_else(|| "demo".to_owned());
+    if matches!(args.next().as_deref(), Some("--version")) {
+        println!("love-lite {BUILD_REVISION}");
+        return Ok(0);
+    }
+    let mut args = env::args().skip(1);
+    let source = args
+        .next()
+        .context("APP Manager UI directory argument is required")?;
     let width = parse_dimension(args.next(), DEFAULT_WIDTH, "width")?;
     let height = parse_dimension(args.next(), DEFAULT_HEIGHT, "height")?;
     let engine = Engine::load(&source, width, height)?;
@@ -45,14 +56,17 @@ fn run() -> Result<i32> {
         .create_texture_streaming(PixelFormatEnum::RGBA32, width, height)
         .context("create SDL2 frame texture")?;
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
-    let _controllers = open_controllers(&sdl);
-    let confirm_button = env::var("LOVE_LITE_CONFIRM_BUTTON").unwrap_or_else(|_| "a".to_owned());
-    let target_frame_time = Duration::from_secs_f64(1.0 / target_fps() as f64);
+    let update_interval = Duration::from_secs_f64(1.0 / animation_render_fps() as f64);
+    let idle_render_interval = Duration::from_secs_f64(1.0 / idle_render_fps() as f64);
     let mut previous = Instant::now();
+    let mut last_render = previous
+        .checked_sub(idle_render_interval)
+        .unwrap_or(previous);
     let mut exit_code = 0;
 
     'running: loop {
-        let frame_started = Instant::now();
+        let update_started = Instant::now();
+        let mut redraw = last_render.elapsed() >= idle_render_interval;
         for event in events.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
@@ -63,6 +77,7 @@ fn run() -> Result<i32> {
                 } => {
                     if let Some(key) = love_key(key) {
                         engine.key_pressed(key, repeat)?;
+                        redraw = true;
                     }
                 }
                 Event::KeyUp {
@@ -70,18 +85,10 @@ fn run() -> Result<i32> {
                 } => {
                     if let Some(key) = love_key(key) {
                         engine.key_released(key)?;
+                        redraw = true;
                     }
                 }
-                Event::ControllerButtonDown { button, .. } => {
-                    if let Some(key) = controller_key(button, &confirm_button) {
-                        engine.key_pressed(key, false)?;
-                    }
-                }
-                Event::ControllerButtonUp { button, .. } => {
-                    if let Some(key) = controller_key(button, &confirm_button) {
-                        engine.key_released(key)?;
-                    }
-                }
+                Event::Window { .. } => redraw = true,
                 _ => {}
             }
         }
@@ -89,15 +96,22 @@ fn run() -> Result<i32> {
         let now = Instant::now();
         let dt = now.duration_since(previous).as_secs_f64().min(0.25);
         previous = now;
-        engine.update_and_draw(dt)?;
-        engine
-            .with_frame_rgba(|frame| texture.update(None, frame, width as usize * 4))
-            .context("upload frame")?;
-        canvas.clear();
-        canvas
-            .copy(&texture, None, None)
-            .map_err(anyhow::Error::msg)?;
-        canvas.present();
+        engine.update(dt)?;
+        if !redraw && engine.is_animating()? {
+            redraw = true;
+        }
+        if redraw {
+            last_render = Instant::now();
+            engine.draw()?;
+            engine
+                .with_frame_rgba(|frame| texture.update(None, frame, width as usize * 4))
+                .context("upload frame")?;
+            canvas.clear();
+            canvas
+                .copy(&texture, None, None)
+                .map_err(anyhow::Error::msg)?;
+            canvas.present();
+        }
 
         if let Some(code) = engine.take_quit_code() {
             exit_code = code;
@@ -105,7 +119,7 @@ fn run() -> Result<i32> {
         if engine.should_quit() {
             break;
         }
-        if let Some(remaining) = target_frame_time.checked_sub(frame_started.elapsed()) {
+        if let Some(remaining) = update_interval.checked_sub(update_started.elapsed()) {
             thread::sleep(remaining);
         }
     }
@@ -124,42 +138,20 @@ fn parse_dimension(value: Option<String>, fallback: u32, name: &str) -> Result<u
     Ok(parsed)
 }
 
-fn open_controllers(sdl: &sdl2::Sdl) -> Vec<GameController> {
-    let Ok(subsystem) = sdl.game_controller() else {
-        return Vec::new();
-    };
-    if let Some(path) = env::var_os("SDL_GAMECONTROLLERCONFIG_FILE")
-        && let Err(error) = subsystem.load_mappings(path)
-    {
-        eprintln!("love-lite: controller mappings were not loaded: {error}");
-    }
-    let count = subsystem.num_joysticks().unwrap_or(0);
-    (0..count)
-        .filter(|index| subsystem.is_game_controller(*index))
-        .filter_map(|index| subsystem.open(index).ok())
-        .collect()
+fn idle_render_fps() -> u32 {
+    render_fps("LOVE_LITE_FPS", 30)
 }
 
-fn target_fps() -> u32 {
-    env::var("LOVE_LITE_FPS")
+fn animation_render_fps() -> u32 {
+    render_fps("LOVE_LITE_ANIMATION_FPS", 30)
+}
+
+fn render_fps(name: &str, fallback: u32) -> u32 {
+    env::var(name)
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(30)
+        .unwrap_or(fallback)
         .clamp(1, 120)
-}
-
-fn controller_key(button: Button, confirm_button: &str) -> Option<&'static str> {
-    match button {
-        Button::DPadUp => Some("up"),
-        Button::DPadDown => Some("down"),
-        Button::DPadLeft => Some("left"),
-        Button::DPadRight => Some("right"),
-        Button::A if confirm_button.eq_ignore_ascii_case("a") => Some("confirm"),
-        Button::B if confirm_button.eq_ignore_ascii_case("a") => Some("cancel"),
-        Button::B => Some("confirm"),
-        Button::A => Some("cancel"),
-        _ => None,
-    }
 }
 
 fn love_key(key: Keycode) -> Option<&'static str> {

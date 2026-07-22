@@ -11,6 +11,25 @@ fn game(main: &str) -> TempDir {
 }
 
 #[test]
+fn lua_can_request_smooth_redraws_only_while_animating() {
+    let directory = game(
+        r#"
+        active = false
+        function love.isAnimating() return active end
+        "#,
+    );
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    assert!(!engine.is_animating().expect("read idle state"));
+    engine
+        .runtime
+        .lua
+        .load("active = true")
+        .exec()
+        .expect("enable animation");
+    assert!(engine.is_animating().expect("read animation state"));
+}
+
+#[test]
 fn exposes_launcher_api_contract() {
     let directory = game("");
     let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
@@ -170,6 +189,35 @@ fn renders_and_preserves_quit_code() {
         .expect("dispatch return");
     assert!(engine.should_quit());
     assert_eq!(engine.take_quit_code(), Some(42));
+}
+
+#[test]
+fn update_can_poll_background_work_without_redrawing() {
+    let directory = game(
+        r#"
+        updates = 0
+        draws = 0
+        function love.update() updates = updates + 1 end
+        function love.draw()
+            draws = draws + 1
+            love.graphics.rectangle("fill", 1, 1, 2, 2)
+        end
+        "#,
+    );
+    let engine = Engine::load(directory.path(), 16, 16).expect("load runtime");
+    engine.update(0.05).expect("poll first update");
+    engine.update(0.05).expect("poll second update");
+    let before_draw = engine.frame_rgba();
+    engine.draw().expect("draw frame");
+    let (updates, draws): (u32, u32) = engine
+        .runtime
+        .lua
+        .load("return updates, draws")
+        .eval()
+        .expect("read callback counts");
+    assert_eq!((updates, draws), (2, 1));
+    assert!(before_draw.iter().all(|value| *value == 0));
+    assert!(engine.frame_rgba().iter().any(|value| *value != 0));
 }
 
 #[test]

@@ -91,8 +91,9 @@ done
 [ -f "$APP/runtime/musl/libc.musl-aarch64.so.1" ]
 
 file "$APP/runtime/love.aarch64" | grep -Fq 'ARM aarch64'
-! strings "$APP/runtime/love.aarch64" | grep -Fq 'liblove-11.5.so'
-! strings "$APP/runtime/love.aarch64" | grep -Fq 'libluajit-5.1.so.2'
+! grep -aFq 'liblove-11.5.so' "$APP/runtime/love.aarch64"
+! grep -aFq 'libluajit-5.1.so.2' "$APP/runtime/love.aarch64"
+grep -aFq "$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")" "$APP/runtime/love.aarch64"
 file "$APP/bin/gptokeyb" | grep -Fq 'ARM aarch64'
 file "$APP/bin/busybox" | grep -Fq 'ARM aarch64'
 file "$APP/bin/portkit" | grep -Fq 'ARM aarch64'
@@ -104,7 +105,11 @@ file "$APP/bin/appmanager-cli" | grep -Fq 'statically linked'
 grep -Fq 'PAM_APP_ROOT="$PAM_DIR/jenny92-appmanager"' "$DIST/APP Manager.sh"
 grep -Fq 'PAM_ENV="$PAM_APP_ROOT/state/env.json"' "$DIST/APP Manager.sh"
 grep -Fq 'PAM_APP_ROOT/runtime/love.aarch64' "$DIST/APP Manager.sh"
-grep -Fq 'LOVE_LITE_FPS=12' "$DIST/APP Manager.sh"
+grep -Fq 'LOVE_LITE_FPS=6' "$DIST/APP Manager.sh"
+grep -Fq 'LOVE_LITE_ANIMATION_FPS=30' "$DIST/APP Manager.sh"
+grep -Fq '"$PAM_APP_ROOT/runtime/love.aarch64" "$PAM_APP_ROOT/love_ui" "$DISPLAY_WIDTH" "$DISPLAY_HEIGHT"' "$DIST/APP Manager.sh"
+grep -A2 -Fq 'indeterminate=true,stage=L("Checking device configuration"' "$APP/love_ui/main.lua"
+! grep -Fq 'Event::ControllerButton' "$ROOT/crates/love-lite/src/main.rs"
 ! grep -Fq 'PAM_LOVE_LIBRARY_PATH' "$DIST/APP Manager.sh"
 ! grep -Fq 'resolved_love_library_path' "$DIST/APP Manager.sh"
 ! grep -Fq 'runtime/libs.aarch64' "$DIST/APP Manager.sh"

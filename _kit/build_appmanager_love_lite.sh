@@ -8,6 +8,7 @@ IMAGE="${PAM_LOVE_LITE_BUILD_IMAGE:-rust:1.88-bullseye}"
 OUT="$ROOT/ports/appmanager/portable/runtime/love.aarch64"
 REVISION_FILE="$ROOT/ports/appmanager/love-lite-revision.txt"
 STAGING="$ROOT/.tmp/love-lite-build"
+REVISION="$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")"
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker is required to build the aarch64 LOVE-lite runtime." >&2
@@ -16,6 +17,7 @@ command -v docker >/dev/null 2>&1 || {
 
 mkdir -p "$STAGING" "$(dirname "$OUT")"
 docker run --rm --platform linux/arm64 \
+  -e LOVE_LITE_SOURCE_REVISION="$REVISION" \
   -v "$ROOT:/work" \
   -w /work \
   "$IMAGE" \
@@ -28,15 +30,19 @@ docker run --rm --platform linux/arm64 \
   '
 
 install -m 0755 "$STAGING/love.aarch64" "$OUT"
-python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT" > "$REVISION_FILE"
+printf '%s\n' "$REVISION" > "$REVISION_FILE"
 
 description=$(file "$OUT")
 case "$description" in
   *ELF*ARM\ aarch64*) ;;
   *) echo "LOVE-lite runtime is not an aarch64 ELF: $description" >&2; exit 65 ;;
 esac
-strings "$OUT" | grep -Fq 'liblove-11.5.so' && {
+grep -aFq 'liblove-11.5.so' "$OUT" && {
   echo "LOVE-lite unexpectedly references PortMaster's LÖVE runtime" >&2
+  exit 65
+}
+grep -aFq "$REVISION" "$OUT" || {
+  echo "LOVE-lite runtime does not contain its source revision" >&2
   exit 65
 }
 echo "$description"

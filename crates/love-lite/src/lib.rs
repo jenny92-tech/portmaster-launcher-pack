@@ -56,7 +56,16 @@ impl Engine {
     }
 
     pub fn update_and_draw(&self, dt: f64) -> Result<()> {
+        self.update(dt)?;
+        self.draw()
+    }
+
+    pub fn update(&self, dt: f64) -> Result<()> {
         self.call_optional("update", dt)?;
+        Ok(())
+    }
+
+    pub fn draw(&self) -> Result<()> {
         let background = *self.runtime.state.background_color.lock();
         self.runtime.state.pixel_buffer.lock().clear(
             background[0],
@@ -65,6 +74,14 @@ impl Engine {
             background[3],
         );
         self.call_optional("draw", ())
+    }
+
+    pub fn is_animating(&self) -> Result<bool> {
+        let love: LuaTable = self.runtime.lua.globals().get("love")?;
+        let Ok(function) = love.get::<LuaFunction>("isAnimating") else {
+            return Ok(false);
+        };
+        function.call::<bool>(()).context("love.isAnimating")
     }
 
     pub fn frame_rgba(&self) -> Vec<u8> {

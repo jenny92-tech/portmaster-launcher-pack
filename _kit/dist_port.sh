@@ -145,6 +145,10 @@ if [ "$PORT" = "appmanager" ]; then
     *ELF*ARM\ aarch64*) ;;
     *) echo "invalid LOVE-lite runtime: $love_lite_description" >&2; exit 1 ;;
   esac
+  grep -aFq "$expected_love_lite_revision" "$APP_DIST_ROOT/runtime/love.aarch64" || {
+    echo "LOVE-lite runtime does not match its source revision" >&2
+    exit 1
+  }
 fi
 
 [ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"
