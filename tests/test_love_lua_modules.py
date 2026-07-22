@@ -534,12 +534,86 @@ lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute("arg = {[1]=...}", str(root / "ports/appmanager/love"))
 lua.execute(f"dofile({str(root / 'ports/appmanager/tests/test_scan.lua')!r})")
 
+# APP Manager caches are fine-grained and lazy. Repeated page consumers reuse
+# the same Port, Trash and Runtime values; a Runtime repair invalidates only
+# Runtime-derived entries, while coalesced async requests notify every waiter.
+lua = LuaRuntime(unpack_returned_tuples=True)
+lua.execute(f"package.path={str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path")
+lua.execute(r'''
+    local calls={run=0,entries=0,health=0,invalidates=0}
+    local scanner={}
+    function scanner.run()
+        calls.run=calls.run+1
+        return {ports={{script="Game.sh",images={}}},refcount={},orphan_dirs={},orphan_images={},dead_scripts={},
+            runtimes={need={godot_4_5={"Game.sh"}},missing={}}}
+    end
+    function scanner.entries(path)
+        calls.entries=calls.entries+1
+        if path=="/trash" then return {} end
+        if path=="/libs" then return {{name="godot_4_5.squashfs",path=path.."/godot_4_5.squashfs",is_dir=false}} end
+        return {}
+    end
+    function scanner.runtime_file_health()
+        calls.health=calls.health+1; return "healthy",42
+    end
+    function scanner.invalidate() calls.invalidates=calls.invalidates+1 end
+    local model=require("app_model").new({get_state=function() return {ui_lang="en"} end},{},scanner)
+    model.env.scripts_dir="/scripts"; model.env.gamedirs_dir="/data"; model.env.images_dir="/images"
+    model.env.libs_dir="/libs"; model.env.gamedir=""; model.env.size_file=""; model.env.runtime_metadata_file=""
+    assert(model.ensure_report()==model.ensure_report() and calls.run==1)
+    assert(model.trash_items()==model.trash_items() and calls.entries==1)
+    assert(model.required_runtimes()==model.required_runtimes() and calls.health==1)
+    assert(model.installed_runtimes()==model.installed_runtimes() and calls.entries==2)
+    model.invalidate_for_plan({{kind="INSTALL_RUNTIME",arg="godot_4_5"}})
+    model.required_runtimes(); model.installed_runtimes()
+    assert(calls.run==1 and calls.health==2 and calls.entries==3)
+
+    model.invalidate_for_plan({{kind="TRASH",arg="/scripts/Game.sh"}})
+    model.ensure_report(); model.trash_items(); model.required_runtimes(); model.installed_runtimes()
+    assert(calls.run==2 and calls.health==3 and calls.entries==5)
+
+    model.invalidate_for_plan({{kind="DELETE_ITEM",arg="/trash/old/Game.sh"}})
+    model.ensure_report(); model.trash_items(); model.required_runtimes(); model.installed_runtimes()
+    assert(calls.run==2 and calls.health==3 and calls.entries==6)
+
+    model.invalidate_for_plan({{kind="INSTALL_PORTMASTER",arg="stable"}})
+    model.ensure_report(); model.trash_items(); model.required_runtimes(); model.installed_runtimes()
+    assert(calls.run==3 and calls.health==4 and calls.entries==8)
+
+    local starts,callbacks,resolve=0,0,nil
+    local function producer(done) starts=starts+1; resolve=done end
+    model.request_cached("network","release",producer,function(value) assert(value=="ok"); callbacks=callbacks+1 end)
+    model.request_cached("network","release",producer,function(value) assert(value=="ok"); callbacks=callbacks+1 end)
+    assert(starts==1 and callbacks==0)
+    resolve("ok",nil)
+    assert(callbacks==2)
+
+    local snapshot_version="a"
+    local snapshots={
+        a={ok=true,data={schema=1,ports={{script="A.sh",images={}}},refcount={},orphan_dirs={},
+            orphan_images={},dead_scripts={},trash={},runtimes={need={},facts={}}}},
+        b={ok=true,data={schema=1,ports={{script="B.sh",images={}}},refcount={},orphan_dirs={},
+            orphan_images={},dead_scripts={},trash={},runtimes={need={},facts={}}}},
+    }
+    local native_model=require("app_model").new({get_state=function() return {ui_lang="en"} end},
+        {decode=function(text) return snapshots[text] end},scanner)
+    native_model.env.inventory_file="/inventory.json"
+    native_model.env.scripts_dir="/scripts"; native_model.env.gamedirs_dir="/data"
+    native_model.env.images_dir="/images"; native_model.env.libs_dir="/libs"; native_model.env.gamedir=""
+    native_model.file_exists=function() return true end
+    native_model.read_all=function() return snapshot_version end
+    assert(native_model.ensure_report().ports[1].script=="A.sh")
+    snapshot_version="b"
+    native_model.invalidate_for_plan({{kind="TRASH",arg="/scripts/A.sh"}})
+    assert(native_model.ensure_report().ports[1].script=="B.sh")
+''')
+
 # APP Manager must use the same renderer against a real dynamic scan result.
 with tempfile.TemporaryDirectory() as source:
     base = Path(source)
     scripts = base / "scripts"
     data = base / "data"
-    app = data / "appmanager"
+    app = data / "jenny92-appmanager"
     for directory in (scripts, data / "GameData", app / "conf", app / "trash", base / "libs", base / "images"):
         directory.mkdir(parents=True, exist_ok=True)
     (base / "libs" / "frt_3.6.squashfs").write_bytes(b"hsqs")
@@ -552,6 +626,9 @@ with tempfile.TemporaryDirectory() as source:
         'GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\nruntime=godot_4.5\n',
         encoding="utf-8",
     )
+    (scripts / "Game.png").write_bytes(b"sibling image")
+    (base / "images" / "Installed.png").write_bytes(b"frontend image")
+    (base / "images" / "Orphan.png").write_bytes(b"orphan image")
     env_path = app / "conf/env.json"
     runtime_metadata = app / "conf/runtime-metadata.tsv"
     runtime_metadata.write_text(
@@ -573,8 +650,8 @@ with tempfile.TemporaryDirectory() as source:
         "progress_file": str(app / "conf/progress.tsv"),
         "size_file": str(app / "conf/sizes.tsv"),
         "runtime_metadata_file": str(runtime_metadata),
-        "ignore_dirs": ["PortMaster", "images", "appmanager"],
-        "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "appmanager"
+        "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
+        "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "jenny92-appmanager"
     }), encoding="utf-8")
     previous = os.environ.get("PAM_ENV")
     os.environ["PAM_ENV"] = str(env_path)
@@ -590,8 +667,12 @@ with tempfile.TemporaryDirectory() as source:
         str(scripts): [
             {"name": "Game.sh", "path": str(scripts / "Game.sh"), "is_dir": False},
             {"name": "Installed.sh", "path": str(scripts / "Installed.sh"), "is_dir": False},
+            {"name": "Game.png", "path": str(scripts / "Game.png"), "is_dir": False},
         ],
-        str(base / "images"): [],
+        str(base / "images"): [
+            {"name": "Installed.png", "path": str(base / "images" / "Installed.png"), "is_dir": False},
+            {"name": "Orphan.png", "path": str(base / "images" / "Orphan.png"), "is_dir": False},
+        ],
         str(base / "libs"): [
             {"name": "frt_3.6.squashfs", "path": str(base / "libs" / "frt_3.6.squashfs"), "is_dir": False},
             {"name": "godot_4.5.squashfs", "path": str(base / "libs" / "godot_4.5.squashfs"), "is_dir": False},
@@ -599,6 +680,10 @@ with tempfile.TemporaryDirectory() as source:
         str(app / "trash"): [],
     }
     lua.globals().SCAN_FIXTURE = json.dumps(fixture)
+    lua.globals().TEST_SCRIPTS = str(scripts)
+    lua.globals().TEST_DATA = str(data)
+    lua.globals().TEST_IMAGES = str(base / "images")
+    lua.globals().TEST_LIBS = str(base / "libs")
     lua.execute(r'''
         local rows=require("json").decode(SCAN_FIXTURE)
         require("scan").set_list_provider(function(path,want_dirs)
@@ -608,6 +693,19 @@ with tempfile.TemporaryDirectory() as source:
             end
             return result
         end)
+        local report=require("scan").run({
+            scripts_dir=TEST_SCRIPTS,gamedirs_dir=TEST_DATA,
+            images_dir=TEST_IMAGES,libs_dir=TEST_LIBS,
+            directory="data",home="/root",ignore_dirs={"jenny92-appmanager"},ignore_scripts={}
+        })
+        assert(#report.ports==2)
+        local images={}
+        for _,port in ipairs(report.ports) do
+            for _,image in ipairs(port.images or {}) do images[image.path]=true end
+        end
+        assert(images[TEST_SCRIPTS.."/Game.png"])
+        assert(images[TEST_IMAGES.."/Installed.png"])
+        assert(#report.orphan_images==1 and report.orphan_images[1].name=="Orphan.png")
     ''')
     lua.execute(f"dofile({str(root / 'ports/appmanager/love/main.lua')!r})")
     lua.execute(
@@ -806,6 +904,23 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("down"); assert(k.debug_focus().sidebar_i==4)
         love.keypressed("up"); assert(k.debug_focus().sidebar_i==2)
         love.keypressed("right"); assert(k.debug_focus().sidebar_i==3)
+        k.goto_page(1)
+    ''')
+    # A status-only page has no focusable row. Pressing Down must move to its
+    # sidebar (or the header when no sidebar exists) without clearing focus_i;
+    # a later Right press used to crash in nearest_sidebar_for_row.
+    lua.execute(r'''
+        local k=require("kit")
+        local status=k.add_page("Status",{
+            k.textview("State","Ready",{focusable=false})
+        },{row_layout={mode="flow",max_columns=1},sidebar={
+            k.button("Continue",function() end,{id="continue"})}})
+        k.goto_page(status)
+        love.keypressed("down")
+        local focus=k.debug_focus()
+        assert(focus.zone=="sidebar" and focus.sidebar_i==1 and focus.focus_i~=nil)
+        love.keypressed("left"); love.keypressed("right")
+        assert(k.debug_focus().zone=="sidebar")
         k.goto_page(1)
     ''')
     # preserve_focus follows a stable row id across insertions rather than

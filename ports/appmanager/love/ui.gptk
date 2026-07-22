@@ -4,8 +4,10 @@ a = enter
 b = enter
 x = esc
 y = esc
-start = enter
-back = esc
+# gptokeyb defaults an omitted Start to Enter and an omitted Back/Select to
+# Escape. Map both to a key UIKit deliberately ignores so they are true no-ops.
+start = f10
+back = f10
 guide = esc
 
 up = up

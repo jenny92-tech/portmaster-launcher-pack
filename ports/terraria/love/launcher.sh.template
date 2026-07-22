@@ -1,11 +1,20 @@
 #!/bin/bash
 # PORTMASTER: terraria, T_泰拉瑞亚.sh
 #
+# Stage-0: if the player has dropped an APK into gamedata/, run the patcher
+#          to extract it (full-screen progress UI). No APK → stay quiet so
+#          the love UI still comes up.
 # Stage-1: shared love settings UI writes launch_config.env.
-# Stage-2: apply the language to config.json, rewrite the toml, run the Unity game.
+# Stage-2: apply the language to config.json, rewrite the toml, run the Unity
+#          game. A final pre-launch check surfaces a friendly message if the
+#          player hasn't added the APK yet.
 #
 # Critical isolation: love's display env must stay confined to the
 # run_love_launcher_ui subshell and never leak into stage-2.
+#
+# Gamedata model: the port ships no game content. The player drops a legal
+# Terraria Android APK into gamedata/; patch/patch.bash extracts it into the
+# layout UnityLoader expects. See README.md for the player recipe.
 
 PORT_NAME="terraria"; LOG_PREFIX="[TER-LOVE]"
 
@@ -15,6 +24,7 @@ PORT_NAME="terraria"; LOG_PREFIX="[TER-LOVE]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_artwork.sh"
 #@KIT-END
 portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source "$controlfolder/control.txt"
@@ -26,6 +36,7 @@ if [ -n "$directory" ] && [ -d "/$directory/ports/$PORT_NAME" ]; then
 else
   GAMEDIR="/sdcard/roms/ports/$PORT_NAME"
 fi
+portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
 cd "$GAMEDIR" || exit 1
 exec > "$GAMEDIR/log.txt" 2>&1
@@ -41,6 +52,47 @@ source "$KIT/launcher_unity_common.sh"
 
 # One toml name across all ports; legacy installs are renamed in place.
 resolve_port_toml
+
+# ═══════════════ STAGE 0: first-launch APK extract (only if APK present) ══
+# If the player has dropped an APK into gamedata/ and setup hasn't run yet,
+# run the patcher now (full-screen progress UI). If there's no APK we stay
+# quiet here and let the love settings UI come up normally — the final
+# pre-launch check below surfaces the friendly "add the APK" message. This
+# ordering is deliberate: the love launcher page must always be visible.
+ter_core_files_ok() {
+  local f
+  # Resource paths match config.toml's game_files="./gamedata/" — the loader
+  # pulls from gamedata/lib and gamedata/assets, not the GAMEDIR root.
+  for f in \
+    gamedata/lib/arm64-v8a/libil2cpp.so \
+    gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat \
+    gamedata/assets/bin/Data/data.unity3d
+  do
+    [ -f "$GAMEDIR/$f" ] || return 1
+  done
+  return 0
+}
+
+ter_setup_gamedata() {
+  [ -f "$GAMEDIR/.gamedata_ready" ] && return 0
+  ter_core_files_ok && { touch "$GAMEDIR/.gamedata_ready"; return 0; }
+
+  # No APK → defer to the final check. Do NOT exit here — the love UI runs next.
+  ls "$GAMEDIR/gamedata/"*.apk >/dev/null 2>&1 || return 0
+
+  local pf="$GAMEDIR/patch/patch.bash"
+  if [ ! -f "$pf" ] || [ ! -f "$controlfolder/utils/patcher.txt" ]; then
+    echo "$LOG_PREFIX APK present but patch/patch.bash or patcher framework missing"
+    return 0
+  fi
+  chmod a+x "$pf" 2>/dev/null || true
+  export GAMEDIR
+  export PATCHER_FILE="$pf" PATCHER_GAME="Terraria" PATCHER_TIME="under 1 min"
+  echo "$LOG_PREFIX APK found — running patcher"
+  source "$controlfolder/utils/patcher.txt"
+  kill -9 $(pidof gptokeyb) 2>/dev/null || true
+}
+ter_setup_gamedata
 
 # ═══════════════ STAGE 1: love settings UI → writes launch_config.env ════
 # Shared logic lives in _kit (fonts / display / gptokeyb / exit-code gating);
@@ -105,6 +157,17 @@ export BD_SOFT_INPUT_DEFAULT="${BD_SOFT_INPUT_DEFAULT:-$TER_AUTONAME_VALUE}"
 export BD_SOFT_INPUT_FORCE_DEFAULT="${BD_SOFT_INPUT_FORCE_DEFAULT:-0}"
 export BD_SOFT_INPUT_CONFIRM_KEYS="${BD_SOFT_INPUT_CONFIRM_KEYS:-ENTER,NUMPAD_ENTER,DPAD_CENTER,BUTTON_A,BUTTON_START,BUTTON_R1,BUTTON_THUMBR}"
 export BD_SOFT_INPUT_CANCEL_KEYS="${BD_SOFT_INPUT_CANCEL_KEYS:-BACK,ESCAPE,BUTTON_B,BUTTON_SELECT}"
+
+# ═══════════════ FINAL CHECK: core files must exist before launch ═════════
+# Defence in depth only. The love launcher's prelaunch gate already toasts
+# the "add your APK" message and refuses to exit when no game data is
+# present, so reaching here with core files missing means an extract failure
+# or post-gate tampering. Just log and bail — no UI, the player was already
+# told by the launcher.
+if ! ter_core_files_ok; then
+  echo "$LOG_PREFIX core files missing at launch time (love prelaunch gate should have caught this)"
+  exit 1
+fi
 
 # ═══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game "$PORT_TOML"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PAM_TOOL_MODE=system # Host fixtures run on macOS, not the packaged aarch64 runtime.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GUI="$(cd "$ROOT/../PortMaster-GUI" && pwd)"
 TMP="$(mktemp -d)"
 cleanup() {
   local rc=$?
@@ -16,9 +16,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$ROOT/_kit/dist_port.sh" appmanager >/dev/null
+bash "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
+cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli -p portkit-cli
 mkdir -p "$TMP/release" "$TMP/archive/PortMaster/pylibs-src" "$TMP/archive/PortMaster/miniloong" "$TMP/app"
-cp -R "$ROOT/ports/appmanager/dist/PortAppManager/." "$TMP/app/"
+cp -R "$ROOT/ports/appmanager/dist/jenny92-appmanager/." "$TMP/app/"
 rm -f "$TMP/app/bin/busybox-portable"
 
 printf 'controlfolder=/unused\n' > "$TMP/archive/PortMaster/control.txt"
@@ -32,26 +33,9 @@ printf '#!/bin/sh\nexit 0\n' > "$TMP/archive/PortMaster/PortMaster.sh"
 printf '#!/bin/sh\nexec "$(dirname "$0")/PortMaster/PortMaster.sh"\n' > "$TMP/archive/PortMaster/miniloong/PortMaster.txt"
 chmod +x "$TMP/archive/PortMaster/PortMaster.sh"
 (cd "$TMP/archive" && zip -qr "$TMP/release/PortMaster.zip" PortMaster)
-cp "$GUI/tools/appmanager-installer.sh" "$TMP/release/appmanager-installer.sh"
 archive_md5=$(md5 -q "$TMP/release/PortMaster.zip" 2>/dev/null || md5sum "$TMP/release/PortMaster.zip" | awk '{print $1}')
-cat > "$TMP/release/version.json" <<JSON
-{
-  "stable": {
-    "version": "2026.07",
-    "url": "https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",
-    "md5": "$archive_md5"
-  }
-}
-JSON
-cat > "$TMP/release/official-version.json" <<JSON
-{
-  "stable": {
-    "version": "2026.07",
-    "url": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip",
-    "md5": "$archive_md5"
-  }
-}
-JSON
+printf '%s\n' "{\"stable\":{\"md5\":\"$archive_md5\",\"url\":\"https://github.com/jenny92-tech/PortMaster-GUI/releases/download/2026.07/PortMaster.zip\",\"version\":\"2026.07\"}}" > "$TMP/release/version.json"
+printf '%s\n' "{\"stable\":{\"url\":\"https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip\",\"md5\":\"$archive_md5\",\"version\":\"2026.07\"}}" > "$TMP/release/official-version.json"
 (printf 'hsqs'; printf '%016d' 0) > "$TMP/release/python_3.11.squashfs"
 python_size=$(wc -c < "$TMP/release/python_3.11.squashfs" | tr -d '[:space:]')
 python_md5=$(md5 -q "$TMP/release/python_3.11.squashfs" 2>/dev/null || md5sum "$TMP/release/python_3.11.squashfs" | awk '{print $1}')
@@ -69,73 +53,80 @@ cat > "$TMP/release/ports.json" <<JSON
 }
 JSON
 
-cat > "$TMP/app/bin/curl-portable" <<'CURL'
+cat > "$TMP/appmanager-test" <<'CLI'
 #!/bin/sh
-if [ "${1:-}" = "--version" ]; then echo 'curl test'; exit 0; fi
-printf '%s\n' "$*" >> "$PAM_TEST_CURL_LOG"
-out=""; url=""; resume=0
+case "${1:-}" in
+  fetch-stable-manifest)
+    shift; out=""; source=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in --source) source=$2; shift 2 ;; --output) out=$2; shift 2 ;; *) shift ;; esac
+    done
+    printf '%s\n' "$source" >> "$PAM_TEST_FETCH_LOG"
+    case "$source" in *PortsMaster/PortMaster-GUI*) file=official-version.json ;; *) file=version.json ;; esac
+    cp "$PAM_TEST_RELEASE/$file" "$out"; printf '%s\n' '{"ok":true}'; exit 0
+    ;;
+  fetch-runtime-metadata)
+    shift; out=""; source=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in --source) source=$2; shift 2 ;; --output) out=$2; shift 2 ;; *) shift ;; esac
+    done
+    printf '%s\n' "$source" >> "$PAM_TEST_FETCH_LOG"
+    cp "$PAM_TEST_RELEASE/ports.json" "$out"; printf '%s\n' '{"ok":true}'; exit 0
+    ;;
+esac
+exec "$PAM_REAL_APPMANAGER" "$@"
+CLI
+cat > "$TMP/portkit-test" <<'PORTKIT'
+#!/bin/sh
+if [ "${1:-}" != github ] || [ "${2:-}" != fetch ]; then exec "$PAM_REAL_PORTKIT" "$@"; fi
+shift 2
+out=""; source=""; expected=""; progress=""; cancel=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    -o) out=$2; shift 2 ;;
-    -C) resume=1; shift 2 ;;
-    http*) url=$1; shift ;;
+    --source) source=$2; shift 2 ;;
+    --output) out=$2; shift 2 ;;
+    --expected-md5) expected=$2; shift 2 ;;
+    --progress) progress=$2; shift 2 ;;
+    --cancel-file) cancel=$2; shift 2 ;;
     *) shift ;;
   esac
 done
-asset=${url##*/}
-if [ "$asset" = version.json ] && printf '%s\n' "$url" | grep -Fq 'github.com/PortsMaster/PortMaster-GUI/'; then
-  source_file="$PAM_TEST_RELEASE/official-version.json"
-else
-  source_file="$PAM_TEST_RELEASE/$asset"
-fi
+printf '%s\n' "$source" >> "$PAM_TEST_FETCH_LOG"
+asset=${source##*/}; source_file="$PAM_TEST_RELEASE/$asset"
 [ -f "$source_file" ] || exit 22
-if [ -n "$out" ]; then
-  if [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_PARTIAL:-0}" = "1" ]; then
-    if [ ! -s "$out" ]; then
+if [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_PARTIAL:-0}" = "1" ] && [ ! -s "$out.part" ]; then
       size=$(wc -c < "$source_file" | tr -d '[:space:]')
-      head -c "$((size / 2))" "$source_file" > "$out"
-    fi
-    exit 28
-  elif [ "$asset" = "PortMaster.zip" ] && [ "$resume" = 1 ] && [ -s "$out" ]; then
-    current=$(wc -c < "$out" | tr -d '[:space:]')
-    printf 'resume-from=%s\n' "$current" >> "$PAM_TEST_CURL_LOG"
-    tail -c "+$((current + 1))" "$source_file" >> "$out"
-  elif [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_CORRUPT:-0}" = "1" ]; then
-    printf 'corrupt archive\n' > "$out"
-  elif [ "$asset" = "python_3.11.squashfs" ] && [ "${PAM_TEST_CORRUPT_PYTHON:-0}" = "1" ]; then
-    printf 'corrupt runtime\n' > "$out"
-  elif [ "$asset" = "PortMaster.zip" ] && [ "${PAM_TEST_SLOW:-0}" = "1" ]; then
-    size=$(wc -c < "$source_file" | tr -d '[:space:]')
-    half=$((size / 2))
-    : > "$out"
-    sleep 1
-    head -c "$half" "$source_file" >> "$out"
-    sleep 2
-    tail -c "+$((half + 1))" "$source_file" >> "$out"
-  else
-    cp "$source_file" "$out"
-  fi
-else
-  head -c 16 "$source_file"
+      head -c "$((size / 2))" "$source_file" > "$out.part"
+      exit 2
 fi
-if [ "$asset" = "${PAM_TEST_CANCEL_ON_ASSET:-never}" ]; then : > "$PAM_TEST_CANCEL_FILE"; fi
-CURL
-cat > "$TMP/app/bin/unzip-portable" <<'UNZIP'
-#!/bin/sh
-exec unzip "$@"
-UNZIP
-cat > "$TMP/app/bin/sha256sum-portable" <<'SHA'
-#!/bin/sh
-exec shasum -a 256 "$@"
-SHA
-chmod +x "$TMP/app/bin/curl-portable" "$TMP/app/bin/unzip-portable" "$TMP/app/bin/sha256sum-portable"
+if [ "$asset" = "${PAM_TEST_CANCEL_ON_ASSET:-never}" ]; then
+  : > "$cancel"; [ -z "$progress" ] || printf '1\tcancelled\tPortMaster\t1\t1\t0\t0\t0\tCancelled\n' > "$progress"
+  exit 70
+fi
+if [ "$asset" = PortMaster.zip ] && [ "${PAM_TEST_CORRUPT:-0}" = 1 ]; then
+  printf 'corrupt archive\n' > "$out"; exit 65
+fi
+[ -z "$progress" ] || printf '1\tdownloading\tPortMaster\t1\t1\t1\t2\t1\t\n' > "$progress"
+[ "${PAM_TEST_SLOW:-0}" != 1 ] || sleep 1
+cp "$source_file" "$out"
+rm -f "$out.part" "$out.part.route"
+if [ -n "$expected" ]; then
+  actual=$(md5 -q "$out" 2>/dev/null || md5sum "$out" | awk '{print $1}')
+  [ "$actual" = "$expected" ] || { rm -f "$out"; exit 65; }
+fi
+printf '%s\n' '{"ok":true}'
+PORTKIT
+chmod +x "$TMP/appmanager-test" "$TMP/portkit-test"
 
 run_repair() {
   local name=$1 corrupt=${2:-0} cancel_asset=${3:-never} existing=${4:-0} cached=${5:-0} slow=${6:-0}
-  local channel=${7:-official} partial=${8:-0} force_python_runtime=${9:-0} corrupt_python=${10:-0} cached_python=${11:-0} loong_file
-  local state="$TMP/$name/state" target="$TMP/$name/PortMaster" scripts="$TMP/$name/scripts"
+  local channel=${7:-official} partial=${8:-0} force_python_runtime=${9:-0} cached_python=${10:-0}
+  local device_root="$TMP/$name/device"
+  local state="$TMP/$name/state" scripts="$device_root/mnt/sdcard/roms/ports"
+  local target="$scripts/PortMaster"
   local observer_pid=0 rc=0
   mkdir -p "$state" "$scripts" "$target/libs"
+  printf '#!/bin/sh\nexit 0\n' > "$scripts/APP Manager.sh"
   if [ "$cached_python" = 1 ]; then
     cp "$TMP/release/python_3.11.squashfs" "$target/libs/python_3.11.squashfs"
     printf 'python_3.11\taarch64\t%s\t%s\thttps://github.com/PortsMaster/PortMaster-New/releases/download/test/python_3.11.squashfs\n' \
@@ -154,12 +145,12 @@ run_repair() {
     printf 'old-core\n' > "$target/old.txt"
     printf 'old-launcher\n' > "$scripts/PortMaster.sh"
   fi
-  printf '# plan\nINSTALL_PORTMASTER\tstable\n' > "$state/plan.txt"
   if [ "$channel" = custom ]; then
-    mkdir -p "$TMP/loong"; printf '1.0\n' > "$TMP/loong/loong_version"
-    loong_file="$TMP/loong/loong_version"
+    mkdir -p "$device_root/loong"; printf '1.0\n' > "$device_root/loong/loong_version"
+    printf '# plan\nINSTALL_PORTMASTER\tstable\n' > "$state/plan.txt"
   else
-    loong_file="$TMP/no-loong"
+    printf '# plan\nACK_DEVICE_RISK\tunsupported-known\nACK_DEVICE_SUPPORT\t%s\nINSTALL_PORTMASTER\tstable\n' \
+      "$target" > "$state/plan.txt"
   fi
   if [ "$slow" = 1 ]; then
     (
@@ -171,15 +162,17 @@ run_repair() {
     ) &
     observer_pid=$!
   fi
-  PAM_SOURCE_DIR="$TMP" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$state" \
-    PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_DIRECTORY_OVERRIDE="${TMP#/}/$name/data" \
+  PAM_SOURCE_DIR="$scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$state" \
+    PAM_PORTMASTER_DIR_OVERRIDE="$target" PAM_DIRECTORY_OVERRIDE="$device_root/mnt/sdcard/ports/appmanager" \
+    PAM_NATIVE_ROOT="$device_root" \
+    PAM_NATIVE_LAUNCHER_OVERRIDE="$scripts/APP Manager.sh" \
+    PAM_REAL_APPMANAGER="$ROOT/target/debug/appmanager-cli" \
+    PAM_REAL_PORTKIT="$ROOT/target/debug/portkit" \
+    PAM_APPMANAGER_CLI_BIN_OVERRIDE="$TMP/appmanager-test" \
+    PAM_PORTKIT_BIN_OVERRIDE="$TMP/portkit-test" \
     PAM_PYTHON3_CMD_OVERRIDE="$([ "$force_python_runtime" = 1 ] && echo /missing/python3 || echo python3)" \
-    PAM_DEVICE_CLASS_OVERRIDE=tested PAM_TARGET_CONFIRMED_OVERRIDE=1 \
-    PAM_PARAM_DEVICE_OVERRIDE=miniloong \
-    PAM_LOONG_VERSION_FILE="$loong_file" \
     PAM_RUNTIME_CUSTOM_PROXIES='custom|test|https://proxy.invalid' PAM_RUNTIME_PROXIES='' \
-    PAM_TEST_RELEASE="$TMP/release" PAM_TEST_CURL_LOG="$TMP/$name/curl.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
-    PAM_TEST_CORRUPT_PYTHON="$corrupt_python" \
+    PAM_TEST_RELEASE="$TMP/release" PAM_TEST_FETCH_LOG="$TMP/$name/fetch.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
     PAM_TEST_PARTIAL="$partial" \
     PAM_TEST_CANCEL_ON_ASSET="$cancel_asset" PAM_TEST_CANCEL_FILE="$state/cancel.request" \
     bash "$ROOT/ports/appmanager/src/launcher.sh" --apply-plan || rc=$?
@@ -188,48 +181,32 @@ run_repair() {
 }
 
 run_repair success
-[ -f "$TMP/success/PortMaster/control.txt" ]
-[ -f "$TMP/success/PortMaster/libs/keep.squashfs" ]
+[ -f "$TMP/success/device/mnt/sdcard/roms/ports/PortMaster/control.txt" ]
+[ -f "$TMP/success/device/mnt/sdcard/roms/ports/PortMaster/libs/keep.squashfs" ]
 [ -s "$TMP/success/state/pending-install.tsv" ]
 [ -s "$TMP/success/state/pending-manifest.tsv" ]
 grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/success/state/result.txt"
-grep -Fq -- '-C -' "$TMP/success/curl.log"
 grep -Fq $'complete\tPortMaster' "$TMP/success/state/progress.tsv"
-grep -Fq 'PortsMaster/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
-! grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/curl.log"
-! grep -Fq '/SHA256SUMS' "$TMP/success/curl.log"
-grep -Fq 'raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/appmanager-installer.sh' "$TMP/success/curl.log"
-! grep -Fq '/Install.sh' "$TMP/success/curl.log"
-grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "$TMP/success/curl.log"
+grep -Fq 'PortsMaster/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/fetch.log"
+! grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/success/fetch.log"
+! grep -Fq '/SHA256SUMS' "$TMP/success/fetch.log"
+! grep -Fq 'appmanager-installer.sh' "$TMP/success/fetch.log"
+! grep -Fq '/Install.sh' "$TMP/success/fetch.log"
+grep -Fq 'PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip' "$TMP/success/fetch.log"
 
 run_repair miniloong-custom 0 never 0 0 0 custom
-grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/miniloong-custom/curl.log"
-! grep -Fq '/SHA256SUMS' "$TMP/miniloong-custom/curl.log"
-! grep -Fq 'PortsMaster/PortMaster-GUI/releases/download' "$TMP/miniloong-custom/curl.log"
+grep -Fq 'jenny92-tech/PortMaster-GUI/releases/latest/download/version.json' "$TMP/miniloong-custom/fetch.log"
+! grep -Fq '/SHA256SUMS' "$TMP/miniloong-custom/fetch.log"
+! grep -Fq 'PortsMaster/PortMaster-GUI/releases/download' "$TMP/miniloong-custom/fetch.log"
 grep -Fq $'device\tminiloong' "$TMP/miniloong-custom/state/pending-install.tsv"
 
-# Python is a PortMaster dependency. The MiniLoong adapter supplies the shared
-# Runtime fallback when the firmware interpreter is unavailable.
-run_repair python-bootstrap 0 never 0 0 0 custom 0 1
-grep -Fq $'OK\truntime\tpython_3.11\t' "$TMP/python-bootstrap/state/result.txt"
-grep -Fq $'OK\tportmaster\tpending-validation' "$TMP/python-bootstrap/state/result.txt"
-[ -f "$TMP/python-bootstrap/PortMaster/libs/python_3.11.squashfs" ]
-cmp "$TMP/release/python_3.11.squashfs" "$TMP/python-bootstrap/PortMaster/libs/python_3.11.squashfs"
-grep -Fq '/python_3.11.squashfs' "$TMP/python-bootstrap/curl.log"
-
-run_repair python-bootstrap-cached 0 never 0 0 0 custom 0 1 0 1
-! grep -Fq '/ports.json' "$TMP/python-bootstrap-cached/curl.log"
-! grep -Fq '/python_3.11.squashfs' "$TMP/python-bootstrap-cached/curl.log"
-cmp "$TMP/release/python_3.11.squashfs" "$TMP/python-bootstrap-cached/PortMaster/libs/python_3.11.squashfs"
-
-run_repair python-bootstrap-failure 0 never 1 0 0 custom 0 1 1 || true
-grep -Fq $'FAIL\tportmaster\tpython-runtime' "$TMP/python-bootstrap-failure/state/result.txt"
-grep -Fxq old-core "$TMP/python-bootstrap-failure/PortMaster/old.txt"
-grep -Fxq old-control "$TMP/python-bootstrap-failure/PortMaster/control.txt"
-[ ! -f "$TMP/python-bootstrap-failure/state/pending-install.tsv" ]
+run_repair python-bootstrap-cached 0 never 0 0 0 custom 0 1 1
+! grep -Fq '/ports.json' "$TMP/python-bootstrap-cached/fetch.log"
+! grep -Fq '/python_3.11.squashfs' "$TMP/python-bootstrap-cached/fetch.log"
+cmp "$TMP/release/python_3.11.squashfs" "$TMP/python-bootstrap-cached/device/mnt/sdcard/roms/ports/PortMaster/libs/python_3.11.squashfs"
 
 run_repair cached 0 never 0 1
-! grep -Fq '/PortMaster.zip' "$TMP/cached/curl.log"
+! grep -Fq '/PortMaster.zip' "$TMP/cached/fetch.log"
 
 # A failed operation keeps its version-scoped partial archive. A later launch
 # resumes only when normal probing selects the same route; otherwise it safely
@@ -247,19 +224,19 @@ run_repair speed 0 never 0 0 1
 
 run_repair update 0 never 1
 grep -Fq $'mode\tupdate' "$TMP/update/state/pending-install.tsv"
-[ -f "$TMP/update/PortMaster/.appmanager-rollback/core/old.txt" ]
-grep -Fq "PORTMASTER_VERSION = '2026.07'" "$TMP/update/PortMaster/pugwash"
-grep -Fxq 'runtime sentinel' "$TMP/update/PortMaster/libs/keep.squashfs"
+[ -f "$TMP/update/device/mnt/sdcard/roms/ports/PortMaster/.appmanager-rollback/core/old.txt" ]
+grep -Fq "PORTMASTER_VERSION = '2026.07'" "$TMP/update/device/mnt/sdcard/roms/ports/PortMaster/pugwash"
+grep -Fxq 'runtime sentinel' "$TMP/update/device/mnt/sdcard/roms/ports/PortMaster/libs/keep.squashfs"
 
 run_repair checksum 1 || true
 grep -Fq $'FAIL\tportmaster\tchecksum' "$TMP/checksum/state/result.txt"
-[ ! -f "$TMP/checksum/PortMaster/control.txt" ]
-[ -f "$TMP/checksum/PortMaster/libs/keep.squashfs" ]
+[ ! -f "$TMP/checksum/device/mnt/sdcard/roms/ports/PortMaster/control.txt" ]
+[ -f "$TMP/checksum/device/mnt/sdcard/roms/ports/PortMaster/libs/keep.squashfs" ]
 
 run_repair cancelled 0 PortMaster.zip || true
 grep -Fq $'FAIL\tportmaster\tcancelled' "$TMP/cancelled/state/result.txt"
 grep -Fq $'cancelled\tPortMaster' "$TMP/cancelled/state/progress.tsv"
-[ ! -f "$TMP/cancelled/PortMaster/control.txt" ]
-[ -f "$TMP/cancelled/PortMaster/libs/keep.squashfs" ]
+[ ! -f "$TMP/cancelled/device/mnt/sdcard/roms/ports/PortMaster/control.txt" ]
+[ -f "$TMP/cancelled/device/mnt/sdcard/roms/ports/PortMaster/libs/keep.squashfs" ]
 
 echo "appmanager PortMaster repair tests: PASS"

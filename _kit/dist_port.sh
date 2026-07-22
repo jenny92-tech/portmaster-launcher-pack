@@ -9,8 +9,10 @@
 #   ports/<port>/dist/  files that should be copied to the device
 #
 # Deploy rule:
-#   dist/*.sh      -> device Roms/PORTS/
-#   dist/non-*.sh  -> device Data/ports/<port>/
+#   dist/*.sh               -> device Roms/PORTS/
+#   remaining dist payload  -> device Data/ports/<port>/
+# The package-owned same-stem image is copied to the frontend image directory
+# by the launcher on first run.
 
 set -euo pipefail
 
@@ -109,6 +111,29 @@ fi
 # reach into another repository or an installed PortMaster tree.
 if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
   cp -R "$PORT_DIR/portable/." "$APP_DIST_ROOT/"
+fi
+
+if [ "$PORT" = "appmanager" ]; then
+  mkdir -p "$APP_DIST_ROOT/config/platforms"
+  cp "$ROOT/config/config.json" "$APP_DIST_ROOT/config/config.json"
+  cp "$ROOT/config/platforms/"*.json "$APP_DIST_ROOT/config/platforms/"
+  for native_helper in portkit appmanager-cli; do
+    [ -x "$APP_DIST_ROOT/bin/$native_helper" ] || {
+      echo "missing native helper $native_helper; run _kit/build_appmanager_native.sh" >&2
+      exit 1
+    }
+    native_description=$(file "$APP_DIST_ROOT/bin/$native_helper")
+    case "$native_description" in
+      *ELF*ARM\ aarch64*statically\ linked*) ;;
+      *) echo "invalid native helper $native_helper: $native_description" >&2; exit 1 ;;
+    esac
+  done
+  expected_native_revision=$(python3 "$ROOT/_kit/appmanager_native_revision.py" "$ROOT")
+  packaged_native_revision=$(sed -n '1p' "$PORT_DIR/native-revision.txt" 2>/dev/null || true)
+  if [ -z "$packaged_native_revision" ] || [ "$packaged_native_revision" != "$expected_native_revision" ]; then
+    echo "stale native helpers; run _kit/build_appmanager_native.sh" >&2
+    exit 1
+  fi
 fi
 
 [ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"

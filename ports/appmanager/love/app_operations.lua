@@ -38,10 +38,16 @@ function Operations.new(model)
         local failed=result and result:match("FAIL")
         if failed then
             kit.toast(L("The operation failed. See log.txt.","操作失败，请查看 log.txt。"),{kind="error"})
+        elseif completed_task and completed_task.kind=="appledouble" then
+            local count=tonumber(result and result:match("OK\tappledouble\t(%d+)")) or 0
+            kit.toast(L(string.format("Removed %d ._Files garbage files.",count),
+                string.format("已清理 %d 个 ._Files 垃圾文件。",count)),{kind="success"})
         else
             kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
         end
-        model.load_env(); model.refresh_scan(); page_builders.reset_selection()
+        model.load_env()
+        model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
+        page_builders.reset_selection()
         if completed_task and completed_task.kind=="portmaster" then
             if failed then
                 environment.build_manage(); kit.goto_page(pages.MANAGE)
@@ -79,9 +85,10 @@ function Operations.new(model)
             kit.goto_page(self.confirm_return); return
         end
         if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
-        local portmaster=false
+        local portmaster,appledouble=false,false
         for _,item in ipairs(self.confirm_plan) do
             if item.kind=="INSTALL_PORTMASTER" then portmaster=true; break end
+            if item.kind=="CLEAN_APPLEDOUBLE" then appledouble=true end
         end
         if portmaster then
             if env.cancel_file and env.cancel_file~="" then os.remove(env.cancel_file) end
@@ -93,12 +100,16 @@ function Operations.new(model)
             kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),{
                 progress=0,stage=L("Starting repair","正在启动修复"),detail="",
                 footer_left=L("Preparing…","准备中…"),footer_right=L("Preparing…","准备中…")})
+        elseif appledouble then
+            kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files…"),{
+                progress=0,stage=L("Scanning Port directories","正在扫描 Port 目录"),detail="",
+                footer_left=L("0 files","0 个文件"),footer_right=L("Scanning…","扫描中…")})
         else
             kit.set_busy(true,L("Working…","处理中…"))
         end
         os.execute(model.shquote(env.apply_script).." --apply-plan >/dev/null 2>&1 &")
-        self.task={elapsed=0,poll=0,timeout=(self.confirm_return==pages.RUNTIME or portmaster) and 1800 or 45,
-            kind=portmaster and "portmaster" or "operation"}
+        self.task={elapsed=0,poll=0,timeout=(self.confirm_return==pages.RUNTIME or portmaster or appledouble) and 1800 or 45,
+            kind=portmaster and "portmaster" or appledouble and "appledouble" or "operation",plan=self.confirm_plan}
     end
 
     function self.start_plan(plan,return_page)

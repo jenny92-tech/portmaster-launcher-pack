@@ -18,6 +18,7 @@ function Pages.new(model,operations)
             expanded_lines=3,label_px=16,value_px=19,surface=false})
     end
     local function empty(values) return function() return model.selected_count(values)==0 end end
+    local function enabled(name) return env[name]~=false end
 
     function self.bind_environment(value) environment=value end
     function self.reset_selection()
@@ -40,7 +41,7 @@ function Pages.new(model,operations)
         for _,port in ipairs(selected_ports) do
             plan[#plan+1]={kind="TRASH",arg=env.scripts_dir.."/"..port.script}
             for _,image in ipairs(port.images or {}) do
-                if env.images_dir and env.images_dir~="" then plan[#plan+1]={kind="TRASH",arg=env.images_dir.."/"..image} end
+                if image.path and image.path~="" then plan[#plan+1]={kind="TRASH",arg=image.path} end
             end
             if port.dir~="" and dir_counts[port.dir]==(report.refcount[port.dir] or 0) and not planned_dirs[port.dir] then
                 planned_dirs[port.dir]=true
@@ -64,12 +65,17 @@ function Pages.new(model,operations)
     end
 
     function self.build_home(preserve_focus)
+        local can_manage_ports=enabled("capability_manage_ports")
+        local can_trash=can_manage_ports and enabled("capability_trash")
+        local can_leftovers=can_manage_ports and enabled("capability_leftovers") and can_trash
+        local can_runtimes=enabled("capability_repair_runtimes")
+        if can_manage_ports then model.ensure_report() end
         local rows={}
-        for _,port in ipairs(report.ports or {}) do
+        for _,port in ipairs(can_manage_ports and (report.ports or {}) or {}) do
             local script=port.script
             local paths={env.scripts_dir.."/"..script}
             if port.dir~="" then paths[#paths+1]=env.gamedirs_dir.."/"..port.dir end
-            for _,image in ipairs(port.images or {}) do if env.images_dir~="" then paths[#paths+1]=env.images_dir.."/"..image end end
+            for _,image in ipairs(port.images or {}) do if image.path and image.path~="" then paths[#paths+1]=image.path end end
             local detail={}
             if port.dir~="" then detail[#detail+1]=port.dir.."/"
             elseif port.claimed_dir~="" then detail[#detail+1]=L("Missing data: ","数据缺失：")[kit.get_state().ui_lang]..port.claimed_dir end
@@ -82,28 +88,82 @@ function Pages.new(model,operations)
                 badge=missing~="" and kit.badge(L("Runtime missing","缺少 Runtime")) or nil,
             })
         end
-        if #rows==0 then rows[1]=note(L("Status","状态"),L("No ports are available to manage.","没有可管理的游戏。"),"home:empty") end
+        if #rows==0 then rows[1]=note(L("Status","状态"),can_manage_ports and
+            L("No ports are available to manage.","没有可管理的游戏。") or
+            L("Port management is unavailable on this device profile.","当前设备配置未启用 Port 游戏管理。"),"home:empty") end
         local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
-        local trash_count=#self.collect_trash()
-        local runtime_count=model.runtime_issue_count()
+        for _,port in ipairs(report.ports or {}) do
+            if port.dir~="" and ((report.refcount or {})[port.dir] or 0)>1 then
+                junk_count=junk_count+1
+            end
+        end
+        local trash_count=can_trash and #self.collect_trash() or 0
+        local runtime_count=can_runtimes and model.runtime_issue_count() or 0
+        local sidebar={}
+        if can_trash then
+            sidebar[#sidebar+1]=button(model.dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,
+                {id="uninstall",disabled=empty(selected_home)})
+            sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
+                function() self.build_trash(); kit.push_page(page.TRASH) end,{id="trash"})
+        end
+        if can_manage_ports then
+            sidebar[#sidebar+1]=button(L("Select all","全选"),function() select_all_home(true) end,{half=true,id="select-all"})
+            sidebar[#sidebar+1]=button(L("Select none","全不选"),function() select_all_home(false) end,{half=true,id="select-none"})
+        end
+        if can_leftovers then
+            sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
+                function() self.build_junk(); kit.push_page(page.JUNK) end,{id="leftovers"})
+        end
+        if can_runtimes then
+            sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
+                function() self.build_runtime(); kit.push_page(page.RUNTIME) end,{id="runtime-repair-entry"})
+        end
+        sidebar[#sidebar+1]=button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"})
         kit.set_page(page.HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
             preserve_focus=preserve_focus,sidebar_title=L("Quick Tools","快捷工具"),
             sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
             header_action=button(L("Environment","环境管理"),function() environment.build_manage(); kit.push_page(page.MANAGE) end,
-                {badge=model.update_state()=="update" and kit.badge(L("Update","可升级"),{0.62,0.64,0.69}) or nil}),
-            sidebar={
-            button(model.dynamic_count("Uninstall (%d)","卸载 (%d)",selected_home),uninstall_selected,
-                {id="uninstall",disabled=empty(selected_home)}),
-            button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
-                function() self.build_trash(); kit.push_page(page.TRASH) end,{id="trash"}),
-            button(L("Select all","全选"),function() select_all_home(true) end,{half=true,id="select-all"}),
-            button(L("Select none","全不选"),function() select_all_home(false) end,{half=true,id="select-none"}),
-            button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
-                function() self.build_junk(); kit.push_page(page.JUNK) end,{id="leftovers"}),
-            button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
-                function() self.build_runtime(); kit.push_page(page.RUNTIME) end,{id="runtime-repair-entry"}),
-            button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"}),
-        }})
+                {badge=env.portmaster_management=="system" and kit.badge(L("System managed","系统管理"),{0.62,0.64,0.69}) or
+                    (model.update_state()=="update" and kit.badge(L("Update","可升级"),{0.62,0.64,0.69}) or nil)}),
+            sidebar=sidebar})
+        local state=kit.get_state()
+        if state.onboarding_seen~="1" then
+            kit.guide({
+                title=L("Welcome to Port App Manager","欢迎使用 Port App Manager"),
+                message=L(
+                    "A maintenance tool for Port games. Use it to maintain PortMaster, manage Runtimes, and safely uninstall games.",
+                    "这是一款 Port 游戏维护工具，可以维护 PortMaster、管理 Runtime，并安全卸载游戏。"),
+                confirm=L("Start using","开始使用"),
+                callouts={
+                    {target="header",title=L("PortMaster environment","PortMaster 环境"),
+                        body=env.portmaster_management=="system" and L(
+                            "View the PortMaster version, device and path here. PortMaster is maintained by this system, so Port App Manager will not install, update, or replace its core.",
+                            "在这里查看 PortMaster 的版本、设备和路径。当前系统负责维护 PortMaster，因此 Port App Manager 不会安装、更新或覆盖它的核心。") or L(
+                            "View the PortMaster version, device and install path, and check for updates. If PortMaster is missing or damaged, install or repair it here.",
+                            "查看 PortMaster 的版本、设备和安装路径，并检查更新。PortMaster 缺失或损坏时，可以在这里下载安装或修复。")},
+                    {targets={"uninstall","trash"},title=L("Uninstall and Trash","卸载与回收站"),
+                        body=L(
+                            "When uninstalling, the game's launcher, images and exclusive data are moved to Trash by default instead of being deleted immediately. Restore them at any time, or delete them permanently after confirmation.",
+                            "卸载时，游戏启动项、图片和独占数据默认移入回收站，不会立即删除。可以随时还原，确认后也可以彻底删除。")},
+                    {target="leftovers",title=L("Leftover cleanup","残留清理"),
+                        body=L(
+                            "Find unmatched launchers and data folders; ordinary orphan SH files and folders are selected by default. SH launchers that point to the same folder are grouped as duplicate references. They are not preselected: review the warning and choose which launchers to remove.",
+                            "查找不配套的 SH 和数据目录；普通的孤儿 SH 与孤儿目录会默认勾选。多个 SH 指向同一目录时，会按目录聚合为“重复引用”，默认不勾选；请阅读提示后自行选择要清理的启动器。")},
+                    {target="runtime-repair-entry",title=L("Runtime management","Runtime 管理"),
+                        body=L(
+                            "Check the Runtimes required by installed Port games. Missing or damaged Runtimes can be downloaded, verified and repaired automatically.",
+                            "检查已安装 Port 游戏需要的 Runtime。Runtime 缺失或损坏时，可以自动下载、校验并修复。")},
+                    {target="footer",title=L("Maintainer and feedback","维护者与反馈"),
+                        body=L(
+                            "Maintainer: Bili 解腻Jenny. Adapted for restricted networks and handheld devices. If you encounter a problem, keep log.txt and report it through the QQ group.",
+                            "维护者：Bili 解腻Jenny。针对受限网络和掌机环境进行了适配。遇到问题请保留 log.txt，并通过 QQ 群反馈。")},
+                },
+                on_confirm=function()
+                    state.onboarding_seen="1"
+                    kit.persist_state()
+                end,
+            })
+        end
     end
 
     local function select_all_runtime(value)
@@ -207,50 +267,97 @@ function Pages.new(model,operations)
             {confirm=L("Move to Trash","移入回收站")}) end
     end
 
+    local function cleanup_appledouble()
+        local plan={{kind="CLEAN_APPLEDOUBLE",arg="-"}}
+        operations.show_confirm(L("Clean ._Files garbage files","清理 ._Files 垃圾文件"),plan,{},page.JUNK,{
+            message=L(
+                "Scan the managed Port launcher, data and image directories. Every macOS ._* metadata file found will be deleted immediately. This cannot be undone.",
+                "将扫描受管的 Port 启动器、数据和图片目录。发现 macOS 生成的 ._* 元数据文件后会立即永久删除，此操作无法撤销。"),
+            confirm=L("Start cleanup","开始清理"),danger=true,
+        })
+    end
+
     function self.build_junk(preserve_focus)
-        local rows={}
-        local function add(label,detail,path)
+        model.ensure_report()
+        if not preserve_focus then clear(selected_junk) end
+        local rows,item_count={},0
+        rows[#rows+1]=kit.textview(L("Cleanup rules","清理说明"),L(
+            "Ordinary orphan SH files and data folders are selected by default. When several SH launchers reference the same folder, they are grouped below as duplicate references and left unselected. Choose the launchers yourself; cleanup moves only the selected items to Trash.",
+            "普通的孤儿 SH 与孤儿数据目录会默认勾选。多个 SH 指向同一目录时，会在下方按目录聚合为“重复引用”，并默认不勾选。请自行选择要处理的启动器；清理只会把选中项移入回收站。"),{
+            id="leftovers:rules",focusable=false,expandable=false,max_lines=5,expanded_lines=5,
+            label_px=16,value_px=18,surface=false})
+        local function add(label,detail,path,default_selected)
+            item_count=item_count+1
+            if selected_junk[path]==nil then selected_junk[path]=default_selected==true end
             rows[#rows+1]=kit.checkbox(label,{
                 id=path,detail=detail,checked=selected_junk[path],meta={path=path},
                 on_change=function(value) selected_junk[path]=value end,
             })
         end
-        for _,name in ipairs(report.orphan_dirs or {}) do add(name.."/",L("Orphan data folder","孤立数据目录"),env.gamedirs_dir.."/"..name) end
-        for _,name in ipairs(report.orphan_images or {}) do if env.images_dir~="" then add(name,L("Orphan image","孤立图片"),env.images_dir.."/"..name) end end
+        for _,name in ipairs(report.orphan_dirs or {}) do add(name.."/",L(
+            "No SH launcher references this data folder; move it to Trash only after checking it.",
+            "没有检测到 SH 引用这个数据目录；确认无用后再移入回收站。"),env.gamedirs_dir.."/"..name,true) end
+        for _,image in ipairs(report.orphan_images or {}) do add(image.name,L(
+            "No matching SH launcher was found for this image.",
+            "没有检测到与这张图片配套的 SH 启动器。"),image.path,false) end
         for _,item in ipairs(report.dead_scripts or {}) do
-            add(model.display_name(item.script),L("Missing data: ","数据目录缺失：")[kit.get_state().ui_lang]..item.missing_dir,env.scripts_dir.."/"..item.script)
+            add(model.display_name(item.script),L("This SH launcher points to a missing data folder: ",
+                "这个 SH 启动器引用的数据目录不存在：")[kit.get_state().ui_lang]..item.missing_dir,
+                env.scripts_dir.."/"..item.script,true)
         end
-        if #rows==0 then rows[1]=note(L("Status","状态"),L("No leftovers were found.","没有发现残留内容。"),"leftovers:empty") end
-        kit._junk_rows=rows
-        kit.set_page(page.JUNK,L("Leftover cleanup","残留清理"),rows,{preserve_focus=preserve_focus,
-            sidebar_title=L("Quick Tools","快捷工具"),sidebar={
+
+        local shared={}
+        for _,port in ipairs(report.ports or {}) do
+            if port.dir~="" and (report.refcount[port.dir] or 0)>1 then
+                shared[port.dir]=shared[port.dir] or {}
+                shared[port.dir][#shared[port.dir]+1]=port.script
+            end
+        end
+        local shared_names={}
+        for name in pairs(shared) do shared_names[#shared_names+1]=name end
+        table.sort(shared_names)
+        if #shared_names>0 then
+            rows[#rows+1]=kit.section(L("Duplicate folder references","重复目录引用"),{font_px=22})
+            for _,name in ipairs(shared_names) do
+                table.sort(shared[name])
+                rows[#rows+1]=kit.textview(name.."/",L(
+                    string.format("%d SH launchers reference this same folder. This may be intentional or duplicated; review carefully and select the launcher files you want to remove.",#shared[name]),
+                    string.format("有 %d 个 SH 启动器引用同一个目录，可能是有意共用，也可能是重复启动项。请谨慎核对，并自行选择要清理的 SH。",#shared[name])),{
+                    id="leftovers:shared:"..name,focusable=false,expandable=false,max_lines=4,expanded_lines=4,
+                    label_px=16,value_px=18,surface=false})
+                for _,script in ipairs(shared[name]) do
+                    local path=env.scripts_dir.."/"..script
+                    add(model.display_name(script),L(
+                        "Duplicate reference to "..name.."/; selecting this moves only this SH launcher to Trash.",
+                        "重复引用 "..name.."/；勾选后只会把这个 SH 启动器移入回收站。"),path,false)
+                end
+            end
+        end
+        if item_count==0 then rows[#rows+1]=note(L("Status","状态"),L("No removable leftovers were found.","没有发现可清理的残留内容。"),"leftovers:empty") end
+        local sidebar={
             button(model.dynamic_count("Move to Trash (%d)","移入回收站 (%d)",selected_junk),remove_junk,{disabled=empty(selected_junk)}),
             button(L("Select all","全选"),function() select_all_junk(true) end,{half=true}),
             button(L("Select none","全不选"),function() select_all_junk(false) end,{half=true}),
-            button(L("Back","返回"),kit.back_page,{group="bottom"}),
-        }})
+        }
+        if enabled("capability_cleanup_appledouble") then
+            sidebar[#sidebar+1]=button(L("Clean ._Files garbage files","清理 ._Files 垃圾文件"),cleanup_appledouble,{id="clean-appledouble"})
+        end
+        sidebar[#sidebar+1]=button(L("Back","返回"),kit.back_page,{group="bottom"})
+        kit._junk_rows=rows
+        kit.set_page(page.JUNK,L("Leftover cleanup","残留清理"),rows,{preserve_focus=preserve_focus,
+            sidebar_title=L("Quick Tools","快捷工具"),sidebar=sidebar})
     end
 
     function self.collect_trash()
-        local out={}; local root=(env.gamedir or "").."/trash"
-        local function append(entry,kind)
+        local out={}
+        for _,entry in ipairs(model.trash_items()) do
+            local kind
+            if entry.bucket=="scripts" then kind=L("Launcher","启动项")
+            elseif entry.bucket=="data" then kind=L("Game data","游戏数据")
+            elseif entry.bucket=="images" or entry.bucket=="script-images" then kind=L("Image","图片")
+            elseif entry.bucket=="legacy" then kind=L("Legacy trash item","旧版回收站项目")
+            else kind=L("Trash item","回收站项目") end
             out[#out+1]={title=entry.name..(entry.is_dir and "/" or ""),detail=kind,paths={entry.path}}
-        end
-        for _,top in ipairs(scanner.entries(root)) do
-            if not top.is_dir then append(top,L("Trash item","回收站项目"))
-            else
-                for _,bucket in ipairs({"scripts","data","images"}) do
-                    for _,entry in ipairs(scanner.entries(top.path.."/"..bucket)) do
-                        append(entry,L(bucket=="scripts" and "Launcher" or bucket=="data" and "Game data" or "Image",
-                            bucket=="scripts" and "启动项" or bucket=="data" and "游戏数据" or "图片"))
-                    end
-                end
-                for _,entry in ipairs(scanner.entries(top.path)) do
-                    if entry.name~="scripts" and entry.name~="data" and entry.name~="images" then
-                        append(entry,L("Legacy trash item","旧版回收站项目"))
-                    end
-                end
-            end
         end
         return out
     end
@@ -295,6 +402,7 @@ function Pages.new(model,operations)
     end
 
     function self.build_env()
+        model.ensure_report()
         local rows,details={},{}
         local function section(label) rows[#rows+1]=kit.section(label,{font_px=22}) end
         local function info(key,label,value,title,body)
@@ -342,7 +450,7 @@ function Pages.new(model,operations)
         }
         for _,item in ipairs(values) do info(item[1],item[2],item[3],item[4],item[5]) end
 
-        local runtimes=report.runtimes.have or {}
+        local runtimes=model.installed_runtimes()
         section({en=string.format("Installed Runtimes (%d)",#runtimes),zh=string.format("已安装 Runtime（%d）",#runtimes)})
         if #runtimes==0 then
             rows[#rows+1]=kit.list_item(L("None installed","未安装"),{id="runtime:none",font_px=19})

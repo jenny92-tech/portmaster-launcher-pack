@@ -54,6 +54,7 @@ local scroll_top, scroll_y = 1, 0
 local busy, busy_message, busy_info, busy_elapsed = false, nil, nil, 0
 local toast_state = nil
 local dialog_state, dialog_focus = nil, 2
+local guide_state = nil
 local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
 local measurement_cache = setmetatable({}, {__mode="k"})
@@ -88,6 +89,20 @@ local function first_focusable(items)
         if row.focusable and not disabled(row) then return i end
     end
     return 1
+end
+local function default_focus_index(items)
+    -- Default focus for a freshly entered page: prefer the "start" button so
+    -- the player can confirm and launch with a single press. Falls back to
+    -- the first focusable row on pages that have no start button (sub-pages).
+    -- This is ONLY the default — capture_focus/restore_focus still win when
+    -- returning to a page the player already navigated within.
+    for i = #(items or {}), 1, -1 do
+        local row = items[i]
+        if row and row.focusable and not disabled(row) and row.action == "start" then
+            return i
+        end
+    end
+    return first_focusable(items)
 end
 local function valid_focus(items,index)
     local row=items and items[index]
@@ -349,7 +364,7 @@ function kit.set_page(index,title,rows,opts)
             if zone=="rows" then focus_i=find_focus_identity(page.rows,old_row_id) or nearest_focus(page.rows,focus_i) end
             if zone=="sidebar" then sidebar_i=find_focus_identity(page.sidebar,old_sidebar_id) or nearest_focus(page.sidebar,sidebar_i) end
         else
-            zone="rows"; focus_i=first_focusable(page.rows); sidebar_i=first_focusable(page.sidebar); bar_i=1; scroll_top=1; scroll_y=0
+            zone="rows"; focus_i=default_focus_index(page.rows); sidebar_i=first_focusable(page.sidebar); bar_i=1; scroll_top=1; scroll_y=0
         end
     end
     return index
@@ -438,6 +453,26 @@ function kit.debug_dialog()
         title=dialog_state and t(checked and dialog_state.title_checked or dialog_state.title or "") or "",
         message=dialog_state and t(checked and dialog_state.message_checked or dialog_state.message or "") or "",
         scope_depth=#focus_stack}
+end
+function kit.guide(opts)
+    if type(opts)~="table" or type(opts.callouts)~="table" then return false end
+    if #opts.callouts==0 then return false end
+    opts._index=1
+    guide_state=opts
+    return true
+end
+function kit.close_guide()
+    if not guide_state then return false end
+    guide_state=nil
+    return true
+end
+function kit.debug_guide()
+    return {open=guide_state~=nil,title=guide_state and t(guide_state.title or "") or "",
+        message=guide_state and t(guide_state.message or "") or "",
+        confirm=guide_state and t(guide_state.confirm or "") or "",
+        callout_count=guide_state and #(guide_state.callouts or {}) or 0,
+        step=guide_state and (guide_state._index or 1) or 0,
+        target=guide_state and (guide_state.callouts[guide_state._index or 1] or {}).target or nil}
 end
 function kit.debug_focus()
     return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top,scroll_y=scroll_y}
@@ -559,15 +594,18 @@ local function spatial_sidebar(dx,dy)
 end
 
 local function nearest_sidebar_for_row()
-    local row=cur()[focus_i]
+    local row_index=tonumber(focus_i)
+    if not row_index then return nil end
+    local row=cur()[row_index]
     local preferred=row and row.sidebar_target
     local preferred_index=find_focus_identity(sidebar(),preferred)
     if preferred_index then return preferred_index end
     if not layout or not sidebar_geometry then return nil end
-    local L=layout(); local from=L.geometry and L.geometry[focus_i]
+    local L=layout(); local from=L.geometry and L.geometry[row_index]
     if not from then
-        if focus_i<L.first or focus_i>L.last then return nil end
-        from={x=L.x,y=L.top+(focus_i-L.first)*(L.rh+L.gap),w=L.w,h=L.rh}
+        if type(L.first)~="number" or type(L.last)~="number" or
+            row_index<L.first or row_index>L.last then return nil end
+        from={x=L.x,y=L.top+(row_index-L.first)*(L.rh+L.gap),w=L.w,h=L.rh}
     end
     local geometry=sidebar_geometry(L); local fx,fy=from.x+from.w/2,from.y+from.h/2
     local best,best_score
@@ -604,6 +642,12 @@ local function move_v(d)
     end
     local items = cur()
     local fs = focusables(items); local current = focus_i; local pos=1
+    if #fs==0 then
+        local side=focusables(sidebar())
+        if d>0 and #side>0 then zone="sidebar"; sidebar_i=side[1]
+        else zone="bar"; bar_i=1 end
+        return
+    end
     for i,idx in ipairs(fs) do if idx==current then pos=i end end
     pos = pos + d
     if pos < 1 then zone="bar"; bar_i=1; return
@@ -695,6 +739,7 @@ local function save_state()
         return true
     end)
 end
+function kit.persist_state() return save_state() end
 local function allowed_value(values, value)
     if not values then return value ~= nil end
     for _,candidate in ipairs(values) do if candidate==value then return true end end
@@ -808,7 +853,7 @@ end
 -- ── Actions ──────────────────────────────────────────────────────────
 local function goto_page(n)
     if not pages[n] then return end
-    page_i=n; zone="rows"; focus_i=focusables(cur())[1] or 1; sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
+    page_i=n; zone="rows"; focus_i=default_focus_index(cur()); sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
 end
 function kit.goto_page(n)
     if n==1 then navigation_stack={} end
@@ -836,8 +881,57 @@ local function toggle_lang()
     save_state()
 end
 function kit.quit() save_state(); love.event.quit(kit.EXIT_QUIT) end
+-- ── Prelaunch gate ────────────────────────────────────────────────
+-- A port may declare core_files (all must exist to run) plus a source_glob
+-- (a player-supplied package the shell-side patcher will extract). If core
+-- files are missing AND no source package is present, the launcher refuses
+-- to exit and surfaces missing_msg as a toast instead. The port owns the
+-- file lists and message text (see launcher.define prelaunch spec); kit
+-- only runs the check. GAMEDIR is the love_ui parent directory.
+local function file_exists_at(path)
+    local f = io.open(path, "rb")
+    if not f then return false end
+    f:close()
+    return true
+end
+local function prelaunch_ok()
+    local pf = port.prelaunch
+    if not pf then return true end
+    local base = love.filesystem.getSource().."/.."
+    if pf.core_files then
+        local all = true
+        for _, f in ipairs(pf.core_files) do
+            if not file_exists_at(base.."/"..f) then all = false; break end
+        end
+        if all then return true end
+    end
+    -- Core incomplete — still ok if the player has dropped in a source package.
+    if pf.source_glob then
+        local dir, pat = string.match(pf.source_glob, "^(.*)/([^/]+)$")
+        dir = dir or "."
+        pat = pat or pf.source_glob
+        local p = io.popen('ls -1 "'..base.."/"..dir..'/'..pat..'" 2>/dev/null')
+        if p then
+            local out = p:read("*a")
+            p:close()
+            if out and #out > 0 then return true end
+        end
+    end
+    return false
+end
 local function do_action(a)
     if a=="start" then
+        if not prelaunch_ok() then
+            kit.dialog({
+                title = {en = "Game data missing", zh = "缺少游戏资源"},
+                message = port.prelaunch.missing_msg,
+                confirm = {en = "Stay", zh = "留在启动器"},
+                cancel = {en = "Quit", zh = "退出"},
+                default_focus = "confirm",
+                on_cancel = function() kit.quit() end,
+            })
+            return
+        end
         local previous=state.launch_count
         state.launch_count=(tonumber(previous) or 0)+1
         local ok,err=write_env()
@@ -863,6 +957,19 @@ local function finish_dialog(confirm)
     if callback then callback(kit,checked) end
 end
 
+local function advance_guide(delta)
+    local current=guide_state
+    if not current then return end
+    local count=#(current.callouts or {})
+    local next_index=(current._index or 1)+(delta or 1)
+    if next_index<1 then current._index=1
+    elseif next_index<=count then current._index=next_index
+    else
+        kit.close_guide()
+        if current.on_confirm then current.on_confirm(kit) end
+    end
+end
+
 
 -- ── LÖVE callbacks ───────────────────────────────────────────────────
 function kit.run(cfg)
@@ -874,7 +981,7 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2; focus_stack={}; navigation_stack={}; toast_state=nil; busy_elapsed=0
+    dialog_state,dialog_focus=nil,2; guide_state=nil; focus_stack={}; navigation_stack={}; toast_state=nil; busy_elapsed=0
     input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
     for key,action in pairs(port.input_map or {}) do input_map[key]=action end
     measurement_cache=setmetatable({}, {__mode="k"})
@@ -1245,6 +1352,176 @@ local function draw_dialog(L)
     draw_button(2,dx+pad+bw+gap,d.cancel or {en="Cancel",zh="取消"},false)
 end
 
+local function guide_target_rect(L,target)
+    if target=="header" then return {x=18*L.cs,y=18*L.cs,w=145*L.cs,h=54*L.cs} end
+    local page=pages[page_i] or {}
+    if target=="footer" then
+        local footer=page.sidebar_footer
+        local lines=footer and (footer.lines or footer) or nil
+        if not lines or #lines==0 then return nil end
+        local bottom=L.band_top+L.band
+        local side=sidebar(); local geometry=sidebar_geometry(L)
+        for index,g in pairs(geometry) do
+            if side[index].group=="bottom" then bottom=math.min(bottom,g.y-L.gap) end
+        end
+        local h=(#lines*22+12)*L.cs
+        return {x=L.side_x,y=bottom-h,w=L.side_w,h=h}
+    end
+    local side=sidebar(); local geometry=sidebar_geometry(L)
+    for index,row in ipairs(side) do
+        if row_identity(row)==target then return geometry[index] end
+    end
+    for index,row in ipairs(cur()) do
+        if row_identity(row)==target then
+            local g=L.geometry and L.geometry[index]
+            if g then return {x=g.x,y=g.y,w=g.w,h=g.h} end
+            if index>=L.first and index<=L.last then
+                return {x=L.x,y=L.top+(index-L.first)*(L.rh+L.gap),w=L.w,h=L.rh}
+            end
+        end
+    end
+end
+
+local function rect_union(rects)
+    if #rects==0 then return nil end
+    local x1,y1,x2,y2=rects[1].x,rects[1].y,rects[1].x+rects[1].w,rects[1].y+rects[1].h
+    for i=2,#rects do
+        local r=rects[i]
+        x1=math.min(x1,r.x); y1=math.min(y1,r.y)
+        x2=math.max(x2,r.x+r.w); y2=math.max(y2,r.y+r.h)
+    end
+    return {x=x1,y=y1,w=x2-x1,h=y2-y1}
+end
+
+local function rect_overlap(a,b,pad)
+    pad=pad or 0
+    local x=math.max(0,math.min(a.x+a.w,b.x+b.w+pad)-math.max(a.x,b.x-pad))
+    local y=math.max(0,math.min(a.y+a.h,b.y+b.h+pad)-math.max(a.y,b.y-pad))
+    return x*y
+end
+
+local function coach_card_position(target,cw,ch,cs)
+    local margin,gap=18*cs,18*cs
+    if not target then return (W-cw)/2,(H-ch)/2,"center" end
+    local cx,cy=target.x+target.w/2,target.y+target.h/2
+    local order
+    if cx>W*0.62 then order={"left","above","below","right"}
+    elseif cx<W*0.38 and cy<H*0.30 then order={"below","right","left","above"}
+    elseif cy>H*0.68 then order={"above","right","left","below"}
+    else order={"right","left","below","above"} end
+    local ideals={
+        left={x=target.x-gap-cw,y=cy-ch/2},
+        right={x=target.x+target.w+gap,y=cy-ch/2},
+        above={x=cx-cw/2,y=target.y-gap-ch},
+        below={x=cx-cw/2,y=target.y+target.h+gap},
+    }
+    local best,best_score
+    for rank,name in ipairs(order) do
+        local ideal=ideals[name]
+        local x=math.max(margin,math.min(ideal.x,W-margin-cw))
+        local y=math.max(margin,math.min(ideal.y,H-margin-ch))
+        local card={x=x,y=y,w=cw,h=ch}
+        local moved=math.abs(x-ideal.x)+math.abs(y-ideal.y)
+        local score=rank*10+moved*4+rect_overlap(card,target,gap)*1000
+        if not best_score or score<best_score then best,best_score={x=x,y=y,side=name},score end
+    end
+    return best.x,best.y,best.side
+end
+
+local function coach_arrow(card,target,cs)
+    if not target then return end
+    local cx,cy=card.x+card.w/2,card.y+card.h/2
+    local tx,ty=target.x+target.w/2,target.y+target.h/2
+    local dx,dy=tx-cx,ty-cy
+    if math.abs(dx)<0.01 and math.abs(dy)<0.01 then return end
+    local card_scale=math.min((card.w/2)/math.max(0.01,math.abs(dx)),
+        (card.h/2)/math.max(0.01,math.abs(dy)))
+    local target_scale=math.min((target.w/2+6*cs)/math.max(0.01,math.abs(dx)),
+        (target.h/2+6*cs)/math.max(0.01,math.abs(dy)))
+    local sx,sy=cx+dx*card_scale,cy+dy*card_scale
+    local ex,ey=tx-dx*target_scale,ty-dy*target_scale
+    local length=math.sqrt((ex-sx)^2+(ey-sy)^2)
+    if length<8*cs then return end
+    local ux,uy=(ex-sx)/length,(ey-sy)/length
+    local head=11*cs
+    love.graphics.setColor(1.0,0.78,0.36,0.96); love.graphics.setLineWidth(math.max(2,2*cs))
+    love.graphics.line(sx,sy,ex,ey)
+    love.graphics.polygon("fill",ex,ey,
+        ex-ux*head-uy*head*0.55,ey-uy*head+ux*head*0.55,
+        ex-ux*head+uy*head*0.55,ey-uy*head-ux*head*0.55)
+end
+
+local function draw_guide(L)
+    local guide=guide_state
+    if not guide then return end
+    local cs=L.cs; local callouts=guide.callouts or {}; local count=#callouts
+    local index=math.max(1,math.min(guide._index or 1,count)); local callout=callouts[index]
+    local targets=callout.targets or {callout.target}; local rects={}
+    for _,target in ipairs(targets) do
+        local rect=guide_target_rect(L,target)
+        if rect then rects[#rects+1]=rect end
+    end
+    local target=rect_union(rects); local hole_pad=6*cs
+
+    -- Draw one stencil mask for the current semantic target. The real control
+    -- remains fully visible through the hole while the rest of the live page is
+    -- darkened, so the guide stays correct across resolutions and themes.
+    if target and love.graphics.stencil and love.graphics.setStencilTest then
+        love.graphics.stencil(function()
+            for _,rect in ipairs(rects) do
+                love.graphics.rectangle("fill",rect.x-hole_pad,rect.y-hole_pad,
+                    rect.w+hole_pad*2,rect.h+hole_pad*2,10*cs,10*cs)
+            end
+        end,"replace",1,false)
+        love.graphics.setStencilTest("equal",0)
+        love.graphics.setColor(0,0,0,0.82); love.graphics.rectangle("fill",0,0,W,H)
+        love.graphics.setStencilTest()
+    else
+        love.graphics.setColor(0,0,0,0.82); love.graphics.rectangle("fill",0,0,W,H)
+    end
+
+    for _,rect in ipairs(rects) do
+        love.graphics.setColor(1.0,0.78,0.36,0.98); love.graphics.setLineWidth(math.max(2,3*cs))
+        love.graphics.rectangle("line",rect.x-hole_pad,rect.y-hole_pad,
+            rect.w+hole_pad*2,rect.h+hole_pad*2,10*cs,10*cs)
+    end
+
+    local pad=22*cs; local cw=math.min(W-36*cs,430*cs); local inner_w=cw-pad*2
+    local body_text=t(callout.body or "")
+    if index==1 and guide.message then body_text=t(guide.message).."\n"..body_text end
+    local body_font=body_fnt(18*cs)
+    local body,body_lines=wrapped_text(body_text,body_font,inner_w,7)
+    local title_font=body_fnt(23*cs)
+    local title,title_lines=wrapped_text(callout.title or guide.title or "",title_font,inner_w,2)
+    local progress_h=23*cs; local title_h=title_lines*title_font:getHeight()
+    local body_h=body_lines*body_font:getHeight(); local button_h=48*cs
+    local ch=pad+progress_h+8*cs+title_h+10*cs+body_h+18*cs+button_h+pad
+    ch=math.min(ch,H-36*cs)
+    local dx,dy=coach_card_position(target,cw,ch,cs)
+    local card={x=dx,y=dy,w=cw,h=ch}
+    coach_arrow(card,target,cs)
+
+    love.graphics.setColor(0.045,0.030,0.070,0.985)
+    love.graphics.rectangle("fill",dx,dy,cw,ch,12*cs,12*cs)
+    love.graphics.setColor(0.78,0.68,0.91,0.78); love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line",dx,dy,cw,ch,12*cs,12*cs)
+    local progress=string.format("%d / %d",index,count)
+    plain(progress,dx+pad,dy+pad,16*cs,{1.0,0.78,0.36},"left",inner_w)
+    if index==1 and guide.title then
+        plain(t(guide.title),dx+pad,dy+pad,16*cs,{0.72,0.69,0.78},"right",inner_w)
+    end
+    local title_y=dy+pad+progress_h+8*cs
+    outlined(title,dx+pad,title_y,23*cs,{1,1,1},"left",inner_w)
+    local body_y=title_y+title_h+10*cs
+    plain(body,dx+pad,body_y,18*cs,{0.88,0.86,0.92},"left",inner_w)
+
+    local button_y=dy+ch-pad-button_h
+    panel(dx+pad,button_y,inner_w,button_h,true,false,true)
+    local button_label=index==count and (guide.confirm or {en="Start using",zh="开始使用"}) or
+        (guide.next or {en="Next",zh="下一步"})
+    plain(t(button_label),dx+pad,button_y+vcen(20*cs,button_h),20*cs,{1,1,1},"center",inner_w)
+end
+
 
 function kit.draw()
     if letterbox then love.graphics.push(); love.graphics.translate(offX,offY); love.graphics.setScissor(offX,offY,W,H) end
@@ -1471,6 +1748,7 @@ function kit.draw()
     end
     if not L.app then plain(kit.CONTACT,0,H-32*L.cs,CRED_PX*L.cs,{1,1,1,0.9},"right",W-16*L.cs) end
 
+    if guide_state then draw_guide(L) end
     if dialog_state then draw_dialog(L) end
 
     if busy then
@@ -1575,6 +1853,13 @@ function kit.input(action)
             return true
         end
         return false
+    end
+    if guide_state then
+        -- Handhelds disagree about the physical A/B order. Both buttons safely
+        -- advance the non-destructive guide; D-pad left/right also allows review.
+        if action=="confirm" or action=="cancel" or action=="right" then advance_guide(1)
+        elseif action=="left" then advance_guide(-1) end
+        return true
     end
     if dialog_state then
         if action=="up" and dialog_state.checkbox then dialog_focus=3

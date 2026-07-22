@@ -14,7 +14,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
-| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled LÖVE 11.5 | Shared LÖVE UI kit | TrimUI, MiniLoong |
+| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled LÖVE 11.5 + static Rust helpers | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
@@ -29,9 +29,10 @@ step generates PortMaster-style `dist/port.json` from it. Port images use the
 standard filename `screenshot.png` in both the port root and `dist/`.
 
 LÖVE launchers package the shared `kit.lua`, declarative launcher schema, common
-`conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. APP Manager
-uses the same component kit but packages its own bootstrap runtime so it can repair a
-missing PortMaster environment. Godot game-runtime tooling stays inside the relevant port.
+`conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. Port App
+Manager uses the same component kit, but packages its own bootstrap runtime and
+static Rust helpers so it can repair a missing PortMaster environment. Godot
+game-runtime tooling stays inside the relevant port.
 
 ## Documentation
 
@@ -41,6 +42,8 @@ missing PortMaster environment. Godot game-runtime tooling stays inside the rele
 - [`_kit/love/README.md`](_kit/love/README.md) — public UIKit and launcher contract.
 - [`ports/appmanager/README.md`](ports/appmanager/README.md) — Port App Manager behavior,
   resource sources and safety boundaries.
+- [`config/README.md`](config/README.md) — generated device configuration contract,
+  safety rules and validation commands.
 
 ## Dist a port
 
@@ -67,6 +70,8 @@ See [`_kit/README.md`](_kit/README.md) for the helpers each port can pull in:
   `ports/<port>/dist/`.
 - `port_json.py` — converts the repository build manifest into the PortMaster
   `port.json` shipped in `dist/`.
+- `build_appmanager_native.sh` — builds the static aarch64 `portkit` and
+  `appmanager-cli` helpers embedded in Port App Manager.
 
 ## License
 

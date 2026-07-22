@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PAM_TOOL_MODE=system # Host fixtures run on macOS, not the packaged aarch64 runtime.
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO_ROOT=$(cd "$ROOT/../.." && pwd)
-"$REPO_ROOT/_kit/dist_port.sh" appmanager >/dev/null
+bash "$REPO_ROOT/_kit/dist_port.sh" appmanager >/dev/null
+cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" -p appmanager-cli -p portkit-cli
+HOST_PORTKIT="$REPO_ROOT/target/debug/portkit"
+HOST_APPMANAGER="$REPO_ROOT/target/debug/appmanager-cli"
 LAUNCHER="$ROOT/dist/APP Manager.sh"
 APP_UI_DIR="$ROOT/love"
 TMP=$(mktemp -d)
@@ -24,22 +28,24 @@ trap cleanup EXIT
 grep -Fq ' --apply-plan >/dev/null 2>&1 &' "$APP_UI_DIR/app_operations.lua"
 grep -Fq 'if not model.file_exists(env.plan_file)' "$APP_UI_DIR/main.lua"
 grep -Fq ' --scan-sizes >/dev/null 2>&1 &' "$APP_UI_DIR/main.lua"
+grep -Fq 'not model.file_exists(env.size_file)' "$APP_UI_DIR/main.lua"
+! grep -Fq ' --refresh-runtime-metadata >/dev/null 2>&1 &' "$APP_UI_DIR/main.lua"
+grep -Fq 'function self.request_cached' "$APP_UI_DIR/app_model.lua"
+grep -Fq 'function self.invalidate_for_plan' "$APP_UI_DIR/app_model.lua"
+grep -Fq 'model.invalidate_for_plan' "$APP_UI_DIR/app_operations.lua"
+grep -Fq 'task.timeout_notified=true' "$APP_UI_DIR/main.lua"
+grep -Fq 'elseif task.timeout_notified then' "$APP_UI_DIR/main.lua"
+grep -Fq 'size_cache_apply_mutations' "$LAUNCHER"
+! sed -n '/^apply_plan()/,/^pending_value()/p' "$LAUNCHER" | grep -Fq 'scan_sizes'
+grep -Fq 'pam_zip_readable "$PAM_PORTMASTER_DIR/pylibs.zip"' "$LAUNCHER"
+! grep -Fq 'model.refresh_scan()' "$APP_UI_DIR/main.lua"
 grep -Fq 'trash_action("DELETE_ITEM"' "$APP_UI_DIR/app_pages.lua"
 grep -Fq 'item.kind="DELETE_MANAGED"' "$APP_UI_DIR/app_pages.lua"
 grep -Fq 'env.progress_file' "$APP_UI_DIR/app_operations.lua"
-grep -Fq 'GITHUB_PROXY_BATCH_SIZE:-5' "$LAUNCHER"
-grep -Fq 'github_proxy_read' "$LAUNCHER"
-grep -Fq '# Proxy-list maintenance source (consult only when refreshing the bundled list):' "$LAUNCHER"
-! grep -Fq 'RUNTIME_ROUTE_CONTACT=' "$LAUNCHER"
-custom_blob=$(sed -n 's/^GITHUB_PROXY_CUSTOM_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
-github_blob=$(sed -n 's/^GITHUB_PROXY_FULL_ROUTES="\([0-9a-f]*\)"$/\1/p' "$LAUNCHER")
-[ "${#custom_blob}" -gt 200 ] && [ "${#github_blob}" -gt 1000 ]
-! grep -Fq "custom_rows='" "$LAUNCHER"
-! grep -Fq "github_rows='" "$LAUNCHER"
-! grep -Fq 'Testing sources $batch_start-$id' "$LAUNCHER"
-! grep -Fq 'Source: $RUNTIME_PROXY_NAME' "$LAUNCHER"
-! grep -Fq '$source · $name' "$LAUNCHER"
-! grep -Fq 'candidate.$id' "$LAUNCHER"
+grep -Fq 'Clean ._Files garbage files' "$APP_UI_DIR/app_pages.lua"
+! grep -Fq 'github_proxy_' "$LAUNCHER"
+grep -Fq 'github fetch --capability release' "$LAUNCHER"
+grep -Fq 'fetch-runtime-metadata' "$LAUNCHER"
 grep -Fq '正在检查网络' "$APP_UI_DIR/app_model.lua"
 grep -Fq '连接已就绪，正在使用' "$APP_UI_DIR/app_model.lua"
 if grep -Eq 'githubfast\.com|gitclone\.com' "$LAUNCHER"; then
@@ -63,35 +69,11 @@ make_case() {
   mkdir -p "$scripts/PortMaster/libs" "$scripts/PortMaster/runtimes/love_11.5" \
     "$scripts/images" "$gamedirs/GameData" "$app/conf" "$app/trash" "$app/love_ui" \
     "$app/runtime/libs.aarch64" "$app/bin" "$app/share" "$case_dir/bin"
+  cp -R "$REPO_ROOT/config" "$app/config"
   cp "$LAUNCHER" "$scripts/APP Manager.sh"
   : > "$app/love_ui/main.lua"
+  cp "$ROOT/love/json.lua" "$app/love_ui/json.lua"
   : > "$app/love_ui/ui.gptk"
-  # Deliberately stale state. Successful Runtime cases prove that the online
-  # ports.json parser replaced this cache before choosing an asset.
-  cat > "$app/conf/runtime-metadata.tsv" <<'EOF'
-godot_4.5	aarch64	19	00000000000000000000000000000000	https://github.com/PortsMaster/PortMaster-New/releases/download/old/godot_4.5.squashfs
-gmtoolkit	aarch64	59	00000000000000000000000000000000	https://github.com/PortsMaster/PortMaster-New/releases/download/old/gmtoolkit.squashfs
-EOF
-  cat > "$case_dir/ports.json" <<'EOF'
-{
-  "utils": {
-    "godot_4.5.aarch64.squashfs": {
-      "runtime_name": "godot_4.5.squashfs",
-      "runtime_arch": "aarch64",
-      "size": 20,
-      "md5": "03569a31f137dcf994ed737352cb746a",
-      "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs"
-    },
-    "gmtoolkit.aarch64.squashfs": {
-      "runtime_name": "gmtoolkit.squashfs",
-      "runtime_arch": "aarch64",
-      "size": 60,
-      "md5": "18439fd194f4c884026eed5573da308e",
-      "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/gmtoolkit.squashfs"
-    }
-  }
-}
-EOF
   : > "$scripts/Game.sh"
 
   cat > "$scripts/PortMaster/control.txt" <<EOF
@@ -126,7 +108,7 @@ EOF
 LOVE_GPTK=love.aarch64
 LOVE_RUN="$controlfolder/runtimes/love_11.5/love.aarch64"
 EOF
-  cat > "$scripts/PortMaster/runtimes/love_11.5/love.aarch64" <<'LOVE'
+cat > "$scripts/PortMaster/runtimes/love_11.5/love.aarch64" <<'LOVE'
 #!/usr/bin/env bash
 set -e
 count=0
@@ -135,7 +117,7 @@ count=$((count + 1))
 printf '%s\n' "$count" > "$TEST_COUNT"
 [ "$count" = "1" ] || exit 0
 case "$TEST_MODE" in
-  delete|same_root_delete)
+  delete|same_root_delete|sibling_delete)
     printf '# test plan\nTRASH\t%s\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_IMAGE" "$TEST_GAME" > "$TEST_PLAN" ;;
   direct_delete|direct_delete_fail)
     printf '# test plan\nDELETE_MANAGED\t%s\nDELETE_MANAGED\t%s\nDELETE_MANAGED\t%s\n' "$TEST_SCRIPT" "$TEST_IMAGE" "$TEST_GAME" > "$TEST_PLAN" ;;
@@ -144,7 +126,8 @@ case "$TEST_MODE" in
   fail)
     printf '# test plan\nTRASH\t%s\nTRASH\t%s\n' "$TEST_SCRIPT" "$TEST_GAME" > "$TEST_PLAN" ;;
   empty|empty_fail) printf '# test plan\nEMPTY_TRASH\t-\n' > "$TEST_PLAN" ;;
-  restore|restore_legacy|restore_conflict|restore_fail) printf '# test plan\nRESTORE_TRASH\t-\n' > "$TEST_PLAN" ;;
+  appledouble) printf '# test plan\nCLEAN_APPLEDOUBLE\t-\n' > "$TEST_PLAN" ;;
+  restore|sibling_restore|restore_legacy|restore_conflict|restore_fail) printf '# test plan\nRESTORE_TRASH\t-\n' > "$TEST_PLAN" ;;
   restore_selected)
     printf '# test plan\nRESTORE_ITEM\t%s\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" "$TEST_SELECTED_IMAGE" > "$TEST_PLAN" ;;
   restore_misbucket) printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
@@ -153,11 +136,6 @@ case "$TEST_MODE" in
   delete_selected_invalid) printf '# test plan\nDELETE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   delete_container_invalid)
     printf '# test plan\nDELETE_ITEM\t%s\nDELETE_ITEM\t%s\n' "$TEST_BATCH_ROOT" "$TEST_BUCKET_ROOT" > "$TEST_PLAN" ;;
-  runtime_repair|runtime_progress|runtime_default_routes|runtime_custom|runtime_full|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
-  runtime_large) printf '# test plan\nINSTALL_RUNTIME\tgmtoolkit\n' > "$TEST_PLAN" ;;
-  runtime_direct) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
-  runtime_invalid) printf '# test plan\nINSTALL_RUNTIME\t../escape\n' > "$TEST_PLAN" ;;
-  runtime_fail) printf '# test plan\nINSTALL_RUNTIME\tgodot_4.5\n' > "$TEST_PLAN" ;;
   restore_selected_invalid) printf '# test plan\nRESTORE_ITEM\t%s\n' "$TEST_SELECTED_ITEM" > "$TEST_PLAN" ;;
   invalid) printf '# test plan\nTRASH\t%s\n' "$TEST_OUTSIDE" > "$TEST_PLAN" ;;
   no_plan) ;;
@@ -207,111 +185,17 @@ esac
 EOF
   chmod +x "$case_dir/mock-sudo"
 
-  cat > "$case_dir/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-[ "${1:-}" != "--version" ] || { printf 'curl test build\n'; exit 0; }
-out=""
-url=""
-resume=0
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -o) out=$2; shift 2 ;;
-    -C) resume=1; shift 2 ;;
-    --connect-timeout|--max-time|--range|--retry|--retry-delay) shift 2 ;;
-    -*) shift ;;
-    *) url=$1; shift ;;
-  esac
-done
-printf 'resume=%s out=%s url=%s\n' "$resume" "$out" "$url" >> "$TEST_CURL_LOG"
-[ "${url##*/}" != "ports.json" ] || {
-  if [ -n "$out" ]; then cp "$TEST_RUNTIME_METADATA_JSON" "$out"; else printf '{'; fi
-  exit 0
-}
-[ "${TEST_MODE:-}" != "runtime_fail" ] || exit 22
-[ "${TEST_MODE:-}" != "runtime_cached" ] || exit 22
-if [ "${TEST_MODE:-}" = "runtime_proxy_failover" ]; then
-  if [ -z "$out" ] && printf '%s' "$url" | grep -Fq 'secondary.test'; then sleep 1; fi
-  if [ -n "$out" ] && printf '%s' "$url" | grep -Fq 'primary.test'; then exit 22; fi
-fi
-if [ "${TEST_MODE:-}" = "runtime_direct" ] && printf '%s' "$url" | grep -Fq 'proxy.test'; then
-  exit 22
-fi
-# Make the same proxy the normal responsive winner in the two resume cases.
-# The .part.route file itself must not reorder candidates across launches.
-if [ -z "$out" ] && { [ "${TEST_MODE:-}" = "runtime_resume" ] ||
-   [ "${TEST_MODE:-}" = "runtime_resume_reset" ]; } &&
-   printf '%s' "$url" | grep -Eq '^https://github\.com/'; then
-  exit 22
-fi
-if [ -n "$out" ]; then
-  payload='hsqs-runtime-payload'
-  if printf '%s' "$url" | grep -Fq 'gmtoolkit.squashfs'; then
-    payload='hsqs-runtime-payloadhsqs-runtime-payloadhsqs-runtime-payload'
-  fi
-  if [ "${TEST_MODE:-}" = "runtime_progress" ]; then
-    printf '%s' "${payload:0:4}" > "$out"
-    sleep 1
-    printf '%s' "${payload:4:8}" >> "$out"
-    for _ in {1..25}; do
-      speed=$(awk -F '\t' '$2 == "downloading" { print $8 }' "$TEST_PROGRESS_FILE" 2>/dev/null | tail -n 1)
-      case "$speed" in ""|0|*[!0-9]*) ;; *) : > "$TEST_PROGRESS_OBSERVED"; break ;; esac
-      sleep 0.1
-    done
-    printf '%s' "${payload:12}" >> "$out"
-  elif [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume_reset" ] && [ ! -e "$TEST_RESUME_REJECTED" ]; then
-    : > "$TEST_RESUME_REJECTED"
-    exit 33
-  elif [ "$resume" = "1" ] && [ "${TEST_MODE:-}" = "runtime_resume" ]; then
-    current=$(wc -c < "$out" | tr -d '[:space:]')
-    printf '%s' "$payload" | tail -c "+$((current + 1))" >> "$out"
-  else
-    printf '%s' "$payload" > "$out"
-  fi
-else
-  printf 'hsqs'
-fi
-EOF
-  chmod +x "$case_dir/bin/curl"
-  cp "$case_dir/bin/curl" "$app/bin/curl-portable"
-  if [ "$mode" = "runtime_private_curl" ]; then
-    rm -f "$case_dir/bin/curl"
-  elif [ "$mode" = "runtime_bad_private_curl" ]; then
-    printf '#!/usr/bin/env bash\nexit 126\n' > "$app/bin/curl-portable"
-    chmod +x "$app/bin/curl-portable"
-  fi
-
-  cat > "$case_dir/bin/wget" <<'EOF'
-#!/usr/bin/env bash
-out=""
-url=""
-resume=0
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -O) out=$2; shift 2 ;;
-    -c) resume=1; shift ;;
-    -T|--header) shift 2 ;;
-    -*) shift ;;
-    *) url=$1; shift ;;
-  esac
-done
-printf 'wget resume=%s out=%s url=%s\n' "$resume" "$out" "$url" >> "$TEST_CURL_LOG"
-if [ "$out" = "-" ] || [ -z "$out" ]; then
-  printf 'hsqs'
-else
-  printf 'hsqs-runtime-payload' > "$out"
-fi
-EOF
-  chmod +x "$case_dir/bin/wget"
-  [ "$mode" != "runtime_wget" ] || rm -f "$case_dir/bin/curl" "$app/bin/curl-portable"
-
   export TEST_MODE="$mode"
   export PAM_APP_ROOT_OVERRIDE="$app"
+  export PORTMASTER_LOONG_VERSION_FILE="$case_dir/loong-version"
+  : > "$PORTMASTER_LOONG_VERSION_FILE"
   export PAM_STATE_DIR_OVERRIDE="$app/conf"
   export PAM_PORTMASTER_DIR_OVERRIDE="$scripts/PortMaster"
   export PAM_SCRIPTS_DIR_OVERRIDE="$scripts"
   export PAM_DIRECTORY_OVERRIDE="$gamedirs"
-  export PAM_DEVICE_CLASS_OVERRIDE=tested
-  export PAM_TARGET_CONFIRMED_OVERRIDE=1
+  export PAM_PORTKIT_BIN_OVERRIDE="$HOST_PORTKIT"
+  export PAM_APPMANAGER_CLI_BIN_OVERRIDE="$HOST_APPMANAGER"
+  export PAM_NATIVE_LAUNCHER_OVERRIDE="$scripts/APP Manager.sh"
   export DEVICE_ARCH=aarch64
   export ESUDO="$case_dir/mock-sudo"
   export TEST_COUNT="$case_dir/ui-count"
@@ -320,6 +204,7 @@ EOF
   export TEST_SIZE_FILE="$app/conf/sizes.tsv"
   export TEST_SCRIPT="$scripts/Game.sh"
   export TEST_IMAGE="$scripts/images/Game.png"
+  case "$mode" in sibling_delete|sibling_restore) export TEST_IMAGE="$scripts/Game.png" ;; esac
   export TEST_GAME="$gamedirs/GameData"
   export TEST_OUTSIDE="$case_dir/outside.txt"
   export TEST_TRASH_ITEM="$app/trash/visible"
@@ -330,37 +215,10 @@ EOF
   export TEST_SELF="$scripts/APP Manager.sh"
   export TEST_BATCH_ROOT="$app/trash/protected-batch"
   export TEST_BUCKET_ROOT="$app/trash/protected-batch/scripts"
-  export TEST_CURL_LOG="$case_dir/curl.log"
-  export TEST_RESUME_REJECTED="$case_dir/resume-rejected"
-  export TEST_PROGRESS_FILE="$app/conf/progress.tsv"
-  export TEST_PROGRESS_OBSERVED="$case_dir/progress-observed"
-  export TEST_RUNTIME_METADATA_JSON="$case_dir/ports.json"
-  export PAM_RUNTIME_PROXIES="https://proxy.test"
-  export PAM_RUNTIME_CUSTOM_PROXIES=""
-  if [ "$mode" = "runtime_default_routes" ]; then
-    unset PAM_RUNTIME_PROXIES PAM_RUNTIME_CUSTOM_PROXIES
-  elif [ "$mode" = "runtime_custom" ]; then
-    export PAM_RUNTIME_PROXIES=""
-    export PAM_RUNTIME_CUSTOM_PROXIES='custom|custom.test|https://custom.test'
-  elif [ "$mode" = "runtime_full" ]; then
-    export PAM_RUNTIME_PROXIES=""
-    export PAM_RUNTIME_CUSTOM_PROXIES='full|full.test|https://full.test'
-  elif [ "$mode" = "runtime_jsdelivr" ]; then
-    export PAM_RUNTIME_PROXIES=""
-    export PAM_RUNTIME_CUSTOM_PROXIES='jsdelivr|JSDelivr CDN|https://fastly.jsdelivr.net/gh'
-  elif [ "$mode" = "runtime_proxy_failover" ]; then
-    export PAM_RUNTIME_PROXIES=""
-    export PAM_RUNTIME_CUSTOM_PROXIES=$'custom|primary.test|https://primary.test\ncustom|secondary.test|https://secondary.test'
-  fi
-  if [ "$mode" = "runtime_wget" ]; then
-    export PAM_RUNTIME_WGET="$case_dir/bin/wget"
-  else
-    unset PAM_RUNTIME_WGET
-  fi
   : > "$TEST_OUTSIDE"
 
   case "$mode" in
-    delete|same_root_delete|direct_delete|direct_delete_fail)
+    delete|same_root_delete|sibling_delete|direct_delete|direct_delete_fail)
       : > "$scripts/PORTS_cache-main.db"
       : > "$scripts/unrelated-cache.db"
       : > "$TEST_IMAGE"
@@ -371,6 +229,17 @@ EOF
       mkdir -p "$app/trash/.hidden-dir"
       : > "$app/trash/.hidden-dir/file"
       ;;
+    appledouble)
+      mkdir -p "$gamedirs/GameData/nested" "$scripts/images/deep"
+      printf 'metadata\n' > "$gamedirs/GameData/._save.dat"
+      printf 'metadata\n' > "$gamedirs/GameData/nested/._config"
+      printf 'metadata\n' > "$scripts/._Game.sh"
+      printf 'metadata\n' > "$scripts/images/deep/._Game.png"
+      printf 'keep\n' > "$gamedirs/GameData/.keep"
+      printf 'outside\n' > "$case_dir/._outside"
+      ln -s "$gamedirs/GameData/.keep" "$gamedirs/GameData/._link"
+      printf 'stale-size\n' > "$TEST_SIZE_FILE"
+      ;;
     restore|restore_fail|restore_selected|delete_selected)
       rm -f "$TEST_SCRIPT" "$TEST_IMAGE"
       rm -rf "$TEST_GAME"
@@ -379,6 +248,15 @@ EOF
       mkdir -p "$batch/scripts" "$batch/images" "$batch/data/GameData"
       : > "$batch/scripts/Game.sh"
       : > "$batch/images/Game.png"
+      : > "$batch/data/GameData/save.dat"
+      ;;
+    sibling_restore)
+      rm -f "$TEST_SCRIPT" "$TEST_IMAGE"
+      rm -rf "$TEST_GAME"
+      batch="$app/trash/20260715-120000"
+      mkdir -p "$batch/scripts" "$batch/script-images" "$batch/data/GameData"
+      : > "$batch/scripts/Game.sh"
+      : > "$batch/script-images/Game.png"
       : > "$batch/data/GameData/save.dat"
       ;;
     restore_legacy)
@@ -410,23 +288,39 @@ EOF
       mkdir -p "$TEST_BUCKET_ROOT"
       : > "$TEST_BUCKET_ROOT/Keep.sh"
       ;;
-    runtime_repair|runtime_progress|runtime_default_routes|runtime_custom|runtime_full|runtime_jsdelivr|runtime_proxy_failover|runtime_private_curl|runtime_bad_private_curl|runtime_wget|runtime_cached|runtime_resume|runtime_resume_reset|runtime_fail)
-      printf 'old-runtime' > "$scripts/PortMaster/libs/godot_4.5.squashfs"
+  esac
+
+  # Seed the same direct-item snapshot produced by --scan-sizes. Mutation
+  # cases must update these rows incrementally instead of recursively running
+  # du across every game directory again.
+  case "$mode" in
+    delete|same_root_delete|sibling_delete|direct_delete|direct_delete_fail|fail|empty|empty_fail|restore|sibling_restore|restore_legacy|restore_conflict|restore_fail|restore_selected|restore_misbucket|delete_selected)
+      : > "$TEST_SIZE_FILE"
+      seed_size() {
+        [ -e "$1" ] || [ -L "$1" ] || return 0
+        printf '4096\t%s\n' "$1" >> "$TEST_SIZE_FILE"
+      }
+      seed_size "$TEST_SCRIPT"; seed_size "$TEST_IMAGE"; seed_size "$TEST_GAME"
+      for size_batch in "$app/trash"/* "$app/trash"/.[!.]* "$app/trash"/..?*; do
+        [ -e "$size_batch" ] || [ -L "$size_batch" ] || continue
+        if [ ! -d "$size_batch" ] || [ -L "$size_batch" ]; then seed_size "$size_batch"; continue; fi
+        size_structured=0
+        for size_bucket in scripts script-images data images; do
+          [ -d "$size_batch/$size_bucket" ] || continue
+          size_structured=1
+          for size_item in "$size_batch/$size_bucket"/* "$size_batch/$size_bucket"/.[!.]* "$size_batch/$size_bucket"/..?*; do
+            seed_size "$size_item"
+          done
+        done
+        [ "$size_structured" = "1" ] && continue
+        for size_item in "$size_batch"/* "$size_batch"/.[!.]* "$size_batch"/..?*; do seed_size "$size_item"; done
+      done
+      if [ "$mode" = "sibling_delete" ]; then
+        awk -F '\t' -v path="$TEST_GAME" '$2 != path' "$TEST_SIZE_FILE" > "$TEST_SIZE_FILE.tmp"
+        mv "$TEST_SIZE_FILE.tmp" "$TEST_SIZE_FILE"
+      fi
       ;;
   esac
-  if [ "$mode" = "runtime_cached" ] || [ "$mode" = "runtime_resume" ] ||
-     [ "$mode" = "runtime_resume_reset" ] || [ "$mode" = "runtime_fail" ]; then
-    runtime_cache="$app/conf/runtime-cache/03569a31f137dcf994ed737352cb746a"
-    mkdir -p "$runtime_cache"
-    if [ "$mode" = "runtime_cached" ]; then
-      printf 'hsqs-runtime-payload' > "$runtime_cache/runtime.download"
-    else
-      runtime_route='https://proxy.test/https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs'
-      read -r runtime_route_crc runtime_route_bytes _ < <(printf '%s' "$runtime_route" | LC_ALL=C cksum)
-      printf 'hsqs-run' > "$runtime_cache/runtime.download.part"
-      printf 'v1-%s-%s\n' "$runtime_route_crc" "$runtime_route_bytes" > "$runtime_cache/runtime.download.part.route"
-    fi
-  fi
 
   if [ "$mode" = "renamed_launcher" ]; then
     # MiniLoong 把目标 SH 重命名为 .port.sh 后直接执行。helper 应复制
@@ -443,13 +337,24 @@ EOF
   fi
 
   case "$mode" in
-    delete|same_root_delete)
+    delete|same_root_delete|sibling_delete)
       [ ! -e "$TEST_SCRIPT" ]
       [ ! -e "$TEST_IMAGE" ]
       [ ! -e "$TEST_GAME" ]
       [ -n "$(find "$app/trash" -path '*/scripts/Game.sh' -print -quit)" ]
-      [ -n "$(find "$app/trash" -path '*/images/Game.png' -print -quit)" ]
+      if [ "$mode" = "sibling_delete" ]; then
+        [ -n "$(find "$app/trash" -path '*/script-images/Game.png' -print -quit)" ]
+      else
+        [ -n "$(find "$app/trash" -path '*/images/Game.png' -print -quit)" ]
+      fi
       [ -n "$(find "$app/trash" -path '*/data/GameData' -print -quit)" ]
+      # The operation does not signal completion until the derived size
+      # snapshot reflects the new Trash paths.
+      [ -f "$TEST_SIZE_FILE" ]
+      grep -Fq "$app/trash/" "$TEST_SIZE_FILE"
+      grep -Fq $'4096\t' "$TEST_SIZE_FILE"
+      trash_game=$(find "$app/trash" -path '*/data/GameData' -print -quit)
+      grep -Fq "$trash_game" "$TEST_SIZE_FILE"
       # APP Manager 不负责维护任何系统前端缓存；即使名字看起来熟悉也不能碰。
       [ -e "$scripts/PORTS_cache-main.db" ]
       [ -e "$scripts/unrelated-cache.db" ]
@@ -467,6 +372,10 @@ EOF
       [ -e "$scripts/PORTS_cache-main.db" ]
       [ -e "$scripts/unrelated-cache.db" ]
       [ ! -s "$app/conf/result.txt" ]
+      [ -f "$TEST_SIZE_FILE" ]
+      ! grep -Fq "$TEST_SCRIPT" "$TEST_SIZE_FILE"
+      ! grep -Fq "$TEST_IMAGE" "$TEST_SIZE_FILE"
+      ! grep -Fq "$TEST_GAME" "$TEST_SIZE_FILE"
       ;;
     direct_delete_fail)
       [ -e "$TEST_SCRIPT" ]
@@ -495,12 +404,26 @@ EOF
       [ -e "$TEST_TRASH_ITEM" ]
       grep -Fxq $'FAIL\tempty_trash' "$app/conf/result.txt"
       ;;
-    restore|restore_legacy)
+    appledouble)
+      [ ! -e "$gamedirs/GameData/._save.dat" ]
+      [ ! -e "$gamedirs/GameData/nested/._config" ]
+      [ ! -e "$scripts/._Game.sh" ]
+      [ ! -e "$scripts/images/deep/._Game.png" ]
+      [ -e "$gamedirs/GameData/.keep" ]
+      [ -L "$gamedirs/GameData/._link" ]
+      [ -e "$case_dir/._outside" ]
+      [ -s "$TEST_SIZE_FILE" ]
+      ! grep -Fq 'stale-size' "$TEST_SIZE_FILE"
+      grep -Fxq $'OK\tappledouble\t4' "$app/conf/result.txt"
+      ;;
+    restore|sibling_restore|restore_legacy)
       [ -e "$TEST_SCRIPT" ]
       [ -e "$TEST_IMAGE" ]
       [ -e "$TEST_GAME/save.dat" ]
       [ -z "$(find "$app/trash" -mindepth 1 -print -quit)" ]
       [ ! -s "$app/conf/result.txt" ]
+      [ -f "$TEST_SIZE_FILE" ]
+      grep -Fq $'4096\t'"$TEST_GAME" "$TEST_SIZE_FILE"
       ;;
     restore_conflict)
       grep -Fxq 'installed version' "$TEST_SCRIPT"
@@ -543,79 +466,6 @@ EOF
       [ -e "$TEST_BUCKET_ROOT/Keep.sh" ]
       [ "$(grep -Fxc $'FAIL\toperation' "$app/conf/result.txt")" = "2" ]
       ;;
-    runtime_repair|runtime_progress|runtime_private_curl)
-      if ! grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"; then
-        cat "$app/log.txt" "$app/conf/result.txt" >&2
-        exit 1
-      fi
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      grep -Fq 'https://proxy.test/https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      grep -Fxq $'1\tcomplete\tgodot_4.5\t1\t1\t20\t20\t0\tRuntime repair complete' "$app/conf/progress.tsv"
-      [ "$mode" != "runtime_progress" ] || [ -e "$TEST_PROGRESS_OBSERVED" ]
-      ;;
-    runtime_bad_private_curl|runtime_wget)
-      grep -Fxq 'old-runtime' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'FAIL\truntime\tgodot_4.5\tmetadata' "$app/conf/result.txt"
-      ;;
-    runtime_default_routes)
-      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      grep -Fq 'url=https://' "$TEST_CURL_LOG"
-      ;;
-    runtime_custom)
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      grep -Fq 'https://custom.test/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      ;;
-    runtime_full)
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      grep -Fq 'https://full.test/https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      ;;
-    runtime_jsdelivr)
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      ! grep -Fq 'jsdelivr.net' "$TEST_CURL_LOG"
-      grep -Fq 'https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      ;;
-    runtime_proxy_failover)
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      grep -Fq 'https://primary.test/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      grep -Fq 'https://secondary.test/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      ;;
-    runtime_cached)
-      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'OK\truntime\tgodot_4.5\tCache' "$app/conf/result.txt"
-      ! grep -Fq 'godot_4.5.squashfs' "$TEST_CURL_LOG"
-      [ ! -d "$runtime_cache" ]
-      ;;
-    runtime_resume)
-      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq 'resume=1 out=' "$TEST_CURL_LOG"
-      [ ! -d "$runtime_cache" ]
-      ;;
-    runtime_resume_reset)
-      grep -Fxq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq 'resume=1 out=' "$TEST_CURL_LOG"
-      [ -e "$TEST_RESUME_REJECTED" ]
-      [ ! -d "$runtime_cache" ]
-      ;;
-    runtime_large)
-      [ "$(wc -c < "$scripts/PortMaster/libs/gmtoolkit.squashfs" | tr -d ' ')" = "60" ]
-      grep -Fq $'OK\truntime\tgmtoolkit\tnetwork' "$app/conf/result.txt"
-      grep -Fq '/gmtoolkit.squashfs' "$TEST_CURL_LOG"
-      ;;
-    runtime_direct)
-      grep -Fq 'hsqs-runtime-payload' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'OK\truntime\tgodot_4.5\tnetwork' "$app/conf/result.txt"
-      grep -Fq 'https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs' "$TEST_CURL_LOG"
-      ;;
-    runtime_invalid)
-      [ ! -e "$scripts/PortMaster/libs/escape.squashfs" ]
-      grep -Fq $'FAIL\truntime\t../escape\tinvalid-name' "$app/conf/result.txt"
-      ;;
-    runtime_fail)
-      grep -Fxq 'old-runtime' "$scripts/PortMaster/libs/godot_4.5.squashfs"
-      grep -Fq $'FAIL\truntime\tgodot_4.5\tdownload' "$app/conf/result.txt"
-      grep -Fxq 'hsqs-run' "$runtime_cache/runtime.download.part"
-      ;;
     invalid)
       [ -e "$TEST_OUTSIDE" ]
       grep -Fxq $'FAIL\toperation' "$app/conf/result.txt"
@@ -638,34 +488,33 @@ EOF
       grep -Fq '"path": "' "$app/conf/env.json"
       ;;
   esac
-  case "$mode" in
-    runtime_*)
-      ! grep -Eq 'https://|proxy\.test|custom\.test|full\.test|primary\.test|secondary\.test|JSDelivr|GitHub' \
-        "$app/log.txt" "$app/conf/result.txt"
-      ;;
-  esac
   [ ! -e "$TEST_PLAN" ]
   [ -x "$TEST_APPLY_HELPER" ]
 
-  if [ "$mode" = "delete" ]; then
+  if [ "$mode" = "delete" ] || [ "$mode" = "same_root_delete" ]; then
     # 大目录统计由 helper 的独立后台模式产出缓存，不重跑 UI，
     # 也不再触发 get_controls 的平台启动画面。
     mkdir -p "$gamedirs/SizeProbe"
     printf 'size probe\n' > "$gamedirs/SizeProbe/probe.bin"
+    if [ "$mode" = "same_root_delete" ]; then
+      printf 'image probe\n' > "$gamedirs/SizeProbe.png"
+    fi
     PAM_SOURCE_DIR="$scripts" bash "$TEST_APPLY_HELPER" --scan-sizes
     [ -s "$TEST_SIZE_FILE" ]
     grep -Fq "$gamedirs/SizeProbe" "$TEST_SIZE_FILE"
+    if [ "$mode" = "same_root_delete" ]; then
+      [ "$(grep -Fxc "$gamedirs/SizeProbe.png" < <(cut -f2- "$TEST_SIZE_FILE"))" = "1" ]
+    fi
   fi
   [ "$(cat "$TEST_COUNT")" = "1" ]
   # APP-owned bootstrap never executes PortMaster control/get_controls.
   [ ! -e "$TEST_CONTROL_COUNT" ]
 }
 
-for mode in delete same_root_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail \
-  restore restore_legacy restore_conflict restore_fail restore_selected \
+for mode in delete same_root_delete sibling_delete direct_delete direct_delete_fail direct_delete_invalid direct_delete_self fail empty empty_fail appledouble \
+  restore sibling_restore restore_legacy restore_conflict restore_fail restore_selected \
   restore_selected_invalid restore_misbucket delete_selected delete_selected_invalid \
-  delete_container_invalid invalid no_plan runtime_repair runtime_progress runtime_default_routes runtime_custom runtime_full runtime_jsdelivr runtime_proxy_failover runtime_private_curl runtime_bad_private_curl runtime_wget runtime_cached runtime_resume runtime_resume_reset \
-  runtime_large runtime_direct runtime_invalid runtime_fail \
+  delete_container_invalid invalid no_plan \
   renamed_launcher helper_fallback; do
   make_case "$mode"
 done

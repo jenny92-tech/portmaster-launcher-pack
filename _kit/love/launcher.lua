@@ -91,7 +91,7 @@ local function write_pair(out, name, value)
 end
 
 function launcher.define(spec)
-    local port = {state = {ui_lang = "zh", launch_count = 0}, strings = {}, credits = spec.credits}
+    local port = {state = {ui_lang = "zh", launch_count = 0}, strings = {}, credits = spec.credits, prelaunch = spec.prelaunch}
     local fields, by_key = {}, {}
 
     port.strings.title = spec.title

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-for port in heishenhua hk terraria sts2 vampiresurvivors114; do
+for port in appmanager heishenhua hk terraria sts2 vampiresurvivors114; do
   manifest="$ROOT/ports/$port/manifest.json"
   python3 - "$ROOT" "$port" "$manifest" <<'PY'
 import json

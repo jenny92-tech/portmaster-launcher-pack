@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/jenny92-tech/portmaster-launcher-pack/main/config/platform-detail.schema.json",
+  "title": "Port App Manager platform detail",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format", "schema_version", "config_version", "platform_id", "display_name",
+    "support", "required_adapters", "paths", "source_route", "frontend", "libraries",
+    "python", "health", "preserved_dirs", "managed_roots", "capabilities",
+    "environment_scopes", "lifecycle", "display", "input"
+  ],
+  "properties": {
+    "format": {"const": "jenny92.appmanager-config"},
+    "schema_version": {"const": 1},
+    "config_version": {"$ref": "appmanager-config.schema.json#/$defs/semver"},
+    "platform_id": {"$ref": "appmanager-config.schema.json#/$defs/id"},
+    "display_name": {"type": "string", "minLength": 1},
+    "support": {"$ref": "appmanager-config.schema.json#/$defs/support"},
+    "required_adapters": {"type": "array", "uniqueItems": true, "items": {"$ref": "appmanager-config.schema.json#/$defs/id"}},
+    "paths": {"type": "object", "required": ["launcher_directory"], "additionalProperties": {"$ref": "appmanager-config.schema.json#/$defs/pathStrategy"}},
+    "source_route": {"$ref": "appmanager-config.schema.json#/$defs/id"},
+    "frontend": {"$ref": "appmanager-config.schema.json#/$defs/frontend"},
+    "libraries": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "python": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "health": {"type": "array", "items": {"$ref": "appmanager-config.schema.json#/$defs/healthRule"}},
+    "preserved_dirs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+$"}},
+    "managed_roots": {"type": "array", "items": {"$ref": "appmanager-config.schema.json#/$defs/openObject"}},
+    "capabilities": {"type": "object", "additionalProperties": {"type": "boolean"}},
+    "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"]}},
+    "lifecycle": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "display": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "input": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "models": {
+      "type": "object",
+      "propertyNames": {"$ref": "appmanager-config.schema.json#/$defs/id"},
+      "additionalProperties": {"$ref": "appmanager-config.schema.json#/$defs/model"}
+    }
+  }
+}

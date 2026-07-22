@@ -23,7 +23,7 @@ rm -rf "$DIST"
 mkdir -p "$DIST" "$GAMEDATA"
 
 blue "=== Batomon dist: launcher ==="
-cp "$SRC_ROOT/launcher.sh" "$DIST/Batomon Showdown.sh"
+"$REPO_ROOT/_kit/assemble.sh" "$SRC_ROOT/launcher.sh" "$DIST/Batomon Showdown.sh" >/dev/null
 bash -n "$DIST/Batomon Showdown.sh"
 
 [ -f "$PORT_ROOT/LICENSE" ] && cp "$PORT_ROOT/LICENSE" "$DIST/"

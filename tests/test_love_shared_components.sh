@@ -20,6 +20,8 @@ for symbol in \
   'function kit.set_page' \
   'function kit.dialog' \
   'function kit.close_dialog' \
+  'function kit.guide' \
+  'function kit.close_guide' \
   'function kit.input' \
   'function kit.invalidate_layout' \
   'function kit.quit' \
@@ -53,6 +55,7 @@ grep -Fq 'require("kit")' "$app_lua/main.lua"
 for module in app_model app_operations app_pages app_environment; do
   grep -Fq "require(\"$module\")" "$app_lua/main.lua"
 done
+grep -Fq 'kit=kit,json=json,scanner=scanner' "$app_lua/app_model.lua"
 [ "$(wc -l < "$app_lua/main.lua")" -lt 220 ]
 grep -Fq 'kit.checkbox' "$app_lua"/*.lua
 grep -Fq 'kit.checkbox(model.display_name(script),{' "$app_lua/app_pages.lua"
@@ -71,10 +74,24 @@ grep -Fq 'kit.dialog' "$app_lua"/*.lua
 grep -Fq 'function kit.debug_layout' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_layout_cache' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_dialog' "$ROOT/_kit/love/kit.lua"
+grep -Fq 'function kit.debug_guide' "$ROOT/_kit/love/kit.lua"
+grep -Fq 'love.graphics.stencil' "$ROOT/_kit/love/kit.lua"
+grep -Fq 'local function coach_card_position' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_focus' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_page' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'preserve_focus=' "$app_lua/app_pages.lua"
 grep -Fq 'on_home_cancel=operations.show_exit_dialog' "$app_lua/main.lua"
+grep -Fq 'onboarding_seen="0"' "$app_lua/main.lua"
+grep -Fq 'kit.guide({' "$app_lua/app_pages.lua"
+grep -Fq '这是一款 Port 游戏维护工具' "$app_lua/app_pages.lua"
+grep -Fq '开始使用' "$app_lua/app_pages.lua"
+grep -Fq 'target="leftovers"' "$app_lua/app_pages.lua"
+grep -Fq 'id="leftovers:rules"' "$app_lua/app_pages.lua"
+grep -Fq '普通的孤儿 SH 与孤儿数据目录会默认勾选' "$app_lua/app_pages.lua"
+grep -Fq '重复目录引用' "$app_lua/app_pages.lua"
+grep -Fq '勾选后只会把这个 SH 启动器移入回收站' "$app_lua/app_pages.lua"
+grep -Fq 'target="runtime-repair-entry"' "$app_lua/app_pages.lua"
+grep -Fq 'state.onboarding_seen="1"' "$app_lua/app_pages.lua"
 grep -Fq 'button(L("Quit","退出"),operations.show_exit_dialog' "$app_lua/app_pages.lua"
 grep -Fq 'row_layout={mode="grid",columns=2}' "$app_lua"/*.lua
 grep -Fq 'kit.textview' "$app_lua/app_pages.lua"
@@ -87,7 +104,7 @@ sources="$ROOT/ports/appmanager/src/appmanager_sources.sh"
 [ ! -e "$ROOT/ports/appmanager/love/runtime_catalog.tsv" ]
 grep -Fq 'PAM_RUNTIME_REPOSITORY="${PAM_RUNTIME_REPOSITORY:-PortsMaster/PortMaster-New}"' "$sources"
 grep -Fq 'RUNTIME_METADATA_URL="${RUNTIME_METADATA_URL:-$PAM_RUNTIME_RELEASES_URL/latest/download/ports.json}"' "$sources"
-grep -Fq 'github_proxy_download release "$RUNTIME_METADATA_URL"' "$launcher"
+grep -Fq 'fetch-runtime-metadata' "$launcher"
 grep -Fq 'runtime_metadata_refresh()' "$launcher"
 grep -Fq 'runtime_expected_md5()' "$launcher"
 grep -Fq 'runtime_md5_file()' "$launcher"
@@ -100,7 +117,7 @@ grep -Fq 'font:getWidth(title)>title_w' "$ROOT/_kit/love/kit.lua"
 
 # APP Manager is a LÖVE package now; none of the retired Godot/FRT smoke-test
 # payload may reappear in its distribution.
-"$ROOT/_kit/dist_port.sh" appmanager >/dev/null
+bash "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
 for retired in bootstrap.pck appmanager.gptk runtime hacksdl; do
   [ ! -e "$ROOT/ports/appmanager/dist/$retired" ] || {
     echo "appmanager dist: retired payload returned: $retired" >&2
@@ -109,12 +126,12 @@ for retired in bootstrap.pck appmanager.gptk runtime hacksdl; do
 done
 for current in love_ui/kit.lua love_ui/main.lua love_ui/app_model.lua love_ui/app_operations.lua \
   love_ui/app_pages.lua love_ui/app_environment.lua love_ui/scan.lua love_ui/ui.gptk; do
-  [ -f "$ROOT/ports/appmanager/dist/PortAppManager/$current" ] || {
+  [ -f "$ROOT/ports/appmanager/dist/jenny92-appmanager/$current" ] || {
     echo "appmanager dist: missing $current" >&2
     exit 1
   }
 done
-[ ! -e "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/runtime_catalog.tsv" ]
+[ ! -e "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/runtime_catalog.tsv" ]
 
 # Ordinary launchers accept either primary face button as confirm.
 for mapping in 'a = enter' 'b = enter' 'x = esc' 'y = esc'; do
@@ -123,14 +140,18 @@ done
 # APP Manager also makes both face-button conventions activate the focused
 # explicit choice, avoiding firmware-specific physical A/B label swaps.
 for mapping in 'a = enter' 'b = enter' 'x = esc' 'y = esc'; do
-  grep -Fxq "$mapping" "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/ui.gptk"
+  grep -Fxq "$mapping" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
 done
+for ignored_mapping in 'start = f10' 'back = f10'; do
+  grep -Fxq "$ignored_mapping" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
+done
+! grep -Eq '^(start|back) = (enter|esc)$' "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
 for repeat_mapping in 'up = repeat' 'down = repeat' 'left_analog_up = repeat' \
   'left_analog_down = repeat' 'repeat_delay = 360' 'repeat_interval = 90'; do
   grep -Fxq "$repeat_mapping" "$ROOT/_kit/love/ui.gptk"
-  grep -Fxq "$repeat_mapping" "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/ui.gptk"
+  grep -Fxq "$repeat_mapping" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
 done
-if cmp -s "$ROOT/_kit/love/ui.gptk" "$ROOT/ports/appmanager/dist/PortAppManager/love_ui/ui.gptk"; then
+if cmp -s "$ROOT/_kit/love/ui.gptk" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"; then
   echo "appmanager dist: expected its explicit navigation mapping" >&2
   exit 1
 fi

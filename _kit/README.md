@@ -12,44 +12,50 @@ launcher fail to start.
 |---|---|
 | `love/kit.lua` | Shared LÖVE UI: pages, items, buttons, split layout, focus, localization and busy state. |
 | `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
-| `github_proxy.sh` | Capability-aware GitHub transport and bundled default registry: Release/Raw/Archive/API/Gist downloads and Git clone, with per-proxy URL formatters, bounded probing, same-route resume, validation and fallback. |
+| `portable_tools.sh` | Capability probe and process-local all-or-nothing switch from system applets to an application-provided BusyBox. |
+| `launcher_artwork.sh` | Shared tested-device adapter for launcher artwork paths and safe same-name synchronization. |
 | `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
 | `launcher_unity_common.sh` | **Unity-loader only**: configuration, button remap and game launch. |
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
+| `build_appmanager_native.sh` | Build and stage Port App Manager's static aarch64 Rust helpers. |
+| `dist_trimui_app.sh` | Wrap a built launcher as a TrimUI MainUI APP ZIP prefixed with `[TrimUI App]`; the archive extracts directly under `Apps/`. |
+
+## TrimUI system APP packages
+
+```bash
+_kit/dist_trimui_app.sh appmanager
+_kit/dist_trimui_app.sh terraria /path/to/output
+```
+
+The archive always contains one application directory and is safe to extract
+directly into `/mnt/SDCARD/Apps/`. `config.json`, `launch.sh`, and `icon.png`
+are generated around the normal built launcher; the standard PortMaster package
+is not changed. Ordinary game launchers include only their SH and keep using
+their installed data under `Data/ports/<port>`. A self-contained application can
+declare extra root-level dist items and environment variables in its manifest's
+`trimui_app` object. Runtime state, trash, caches, logs, backups, and macOS
+metadata are omitted. TrimUI system APPs are frontend entries and are not part
+of APP Manager's Port scanning, uninstall, or leftover-cleanup model.
 
 ## GitHub transport
 
-`github_proxy.sh` treats a proxy as a registry row instead of assuming every
-endpoint supports every GitHub URL:
+The static Rust `portkit` helper treats a proxy as a typed registry entry
+instead of assuming every endpoint supports every GitHub URL:
 
 ```text
 id<TAB>formatter<TAB>release,raw,archive,clone,api,gist<TAB>base-url
 ```
 
-Formatters currently include `direct`, `full` (prefix the complete source
-URL), `mirror` (replace `github.com`), `jsdelivr` (Raw files only), and
-`gitclone` (Git smart HTTP only). `github_proxy_fetch` filters by capability,
-probes at most five routes at once, downloads through responsive routes, and
-accepts a route only after the caller's content validator succeeds.
-`github_proxy_clone` performs the equivalent flow for Git clone. Range data is
-resumed only from the same route ID; changing routes discards the old partial.
-After a validated success, each capability remembers that route in a plain
-shell variable for the lifetime of the current process. Later operations try it
-first; a failed probe or transfer clears the hint and continues through every
-remaining batch. Exiting or restarting clears all hints. Probe scratch files
-live under `${TMPDIR:-/tmp}` and are removed after each operation. A
-`.part.route` sidecar may remain only beside an incomplete download. It stores
-a non-reversible fingerprint of the fully formatted URL, so proxy-list changes
-cannot mix bytes across endpoints; it does not affect candidate priority.
-New endpoints can be appended as TSV rows through
-`GITHUB_PROXY_REGISTRY_EXTRA`; callers do not edit the download operations.
-The bundled defaults and their maintenance-source comment also live in
-this module; applications only source the module. Generic consumers may replace
-the two groups with `GITHUB_PROXY_CUSTOM_PROXIES` and
-`GITHUB_PROXY_FULL_PROXIES`; the older APP Manager override names remain
-supported for compatibility.
+Formatters include direct, full-source prefix, mirror-host replacement,
+jsDelivr Raw files, and Git-smart-HTTP routes. `portkit github fetch` filters by
+capability, probes at most five routes at once, validates content before atomic
+promotion, and resumes only from the same formatted endpoint. Route hints live
+only for the Rust process lifetime. APP-specific Runtime and stable-manifest
+validation is exposed by `appmanager-cli`; MD5/SHA-256 and ZIP inspection are
+provided by `portkit file`, so launchers do not carry curl or archive/hash shell
+wrappers.
 
 Git LFS, GitHub Packages, and GHCR are intentionally not modeled as file
 downloads: they have separate authenticated protocols. Add them as distinct
@@ -107,10 +113,18 @@ _kit/dist_port.sh hk
 
 # 2. Deploy only the generated dist directory.
 # MiniLoong: script -> /mnt/sdcard/roms/ports/
+#              same-stem image -> /mnt/sdcard/roms/ports/<port>/
 #              data -> /mnt/sdcard/roms/ports/<port>/
 # TrimUI:     script -> Roms/PORTS/
+#              same-stem image -> Data/ports/<port>/
 #              data -> Data/ports/<port>/
 ```
+
+The shared `launcher_artwork.sh` adapter copies package-owned artwork whose stem
+exactly matches the selected launcher, without overwriting an existing file, to
+the verified frontend path on first launch:
+MiniLoong uses `Roms/PORTS/images`; TrimUI uses the TF-card `Imgs/PORTS` path
+declared by its PORTS emulator config. Unknown devices are left untouched.
 
 **One assembled script serves both devices** — `audio_setup` branches on
 `CFW_NAME`: on **MiniLoong (`Loong`, wayland/weston)** it leaves system audio +

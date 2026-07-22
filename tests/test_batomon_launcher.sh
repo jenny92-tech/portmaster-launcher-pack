@@ -29,7 +29,7 @@ grep -Fq './godot.mono' "$SCRIPT"
 grep -Fq 'BATOMON_SCENE' "$SCRIPT"
 grep -Fq 'source "$controlfolder/control.txt"' "$SCRIPT"
 
-grep -Fq 'cp "$SRC_ROOT/launcher.sh" "$DIST/Batomon Showdown.sh"' "$DIST_SCRIPT"
+grep -Fq '"$REPO_ROOT/_kit/assemble.sh" "$SRC_ROOT/launcher.sh" "$DIST/Batomon Showdown.sh"' "$DIST_SCRIPT"
 grep -Fq 'external/godot/godot.linuxbsd.template_release.arm64.mono' "$DIST_SCRIPT"
 grep -Fq 'port_json.py' "$DIST_SCRIPT"
 

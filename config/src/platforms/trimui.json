@@ -1,0 +1,306 @@
+{
+  "display_name": "TrimUI",
+  "priority": 900,
+  "support": {
+    "device_class": "tested",
+    "target_confirmation": "detected"
+  },
+  "recognition": {
+    "kind": "any",
+    "predicates": [
+      {
+        "kind": "directory_exists",
+        "path": "/usr/trimui"
+      },
+      {
+        "kind": "env_equals",
+        "name": "CFW_NAME",
+        "value": "TrimUI"
+      },
+      {
+        "kind": "launcher_path_prefix",
+        "prefix": "/mnt/SDCARD/Roms/PORTS"
+      }
+    ]
+  },
+  "required_adapters": [
+    "predicate.v1",
+    "path.v1",
+    "frontend.v1",
+    "library.v1",
+    "python.v1",
+    "lifecycle.v1"
+  ],
+  "paths": {
+    "scripts": {
+      "strategy": "launcher_dir"
+    },
+    "launcher_directory": {
+      "strategy": "literal",
+      "value": "/mnt/SDCARD/Data"
+    },
+    "game_data": {
+      "strategy": "literal",
+      "value": "/mnt/SDCARD/Data/ports"
+    },
+    "portmaster_core": {
+      "strategy": "literal",
+      "value": "/mnt/SDCARD/Apps/PortMaster/PortMaster"
+    },
+    "frontend": {
+      "strategy": "literal",
+      "value": "/mnt/SDCARD/Apps/PortMaster"
+    },
+    "images": {
+      "strategy": "rom_root_from_launcher",
+      "suffix": "Imgs/PORTS"
+    }
+  },
+  "source_route": "official",
+  "frontend": {
+    "management": "app",
+    "kind": "trimui",
+    "names": [
+      "launch.sh",
+      "config.json",
+      "icon.png"
+    ],
+    "primary": "launch.sh",
+    "control_source": "trimui/control.txt",
+    "core_launcher_source": null,
+    "remove_core_launcher": true,
+    "empty_tasksetter": true,
+    "core_executable": null,
+    "frontend_executable": "launch.sh",
+    "install_map": [
+      {
+        "source": "trimui/PortMaster.txt",
+        "target": "launch.sh",
+        "executable": true
+      },
+      {
+        "source": "trimui/config.json",
+        "target": "config.json",
+        "executable": false
+      },
+      {
+        "source": "trimui/icon.png",
+        "target": "icon.png",
+        "executable": false
+      }
+    ],
+    "transforms": [
+      {
+        "kind": "export_library_group",
+        "target": "launch.sh",
+        "variable": "PYSDL2_DLL_PATH",
+        "library_group": "sdl2"
+      }
+    ]
+  },
+  "libraries": {
+    "resolution": "first_complete",
+    "groups": {
+      "sdl2": {
+        "required_sonames": [
+          "libSDL2-2.0.so.0",
+          "libSDL2_image-2.0.so.0",
+          "libSDL2_mixer-2.0.so.0",
+          "libSDL2_ttf-2.0.so.0"
+        ],
+        "candidates": [
+          "/usr/lib",
+          "/usr/trimui/lib"
+        ]
+      },
+      "gles": {
+        "required_sonames": [
+          "libGLESv2.so"
+        ],
+        "candidates": [
+          "/usr/lib"
+        ]
+      },
+      "love_private": {
+        "required_sonames": [
+          "liblove-11.5.so",
+          "libluajit-5.1.so.2",
+          "libmodplug.so.1",
+          "libogg.so.0",
+          "libtheoradec.so.1"
+        ],
+        "candidates": [
+          "{app_root}/runtime/libs.aarch64"
+        ]
+      }
+    }
+  },
+  "python": {
+    "mode": "system",
+    "imports": [
+      "sys",
+      "encodings",
+      "zipfile",
+      "hashlib"
+    ]
+  },
+  "health": [
+    {
+      "kind": "required_file",
+      "path": "{portmaster_core}/control.txt"
+    },
+    {
+      "kind": "required_file",
+      "path": "{portmaster_core}/device_info.txt"
+    },
+    {
+      "kind": "required_file",
+      "path": "{portmaster_core}/funcs.txt"
+    },
+    {
+      "kind": "one_of_files",
+      "paths": [
+        "{portmaster_core}/pugwash",
+        "{portmaster_core}/harbourmaster"
+      ]
+    },
+    {
+      "kind": "archive_or_nonempty_directory",
+      "archive": "{portmaster_core}/pylibs.zip",
+      "directory": "{portmaster_core}/pylibs"
+    },
+    {
+      "kind": "python_imports_or_runtime",
+      "imports": [
+        "sys",
+        "encodings",
+        "zipfile",
+        "hashlib"
+      ]
+    }
+  ],
+  "preserved_dirs": [
+    "libs",
+    "config",
+    "themes",
+    "logs",
+    "cache"
+  ],
+  "managed_roots": [
+    {
+      "path": "portmaster_core",
+      "owner": "app",
+      "preserve": "preserved_dirs"
+    },
+    {
+      "path": "frontend",
+      "owner": "app",
+      "names": [
+        "launch.sh",
+        "config.json",
+        "icon.png"
+      ]
+    },
+    {
+      "path": "game_data",
+      "owner": "port-user-data"
+    },
+    {
+      "path": "images",
+      "owner": "frontend-artwork"
+    }
+  ],
+  "capabilities": {
+    "manage_portmaster": true,
+    "install_portmaster": true,
+    "update_portmaster": true,
+    "repair_runtimes": true,
+    "manage_ports": true,
+    "manage_frontend": true,
+    "manage_images": true,
+    "manage_artwork": true,
+    "trash": true,
+    "leftovers": true,
+    "cleanup_appledouble": true
+  },
+  "environment_scopes": [
+    "appmanager",
+    "love_ui",
+    "portmaster",
+    "runtime_tool",
+    "game_launcher"
+  ],
+  "lifecycle": {
+    "display_backend": "wayland_then_kms",
+    "input_helper": "gptokeyb",
+    "wait_for_ui": true,
+    "cleanup_input_helper": true
+  },
+  "display": {
+    "default_width": 1280,
+    "default_height": 720,
+    "rotation": "system",
+    "graphics_api": "gles2"
+  },
+  "input": {
+    "analog_sticks": 2,
+    "controller_database": "bundled",
+    "tty": "/dev/tty0"
+  },
+  "models": {
+    "brick": {
+      "display_name": "TrimUI Brick",
+      "recognition": {
+        "kind": "env_equals",
+        "name": "DEVICE",
+        "value": "brick",
+        "case_insensitive": true
+      },
+      "display": {
+        "default_width": 1024,
+        "default_height": 768
+      },
+      "overrides": {
+        "input": {
+          "analog_sticks": 0
+        }
+      }
+    },
+    "brick_pro": {
+      "display_name": "TrimUI Brick Pro",
+      "recognition": {
+        "kind": "env_equals",
+        "name": "DEVICE",
+        "value": "brick-pro",
+        "case_insensitive": true
+      },
+      "display": {
+        "default_width": 1024,
+        "default_height": 768
+      },
+      "overrides": {
+        "input": {
+          "analog_sticks": 2
+        }
+      }
+    },
+    "smart_pro": {
+      "display_name": "TrimUI Smart Pro",
+      "recognition": {
+        "kind": "env_equals",
+        "name": "DEVICE",
+        "value": "smart-pro",
+        "case_insensitive": true
+      },
+      "display": {
+        "default_width": 1280,
+        "default_height": 720
+      },
+      "overrides": {
+        "input": {
+          "analog_sticks": 2
+        }
+      }
+    }
+  }
+}

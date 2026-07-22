@@ -15,6 +15,7 @@ PORT_NAME="heishenhua"; LOG_PREFIX="[HSH-LOVE]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_artwork.sh"
 #@KIT-END
 portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source $controlfolder/control.txt
@@ -22,6 +23,7 @@ source $controlfolder/control.txt
 get_controls
 
 GAMEDIR="/$directory/ports/$PORT_NAME"
+portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
 cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1

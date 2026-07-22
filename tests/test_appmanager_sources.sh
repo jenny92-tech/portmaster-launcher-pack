@@ -13,7 +13,7 @@ bash -n "$SOURCES"
   [ "$PAM_RUNTIME_RELEASES_URL" = "https://github.com/PortsMaster/PortMaster-New/releases" ]
   [ "$PAM_CUSTOM_VERSION_URL" = "$PAM_FORK_RELEASES_URL/latest/download/version.json" ]
   [ "$PAM_OFFICIAL_VERSION_URL" = "$PAM_OFFICIAL_RELEASES_URL/latest/download/version.json" ]
-  [ "$PAM_INSTALLER_SOURCE_URL" = "https://raw.githubusercontent.com/jenny92-tech/PortMaster-GUI/miniloong-support/tools/appmanager-installer.sh" ]
+  [ "$PAM_DEVICE_CONFIG_URL" = "https://raw.githubusercontent.com/jenny92-tech/portmaster-launcher-pack/main/config/config.json" ]
   [ "$RUNTIME_METADATA_URL" = "$PAM_RUNTIME_RELEASES_URL/latest/download/ports.json" ]
 )
 
@@ -21,14 +21,13 @@ bash -n "$SOURCES"
   PAM_GITHUB_WEB_ORIGIN=https://mirror.example
   PAM_GITHUB_RAW_ORIGIN=https://raw.example
   PAM_FORK_REPOSITORY=owner/fork
-  PAM_FORK_BRANCH=stable
   PAM_OFFICIAL_REPOSITORY=owner/upstream
   PAM_RUNTIME_REPOSITORY=owner/runtimes
   source "$SOURCES"
   [ "$PAM_FORK_RELEASES_URL" = "https://mirror.example/owner/fork/releases" ]
   [ "$PAM_OFFICIAL_RELEASES_URL" = "https://mirror.example/owner/upstream/releases" ]
   [ "$PAM_RUNTIME_RELEASES_URL" = "https://mirror.example/owner/runtimes/releases" ]
-  [ "$PAM_INSTALLER_SOURCE_URL" = "https://raw.example/owner/fork/stable/tools/appmanager-installer.sh" ]
+  [ "$PAM_DEVICE_CONFIG_URL" = "https://raw.example/jenny92-tech/portmaster-launcher-pack/main/config/config.json" ]
 )
 
 TMP="$(mktemp -d)"

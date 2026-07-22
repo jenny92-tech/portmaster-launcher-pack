@@ -2,6 +2,12 @@
 # PORTMASTER: batomon, Batomon Showdown.sh
 # Godot 4 runner for a prepared Batomon Showdown Demo PCK.
 
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/launcher_artwork.sh"
+#@KIT-END
+portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0"
+
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 if [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
 elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"

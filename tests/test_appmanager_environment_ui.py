@@ -17,6 +17,8 @@ assert "SquashFS 镜像" not in source
 assert "kit.info" not in source
 assert 'L("PortMaster is not installed. Repair it first.","未安装 PortMaster，请先修复。")' in source
 assert 'L("PortMaster is damaged. Repair it first.","PortMaster 已损坏，请先修复。")' in source
+assert 'L("Managed by system · Available","系统管理 · 当前可用")' in source
+assert "Port App Manager 不会安装、重装或覆盖它" in source
 assert 'L("Checking PortMaster","检查 PortMaster")' in source
 assert "正在检查刚安装的 PortMaster。完成后会自动进入首页。" in source
 assert 'indeterminate=true' in source
@@ -79,7 +81,7 @@ package.loaded.scan = {
 '''
 
 
-def run_case(health: str, pending: bool = False):
+def run_case(health: str, pending: bool = False, management: str = "app"):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         for name in ("scripts", "games", "images", "libs", "state", "trash"):
@@ -102,6 +104,7 @@ def run_case(health: str, pending: bool = False):
                     "home": str(root),
                     "portmaster_target": str(root / "PortMaster"),
                     "portmaster_health": health,
+                    "portmaster_management": management,
                     "portmaster_version": "2026.07" if health == "healthy" else "",
                     "device_name": "MiniLoong Pocket One",
                     "device_class": "tested",
@@ -116,9 +119,9 @@ def run_case(health: str, pending: bool = False):
                     "install_transaction": str(root / "state" / "install-transaction.tsv"),
                     "portmaster_active": str(root / "state" / "portmaster-active.tsv"),
                     "validation_result_file": str(validation_path),
-                    "ignore_dirs": ["PortMaster", "images", "appmanager"],
+                    "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
                     "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"],
-                    "self_port": "appmanager",
+                    "self_port": "jenny92-appmanager",
                 }
             ),
             encoding="utf-8",
@@ -142,6 +145,22 @@ def run_case(health: str, pending: bool = False):
 
 healthy = run_case("healthy")
 assert healthy.eval('require("kit").debug_page().title') == "Port App Manager"
+guide = healthy.eval('require("kit").debug_guide()')
+assert guide["open"]
+assert guide["title"] == "欢迎使用 Port App Manager"
+assert "Port 游戏维护工具" in guide["message"]
+assert guide["confirm"] == "开始使用"
+assert guide["callout_count"] == 5
+assert guide["step"] == 1
+assert guide["target"] == "header"
+healthy.execute('require("kit").input("confirm")')
+assert healthy.eval('require("kit").debug_guide().step') == 2
+healthy.execute('require("kit").input("cancel")')
+assert healthy.eval('require("kit").debug_guide().step') == 3
+assert healthy.eval('require("kit").debug_guide().target') == "leftovers"
+healthy.execute('require("kit").input("confirm"); require("kit").input("confirm"); require("kit").input("confirm")')
+assert not healthy.eval('require("kit").debug_guide().open')
+assert healthy.eval('require("kit").get_state().onboarding_seen') == "1"
 healthy.execute('require("kit").input("up"); require("kit").input("confirm")')
 page = healthy.eval('require("kit").debug_page()')
 assert page["title"] == "环境管理"
@@ -198,6 +217,18 @@ for state, expected_title in (
     dialog = runtime.eval('require("kit").debug_dialog()')
     assert dialog["open"], state
     assert dialog["title"] == ("修复 PortMaster" if state == "damaged" else "安装 PortMaster"), state
+
+system_managed = run_case("missing", management="system")
+page = system_managed.eval('require("kit").debug_page()')
+assert page["title"] == "Port App Manager"
+system_managed.execute('require("kit").close_guide(); require("kit").input("up"); require("kit").input("confirm")')
+page = system_managed.eval('require("kit").debug_page()')
+assert page["title"] == "环境管理"
+assert page["row_count"] == 7
+assert page["sidebar_count"] == 2
+assert page["row_kinds"][7] == "textview"
+system_managed.execute('require("kit").input("right"); require("kit").input("confirm")')
+assert system_managed.eval('require("kit").debug_page().title') == "Runtime 修复"
 
 pending = run_case("healthy", pending=True)
 page = pending.eval('require("kit").debug_page()')

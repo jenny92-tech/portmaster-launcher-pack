@@ -1,0 +1,211 @@
+{
+  "display_name": "muOS",
+  "priority": 800,
+  "support": {
+    "device_class": "official-untested",
+    "target_confirmation": "detected"
+  },
+  "recognition": {
+    "kind": "any",
+    "predicates": [
+      {
+        "kind": "directory_exists",
+        "path": "/mnt/mmc/MUOS"
+      },
+      {
+        "kind": "env_equals",
+        "name": "CFW_NAME",
+        "value": "muOS"
+      }
+    ]
+  },
+  "required_adapters": [
+    "predicate.v1",
+    "path.v1",
+    "frontend.v1",
+    "library.v1",
+    "python.v1",
+    "lifecycle.v1"
+  ],
+  "paths": {
+    "scripts": {
+      "strategy": "launcher_dir"
+    },
+    "launcher_directory": {
+      "strategy": "parent",
+      "of": "game_data"
+    },
+    "game_data": {
+      "strategy": "literal_by_launcher_prefix",
+      "prefix": "/mnt/sdcard",
+      "matched": "/mnt/sdcard/ports",
+      "fallback": [
+        "/mnt/mmc/ports"
+      ]
+    },
+    "portmaster_core": {
+      "strategy": "literal",
+      "value": "/mnt/mmc/MUOS/PortMaster"
+    },
+    "frontend": {
+      "strategy": "literal",
+      "value": "/roms/ports/PortMaster"
+    }
+  },
+  "source_route": "official",
+  "frontend": {
+    "management": "app",
+    "kind": "control-internal",
+    "names": [
+      "control.txt"
+    ],
+    "primary": "control.txt",
+    "control_source": "muos/control.txt",
+    "core_launcher_source": "muos/PortMaster.txt",
+    "remove_core_launcher": false,
+    "empty_tasksetter": true,
+    "core_executable": "PortMaster.sh",
+    "frontend_executable": null,
+    "install_map": [
+      {
+        "source": "muos/control.txt",
+        "target": "control.txt",
+        "executable": false
+      }
+    ]
+  },
+  "libraries": {
+    "resolution": "first_complete",
+    "groups": {
+      "system_sdl2": {
+        "required_sonames": [
+          "libSDL2-2.0.so.0",
+          "libSDL2_image-2.0.so.0",
+          "libSDL2_mixer-2.0.so.0",
+          "libSDL2_ttf-2.0.so.0"
+        ],
+        "candidates": [
+          "/usr/lib",
+          "/lib"
+        ]
+      },
+      "gles": {
+        "required_sonames": [
+          "libGLESv2.so"
+        ],
+        "candidates": [
+          "/usr/lib",
+          "/lib"
+        ]
+      },
+      "love_private": {
+        "required_sonames": [
+          "liblove-11.5.so",
+          "libluajit-5.1.so.2",
+          "libmodplug.so.1",
+          "libogg.so.0",
+          "libtheoradec.so.1"
+        ],
+        "candidates": [
+          "{app_root}/runtime/libs.aarch64"
+        ]
+      }
+    }
+  },
+  "python": {
+    "mode": "system",
+    "imports": [
+      "sys",
+      "encodings",
+      "zipfile",
+      "hashlib"
+    ]
+  },
+  "health": [
+    {
+      "kind": "required_file",
+      "path": "{portmaster_core}/control.txt"
+    },
+    {
+      "kind": "required_file",
+      "path": "{portmaster_core}/funcs.txt"
+    },
+    {
+      "kind": "one_of_files",
+      "paths": [
+        "{portmaster_core}/pugwash",
+        "{portmaster_core}/harbourmaster"
+      ]
+    },
+    {
+      "kind": "executable_file",
+      "path": "{portmaster_core}/PortMaster.sh"
+    },
+    {
+      "kind": "archive_or_nonempty_directory",
+      "archive": "{portmaster_core}/pylibs.zip",
+      "directory": "{portmaster_core}/pylibs"
+    }
+  ],
+  "preserved_dirs": [
+    "libs",
+    "config",
+    "themes",
+    "logs",
+    "cache"
+  ],
+  "managed_roots": [
+    {
+      "path": "portmaster_core",
+      "owner": "app",
+      "preserve": "preserved_dirs"
+    },
+    {
+      "path": "frontend",
+      "owner": "app",
+      "names": [
+        "control.txt"
+      ]
+    },
+    {
+      "path": "game_data",
+      "owner": "port-user-data"
+    }
+  ],
+  "capabilities": {
+    "manage_portmaster": true,
+    "install_portmaster": true,
+    "update_portmaster": true,
+    "repair_runtimes": true,
+    "manage_ports": true,
+    "manage_frontend": true,
+    "manage_images": false,
+    "manage_artwork": false,
+    "trash": true,
+    "leftovers": true,
+    "cleanup_appledouble": true
+  },
+  "environment_scopes": [
+    "appmanager",
+    "love_ui",
+    "portmaster",
+    "runtime_tool",
+    "game_launcher"
+  ],
+  "lifecycle": {
+    "display_backend": "wayland_then_kms",
+    "input_helper": "gptokeyb",
+    "wait_for_ui": true,
+    "cleanup_input_helper": true
+  },
+  "display": {
+    "default_width": 640,
+    "default_height": 480,
+    "rotation": "system"
+  },
+  "input": {
+    "analog_sticks": 2,
+    "controller_database": "bundled",
+    "tty": "/dev/tty0"
+  }
+}

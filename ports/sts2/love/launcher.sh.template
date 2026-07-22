@@ -14,6 +14,7 @@
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_artwork.sh"
 #@KIT-END
 portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source $controlfolder/control.txt
@@ -25,6 +26,7 @@ LOG_PREFIX="[STS2-LOVE]"
 for candidate in "/$directory/ports/sts2" "/mnt/sdcard/roms/ports/sts2" "/mnt/sdcard/mmcblk1p1/Data/ports/sts2" "/roms/ports/sts2"; do
   [ -d "$candidate" ] && GAMEDIR="$candidate" && break
 done
+portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
 mkdir -p "$CONFDIR"
 cd "$GAMEDIR" || exit 1

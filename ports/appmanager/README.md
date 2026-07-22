@@ -1,125 +1,144 @@
 # Port App Manager
 
-Port App Manager 是一个独立的掌机软件，用于管理 Port 启动项、回收站、残留目录、
-共享 Runtime 和 PortMaster 环境。它自带 aarch64 LÖVE、中文字体、gptokeyb、控制器
-数据库和 HTTPS 工具，因此 PortMaster 缺失或损坏时仍能启动并完成修复。
+Port App Manager 是独立的掌机软件，用来管理 Port 启动项、回收站、残留、
+PortMaster Runtime 和 PortMaster 环境。它随包携带 aarch64 LÖVE、中文字体、
+gptokeyb、controller database、静态 Rust helper 和必要的便携工具；PortMaster
+缺失或损坏时，APP 本身仍能启动。
 
-## 功能范围
+ROCKNIX 系固件缺少 `libtheoradec.so.1` 时，启动器只为当前 APP 注入随包兼容库；
+系统已有该 SONAME 时继续使用系统版本，不修改设备库目录。
 
-- 列出受管 Port，显示目录、图片和估算大小。
-- 默认将卸载内容移动到回收站，支持恢复和明确确认后的永久删除。
-- 清理无主目录、图片和失效启动脚本。
-- 修复当前启动脚本声明的缺失或损坏 Runtime。
-- 显示 PortMaster 版本、健康状态、设备、路径和环境详情。
-- 在 MiniLoong 上安装 Jenny92 维护版 PortMaster；其他设备安装官方稳定版。
-- 安装后在下一次启动时阻断式验证，失败则恢复旧的受管核心。
+## 功能边界
 
-Port App Manager 不管理游戏本体资源，也不替代 PortMaster 的端口目录、图片、主题或
-Runtime 数据源。
+- 列出 Port，显示目录、图片和估算大小。
+- 默认把卸载内容移入回收站，并支持恢复或二次确认后彻底删除。
+- 清理无主 SH、数据目录、图片和 `._*` AppleDouble 文件。
+- 将多个 SH 对同一目录的引用聚合显示，并默认保持未选中。
+- 修复启动脚本明确声明的缺失或损坏 Runtime。
+- 显示 PortMaster 版本、健康状态、设备、路径和环境信息。
+- MiniLoong 安装 Jenny92 稳定版 PortMaster；其他受支持设备使用官方稳定版。
+- 安装后退出，并在下次启动时阻断式验证；失败时恢复旧的受管核心。
+
+Port App Manager 不管理游戏本体内容，也不替代 PortMaster 的 Port 目录、主题、
+图片或 Runtime 数据源。系统托管 PortMaster 的平台（如 ROCKNIX）不由 APP
+安装、重装或更新核心，只保留 Runtime 修复、环境详情和 Port 游戏管理。
 
 ## 页面与输入
 
-首页、残留页和回收站使用“左侧内容、右侧操作”。环境管理左侧显示版本、状态、设备
-和路径，右侧提供检查更新、更新/重新安装、Runtime 修复和环境详情。简单的缺失、安装
-后校验和恢复提示使用单栏页面，不保留空侧栏或分割线。
+首页、残留页和回收站采用左侧内容、右侧操作的布局。环境管理显示版本、状态、
+设备和路径，并提供检查更新、更新/重新安装、Runtime 修复和环境详情。简单提示、
+安装后验证和恢复页面使用单栏布局。
 
-环境详情按“关键路径 / 环境变量 / 已安装 Runtime”分段。TextView 默认双列、自动换行
-和同排等高，关键路径说明由稳定 Item ID 查询，不依赖列表下标。
+危险 Dialog 默认聚焦安全操作；退出必须明确确认。APP 自带
+`love/ui.gptk` 和 `gamecontrollerdb.txt`，不修改其他启动器的按键映射。Start 和
+Select 显式映射到 UIKit 不处理的 F10，因此不会触发确认或返回。
 
-UIKit 只处理语义化的确认与返回。所有危险 Dialog 默认聚焦安全操作；退出必须经过
-明确按钮确认。App Manager 携带独立 `love/ui.gptk` 和 `gamecontrollerdb.txt`，不修改
-其他游戏启动器的按键映射。
+扫描结果采用 APP 进程内的细粒度 lazy cache。页面切换和选择只读缓存；安装、
+Runtime 修复、卸载、恢复或删除完成后，只失效受影响的缓存。未知外部变化不会
+触发后台重扫，重新启动 APP 或明确刷新才重建对应快照。
 
-## 安全执行边界
+## 原生核心与配置
 
-Lua 负责展示、只读扫描、选择和写入 `state/plan.txt`。所有移动、恢复、删除、下载和
-安装都由 `launcher.sh` 的 helper 模式执行，并重新检查路径边界。UI 不能绕过 Shell
-校验直接修改文件系统。
+平台配置分为两级：
 
 ```text
-UI 选择并确认
-  -> 写入 operation plan
-  -> Shell 重新验证并执行
-  -> 原子写入 result/progress state
-  -> 当前 UI 重扫并刷新页面
+config/config.json
+config/platforms/<platform-id>.json
 ```
 
-卸载默认进入 `PortAppManager/trash/<timestamp>/`。只有卸载 Dialog 中主动勾选“直接
-删除”，或在回收站中再次确认“彻底删除”，内容才会永久删除。共用同一数据目录的多个
-脚本只有全部选中时才移动该目录；恢复遇到同名目标时绝不覆盖。
+根文件只含共享策略、平台识别和 detail 引用；detail 含当前平台和它的机型。
+根文件以 SHA-256 绑定 detail，并要求 format、schema、config version 和 platform ID
+一致。随包包含根和全部 detail；在线刷新时，`portkit` 先用远端根识别当前平台，
+只下载对应 detail，完整验证后再将 root/detail 对提升为本次远端候选。失败、降级、
+摘要不一致或当前设备需要未知 adapter 时，继续使用随包配置。
 
-端口归属使用两条独立规则：精确展开脚本变量决定卸载归属；保守词边界引用决定残留
-归属。解析失败只允许少清理，不能扩大删除范围。扫描会先移除注释，并拒绝把含 Shell
-元字符或不含 `/ports/` 路径段的表达式当成可删除目标。
+两个静态 Rust helper 的职责是：
 
-`libs`、`config`、`themes`、日志和缓存不属于 PortMaster 核心替换范围。安装器只替换
-计划中声明的受管核心和前端文件，保留回滚及待验证清单。下一次启动验证成功后才删除
-回滚；失败时恢复旧核心并要求退出。
+| Helper | 职责 |
+| --- | --- |
+| `portkit` | 设备/机型识别、路径和环境解析、配置校验、GitHub transport |
+| `appmanager-cli` | inventory、安装计划、PortMaster 事务、Runtime 修复、缓存失效决策 |
 
-## 下载与资源来源
+生产路径中的 native resolver 出错会直接停止相关危险操作，不会静默退回 Shell。
+Shell 的职责是启动、环境准备、子进程编排，以及重新校验路径后的 Port/回收站文件操作。
 
-资源地址集中在 `src/appmanager_sources.sh`：
+## 安装与回滚
 
-| 内容 | 来源 | 校验 |
+安装流程只接受 native resolution 生成并再次验证的计划。首发协议将回滚拆成两个
+同文件系统位置：
+
+- core rollback：`<PortMaster core>/.appmanager-rollback`
+- frontend rollback：`<frontend dir>/.appmanager-rollback`
+
+这样 core 和 frontend 都只使用同文件系统 rename，不依赖跨文件系统移动。事务状态和
+待验证状态同时记录两个路径；下一次启动验证通过后删除两份回滚，验证失败则恢复原文件
+并要求用户退出。`libs`、`config`、`themes`、日志和缓存不属于 core 替换范围，
+`libs` 由 Runtime 修复单独管理。
+
+卸载默认进入 `jenny92-appmanager/trash/<timestamp>/`。只有卸载 Dialog 主动勾选
+“直接删除”，或在回收站中再次确认，内容才永久删除。多个 SH 共用同一数据目录时，
+必须全部选中才移动该目录；恢复遇到同名目标绝不覆盖。
+
+## 下载与资源
+
+| 内容 | 来源 | 验证 |
 | --- | --- | --- |
-| MiniLoong PortMaster | Jenny92 Fork stable | Fork `version.json` 中的 MD5 |
-| 其他设备 PortMaster | 官方 PortMaster-GUI stable | 官方 `version.json` 中的 MD5 |
-| App Manager 安装协议 | Jenny92 Fork 维护分支中的 `tools/appmanager-installer.sh` | 协议标记、语法和内容验证 |
-| Runtime 元数据与镜像 | 官方 PortMaster-New | URL、大小、MD5 和 SquashFS 文件头 |
+| MiniLoong PortMaster | Jenny92 Fork stable | 标准 `version.json` MD5 |
+| 其他设备 PortMaster | 官方 PortMaster-GUI stable | 标准 `version.json` MD5 |
+| 设备配置 | 本仓库 root + 当前平台 detail | 版本、身份、SHA-256、当前设备闭包 |
+| Runtime 元数据与镜像 | 官方 PortMaster-New | URL、大小、MD5、SquashFS 文件头 |
 
-Port App Manager 与 PortMaster GUI 都读取标准 `version.json` 通道记录；App Manager
-固定读取 `stable`。Jenny92 Release 仍提供官方同名的 `stable`、`beta`、`alpha` 三个
-记录，但现阶段全部指向同一份已验证稳定版。这样 PortMaster 内部切换通道也不会离开
-维护版，将来启用独立测试通道时只需修改 Fork 的 CI 生成策略。
+GitHub transport 按 Release、Raw、Archive、API、Gist 和 Clone 能力选择线路，分批探测，
+并只在当前进程中复用成功线路。断点续传要求相同格式化端点、正确的
+`Content-Range` 和相同实体标识；不满足条件时丢弃 partial 并重新下载。每个最终文件
+还必须通过调用方的领域校验，全部线路失败后才向 UI 报错。
 
-GitHub 下载统一使用 `_kit/github_proxy.sh`。代理按 Release、Raw、Archive、API、Gist 和
-Clone 能力筛选，每批最多探测五条线路。下载成功的线路只在当前进程中优先复用；进程
-退出后缓存消失。断点数据仅能从相同格式化端点继续，切换线路会丢弃不兼容的部分文件。
-最终文件必须通过调用方验证，否则继续换线；全部失败后才向 UI 报错。
+Runtime 页面只展示受管脚本通过 `runtime=` 或 `*_runtime=` 明确声明的依赖。
+修复时读取官方 `ports.json`，由 native Runtime repair 批量下载、报告实时进度、响应
+取消，并在原子替换前校验大小、MD5 和 SquashFS magic。客户端不携带固定 Runtime 清单。
 
-Runtime 页面只展示当前受管脚本通过 `runtime=` 或 `*_runtime=` 明确声明的依赖。
-缺失项和无效 SquashFS 默认进入“需要修复”，本地有效项可手动选择重新下载。客户端不
-携带固定 Runtime 清单；每次安装前刷新官方 `ports.json`，因此不需要跟随远端目录更新
-重新发布 App Manager。
-
-## 目录和状态
-
-发布物只有启动 SH 和相邻资源目录：
+## 发布布局
 
 ```text
 APP Manager.sh
-PortAppManager/
-  bin/       portable executables
+jenny92-appmanager/
+  bin/       static native and portable helpers
+  config/    root config and platform details
   love_ui/   UIKit and application Lua modules
   runtime/   private LÖVE runtime
   share/     font, CA and controller data
-  state/     plans, progress, cache and pending validation
+  state/     plans, progress and pending validation
   trash/     recoverable uninstall batches
 ```
 
-MiniLoong 受管核心默认位于 `/mnt/sdcard/roms/ports/PortMaster`。TrimUI 官方布局的核心
-位于 `/mnt/SDCARD/Apps/PortMaster/PortMaster`，同级前端文件为 `launch.sh`、
-`config.json` 和 `icon.png`。脚本目录、游戏数据目录、核心目录和前端目录始终分别探测，
-不会假设它们相同。
+MiniLoong 默认 core 位于 `/mnt/sdcard/roms/ports/PortMaster`。TrimUI 官方布局默认 core
+位于 `/mnt/SDCARD/Apps/PortMaster/PortMaster`，frontend 位于它的父目录。ROCKNIX、
+JELOS 与 UnofficialOS 使用系统 frontend、core 内启动器布局，APP 不生成外层入口，
+也不修改 `gamelist.xml`。
 
-生产诊断写入 `log.txt`。`progress.tsv`、结果、下载缓存、回滚和待验证文件是操作状态，
-不是长期调试快照。
+TrimUI 还可将 APP 作为系统应用放在 `/mnt/SDCARD/Apps/jenny92-appmanager`：
+
+```sh
+_kit/dist_trimui_app.sh appmanager
+```
+
+生成的 `[TrimUI App] APP Manager.zip` 可直接解压到 `/mnt/SDCARD/Apps/`。该系统 APP
+不属于 Port 扫描、卸载或残留清理范围。
 
 ## 构建与验证
 
-```bash
+```sh
+python3 config/scripts/generate.py --check
+python3 -m unittest -v config.tests.test_config_contract
+cargo test --workspace
+_kit/build_appmanager_native.sh
 _kit/dist_port.sh appmanager
-
-bash tests/test_appmanager_sources.sh
-bash tests/test_github_proxy_library.sh
-bash tests/test_appmanager_device_gates.sh
-bash tests/test_appmanager_portmaster_repair.sh
-bash tests/test_appmanager_pending_validation.sh
-bash ports/appmanager/tests/test_appmanager_apply_flow.sh
+bash tests/test_appmanager_native_packaging.sh
 bash tests/test_appmanager_portable_package.sh
-bash tests/test_love_shared_components.sh
+bash tests/test_appmanager_pending_validation.sh
+bash tests/test_appmanager_native_fail_closed.sh
 ```
 
-设备发布前执行 [SMOKE_TEST.md](SMOKE_TEST.md)。跨仓库职责和 CI 产物见
-[`../../docs/architecture.md`](../../docs/architecture.md)。第三方组件和来源见
+真机发布前执行 [SMOKE_TEST.md](SMOKE_TEST.md)。跨仓库职责与发布路由见
+[`../../docs/architecture.md`](../../docs/architecture.md)，第三方来源见
 [`portable/licenses/THIRD-PARTY-SOURCES.md`](portable/licenses/THIRD-PARTY-SOURCES.md)。

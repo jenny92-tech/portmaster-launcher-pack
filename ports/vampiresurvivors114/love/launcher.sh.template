@@ -16,12 +16,14 @@ PORT_NAME="vampiresurvivors114"; LOG_PREFIX="[VS114-LOVE]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_artwork.sh"
 #@KIT-END
 portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source $controlfolder/control.txt
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 
 GAMEDIR="/$directory/ports/$PORT_NAME"
+portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
 cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1

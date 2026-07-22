@@ -59,4 +59,77 @@ os.remove(health_path)
 health,bytes=test.runtime_file_health(health_path,12)
 assert(health=="missing" and bytes==0)
 
+local list_calls=0
+scan.set_list_provider(function(path,want_dirs)
+    list_calls=list_calls+1
+    return {
+        {name="Data",path=path.."/Data",is_dir=true},
+        {name="Game.sh",path=path.."/Game.sh",is_dir=false},
+    }
+end)
+assert(#scan.entries("/ports")==2 and #scan.entries("/ports")==2 and list_calls==1)
+scan.invalidate("/ports")
+assert(#scan.entries("/ports")==2 and list_calls==2)
+scan.set_list_provider(nil)
+
+scan.set_list_provider(function(path)
+    if path=="/games" then
+        return {
+            {name="autoinstall",path="/games/autoinstall",is_dir=true},
+            {name="Orphan",path="/games/Orphan",is_dir=true},
+        }
+    end
+    return {}
+end)
+local ignored=scan.run({gamedirs_dir="/games",scripts_dir="/scripts",images_dir="/images",
+    ignore_dirs={"autoinstall"},ignore_scripts={}})
+assert(#ignored.orphan_dirs==1 and ignored.orphan_dirs[1]=="Orphan")
+scan.set_list_provider(nil)
+
+-- Launcher artwork matches only when the complete stem is identical. Scan both
+-- the SH directory and the device-specific frontend image directory; changing
+-- case is not a match on case-sensitive devices.
+scan.invalidate("/games","/scripts","/images")
+scan.set_list_provider(function(path)
+    if path=="/scripts" then
+        return {
+            {name="Game.sh",path="/scripts/Game.sh",is_dir=false},
+            {name="Game.png",path="/scripts/Game.png",is_dir=false},
+            {name="game.jpg",path="/scripts/game.jpg",is_dir=false},
+        }
+    elseif path=="/images" then
+        return {
+            {name="Game.webp",path="/images/Game.webp",is_dir=false},
+            {name="GAME.png",path="/images/GAME.png",is_dir=false},
+        }
+    end
+    return {}
+end)
+local artwork=scan.run({gamedirs_dir="/games",scripts_dir="/scripts",images_dir="/images",scan_script_images=true,
+    ignore_dirs={},ignore_scripts={}})
+assert(#artwork.ports==1 and artwork.ports[1].script=="Game.sh")
+assert(#artwork.ports[1].images==2)
+assert(artwork.ports[1].images[1].path=="/images/Game.webp")
+assert(artwork.ports[1].images[2].path=="/scripts/Game.png")
+assert(#artwork.orphan_images==2)
+assert(artwork.orphan_images[1].path=="/images/GAME.png")
+assert(artwork.orphan_images[2].path=="/scripts/game.jpg")
+
+scan.invalidate("/games","/scripts","/images")
+local trimui_artwork=scan.run({gamedirs_dir="/games",scripts_dir="/scripts",images_dir="/images",
+    scan_script_images=false,ignore_dirs={},ignore_scripts={}})
+assert(#trimui_artwork.ports==1 and #trimui_artwork.ports[1].images==1)
+assert(trimui_artwork.ports[1].images[1].path=="/images/Game.webp")
+assert(#trimui_artwork.orphan_images==1 and trimui_artwork.orphan_images[1].path=="/images/GAME.png")
+scan.set_list_provider(nil)
+
+local read_path=os.tmpname()
+local read_file=assert(io.open(read_path,"wb")); read_file:write("first"); read_file:close()
+assert(scan.read(read_path)=="first")
+read_file=assert(io.open(read_path,"wb")); read_file:write("second"); read_file:close()
+assert(scan.read(read_path)=="first")
+scan.invalidate(read_path)
+assert(scan.read(read_path)=="second")
+os.remove(read_path)
+
 print("appmanager Lua scanner tests: PASS")

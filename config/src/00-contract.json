@@ -1,0 +1,66 @@
+{
+  "format": "jenny92.appmanager-config",
+  "schema_version": 1,
+  "config_version": "1.0.0",
+  "metadata": {
+    "generated_at": "2026-07-21T00:00:00Z",
+    "source_revision": "config-v1.0.0"
+  },
+  "parser_limits": {
+    "max_depth": 32,
+    "max_path_bytes": 4096,
+    "max_string_bytes": 65536,
+    "max_collection_items": 16384
+  },
+  "bootstrap": {
+    "policy": "remote_then_embedded",
+    "config_url": "https://raw.githubusercontent.com/jenny92-tech/portmaster-launcher-pack/main/config/config.json",
+    "fallback": "embedded_root_then_local_dir",
+    "transport": "github_https",
+    "required_format": "jenny92.appmanager-config"
+  },
+  "sources": {
+    "endpoints": {
+      "jenny92_portmaster": "https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/version.json",
+      "official_portmaster": "https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download/version.json",
+      "runtime_metadata": "https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json"
+    },
+    "release_routes": {
+      "miniloong-custom": {
+        "manifest": "jenny92_portmaster",
+        "channel": "stable",
+        "archive_name": "PortMaster.zip",
+        "checksum": "md5_from_manifest"
+      },
+      "official": {
+        "manifest": "official_portmaster",
+        "channel": "stable",
+        "archive_name": "PortMaster.zip",
+        "checksum": "md5_from_manifest"
+      },
+      "system": {
+        "manifest": "official_portmaster",
+        "channel": "stable",
+        "archive_name": "PortMaster.zip",
+        "checksum": "md5_from_manifest",
+        "install_allowed": false
+      }
+    },
+    "runtime": {
+      "metadata": "runtime_metadata",
+      "verification": ["url", "size", "md5", "squashfs_magic"]
+    },
+    "transport": {
+      "proxy_registry_ref": "embedded://github-proxy-registry/v1",
+      "probe_batch_limit": 5,
+      "capabilities": ["release", "raw", "archive", "api", "gist", "clone"],
+      "routes": {
+        "jenny92_portmaster": "release",
+        "official_portmaster": "release",
+        "runtime_metadata": "release"
+      },
+      "cache_scope": "process",
+      "resume_requires_same_formatted_endpoint": true
+    }
+  }
+}

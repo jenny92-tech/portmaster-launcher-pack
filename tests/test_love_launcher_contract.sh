@@ -44,7 +44,7 @@ for port in heishenhua hk sts2 terraria vampiresurvivors114; do
 done
 
 # Build one representative port and assert the common files are materialized in dist.
-"$ROOT/_kit/dist_port.sh" hk >/dev/null
+bash "$ROOT/_kit/dist_port.sh" hk >/dev/null
 for file in kit.lua launcher.lua conf.lua ui.gptk; do
   [ -f "$ROOT/ports/hk/dist/love_ui/$file" ] || {
     echo "hk dist: missing shared $file" >&2
@@ -71,7 +71,7 @@ grep -Fq 'PortPaths.Get("SLL_QUALITY")' "$ROOT/ports/sts2/src/STS2LinuxLauncher/
 grep -Fq 'love_ui/main.lua' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
 grep -Fq 'love_ui/kit.lua' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"
 grep -Fq 'cp "$KIT_ROOT/love/"*.lua "$DIST/love_ui/"' "$ROOT/ports/sts2/src/scripts/dist-port.sh"
-UI_ONLY=1 "$ROOT/_kit/dist_port.sh" sts2 >/dev/null
+UI_ONLY=1 bash "$ROOT/_kit/dist_port.sh" sts2 >/dev/null
 for file in 'Slay the Spire 2.sh' love_ui/kit.lua love_ui/launcher.lua love_ui/main.lua love_ui/ui.gptk; do
   [ -f "$ROOT/ports/sts2/dist/$file" ] || {
     echo "sts2 UI-only dist: missing $file" >&2

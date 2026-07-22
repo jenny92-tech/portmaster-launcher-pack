@@ -2,6 +2,7 @@
 -- launcher.sh validates and applies every selected path.
 local scan = {}
 local list_provider
+local list_cache,read_cache={},{ }
 
 local WORD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
 
@@ -10,36 +11,80 @@ local function basename(path) return path:match("([^/]+)/*$") or path end
 local function trim(s) return (s:gsub("^%s+",""):gsub("%s+$","")) end
 local function contains(list,value) for _,v in ipairs(list or {}) do if v==value then return true end end return false end
 
-local function list(path,want_dirs)
-    if list_provider then return list_provider(path,want_dirs) or {} end
+local function list_all(path)
+    local key=tostring(path or "")
+    if list_cache[key] then return list_cache[key] end
+    if list_provider then
+        local provided=list_provider(path,nil) or {}
+        list_cache[key]=provided
+        return provided
+    end
     local out={}; if not path or path=="" then return out end
-    -- Do not follow symlinks: a symlink to a directory is managed as one file,
-    -- never traversed. `! -type d` also keeps other direct non-directory items.
-    local kind=want_dirs==nil and "" or (want_dirs and " -type d" or " ! -type d")
-    local p=io.popen("find "..shquote(path).." -mindepth 1 -maxdepth 1"..kind.." -print0 2>/dev/null","r")
+    -- Enumerate each SD-card directory once. Three shell globs include normal
+    -- and hidden entries; classification happens in the same pass. Symlinks
+    -- to directories remain managed as files and are never traversed.
+    local root=shquote(path)
+    local command="for item in "..root.."/* "..root.."/.[!.]* "..root.."/..?*; do "..
+        "[ -e \"$item\" ] || [ -L \"$item\" ] || continue; "..
+        "if [ -d \"$item\" ] && [ ! -L \"$item\" ]; then "..
+        "printf 'd\\000%s\\000' \"$item\"; else printf 'f\\000%s\\000' \"$item\"; fi; done"
+    local p=io.popen(command.." 2>/dev/null","r")
     if not p then return out end
     local data=p:read("*a") or ""; p:close()
-    for full in data:gmatch("([^%z]+)%z") do
-        out[#out+1]={name=basename(full),path=full,is_dir=want_dirs==true}
+    for kind,full in data:gmatch("([df])%z([^%z]+)%z") do
+        out[#out+1]={name=basename(full),path=full,is_dir=kind=="d"}
     end
     table.sort(out,function(a,b) return a.name:lower()<b.name:lower() end)
+    list_cache[key]=out
+    return out
+end
+
+local function list(path,want_dirs)
+    local out={}
+    for _,entry in ipairs(list_all(path)) do
+        if want_dirs==nil or entry.is_dir==want_dirs then out[#out+1]=entry end
+    end
     return out
 end
 
 function scan.set_list_provider(provider)
     list_provider=provider
+    list_cache={}; read_cache={}
+end
+
+function scan.invalidate(...)
+    local count=select("#",...)
+    if count==0 then list_cache={}; read_cache={}; return end
+    local roots={}
+    for i=1,count do
+        local root=select(i,...)
+        if root and root~="" then roots[#roots+1]=tostring(root):gsub("/+$","") end
+    end
+    local function affected(path)
+        for _,root in ipairs(roots) do
+            if path==root or path:sub(1,#root+1)==root.."/" then return true end
+        end
+        return false
+    end
+    for path in pairs(list_cache) do
+        if affected(path) then list_cache[path]=nil end
+    end
+    for path in pairs(read_cache) do if affected(path) then read_cache[path]=nil end end
 end
 
 function scan.entries(path)
     local dirs=list(path,true); local files=list(path,false)
-    for _,v in ipairs(files) do dirs[#dirs+1]=v end
-    table.sort(dirs,function(a,b) return a.name:lower()<b.name:lower() end)
-    return dirs
+    local out={}
+    for _,v in ipairs(dirs) do out[#out+1]=v end
+    for _,v in ipairs(files) do out[#out+1]=v end
+    table.sort(out,function(a,b) return a.name:lower()<b.name:lower() end)
+    return out
 end
 
 local function read(path)
+    if read_cache[path]~=nil then return read_cache[path] end
     local f=io.open(path,"rb"); if not f then return "" end
-    local text=f:read("*a") or ""; f:close(); return text
+    local text=f:read("*a") or ""; f:close(); read_cache[path]=text; return text
 end
 
 local function unquote(s)
@@ -171,22 +216,45 @@ local function runtime_file_health(path,expected_bytes)
 end
 
 local function stem(name) return (name:gsub("%.[^.]+$","")) end
+local function is_image(name)
+    local lower=(name or ""):lower()
+    return lower:match("%.png$") or lower:match("%.jpe?g$") or lower:match("%.webp$")
+end
 
 function scan.run(env)
     local real_dirs={}; for _,entry in ipairs(list(env.gamedirs_dir,true)) do if not contains(env.ignore_dirs,entry.name) then real_dirs[entry.name]=true end end
-    local images=list(env.images_dir,false); local scripts={}; local texts={}
-    for _,entry in ipairs(list(env.scripts_dir,false)) do
-        if entry.name:lower():match("%.sh$") and not contains(env.ignore_scripts,entry.name) then scripts[#scripts+1]=entry.name end
+    local images,scripts,texts,all_script_stems,seen_images={},{},{},{},{}
+    local script_entries=list(env.scripts_dir,false)
+    for _,entry in ipairs(script_entries) do
+        if entry.name:lower():match("%.sh$") then
+            all_script_stems[stem(entry.name)]=true
+            if not contains(env.ignore_scripts,entry.name) then scripts[#scripts+1]=entry.name end
+        elseif env.scan_script_images==true and is_image(entry.name) then
+            images[#images+1]=entry; seen_images[entry.path]=true
+        end
     end
+    if env.images_dir and env.images_dir~="" and env.images_dir~=env.scripts_dir then
+        for _,entry in ipairs(list(env.images_dir,false)) do
+            if is_image(entry.name) and not seen_images[entry.path] then
+                images[#images+1]=entry; seen_images[entry.path]=true
+            end
+        end
+    end
+    table.sort(images,function(a,b) return a.path:lower()<b.path:lower() end)
     table.sort(scripts)
     for _,name in ipairs(scripts) do texts[name]=read(env.scripts_dir.."/"..name) end
     if env.self_port and env.self_port~="" then
         local keep={}; for _,name in ipairs(scripts) do if not mentions(texts[name],env.self_port) then keep[#keep+1]=name end end; scripts=keep
     end
 
+    local images_by_stem={}
+    for _,img in ipairs(images) do
+        local key=stem(img.name)
+        images_by_stem[key]=images_by_stem[key] or {}
+        images_by_stem[key][#images_by_stem[key]+1]=img
+    end
     local image_of={}; for _,name in ipairs(scripts) do
-        image_of[name]={}; local wanted=stem(name):lower()
-        for _,img in ipairs(images) do if stem(img.name):lower()==wanted then image_of[name][#image_of[name]+1]=img.name end end
+        image_of[name]=images_by_stem[stem(name)] or {}
     end
     local seed={directory=env.directory or "",controlfolder=env.controlfolder or "",HOME=env.home or "/root"}
     local ports,refcount,dead={},{},{}
@@ -198,26 +266,34 @@ function scan.run(env)
         ports[#ports+1]={script=name,dir=result.exists and result.dir or "",claimed_dir=result.dir,dir_exists=result.exists,
             images=image_of[name],runtime=runtimes[1] or "",runtimes=runtimes}
     end
+    -- Build the conservative reference index once. The old nested loop read
+    -- every SH string once per data directory (O(directories × scripts)).
+    local referenced_dirs={}
+    for _,script in ipairs(scripts) do
+        for token in texts[script]:gmatch("[A-Za-z0-9_.%-]+") do
+            if real_dirs[token] then referenced_dirs[token]=true end
+        end
+    end
     local orphan_dirs={}
     for name in pairs(real_dirs) do
-        local seen=false; for _,script in ipairs(scripts) do if mentions(texts[script],name) then seen=true; break end end
+        local seen=referenced_dirs[name]==true
+        -- Preserve exact support for unusual Unicode/space directory names;
+        -- normal Port names stay on the linear token-index path above.
+        if not seen and name:find("[^A-Za-z0-9_.%-]") then
+            for _,script in ipairs(scripts) do if mentions(texts[script],name) then seen=true; break end end
+        end
         if not seen then orphan_dirs[#orphan_dirs+1]=name end
     end
     table.sort(orphan_dirs)
-    local script_stems={}; for _,name in ipairs(scripts) do script_stems[stem(name):lower()]=true end
-    local orphan_images={}; for _,img in ipairs(images) do if not script_stems[stem(img.name):lower()] then orphan_images[#orphan_images+1]=img.name end end
-    table.sort(orphan_images)
-    local have={}; for _,entry in ipairs(list(env.libs_dir,false)) do local name=entry.name:match("^(.-)%.squashfs$"); if name then have[name]=true end end
+    local orphan_images={}; for _,img in ipairs(images) do if not all_script_stems[stem(img.name)] then orphan_images[#orphan_images+1]=img end end
+    table.sort(orphan_images,function(a,b) return a.path:lower()<b.path:lower() end)
     local need={}; for _,p in ipairs(ports) do
         for _,runtime in ipairs(p.runtimes or {}) do
             need[runtime]=need[runtime] or {}; need[runtime][#need[runtime]+1]=p.script
         end
     end
-    local missing={}; for name,users in pairs(need) do if not have[name] then missing[#missing+1]={name=name,users=users} end end
-    table.sort(missing,function(a,b) return a.name<b.name end)
-    local have_list={}; for name in pairs(have) do have_list[#have_list+1]=name end; table.sort(have_list)
     return {ports=ports,refcount=refcount,orphan_dirs=orphan_dirs,orphan_images=orphan_images,
-        dead_scripts=dead,runtimes={have=have_list,need=need,missing=missing}}
+        dead_scripts=dead,runtimes={need=need}}
 end
 
 scan.read=read

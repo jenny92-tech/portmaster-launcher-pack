@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/jenny92-tech/portmaster-launcher-pack/main/config/appmanager-config.schema.json",
+  "title": "Port App Manager device configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schema_version",
+    "config_version",
+    "metadata",
+    "parser_limits",
+    "bootstrap",
+    "sources",
+    "environment",
+    "adapters",
+    "platforms"
+  ],
+  "properties": {
+    "format": {"const": "jenny92.appmanager-config"},
+    "schema_version": {"const": 1},
+    "config_version": {"$ref": "#/$defs/semver"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generated_at", "source_revision"],
+      "properties": {
+        "generated_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "source_revision": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "parser_limits": {
+      "type": "object",
+      "description": "Resource limits intentionally omit a total file-size cap.",
+      "additionalProperties": false,
+      "required": ["max_depth", "max_path_bytes", "max_string_bytes", "max_collection_items"],
+      "properties": {
+        "max_depth": {"type": "integer", "minimum": 1},
+        "max_path_bytes": {"type": "integer", "minimum": 1},
+        "max_string_bytes": {"type": "integer", "minimum": 1},
+        "max_collection_items": {"type": "integer", "minimum": 1}
+      }
+    },
+    "bootstrap": {"$ref": "#/$defs/openObject"},
+    "sources": {"$ref": "#/$defs/openObject"},
+    "environment": {"$ref": "#/$defs/environment"},
+    "adapters": {
+      "type": "object",
+      "description": "Unknown adapter definitions are retained for unrelated platforms; engines check only the resolved closure.",
+      "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {"$ref": "#/$defs/adapter"}
+    },
+    "platforms": {
+      "type": "object",
+      "required": ["miniloong", "trimui", "muos", "rocknix", "jelos", "unofficialos", "knulli", "batocera", "miyoo", "generic"],
+      "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {"$ref": "#/$defs/platformEntry"}
+    }
+  },
+  "$defs": {
+    "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"},
+    "platformEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["priority", "recognition", "detail", "sha256"],
+      "properties": {
+        "priority": {"type": "integer"},
+        "recognition": {"$ref": "#/$defs/predicate"},
+        "detail": {"type": "string", "pattern": "^\\./platforms/[a-z][a-z0-9_.-]{0,127}\\.json$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "openObject": {"type": "object"},
+    "adapter": {
+      "type": "object",
+      "required": ["kind", "contract_version"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "contract_version": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "environmentOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "name"],
+      "properties": {
+        "operation": {"enum": ["set", "prepend", "append", "unset"]},
+        "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "value": {"type": "string"},
+        "separator": {"type": "string", "maxLength": 4}
+      }
+    },
+    "environmentScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profiles", "operations"],
+      "properties": {
+        "profiles": {"type": "array", "items": {"$ref": "#/$defs/id"}, "uniqueItems": true},
+        "operations": {"type": "array", "items": {"$ref": "#/$defs/environmentOperation"}}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inherit", "blocked_names", "blocked_prefixes", "value_handling", "operation_kinds", "profiles", "scopes"],
+      "properties": {
+        "inherit": {"const": "all_except_blocked"},
+        "blocked_names": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 9,
+          "maxItems": 9,
+          "items": {"enum": ["LD_PRELOAD", "LD_AUDIT", "GCONV_PATH", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "IFS", "PS4"]}
+        },
+        "blocked_prefixes": {"const": ["BASH_FUNC_"]},
+        "value_handling": {"const": "literal"},
+        "operation_kinds": {"const": ["set", "prepend", "append", "unset"]},
+        "profiles": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/environmentOperation"}}
+        },
+        "scopes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"],
+          "properties": {
+            "appmanager": {"$ref": "#/$defs/environmentScope"},
+            "love_ui": {"$ref": "#/$defs/environmentScope"},
+            "portmaster": {"$ref": "#/$defs/environmentScope"},
+            "runtime_tool": {"$ref": "#/$defs/environmentScope"},
+            "game_launcher": {"$ref": "#/$defs/environmentScope"}
+          }
+        }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["always", "all", "any", "directory_exists", "env_equals", "file_exists", "launcher_path_prefix", "os_release_equals"]},
+        "predicates": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/predicate"}},
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "prefix": {"$ref": "#/$defs/absolutePath"},
+        "field": {"type": "string"},
+        "name": {"type": "string"},
+        "value": {"type": "string"},
+        "case_insensitive": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "absolutePath": {"type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.?/)(?!.*//)[^\\u0000\\r\\n]+$"},
+    "pathStrategy": {
+      "type": "object",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {"enum": ["first_existing", "launcher_dir", "literal", "literal_by_launcher_prefix", "parent", "platform_core", "relative_to", "rom_root_from_launcher", "xdg_data_home"]},
+        "value": {"$ref": "#/$defs/absolutePath"},
+        "prefix": {"$ref": "#/$defs/absolutePath"},
+        "matched": {"$ref": "#/$defs/absolutePath"},
+        "candidates": {"type": "array", "items": {"$ref": "#/$defs/absolutePath"}},
+        "fallback": {"type": "array", "items": {"$ref": "#/$defs/absolutePath"}},
+        "on_missing": {"const": "unresolved"},
+        "base": {"$ref": "#/$defs/id"},
+        "of": {"$ref": "#/$defs/id"},
+        "suffix": {"type": "string", "pattern": "^[^/](?:.*[^/])?$"}
+      },
+      "additionalProperties": false
+    },
+    "healthRule": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["archive_or_nonempty_directory", "executable_file", "file_magic", "one_of_files", "python_imports_or_runtime", "required_file"]},
+        "path": {"type": "string"},
+        "archive": {"type": "string"},
+        "directory": {"type": "string"},
+        "imports": {"type": "array", "items": {"type": "string"}},
+        "runtime": {"type": "string"},
+        "magic": {"type": "string"},
+        "paths": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "frontendInstallItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "target", "executable"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "pattern": "^[^/]+$"},
+        "executable": {"type": "boolean"}
+      }
+    },
+    "frontendTransform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target", "variable", "library_group"],
+      "properties": {
+        "kind": {"const": "export_library_group"},
+        "target": {"type": "string", "pattern": "^[^/]+$"},
+        "variable": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "library_group": {"$ref": "#/$defs/id"}
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["management", "kind", "names", "primary", "control_source", "core_launcher_source", "remove_core_launcher", "empty_tasksetter", "core_executable", "frontend_executable", "install_map"],
+      "properties": {
+        "management": {"enum": ["app", "system"]},
+        "kind": {"enum": ["script-internal", "script-external", "control-internal", "core-internal", "trimui"]},
+        "names": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+$"}},
+        "primary": {"type": "string", "pattern": "^[^/]+$"},
+        "control_source": {"type": ["string", "null"]},
+        "core_launcher_source": {"type": ["string", "null"]},
+        "remove_core_launcher": {"type": "boolean"},
+        "empty_tasksetter": {"type": "boolean"},
+        "core_executable": {"type": ["string", "null"], "pattern": "^[^/]+$"},
+        "frontend_executable": {"type": ["string", "null"], "pattern": "^[^/]+$"},
+        "install_map": {"type": "array", "items": {"$ref": "#/$defs/frontendInstallItem"}},
+        "transforms": {"type": "array", "items": {"$ref": "#/$defs/frontendTransform"}}
+      }
+    },
+    "support": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_class", "target_confirmation"],
+      "properties": {
+        "device_class": {"enum": ["tested", "official-untested", "unsupported-known"]},
+        "target_confirmation": {"enum": ["detected", "existing_core_or_override"]}
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "priority", "support", "recognition", "required_adapters", "paths", "source_route", "frontend", "libraries", "python", "health", "preserved_dirs", "managed_roots", "capabilities", "environment_scopes", "lifecycle", "display", "input"],
+      "properties": {
+        "display_name": {"type": "string", "minLength": 1},
+        "priority": {"type": "integer"},
+        "support": {"$ref": "#/$defs/support"},
+        "recognition": {"$ref": "#/$defs/predicate"},
+        "required_adapters": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "paths": {"type": "object", "required": ["launcher_directory"], "additionalProperties": {"$ref": "#/$defs/pathStrategy"}},
+        "source_route": {"$ref": "#/$defs/id"},
+        "frontend": {"$ref": "#/$defs/frontend"},
+        "libraries": {"$ref": "#/$defs/openObject"},
+        "python": {"$ref": "#/$defs/openObject"},
+        "health": {"type": "array", "items": {"$ref": "#/$defs/healthRule"}},
+        "preserved_dirs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+$"}},
+        "managed_roots": {"type": "array", "items": {"$ref": "#/$defs/openObject"}},
+        "capabilities": {"type": "object", "additionalProperties": {"type": "boolean"}},
+        "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"]}},
+        "lifecycle": {"$ref": "#/$defs/openObject"},
+        "display": {"$ref": "#/$defs/openObject"},
+        "input": {"$ref": "#/$defs/openObject"},
+        "models": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {"$ref": "#/$defs/model"}
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "recognition", "display"],
+      "properties": {
+        "display_name": {"type": "string", "minLength": 1},
+        "recognition": {"$ref": "#/$defs/predicate"},
+        "display": {"$ref": "#/$defs/openObject"},
+        "overrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "display": {"$ref": "#/$defs/openObject"},
+            "input": {"$ref": "#/$defs/openObject"}
+          }
+        }
+      }
+    }
+  }
+}

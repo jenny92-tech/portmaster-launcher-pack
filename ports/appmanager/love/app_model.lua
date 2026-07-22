@@ -11,9 +11,69 @@ end
 
 function Model.new(kit,json,scanner)
     local self={
-        env={},report={},size_map={},runtime_metadata={},
+        kit=kit,json=json,scanner=scanner,
+        env={},report={},size_map={},runtime_metadata={},missing_by_script={},native_inventory=nil,
+        cache={},report_version=0,
         pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6},
     }
+
+    local function cached(key,token,loader,force)
+        local entry=self.cache[key]
+        if force or not entry or entry.token~=token then
+            entry={token=token,valid=false,loading=false,waiters={}}
+            self.cache[key]=entry
+        end
+        if entry.valid then return entry.value end
+        if entry.loading then return entry.value end -- synchronous callers wait in the LÖVE event queue
+        entry.loading=true
+        local ok,value=pcall(loader)
+        entry.loading=false
+        if not ok then
+            entry.error=tostring(value)
+            return nil,entry.error
+        end
+        entry.value=value; entry.valid=true; entry.error=nil
+        local waiters=entry.waiters; entry.waiters={}
+        for _,waiter in ipairs(waiters) do pcall(waiter,value,nil) end
+        return value
+    end
+
+    -- Coalesced async form. The first caller starts producer(resolve); later
+    -- callers for the same key only enqueue callbacks. Producer may either
+    -- resolve later or return an immediate value.
+    function self.request_cached(key,token,producer,callback,force)
+        local entry=self.cache[key]
+        if not force and entry and entry.token==token and entry.valid then
+            callback(entry.value,nil); return
+        end
+        if not entry or force or entry.token~=token then
+            entry={token=token,valid=false,loading=false,waiters={}}
+            self.cache[key]=entry
+        end
+        entry.waiters[#entry.waiters+1]=callback
+        if entry.loading then return end
+        entry.loading=true
+        local settled=false
+        local function resolve(value,err)
+            if settled then return end
+            settled=true; entry.loading=false; entry.value=value; entry.error=err
+            entry.valid=err==nil
+            local waiters=entry.waiters; entry.waiters={}
+            for _,waiter in ipairs(waiters) do pcall(waiter,value,err) end
+        end
+        local ok,value=pcall(producer,resolve)
+        if not ok then resolve(nil,tostring(value))
+        elseif value~=nil and not settled then resolve(value,nil) end
+    end
+
+    function self.invalidate(...)
+        for i=1,select("#",...) do self.cache[select(i,...)]=nil end
+    end
+
+    function self.invalidate_all()
+        clear(self.cache)
+        if scanner.invalidate then scanner.invalidate() end
+    end
 
     function self.L(en,zh) return {en=en,zh=zh} end
     function self.join(parts,sep) return table.concat(parts,sep or " · ") end
@@ -40,7 +100,7 @@ function Model.new(kit,json,scanner)
         return true
     end
 
-    local function load_sizes()
+    local function load_sizes_file()
         clear(self.size_map)
         local f=io.open(self.env.size_file or "","rb"); if not f then return end
         for line in f:lines() do
@@ -58,7 +118,7 @@ function Model.new(kit,json,scanner)
         return value
     end
 
-    function self.load_runtime_metadata()
+    local function load_runtime_metadata_file()
         clear(self.runtime_metadata)
         local f=io.open(self.env.runtime_metadata_file or "","rb")
         if not f then return end
@@ -70,6 +130,58 @@ function Model.new(kit,json,scanner)
             end
         end
         f:close()
+        return self.runtime_metadata
+    end
+
+    local function collect_trash_snapshot()
+        local native=self.load_native_inventory()
+        if native and type(native.trash)=="table" then return native.trash end
+        local out={}; local root=(self.env.gamedir or "").."/trash"
+        local function append(entry,bucket)
+            out[#out+1]={name=entry.name,path=entry.path,is_dir=entry.is_dir,bucket=bucket}
+        end
+        for _,top in ipairs(scanner.entries(root)) do
+            if not top.is_dir then append(top,"item")
+            else
+                for _,entry in ipairs(scanner.entries(top.path)) do
+                    local bucket=entry.name
+                    if entry.is_dir and (bucket=="scripts" or bucket=="script-images" or
+                       bucket=="data" or bucket=="images") then
+                        for _,item in ipairs(scanner.entries(entry.path)) do append(item,bucket) end
+                    else append(entry,"legacy") end
+                end
+            end
+        end
+        return out
+    end
+
+    local function collect_required_runtimes()
+        local out={}
+        clear(self.missing_by_script)
+        local native=self.load_native_inventory()
+        local native_facts={}
+        if native and native.runtimes and type(native.runtimes.facts)=="table" then
+            for _,fact in ipairs(native.runtimes.facts) do native_facts[fact.name]=fact end
+        end
+        for name,users in pairs((self.report.runtimes or {}).need or {}) do
+            local fact=native_facts[name]
+            local health,bytes
+            if fact then health,bytes=fact.health,tonumber(fact.bytes) or 0
+            else health,bytes=scanner.runtime_file_health((self.env.libs_dir or "").."/"..name..".squashfs") end
+            local needs_repair=health=="missing" or health=="invalid_magic" or health=="symlink"
+            out[#out+1]={name=name,users=users,health=health,bytes=bytes,
+                missing=health=="missing",damaged=health=="invalid_magic",
+                needs_repair=needs_repair}
+            if needs_repair then
+                for _,script in ipairs(users or {}) do
+                    self.missing_by_script[script]=self.missing_by_script[script] or {}
+                    self.missing_by_script[script][#self.missing_by_script[script]+1]=name
+                end
+            end
+        end
+        table.sort(out,function(a,b) return a.name<b.name end)
+        for _,names in pairs(self.missing_by_script) do table.sort(names) end
+        return out
     end
 
     function self.human(bytes)
@@ -91,6 +203,18 @@ function Model.new(kit,json,scanner)
         local index,count=tonumber(fields[4]) or 0,tonumber(fields[5]) or 0
         local current,total,speed=tonumber(fields[6]) or 0,tonumber(fields[7]) or 0,tonumber(fields[8]) or 0
         local portmaster=runtime=="PortMaster"
+        local appledouble=runtime=="AppleDouble"
+        if appledouble then
+            local stages={
+                scanning=L("Scanning Port directories","正在扫描 Port 目录"),
+                cleaning=L("Removing ._Files garbage files","正在清理 ._Files 垃圾文件"),
+                indexing=L("Updating size information","正在更新容量信息"),
+                complete=L("Cleanup completed","清理完成"),
+            }
+            return {progress=0,stage=stages[phase] or L("Cleaning ._Files","正在清理 ._Files"),
+                detail="",footer_left=L(string.format("%d files",current),string.format("%d 个文件",current)),
+                footer_right=phase=="complete" and L("Done","完成") or L("Scanning…","扫描中…"),phase=phase}
+        end
         local stages=portmaster and {
             preparing=L("Preparing PortMaster","正在准备 PortMaster"),probing=L("Checking network","正在检查网络"),
             connected=L("Network connected","网络连接成功"),downloading=L("Downloading PortMaster","正在下载 PortMaster"),
@@ -145,6 +269,7 @@ function Model.new(kit,json,scanner)
     end
 
     function self.path_size(paths)
+        self.load_sizes()
         local total=0
         for _,path in ipairs(paths or {}) do total=total+(self.size_map[path] or 0) end
         return total
@@ -165,36 +290,111 @@ function Model.new(kit,json,scanner)
         end
     end
 
+    function self.load_sizes(force)
+        -- A first-run background scan may still be producing this file. Do
+        -- not cache the temporary absence; the next page build can consume
+        -- the atomically published snapshot without an explicit invalidation.
+        if not self.file_exists(self.env.size_file or "") then
+            clear(self.size_map)
+            self.invalidate("sizes")
+            return self.size_map
+        end
+        return cached("sizes",self.env.size_file or "",function()
+            load_sizes_file(); return self.size_map
+        end,force)
+    end
+
+    function self.load_runtime_metadata(force)
+        return cached("runtime-metadata",(self.env.runtime_metadata_file or "").."\0"..tostring(self.env.device_arch or ""),
+            load_runtime_metadata_file,force)
+    end
+
+    function self.load_native_inventory(force)
+        if force then self.invalidate("native-inventory") end
+        local path=self.env.inventory_file or ""
+        if path=="" or not self.file_exists(path) then self.native_inventory=nil; return nil end
+        return cached("native-inventory",path,function()
+            local text=self.read_all(path)
+            local ok,envelope=pcall(self.json.decode,text or "")
+            if not ok or type(envelope)~="table" or envelope.ok~=true or
+               type(envelope.data)~="table" or envelope.data.schema~=1 then
+                self.native_inventory=nil
+                return nil
+            end
+            self.native_inventory=envelope.data
+            return self.native_inventory
+        end,force)
+    end
+
+    function self.ensure_report(force)
+        if force then self.invalidate("required-runtimes") end
+        local token=table.concat({self.env.scripts_dir or "",self.env.gamedirs_dir or "",
+            self.env.images_dir or "",tostring(self.env.scan_script_images==true),
+            self.env.directory or "",self.env.controlfolder or ""},"\0")
+        return cached("ports",token,function()
+            local native=self.load_native_inventory(force)
+            replace(self.report,native or scanner.run(self.env))
+            self.report_version=self.report_version+1
+            return self.report
+        end,force)
+    end
+
+    -- Compatibility entry point: force only the Port inventory and its direct
+    -- Runtime derivative, not unrelated Trash/metadata/size caches.
     function self.refresh_scan()
-        load_sizes()
-        self.load_runtime_metadata()
-        replace(self.report,scanner.run(self.env))
+        if self.env.apply_script and self.env.apply_script~="" then
+            os.execute(self.shquote(self.env.apply_script).." --refresh-inventory >/dev/null 2>&1")
+        end
+        self.invalidate("native-inventory")
+        self.native_inventory=nil
+        if scanner.invalidate then scanner.invalidate(self.env.scripts_dir,self.env.gamedirs_dir,
+            self.env.images_dir) end
+        return self.ensure_report(true)
+    end
+
+    function self.trash_items(force)
+        local root=(self.env.gamedir or "").."/trash"
+        return cached("trash",root,collect_trash_snapshot,force) or {}
     end
 
     function self.missing_runtime(script)
-        local out={}
-        for _,item in ipairs(self.report.runtimes.missing or {}) do
-            for _,user in ipairs(item.users or {}) do if user==script then out[#out+1]=item.name end end
-        end
-        table.sort(out); return table.concat(out,", ")
+        self.required_runtimes()
+        return table.concat(self.missing_by_script[script] or {},", ")
     end
 
-    function self.required_runtimes()
-        local out={}
-        for name,users in pairs(self.report.runtimes.need or {}) do
-            local health,bytes=scanner.runtime_file_health((self.env.libs_dir or "").."/"..name..".squashfs")
-            out[#out+1]={name=name,users=users,health=health,bytes=bytes,
-                missing=health=="missing",damaged=health=="invalid_magic",
-                needs_repair=health=="missing" or health=="invalid_magic"}
-        end
-        table.sort(out,function(a,b) return a.name<b.name end)
-        return out
+    function self.required_runtimes(force)
+        self.ensure_report()
+        local token=(self.env.libs_dir or "").."\0"..tostring(self.report_version)
+        return cached("required-runtimes",token,collect_required_runtimes,force) or {}
     end
 
     function self.runtime_issue_count()
         local count=0
         for _,item in ipairs(self.required_runtimes()) do if item.needs_repair then count=count+1 end end
         return count
+    end
+
+    function self.installed_runtimes(force)
+        return cached("installed-runtimes",self.env.libs_dir or "",function()
+            local native=self.load_native_inventory(force)
+            if native and native.runtimes and type(native.runtimes.facts)=="table" then
+                local out={}
+                for _,fact in ipairs(native.runtimes.facts) do
+                    if fact.health~="missing" and fact.health~="symlink" then out[#out+1]=fact.name end
+                end
+                table.sort(out)
+                return out
+            end
+            local out={}
+            for _,entry in ipairs(scanner.entries(self.env.libs_dir or "")) do
+                if not entry.is_dir then
+                    local name=entry.name:match("^(.-)%.squashfs$")
+                    if name then out[#out+1]=name end
+                end
+            end
+            table.sort(out)
+            return out
+        end,force) or {}
     end
 
     function self.load_update_cache()
@@ -206,7 +406,6 @@ function Model.new(kit,json,scanner)
     end
 
     function self.update_state()
-        self.load_update_cache()
         local current=tostring(self.env.portmaster_version or "")
         local latest=tostring(self.env.portmaster_latest or "")
         if self.env.update_status~="ok" or latest=="" then return "unknown" end
@@ -214,6 +413,40 @@ function Model.new(kit,json,scanner)
         if current:match("^20%d%d[%.%-]%d%d[%.%-]%d%d%-%d%d%d%d$") and
            latest:match("^20%d%d[%.%-]%d%d[%.%-]%d%d%-%d%d%d%d$") and current<latest then return "update" end
         return "reinstall"
+    end
+
+    function self.invalidate_for_plan(plan)
+        local ports,trash,runtimes,sizes,all=false,false,false,false,false
+        for _,item in ipairs(plan or {}) do
+            local kind=item.kind
+            if kind=="INSTALL_PORTMASTER" then all=true
+            elseif kind=="INSTALL_RUNTIME" then runtimes=true
+            elseif kind=="TRASH" or kind=="DELETE_MANAGED" or kind=="RESTORE_TRASH" or kind=="RESTORE_ITEM" then
+                ports=true; trash=true; runtimes=true; sizes=true
+            elseif kind=="EMPTY_TRASH" or kind=="DELETE_ITEM" then
+                trash=true; sizes=true
+            elseif kind=="CLEAN_APPLEDOUBLE" then
+                ports=true; sizes=true
+            end
+        end
+        if all then self.invalidate_all(); return end
+        if ports or trash or runtimes then
+            self.invalidate("native-inventory")
+            self.native_inventory=nil
+        end
+        if ports then
+            self.invalidate("ports")
+            if scanner.invalidate then scanner.invalidate(self.env.scripts_dir,self.env.gamedirs_dir,self.env.images_dir) end
+        end
+        if trash then
+            self.invalidate("trash")
+            if scanner.invalidate then scanner.invalidate((self.env.gamedir or "").."/trash") end
+        end
+        if runtimes then
+            self.invalidate("required-runtimes","installed-runtimes","runtime-metadata")
+            if scanner.invalidate then scanner.invalidate(self.env.libs_dir) end
+        end
+        if sizes then self.invalidate("sizes") end
     end
 
     return self
