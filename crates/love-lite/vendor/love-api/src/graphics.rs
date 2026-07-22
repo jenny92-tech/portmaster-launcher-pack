@@ -3089,8 +3089,12 @@ fn load_font(state: &SharedState, source: Option<FontSource>) -> u64 {
     }
     let data = match source {
         FontSource::Path(font_path) => {
-            let game_source = state.game_source.lock();
-            game_source.read_file(&font_path).ok()
+            if std::path::Path::new(&font_path).is_absolute() {
+                std::fs::read(font_path).ok()
+            } else {
+                let game_source = state.game_source.lock();
+                game_source.read_file(&font_path).ok()
+            }
         }
         FontSource::Data { table, .. } => table
             .get::<mlua::String>("_file_data")
@@ -3100,7 +3104,7 @@ fn load_font(state: &SharedState, source: Option<FontSource>) -> u64 {
     let Some(ttf_data) = data else {
         return 0;
     };
-    let Ok(font) = fontdue::Font::from_bytes(ttf_data, fontdue::FontSettings::default()) else {
+    let Ok(font) = ab_glyph::FontArc::try_from_vec(ttf_data) else {
         return 0;
     };
     let font_id = {
@@ -3134,13 +3138,7 @@ fn new_font_table(lua: &Lua, state: &SharedState, font_id: u64, size: f32) -> Lu
     let font_data = get_font(state, font_id);
 
     let height = match &font_data {
-        Some(fd) => {
-            let m = fd.font.horizontal_line_metrics(size);
-            match m {
-                Some(lm) => (lm.ascent - lm.descent).ceil(),
-                None => size,
-            }
-        }
+        Some(fd) => fd.height_at(size).ceil(),
         None => size,
     };
 
@@ -3153,19 +3151,9 @@ fn new_font_table(lua: &Lua, state: &SharedState, font_id: u64, size: f32) -> Lu
         let fd = font_data.clone();
         font.set(
             "getWidth",
-            lua.create_function(move |_, (_self, text): (LuaValue, String)| {
-                match &fd {
-                    Some(f) => {
-                        // Create a FontData with the right size for measuring
-                        let mut w = 0.0f32;
-                        for ch in text.chars() {
-                            let m = f.font.metrics(ch, size);
-                            w += m.advance_width;
-                        }
-                        Ok(w)
-                    }
-                    None => Ok(text.chars().count() as f32 * size.max(8.0)),
-                }
+            lua.create_function(move |_, (_self, text): (LuaValue, String)| match &fd {
+                Some(f) => Ok(f.text_width_at(&text, size)),
+                None => Ok(text.chars().count() as f32 * size.max(8.0)),
             })?,
         )?;
     }
@@ -3198,14 +3186,7 @@ fn new_font_table(lua: &Lua, state: &SharedState, font_id: u64, size: f32) -> Lu
             lua.create_function(move |lua, (_self, text, limit): (LuaValue, String, f32)| {
                 let char_w_fn = |s: &str| -> f32 {
                     match &fd {
-                        Some(f) => {
-                            let mut w = 0.0f32;
-                            for ch in s.chars() {
-                                let m = f.font.metrics(ch, size);
-                                w += m.advance_width;
-                            }
-                            w
-                        }
+                        Some(f) => f.text_width_at(s, size),
                         None => s.chars().count() as f32 * size.max(8.0),
                     }
                 };
@@ -3384,27 +3365,21 @@ fn render_colored_text_to_image(
             return (0, 0, 0);
         }
 
-        let metrics = fd.font.horizontal_line_metrics(font_size);
-        let ascent = match metrics {
-            Some(m) => m.ascent.ceil() as i32,
-            None => font_size as i32,
-        };
+        let ascent = fd.ascent_at(font_size).ceil();
 
         let mut pixels = vec![0u8; (width * line_h * 4) as usize];
         let mut cursor_x = 0.0f32;
 
         for (color, text) in segments {
             for ch in text.chars() {
-                let (m, bitmap) = fd.font.rasterize(ch, font_size);
-                let glyph_x = cursor_x as i32 + m.xmin;
-                let glyph_y = ascent - m.height as i32 - m.ymin;
+                let glyph = fd.rasterize_glyph_at(ch, font_size, cursor_x, ascent);
 
-                for gy in 0..m.height {
-                    for gx in 0..m.width {
-                        let px = glyph_x + gx as i32;
-                        let py = glyph_y + gy as i32;
+                for gy in 0..glyph.height {
+                    for gx in 0..glyph.width {
+                        let px = glyph.x + gx as i32;
+                        let py = glyph.y + gy as i32;
                         if px >= 0 && (px as u32) < width && py >= 0 && (py as u32) < line_h {
-                            let alpha = bitmap[gy * m.width + gx];
+                            let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
                             if alpha > 0 {
                                 let idx = ((py as u32 * width + px as u32) * 4) as usize;
                                 // Blend with existing pixel (later segments overlay)
@@ -3437,7 +3412,7 @@ fn render_colored_text_to_image(
                         }
                     }
                 }
-                cursor_x += m.advance_width;
+                cursor_x += glyph.advance;
             }
         }
 

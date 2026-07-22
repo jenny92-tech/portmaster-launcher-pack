@@ -198,6 +198,34 @@ fn loads_the_packaged_chinese_font_from_file_data() {
 }
 
 #[test]
+fn loads_the_packaged_font_directly_without_a_lua_byte_copy() {
+    let directory = game("");
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ports/appmanager/portable/share/NotoSansSC-Regular.ttf")
+        .canonicalize()
+        .expect("canonical font path");
+    engine
+        .runtime
+        .lua
+        .globals()
+        .set("font_path", font_path.to_string_lossy().as_ref())
+        .expect("publish font path");
+    let width: f32 = engine
+        .runtime
+        .lua
+        .load(
+            r#"
+            local font = love.graphics.newFont(font_path, 20)
+            return font:getWidth("中文")
+            "#,
+        )
+        .eval()
+        .expect("load font from absolute path");
+    assert!(width > 0.0);
+}
+
+#[test]
 fn font_sizes_share_one_parsed_font_file() {
     let directory = game("");
     let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");

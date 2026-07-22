@@ -27,6 +27,8 @@ are excluded.
   guide's stencil, that work falls back to the CPU renderer.
 - Runs the real shared launcher UIKit in an automated contract test.
 - Loads and draws the real modular App Manager Lua frontend in a contract test.
+- Parses the bundled CJK font lazily with `ab_glyph`; loading the font no
+  longer expands every glyph outline into memory at startup.
 - Produces an approximately 2 MB aarch64 Linux release binary against Debian
   11's glibc and
   the target device's SDL2 shared library.

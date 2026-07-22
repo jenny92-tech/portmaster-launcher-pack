@@ -14,4 +14,4 @@ flate2 = "1.0"
 sprite-to-text = { path = "../sprite-to-text" }
 dirs = "5"
 image = { version = "0.25", default-features = false, features = ["png"] }
-fontdue = "0.9"
+ab_glyph = "0.2"

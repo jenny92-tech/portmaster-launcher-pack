@@ -1,3 +1,4 @@
+use ab_glyph::{point, Font, FontArc, PxScale, ScaleFont};
 use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -370,26 +371,80 @@ impl GameSource {
 
 /// A loaded TTF font for text rendering
 pub struct FontData {
-    pub font: fontdue::Font,
+    pub font: FontArc,
+}
+
+pub struct RasterizedGlyph {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub alpha: Vec<u8>,
+    pub advance: f32,
 }
 
 impl FontData {
     /// Measure the width of a text string at a given size in pixels
     pub fn text_width_at(&self, text: &str, size: f32) -> f32 {
-        let mut width = 0.0f32;
-        for ch in text.chars() {
-            let metrics = self.font.metrics(ch, size);
-            width += metrics.advance_width;
-        }
-        width
+        let scaled = self.font.as_scaled(PxScale::from(size));
+        text.chars()
+            .map(|ch| scaled.h_advance(scaled.glyph_id(ch)))
+            .sum()
     }
 
     /// Get the line height at the stored size
     pub fn line_height_at(&self, size: f32) -> f32 {
-        let metrics = self.font.horizontal_line_metrics(size);
-        match metrics {
-            Some(m) => m.ascent - m.descent + m.line_gap,
-            None => size,
+        let scaled = self.font.as_scaled(PxScale::from(size));
+        scaled.ascent() - scaled.descent() + scaled.line_gap()
+    }
+
+    pub fn height_at(&self, size: f32) -> f32 {
+        let scaled = self.font.as_scaled(PxScale::from(size));
+        scaled.ascent() - scaled.descent()
+    }
+
+    pub fn ascent_at(&self, size: f32) -> f32 {
+        self.font.as_scaled(PxScale::from(size)).ascent()
+    }
+
+    pub fn rasterize_glyph_at(
+        &self,
+        ch: char,
+        size: f32,
+        x: f32,
+        baseline: f32,
+    ) -> RasterizedGlyph {
+        let scaled = self.font.as_scaled(PxScale::from(size));
+        let glyph_id = scaled.glyph_id(ch);
+        let advance = scaled.h_advance(glyph_id);
+        let glyph = glyph_id.with_scale_and_position(PxScale::from(size), point(x, baseline));
+        let Some(outlined) = self.font.outline_glyph(glyph) else {
+            return RasterizedGlyph {
+                x: x.floor() as i32,
+                y: baseline.floor() as i32,
+                width: 0,
+                height: 0,
+                alpha: Vec::new(),
+                advance,
+            };
+        };
+        let bounds = outlined.px_bounds();
+        let width = bounds.width().max(0.0).round() as u32;
+        let height = bounds.height().max(0.0).round() as u32;
+        let mut alpha = vec![0; width as usize * height as usize];
+        outlined.draw(|px, py, coverage| {
+            if px < width && py < height {
+                alpha[py as usize * width as usize + px as usize] =
+                    (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        });
+        RasterizedGlyph {
+            x: bounds.min.x.round() as i32,
+            y: bounds.min.y.round() as i32,
+            width,
+            height,
+            alpha,
+            advance,
         }
     }
 
@@ -400,18 +455,11 @@ impl FontData {
             return (0, 0, vec![]);
         }
 
-        let metrics = self.font.horizontal_line_metrics(size);
-        let (ascent, height) = match metrics {
-            Some(m) => (m.ascent.ceil() as i32, (m.ascent - m.descent).ceil() as u32),
-            None => (size as i32, size.ceil() as u32),
-        };
+        let ascent = self.ascent_at(size).ceil();
+        let height = self.height_at(size).ceil() as u32;
 
         // First pass: measure total width
-        let mut total_width = 0.0f32;
-        for ch in text.chars() {
-            let m = self.font.metrics(ch, size);
-            total_width += m.advance_width;
-        }
+        let total_width = self.text_width_at(text, size);
 
         let width = total_width.ceil() as u32;
         if width == 0 || height == 0 {
@@ -423,20 +471,14 @@ impl FontData {
         // Second pass: render glyphs
         let mut cursor_x = 0.0f32;
         for ch in text.chars() {
-            let (m, bitmap) = self.font.rasterize(ch, size);
-            let bw = m.width;
-            let bh = m.height;
-            let bmp = &bitmap;
+            let glyph = self.rasterize_glyph_at(ch, size, cursor_x, ascent);
 
-            let glyph_x = cursor_x as i32 + m.xmin;
-            let glyph_y = ascent - bh as i32 - m.ymin;
-
-            for gy in 0..bh {
-                for gx in 0..bw {
-                    let px = glyph_x + gx as i32;
-                    let py = glyph_y + gy as i32;
+            for gy in 0..glyph.height {
+                for gx in 0..glyph.width {
+                    let px = glyph.x + gx as i32;
+                    let py = glyph.y + gy as i32;
                     if px >= 0 && (px as u32) < width && py >= 0 && (py as u32) < height {
-                        let alpha = bmp[gy * bw + gx];
+                        let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
                         if alpha > 0 {
                             let idx = ((py as u32 * width + px as u32) * 4) as usize;
                             pixels[idx] = 255;
@@ -447,7 +489,7 @@ impl FontData {
                     }
                 }
             }
-            cursor_x += m.advance_width;
+            cursor_x += glyph.advance;
         }
 
         (width, height, pixels)

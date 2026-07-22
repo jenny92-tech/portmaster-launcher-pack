@@ -151,18 +151,28 @@ end
 local function fnt(px)
     px = math.max(9, math.floor(px + 0.5))
     if not fonts[px] then
+        -- APP Manager's self-contained LOVE-lite runtime can read the bundled
+        -- font directly. Regular LÖVE launchers keep the portable FileData
+        -- path below and are unaffected.
+        local direct_path=os.getenv("LOVE_LITE_RENDERER") and os.getenv("LOVE_FONT_PATH") or nil
+        if direct_path and direct_path~="" then
+            local ok,font=pcall(love.graphics.newFont,direct_path,px)
+            if ok and font then fonts[px]=font end
+        end
         -- The shell resolves PortMaster's real NotoSansSC path across firmware
         -- layouts. Load it once as shared FileData so every size uses that exact
         -- system file without creating a per-launcher disk copy.
-        local data=load_external_font()
-        if data then
-            fonts[px] = love.graphics.newFont(data,px)
-        elseif love.filesystem.getInfo("font.ttf") then
-            -- Upgrade/degraded fallback for a device whose shared font could
-            -- not be repaired. English still renders if this is absent too.
-            fonts[px] = love.graphics.newFont("font.ttf", px)
-        else
-            fonts[px] = love.graphics.newFont(px)
+        if not fonts[px] then
+            local data=load_external_font()
+            if data then
+                fonts[px] = love.graphics.newFont(data,px)
+            elseif love.filesystem.getInfo("font.ttf") then
+                -- Upgrade/degraded fallback for a device whose shared font could
+                -- not be repaired. English still renders if this is absent too.
+                fonts[px] = love.graphics.newFont("font.ttf", px)
+            else
+                fonts[px] = love.graphics.newFont(px)
+            end
         end
     end
     return fonts[px]
