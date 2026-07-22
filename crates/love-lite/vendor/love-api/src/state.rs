@@ -1,6 +1,7 @@
 use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,6 +9,45 @@ use sprite_to_text::pixel_buffer::{PixelBuffer, StencilCompare};
 
 /// RGBA color stored as [f32; 4], matches LÖVE's convention (0.0-1.0)
 pub type LoveColor = [f32; 4];
+pub type GpuClip = Option<(i32, i32, u32, u32)>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GpuCommand {
+    Clear {
+        color: [u8; 4],
+    },
+    Rectangle {
+        fill: bool,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius: f32,
+        line_width: f32,
+        color: [u8; 4],
+        clip: GpuClip,
+    },
+    Line {
+        points: Vec<(f32, f32)>,
+        line_width: f32,
+        color: [u8; 4],
+        clip: GpuClip,
+    },
+    Polygon {
+        fill: bool,
+        points: Vec<(f32, f32)>,
+        line_width: f32,
+        color: [u8; 4],
+        clip: GpuClip,
+    },
+    Image {
+        image_id: u64,
+        source: (i32, i32, u32, u32),
+        destination: (f32, f32, f32, f32),
+        color: [u8; 4],
+        clip: GpuClip,
+    },
+}
 
 /// LÖVE blend mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,6 +511,9 @@ pub struct SharedState {
     pub active_font_size: Mutex<f32>,
     pub canvas_width: Mutex<u32>,
     pub canvas_height: Mutex<u32>,
+    pub gpu_recording: AtomicBool,
+    pub gpu_unsupported: AtomicBool,
+    pub gpu_commands: Mutex<Vec<GpuCommand>>,
 
     // Image registry
     pub images: Mutex<HashMap<u64, ImageData>>,
@@ -606,6 +649,9 @@ impl SharedState {
             active_font_size: Mutex::new(12.0),
             canvas_width: Mutex::new(canvas_width),
             canvas_height: Mutex::new(canvas_height),
+            gpu_recording: AtomicBool::new(false),
+            gpu_unsupported: AtomicBool::new(false),
+            gpu_commands: Mutex::new(Vec::new()),
             images: Mutex::new(HashMap::new()),
             next_image_id: Mutex::new(1),
             text_image_cache: Mutex::new(TextImageCache::default()),
@@ -659,6 +705,36 @@ impl SharedState {
             crt_params: Mutex::new([0.0, 0.0]),
             canvases_activated_this_frame: Mutex::new(HashSet::new()),
         })
+    }
+
+    pub fn begin_gpu_frame(&self, color: [u8; 4]) {
+        self.gpu_unsupported.store(false, Ordering::Relaxed);
+        let mut commands = self.gpu_commands.lock();
+        commands.clear();
+        commands.push(GpuCommand::Clear { color });
+        self.gpu_recording.store(true, Ordering::Relaxed);
+    }
+
+    pub fn finish_gpu_frame(&self) -> Option<Vec<GpuCommand>> {
+        self.gpu_recording.store(false, Ordering::Relaxed);
+        if self.gpu_unsupported.load(Ordering::Relaxed) {
+            self.gpu_commands.lock().clear();
+            None
+        } else {
+            Some(std::mem::take(&mut *self.gpu_commands.lock()))
+        }
+    }
+
+    pub fn is_gpu_recording(&self) -> bool {
+        self.gpu_recording.load(Ordering::Relaxed)
+    }
+
+    pub fn reject_gpu_frame(&self) {
+        self.gpu_unsupported.store(true, Ordering::Relaxed);
+    }
+
+    pub fn record_gpu(&self, command: GpuCommand) {
+        self.gpu_commands.lock().push(command);
     }
 
     /// Map BlendMode to pixel buffer blend code (0=alpha, 1=replace, 2=add, 3=multiply).

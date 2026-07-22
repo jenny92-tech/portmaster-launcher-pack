@@ -1,6 +1,6 @@
 use std::fs;
 
-use love_lite::Engine;
+use love_lite::{Engine, GpuCommand};
 use mlua::{String as LuaString, Table as LuaTable};
 use tempfile::TempDir;
 
@@ -27,6 +27,70 @@ fn lua_can_request_smooth_redraws_only_while_animating() {
         .exec()
         .expect("enable animation");
     assert!(engine.is_animating().expect("read animation state"));
+}
+
+#[test]
+fn app_graphics_can_record_a_gpu_command_frame() {
+    let directory = game(
+        r#"
+        function love.draw()
+            love.graphics.setColor(0.2, 0.3, 0.4, 0.8)
+            love.graphics.rectangle("fill", 4, 5, 30, 20, 4, 4)
+            love.graphics.setLineWidth(2)
+            love.graphics.line(1, 2, 20, 22)
+            love.graphics.polygon("fill", 3, 4, 9, 10, 2, 12)
+            love.graphics.print("GPU", 8, 9)
+        end
+        "#,
+    );
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    let commands = engine
+        .draw_gpu()
+        .expect("record GPU frame")
+        .expect("supported GPU frame");
+    assert!(matches!(commands[0], GpuCommand::Clear { .. }));
+    assert!(
+        commands
+            .iter()
+            .any(|command| matches!(command, GpuCommand::Rectangle { .. }))
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| matches!(command, GpuCommand::Line { .. }))
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| matches!(command, GpuCommand::Polygon { .. }))
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| matches!(command, GpuCommand::Image { .. }))
+    );
+}
+
+#[test]
+fn unsupported_stencil_frame_requests_cpu_fallback() {
+    let directory = game(
+        r#"
+        function love.draw()
+            love.graphics.stencil(function()
+                love.graphics.rectangle("fill", 1, 1, 8, 8)
+            end, "replace", 1)
+            love.graphics.setStencilTest("equal", 0)
+            love.graphics.rectangle("fill", 0, 0, 16, 16)
+            love.graphics.setStencilTest()
+        end
+        "#,
+    );
+    let engine = Engine::load(directory.path(), 32, 24).expect("load runtime");
+    assert!(
+        engine.draw_gpu().expect("record GPU frame").is_none(),
+        "stencil must use the per-frame CPU fallback"
+    );
+    engine.draw().expect("render CPU fallback");
 }
 
 #[test]
@@ -347,4 +411,12 @@ fn loads_the_real_app_manager_lua_frontend() {
         .update_and_draw(1.0 / 60.0)
         .expect("draw App Manager frontend");
     assert!(engine.frame_rgba().iter().any(|value| *value != 0));
+    let commands = engine
+        .draw_gpu()
+        .expect("record App Manager GPU frame")
+        .expect("App Manager frame uses the supported GPU subset");
+    assert!(
+        commands.len() > 10,
+        "App Manager GPU frame is unexpectedly empty"
+    );
 }

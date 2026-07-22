@@ -11,6 +11,7 @@ from [`4RH1T3CT0R7/balatro-port-tui`](https://github.com/4RH1T3CT0R7/balatro-por
 The terminal runner, Sixel/Ratatui renderer, screenshots, Balatro assets and
 Balatro-specific Lua patches were intentionally not imported. Local changes
 replace Crossterm event collection with an external-backend seam, add the
-filesystem calls required by the launcher UIKit, and provide an SDL2 runner.
+filesystem calls required by the launcher UIKit, and provide an SDL2 runner
+with an APP-specific GPU command renderer and software fallback.
 
 See `LICENSE-UPSTREAM-APACHE-2.0.txt` for the upstream license text.

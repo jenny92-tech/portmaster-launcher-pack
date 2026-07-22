@@ -1,8 +1,10 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use love_api::LoveRuntime;
+pub use love_api::state::GpuCommand;
 use love_api::state::{LoveEvent, SharedState};
 use mlua::{Function as LuaFunction, IntoLuaMulti, Table as LuaTable};
 
@@ -74,6 +76,30 @@ impl Engine {
             background[3],
         );
         self.call_optional("draw", ())
+    }
+
+    pub fn draw_gpu(&self) -> Result<Option<Vec<GpuCommand>>> {
+        let background = self.runtime.state.background_color.lock();
+        let color = background.map(|component| (component.clamp(0.0, 1.0) * 255.0).round() as u8);
+        drop(background);
+        self.runtime.state.begin_gpu_frame(color);
+        let draw_result = self.call_optional("draw", ());
+        let commands = self.runtime.state.finish_gpu_frame();
+        draw_result?;
+        Ok(commands)
+    }
+
+    pub fn image_rgba(&self, image_id: u64) -> Option<(u32, u32, Vec<u8>)> {
+        self.runtime
+            .state
+            .images
+            .lock()
+            .get(&image_id)
+            .map(|image| (image.width, image.height, image.pixels.clone()))
+    }
+
+    pub fn active_image_ids(&self) -> HashSet<u64> {
+        self.runtime.state.images.lock().keys().copied().collect()
     }
 
     pub fn is_animating(&self) -> Result<bool> {

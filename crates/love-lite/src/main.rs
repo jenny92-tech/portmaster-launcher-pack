@@ -8,6 +8,11 @@ use love_lite::{DEFAULT_HEIGHT, DEFAULT_WIDTH, Engine};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
+use sdl2::render::Canvas;
+use sdl2::video::{Window, WindowBuilder};
+
+mod gpu;
+use gpu::GpuRenderer;
 
 const BUILD_REVISION: &str = match option_env!("LOVE_LITE_SOURCE_REVISION") {
     Some(revision) => revision,
@@ -41,17 +46,14 @@ fn run() -> Result<i32> {
     let sdl = sdl2::init().map_err(anyhow::Error::msg)?;
     let video = sdl.video().map_err(anyhow::Error::msg)?;
     let title = engine.runtime.state.window_title.lock().clone();
-    let mut window_builder = video.window(&title, width, height);
-    window_builder.position_centered().resizable();
-    let window = window_builder.build().context("create SDL2 window")?;
-    let canvas_builder = window.into_canvas();
-    let mut canvas = if env::var_os("LOVE_LITE_SOFTWARE").is_some() {
-        canvas_builder.software().build()
-    } else {
-        canvas_builder.accelerated().present_vsync().build()
-    }
-    .context("create SDL2 renderer")?;
+    let preference = RendererPreference::from_environment();
+    let (mut canvas, mut gpu_enabled) = build_canvas(&video, &title, width, height, preference)?;
+    eprintln!(
+        "love-lite: renderer={}",
+        if gpu_enabled { "gpu" } else { "cpu" }
+    );
     let texture_creator = canvas.texture_creator();
+    let mut gpu_renderer = GpuRenderer::new(&texture_creator);
     let mut texture = texture_creator
         .create_texture_streaming(PixelFormatEnum::RGBA32, width, height)
         .context("create SDL2 frame texture")?;
@@ -63,6 +65,7 @@ fn run() -> Result<i32> {
         .checked_sub(idle_render_interval)
         .unwrap_or(previous);
     let mut exit_code = 0;
+    let mut gpu_failures = 0_u8;
 
     'running: loop {
         let update_started = Instant::now();
@@ -102,14 +105,34 @@ fn run() -> Result<i32> {
         }
         if redraw {
             last_render = Instant::now();
-            engine.draw()?;
-            engine
-                .with_frame_rgba(|frame| texture.update(None, frame, width as usize * 4))
-                .context("upload frame")?;
-            canvas.clear();
-            canvas
-                .copy(&texture, None, None)
-                .map_err(anyhow::Error::msg)?;
+            let mut rendered_on_gpu = false;
+            if gpu_enabled && let Some(commands) = engine.draw_gpu()? {
+                match gpu_renderer.render(&mut canvas, &engine, &commands) {
+                    Ok(()) => {
+                        rendered_on_gpu = true;
+                        gpu_failures = 0;
+                    }
+                    Err(error) => {
+                        gpu_failures = gpu_failures.saturating_add(1);
+                        eprintln!("love-lite: GPU frame failed: {error:#}");
+                        if gpu_failures >= 3 {
+                            gpu_enabled = false;
+                            eprintln!("love-lite: renderer=cpu (GPU fallback)");
+                        }
+                    }
+                }
+            }
+            if !rendered_on_gpu {
+                engine.draw()?;
+                engine
+                    .with_frame_rgba(|frame| texture.update(None, frame, width as usize * 4))
+                    .context("upload frame")?;
+                canvas.set_clip_rect(None);
+                canvas.clear();
+                canvas
+                    .copy(&texture, None, None)
+                    .map_err(anyhow::Error::msg)?;
+            }
             canvas.present();
         }
 
@@ -125,6 +148,86 @@ fn run() -> Result<i32> {
     }
 
     Ok(exit_code)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RendererPreference {
+    Auto,
+    Gpu,
+    Cpu,
+}
+
+impl RendererPreference {
+    fn from_environment() -> Self {
+        if env::var_os("LOVE_LITE_SOFTWARE").is_some() {
+            return Self::Cpu;
+        }
+        match env::var("LOVE_LITE_RENDERER")
+            .unwrap_or_else(|_| "auto".to_owned())
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "gpu" => Self::Gpu,
+            "cpu" => Self::Cpu,
+            _ => Self::Auto,
+        }
+    }
+}
+
+fn window_builder(
+    video: &sdl2::VideoSubsystem,
+    title: &str,
+    width: u32,
+    height: u32,
+) -> WindowBuilder {
+    let mut builder = video.window(title, width, height);
+    builder.position_centered().resizable();
+    builder
+}
+
+fn build_canvas(
+    video: &sdl2::VideoSubsystem,
+    title: &str,
+    width: u32,
+    height: u32,
+    preference: RendererPreference,
+) -> Result<(Canvas<Window>, bool)> {
+    if env::var_os("LOVE_LITE_SOFTWARE").is_some() {
+        let window = window_builder(video, title, width, height)
+            .build()
+            .context("create SDL2 window")?;
+        return Ok((
+            window
+                .into_canvas()
+                .software()
+                .build()
+                .context("create SDL2 software renderer")?,
+            false,
+        ));
+    }
+
+    let window = window_builder(video, title, width, height)
+        .build()
+        .context("create SDL2 window")?;
+    match window.into_canvas().accelerated().present_vsync().build() {
+        Ok(canvas) => Ok((canvas, preference != RendererPreference::Cpu)),
+        Err(error) if preference == RendererPreference::Gpu => {
+            Err(error).context("create required SDL2 GPU renderer")
+        }
+        Err(_) => {
+            let window = window_builder(video, title, width, height)
+                .build()
+                .context("recreate SDL2 window for CPU fallback")?;
+            Ok((
+                window
+                    .into_canvas()
+                    .software()
+                    .build()
+                    .context("create SDL2 CPU fallback renderer")?,
+                false,
+            ))
+        }
+    }
 }
 
 fn parse_dimension(value: Option<String>, fallback: u32, name: &str) -> Result<u32> {

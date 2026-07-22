@@ -2551,7 +2551,8 @@ run_portable_ui() {
   # Static pages redraw slowly to save CPU; visible animations temporarily use
   # the smooth rate and automatically fall back when they finish.
   export LOVE_LITE_FPS=6
-  export LOVE_LITE_ANIMATION_FPS=30
+  export LOVE_LITE_ANIMATION_FPS=60
+  export LOVE_LITE_RENDERER=auto
   if [ -S "$wayland_dir/$wayland_name" ]; then
     export XDG_RUNTIME_DIR="$wayland_dir" WAYLAND_DISPLAY="$wayland_name" SDL_VIDEODRIVER=wayland
     unset LIBGL_FB

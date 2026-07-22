@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::lua_util::{color_f32_to_u8, parse_color};
 use crate::state::{
-    BlendMode, CachedTextImage, FontData, ImageData, SavedGraphicsState, SharedState, Transform,
+    BlendMode, CachedTextImage, FontData, GpuCommand, ImageData, SavedGraphicsState, SharedState,
+    Transform,
 };
 use sprite_to_text::pixel_buffer::{DissolveParams, PixelBuffer, StencilCompare};
 
@@ -55,6 +56,12 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
                 } else {
                     parse_color(&args)
                 };
+                if s.is_gpu_recording() {
+                    s.record_gpu(GpuCommand::Clear {
+                        color: color_f32_to_u8(color),
+                    });
+                    return Ok(());
+                }
                 s.with_active_buffer(|pb| {
                     pb.clear(color[0], color[1], color[2], color[3]);
                     pb.clear_stencil();
@@ -148,6 +155,25 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
                     let lw = ((*s.line_width.lock()) * scale_x.max(scale_y)).max(1.0) as u32;
                     let rrx = (rx.unwrap_or(0.0) * scale_x) as i32;
                     let rry = (ry.unwrap_or_else(|| rx.unwrap_or(0.0)) * scale_y) as i32;
+
+                    if s.is_gpu_recording() {
+                        if has_rotation {
+                            s.reject_gpu_frame();
+                        } else {
+                            s.record_gpu(GpuCommand::Rectangle {
+                                fill: mode == "fill",
+                                x: px as f32,
+                                y: py as f32,
+                                width: pw as f32,
+                                height: ph as f32,
+                                radius: rrx.max(rry) as f32,
+                                line_width: lw as f32,
+                                color,
+                                clip: *s.scissor.lock(),
+                            });
+                        }
+                        return Ok(());
+                    }
 
                     s.with_active_buffer(|pb| {
                         if mode == "fill" {
@@ -552,6 +578,50 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
                 let replace = *s.blend_mode.lock() == BlendMode::Replace;
                 let is_fullscreen_shader = *s.active_shader_fullscreen.lock();
 
+                if s.is_gpu_recording() {
+                    let gpu_image = image_id.and_then(|id| {
+                        s.images
+                            .lock()
+                            .get(&id)
+                            .map(|image| (id, image.width, image.height))
+                    });
+                    if canvas_id.is_some()
+                        || spritebatch_id.is_some()
+                        || r.abs() > 0.001
+                        || sx <= 0.0
+                        || sy <= 0.0
+                        || t.b.abs() > 0.001
+                        || t.c.abs() > 0.001
+                    {
+                        s.reject_gpu_frame();
+                        return Ok(());
+                    }
+                    if let Some((id, image_width, image_height)) = gpu_image {
+                        let (src_x, src_y, src_w, src_h) = if has_quad {
+                            (quad_x, quad_y, quad_w, quad_h)
+                        } else {
+                            (0.0, 0.0, image_width as f32, image_height as f32)
+                        };
+                        let (scale_tx, scale_ty) = t.scale_factor();
+                        let (tx, ty) = t.apply(x - ox * sx, y - oy * sy);
+                        s.record_gpu(GpuCommand::Image {
+                            image_id: id,
+                            source: (
+                                src_x.round() as i32,
+                                src_y.round() as i32,
+                                src_w.max(0.0).round() as u32,
+                                src_h.max(0.0).round() as u32,
+                            ),
+                            destination: (tx, ty, src_w * sx * scale_tx, src_h * sy * scale_ty),
+                            color,
+                            clip: *s.scissor.lock(),
+                        });
+                    } else {
+                        s.reject_gpu_frame();
+                    }
+                    return Ok(());
+                }
+
                 // Dissolve shader emulation — build DissolveParams for per-pixel noise
                 let dissolve = *s.active_shader_dissolve.lock();
                 let is_shadow = *s.active_shader_shadow.lock();
@@ -942,6 +1012,20 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
                 let lw = *s.line_width.lock();
                 let (sfx, _) = t.scale_factor();
                 let scaled_lw = (lw * sfx).max(1.0);
+
+                if s.is_gpu_recording() {
+                    let points = coords
+                        .chunks_exact(2)
+                        .map(|pair| t.apply(pair[0], pair[1]))
+                        .collect();
+                    s.record_gpu(GpuCommand::Line {
+                        points,
+                        line_width: scaled_lw,
+                        color,
+                        clip: *s.scissor.lock(),
+                    });
+                    return Ok(());
+                }
 
                 s.with_active_buffer(|pb| {
                     let mut i = 0;
@@ -2256,6 +2340,17 @@ fn register_graphics_object_stubs(
                 let (sfx, _) = t.scale_factor();
                 let scaled_lw = (lw * sfx).max(1.0);
 
+                if s.is_gpu_recording() {
+                    s.record_gpu(GpuCommand::Polygon {
+                        fill: mode == "fill",
+                        points: transformed,
+                        line_width: scaled_lw,
+                        color,
+                        clip: *s.scissor.lock(),
+                    });
+                    return Ok(());
+                }
+
                 s.with_active_buffer(|pb| {
                     if mode == "fill" {
                         fill_polygon(pb, &transformed, color);
@@ -2416,6 +2511,10 @@ fn register_graphics_object_stubs(
                     Option<u8>,
                     Option<bool>,
                 )| {
+                    if s.is_gpu_recording() {
+                        s.reject_gpu_frame();
+                        return Ok(());
+                    }
                     // Clear stencil buffer and enter stencil write mode
                     s.with_active_buffer(|pb| {
                         pb.clear_stencil();
@@ -3478,6 +3577,27 @@ fn draw_transient_text(
     }
     let transform = current_transform(state);
     let color = color_f32_to_u8(*state.current_color.lock());
+    if state.is_gpu_recording() {
+        if rotation.abs() > 0.001 || transform.b.abs() > 0.001 || transform.c.abs() > 0.001 {
+            state.reject_gpu_frame();
+            return;
+        }
+        let (scale_tx, scale_ty) = transform.scale_factor();
+        let (tx, ty) = transform.apply(x - origin_x * scale_x, y - origin_y * scale_y);
+        state.record_gpu(GpuCommand::Image {
+            image_id,
+            source: (0, 0, width as u32, height as u32),
+            destination: (
+                tx,
+                ty,
+                width as f32 * scale_x.abs() * scale_tx,
+                height as f32 * scale_y.abs() * scale_ty,
+            ),
+            color,
+            clip: *state.scissor.lock(),
+        });
+        return;
+    }
     {
         let images = state.images.lock();
         if let Some(image) = images.get(&image_id) {
