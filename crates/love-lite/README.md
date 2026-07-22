@@ -25,6 +25,10 @@ are excluded.
 - Selects the GPU renderer automatically. If accelerated SDL2 is unavailable,
   or an individual frame uses an unsupported operation such as the first-run
   guide's stencil, that work falls back to the CPU renderer.
+- Chooses a native display mode with the configured orientation when its
+  aspect ratio matches, then renders UIKit at SDL2's physical output size.
+  Text baselines and textures stay on the physical pixel grid instead of
+  relying on compositor enlargement.
 - Runs the real shared launcher UIKit in an automated contract test.
 - Loads and draws the real modular App Manager Lua frontend in a contract test.
 - Parses the bundled CJK font lazily with `ab_glyph`; loading the font no
@@ -62,6 +66,8 @@ SDL_VIDEODRIVER=dummy LOVE_LITE_SOFTWARE=1 \
 `LOVE_LITE_RENDERER=auto|gpu|cpu` controls UIKit rendering. `auto` is the
 packaged default; `gpu` requires an accelerated SDL2 renderer, while `cpu`
 keeps the CPU pixel renderer and uses SDL2 only for presentation.
+`LOVE_LITE_NATIVE_RESOLUTION=0` disables native-mode selection for diagnostics
+and uses the platform configuration dimensions unchanged.
 
 Controller mapping remains owned by APP Manager's `ui.gptk` and bundled SDL
 controller database.

@@ -39,23 +39,54 @@ fn run() -> Result<i32> {
     let source = args
         .next()
         .context("APP Manager UI directory argument is required")?;
-    let width = parse_dimension(args.next(), DEFAULT_WIDTH, "width")?;
-    let height = parse_dimension(args.next(), DEFAULT_HEIGHT, "height")?;
-    let engine = Engine::load(&source, width, height)?;
+    let requested_width = parse_dimension(args.next(), DEFAULT_WIDTH, "width")?;
+    let requested_height = parse_dimension(args.next(), DEFAULT_HEIGHT, "height")?;
 
     let sdl = sdl2::init().map_err(anyhow::Error::msg)?;
     let video = sdl.video().map_err(anyhow::Error::msg)?;
-    let title = engine.runtime.state.window_title.lock().clone();
+    let native_enabled = env::var("LOVE_LITE_NATIVE_RESOLUTION").as_deref() != Ok("0");
+    let (window_width, window_height) = native_render_dimensions(
+        requested_width,
+        requested_height,
+        video
+            .current_display_mode(0)
+            .ok()
+            .and_then(|mode| positive_dimensions(mode.w, mode.h)),
+        native_enabled,
+    );
+    let initial_title = env::var("LOVE_WINDOW_TITLE").unwrap_or_else(|_| "Port App Manager".into());
     let preference = RendererPreference::from_environment();
-    let (mut canvas, mut gpu_enabled) = build_canvas(&video, &title, width, height, preference)?;
+    let (mut canvas, mut gpu_enabled) = build_canvas(
+        &video,
+        &initial_title,
+        window_width,
+        window_height,
+        preference,
+    )?;
+    let (render_width, render_height) = canvas
+        .output_size()
+        .map_err(anyhow::Error::msg)
+        .context("read SDL2 renderer output size")?;
+    let engine = Engine::load(&source, render_width, render_height)?;
+    let title = engine.runtime.state.window_title.lock().clone();
+    canvas
+        .window_mut()
+        .set_title(&title)
+        .context("set SDL2 window title")?;
     eprintln!(
-        "love-lite: renderer={}",
-        if gpu_enabled { "gpu" } else { "cpu" }
+        "love-lite: renderer={} requested={}x{} window={}x{} output={}x{}",
+        if gpu_enabled { "gpu" } else { "cpu" },
+        requested_width,
+        requested_height,
+        window_width,
+        window_height,
+        render_width,
+        render_height,
     );
     let texture_creator = canvas.texture_creator();
     let mut gpu_renderer = GpuRenderer::new(&texture_creator);
     let mut texture = texture_creator
-        .create_texture_streaming(PixelFormatEnum::RGBA32, width, height)
+        .create_texture_streaming(PixelFormatEnum::RGBA32, render_width, render_height)
         .context("create SDL2 frame texture")?;
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
     let update_interval = Duration::from_secs_f64(1.0 / animation_render_fps() as f64);
@@ -125,7 +156,7 @@ fn run() -> Result<i32> {
             if !rendered_on_gpu {
                 engine.draw()?;
                 engine
-                    .with_frame_rgba(|frame| texture.update(None, frame, width as usize * 4))
+                    .with_frame_rgba(|frame| texture.update(None, frame, render_width as usize * 4))
                     .context("upload frame")?;
                 canvas.set_clip_rect(None);
                 canvas.clear();
@@ -148,6 +179,33 @@ fn run() -> Result<i32> {
     }
 
     Ok(exit_code)
+}
+
+fn positive_dimensions(width: i32, height: i32) -> Option<(u32, u32)> {
+    (width > 0 && height > 0).then_some((width as u32, height as u32))
+}
+
+fn native_render_dimensions(
+    requested_width: u32,
+    requested_height: u32,
+    native: Option<(u32, u32)>,
+    enabled: bool,
+) -> (u32, u32) {
+    let Some((mut width, mut height)) = native.filter(|_| enabled) else {
+        return (requested_width, requested_height);
+    };
+    let requested_landscape = requested_width >= requested_height;
+    if (width >= height) != requested_landscape {
+        std::mem::swap(&mut width, &mut height);
+    }
+    let requested_aspect = requested_width as f64 / requested_height as f64;
+    let native_aspect = width as f64 / height as f64;
+    let aspect_error = ((native_aspect / requested_aspect) - 1.0).abs();
+    if aspect_error <= 0.03 {
+        (width, height)
+    } else {
+        (requested_width, requested_height)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -272,5 +330,34 @@ fn love_key(key: Keycode) -> Option<&'static str> {
         Keycode::A => Some("a"),
         Keycode::B => Some("b"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_render_dimensions;
+
+    #[test]
+    fn native_resolution_follows_requested_orientation() {
+        assert_eq!(
+            native_render_dimensions(960, 720, Some((720, 960)), true),
+            (960, 720)
+        );
+        assert_eq!(
+            native_render_dimensions(1280, 720, Some((1920, 1080)), true),
+            (1920, 1080)
+        );
+    }
+
+    #[test]
+    fn incompatible_native_aspect_keeps_configured_fallback() {
+        assert_eq!(
+            native_render_dimensions(960, 720, Some((1920, 1080)), true),
+            (960, 720)
+        );
+        assert_eq!(
+            native_render_dimensions(960, 720, Some((720, 960)), false),
+            (960, 720)
+        );
     }
 }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use love_lite::{Engine, GpuCommand};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::{FPoint, FRect, Rect};
-use sdl2::render::{BlendMode, Canvas, Texture, TextureCreator};
+use sdl2::render::{BlendMode, Canvas, ScaleMode, Texture, TextureCreator};
 use sdl2::video::{Window, WindowContext};
 
 struct CachedTexture<'a> {
@@ -109,6 +109,7 @@ impl<'a> GpuRenderer<'a> {
                             .create_texture_static(PixelFormatEnum::RGBA32, width, height)
                             .map_err(anyhow::Error::msg)?;
                         texture.set_blend_mode(BlendMode::Blend);
+                        texture.set_scale_mode(ScaleMode::Nearest);
                         texture
                             .update(None, &pixels, width as usize * 4)
                             .map_err(anyhow::Error::msg)?;
