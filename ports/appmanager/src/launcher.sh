@@ -1571,388 +1571,41 @@ apply_plan() {
   sync
 }
 
-pending_value() {
-  local key="$1" file="$CONFDIR/pending-install.tsv"
-  awk -F '\t' -v key="$key" '$1 == key {sub(/^[^\t]*\t/, ""); print; exit}' "$file"
-}
-
-state_value() {
-  local file="$1" key="$2"
-  awk -F '\t' -v key="$key" '$1 == key {sub(/^[^\t]*\t/, ""); print; count++} END {if (count != 1) exit 1}' "$file"
-}
-
-validation_write() {
-  local status="$1" detail="$2" tmp="$VALIDATION_RESULT_FILE.tmp.$$"
-  detail=${detail//$'\t'/ }; detail=${detail//$'\r'/ }; detail=${detail//$'\n'/ }
-  printf '1\t%s\t%s\n' "$status" "$detail" > "$tmp" && mv -f -- "$tmp" "$VALIDATION_RESULT_FILE"
-}
-
-pending_manifest_valid() {
-  local manifest="$CONFDIR/pending-manifest.tsv" hash relative actual expected_hash expected_count count=0
-  [ -s "$manifest" ] || return 1
-  expected_hash=$(state_value "$CONFDIR/pending-install.tsv" manifest_sha256) || return 1
-  expected_count=$(state_value "$CONFDIR/pending-install.tsv" manifest_count) || return 1
-  case "$expected_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
-  [ "${#expected_hash}" = 64 ] || return 1
-  case "$expected_count" in ''|*[!0-9]*|0) return 1 ;; esac
-  actual=$(pm_sha256_file "$manifest" 2>/dev/null || true)
-  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-  while IFS=$'\t' read -r hash relative; do
-    case "$hash" in ""|*[!0-9A-Fa-f]*) return 1 ;; esac
-    [ "${#hash}" = 64 ] || return 1
-    case "$relative" in ""|/*|../*|*/../*|*/..) return 1 ;; esac
-    [ -f "$PAM_PORTMASTER_DIR/$relative" ] || return 1
-    actual=$(pm_sha256_file "$PAM_PORTMASTER_DIR/$relative" 2>/dev/null || true)
-    [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-      "$(printf '%s' "$hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-    count=$((count + 1))
-  done < "$manifest"
-  [ "$count" = "$expected_count" ]
-}
-
-frontend_name_allowed() {
-  [ "$PAM_FRONTEND_NAMES" != "-" ] || return 1
-  case ",$PAM_FRONTEND_NAMES," in *",$1,"*) return 0 ;; esac
-  return 1
-}
-
-pending_frontend_manifest_valid() {
-  local file="$CONFDIR/pending-install.tsv" manifest="$CONFDIR/pending-frontend-manifest.tsv"
-  local expected_hash expected_count actual hash name count=0
-  [ -f "$manifest" ] || return 1
-  expected_hash=$(state_value "$file" frontend_manifest_sha256) || return 1
-  expected_count=$(state_value "$file" frontend_manifest_count) || return 1
-  case "$expected_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
-  [ "${#expected_hash}" = 64 ] || return 1
-  case "$expected_count" in ''|*[!0-9]*) return 1 ;; esac
-  if [ "$PAM_FRONTEND_NAMES" = "-" ]; then
-    [ "$expected_count" = "0" ] || return 1
-  else
-    [ "$expected_count" -gt 0 ] || return 1
-  fi
-  actual=$(pm_sha256_file "$manifest" 2>/dev/null || true)
-  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-  while IFS=$'\t' read -r hash name; do
-    case "$hash" in ""|*[!0-9A-Fa-f]*) return 1 ;; esac
-    [ "${#hash}" = 64 ] || return 1
-    case "$name" in ""|*/*|.|..) return 1 ;; esac
-    frontend_name_allowed "$name" || return 1
-    [ -f "$PAM_FRONTEND_DIR/$name" ] || return 1
-    actual=$(pm_sha256_file "$PAM_FRONTEND_DIR/$name" 2>/dev/null || true)
-    [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-      "$(printf '%s' "$hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-    count=$((count + 1))
-  done < "$manifest"
-  [ "$count" = "$expected_count" ]
-}
-
-pending_core_valid() {
-  local file="$CONFDIR/pending-install.tsv" expected_target expected_scripts expected_device expected_rollback
-  local expected_frontend_rollback
-  local version protocol_version mode launcher_hash actual expected_frontend_dir expected_frontend_names
-  protocol_version=$(state_value "$file" version) || return 1
-  mode=$(state_value "$file" mode) || return 1
-  expected_target=$(state_value "$file" target) || return 1
-  expected_scripts=$(state_value "$file" scripts) || return 1
-  expected_device=$(state_value "$file" device) || return 1
-  expected_rollback=$(state_value "$file" rollback) || return 1
-  launcher_hash=$(state_value "$file" launcher_sha256) || return 1
-  [ "$protocol_version" = "1" ] || return 1
-  case "$mode" in install|update) ;; *) return 1 ;; esac
-  [ -n "$expected_target" ] && [ "$expected_target" = "$PAM_PORTMASTER_DIR" ] || return 1
-  [ -n "$expected_scripts" ] && [ "$expected_scripts" = "$SCRIPTS_DIR" ] || return 1
-  [ "$expected_rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
-  expected_frontend_dir=$(state_value "$file" frontend_dir) || return 1
-  expected_frontend_names=$(state_value "$file" frontend_names) || return 1
-  [ "$expected_frontend_dir" = "$PAM_FRONTEND_DIR" ] || return 1
-  [ "$expected_frontend_names" = "$PAM_FRONTEND_NAMES" ] || return 1
-  expected_frontend_rollback=$(state_value "$file" frontend_rollback) || return 1
-  [ "$expected_frontend_rollback" = "$PAM_FRONTEND_DIR/.appmanager-rollback" ] || return 1
-  case "$launcher_hash" in *[!0-9A-Fa-f]*|'') return 1 ;; esac
-  [ "${#launcher_hash}" = 64 ] || return 1
-  [ "$expected_device" = "$param_device" ] || return 1
-  [ "$(pam_core_health)" = "healthy" ] || return 1
-  version=$(pam_core_version); [ -n "$version" ] || return 1
-  [ -f "$PAM_PORTMASTER_DIR/pugwash" ] || [ -f "$PAM_PORTMASTER_DIR/harbourmaster" ] || return 1
-  actual=$(pm_sha256_file "$PAM_FRONTEND_LAUNCHER" 2>/dev/null || true)
-  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-    "$(printf '%s' "$launcher_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-  pending_manifest_valid || return 1
-  pending_frontend_manifest_valid
-}
-
-remove_current_managed_core() {
-  local item top failed=0
-  for item in "$PAM_PORTMASTER_DIR"/* "$PAM_PORTMASTER_DIR"/.[!.]* "$PAM_PORTMASTER_DIR"/..?*; do
-    [ -e "$item" ] || [ -L "$item" ] || continue
-    top=$(basename "$item")
-    case "$top" in
-      libs|config|themes|logs|cache|log.txt|pugwash.txt|harbourmaster.txt|.appmanager-state|.appmanager-rollback) continue ;;
-    esac
-    rm -rf -- "$item" || failed=1
-  done
-  [ "$failed" = "0" ]
-}
-
-rollback_has_core() {
-  local rollback="$1" item
-  for item in "$rollback/core"/* "$rollback/core"/.[!.]* "$rollback/core"/..?*; do
-    [ -e "$item" ] || [ -L "$item" ] || continue
-    return 0
-  done
-  return 1
-}
-
-rollback_has_frontend() {
-  local frontend_rollback="$1" item base
-  for item in "$frontend_rollback"/* "$frontend_rollback"/.[!.]* "$frontend_rollback"/..?*; do
-    [ -e "$item" ] || [ -L "$item" ] || continue
-    base=$(basename "$item")
-    [ "$base" != "frontend-existing.tsv" ] || continue
-    return 0
-  done
-  return 1
-}
-
-rollback_toplist_valid() {
-  local rollback="$1" expected_count="$2" expected_hash="$3" actual count name
-  case "$expected_count" in ''|*[!0-9]*) return 1 ;; esac
-  case "$expected_hash" in ''|*[!0-9A-Fa-f]*) return 1 ;; esac
-  [ "${#expected_hash}" = 64 ] && [ -f "$rollback/expected-tops.tsv" ] || return 1
-  actual=$(pm_sha256_file "$rollback/expected-tops.tsv" 2>/dev/null || true)
-  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-  count=0
-  while IFS= read -r name; do
-    case "$name" in ''|*/*|.|..) return 1 ;; esac
-    count=$((count + 1))
-  done < "$rollback/expected-tops.tsv"
-  [ "$count" = "$expected_count" ]
-}
-
-rollback_frontend_list_valid() {
-  local rollback="$1" expected_count="$2" expected_hash="$3" actual count=0 name
-  case "$expected_count" in ''|*[!0-9]*) return 1 ;; esac
-  case "$expected_hash" in ''|*[!0-9A-Fa-f]*) return 1 ;; esac
-  [ "${#expected_hash}" = 64 ] && [ -f "$rollback/frontend-existing.tsv" ] || return 1
-  actual=$(pm_sha256_file "$rollback/frontend-existing.tsv" 2>/dev/null || true)
-  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = \
-    "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ] || return 1
-  while IFS= read -r name; do
-    case "$name" in ''|*/*|.|..) return 1 ;; esac
-    frontend_name_allowed "$name" || return 1
-    count=$((count + 1))
-  done < "$rollback/frontend-existing.tsv"
-  [ "$count" = "$expected_count" ]
-}
-
-rollback_frontend_was_present() {
-  grep -Fqx "$2" "$1/frontend-existing.tsv" 2>/dev/null
-}
-
-remove_current_frontend() {
-  local name failed=0 old_ifs
-  [ "$PAM_FRONTEND_NAMES" != "-" ] || return 0
-  old_ifs=$IFS; IFS=,; set -- $PAM_FRONTEND_NAMES; IFS=$old_ifs
-  for name in "$@"; do
-    [ -n "$name" ] || continue
-    rm -f -- "$PAM_FRONTEND_DIR/$name" || failed=1
-  done
-  [ "$failed" = "0" ]
-}
-
-restore_rollback() {
-  local rollback="$1" frontend_rollback="$2" sweep="$3"
-  local expected_count="$4" expected_hash="$5" frontend_count="$6" frontend_hash="$7"
-  local item top name backup live failed=0 restored=0 restore_count=0 old_ifs
-  if [ "$expected_count" != "-" ]; then
-    rollback_toplist_valid "$rollback" "$expected_count" "$expected_hash" || return 1
-  fi
-  rollback_frontend_list_valid "$frontend_rollback" "$frontend_count" "$frontend_hash" || return 1
-  if [ -e "$rollback/restoring" ]; then
-    sweep=0
-    restored=1
-  fi
-  if [ "$sweep" = "1" ]; then
-    : > "$rollback/sweeping" || return 1
-    remove_current_managed_core || failed=1
-    remove_current_frontend || failed=1
-    [ "$failed" = "0" ] || return 1
-    mv -f -- "$rollback/sweeping" "$rollback/restoring" || return 1
-  fi
-  if [ -d "$rollback/core" ]; then
-    for item in "$rollback/core"/* "$rollback/core"/.[!.]* "$rollback/core"/..?*; do
-      [ -e "$item" ] || [ -L "$item" ] || continue
-      top=$(basename "$item")
-      if [ -e "$PAM_PORTMASTER_DIR/$top" ] || [ -L "$PAM_PORTMASTER_DIR/$top" ]; then
-        failed=1; continue
-      fi
-      mv -- "$item" "$PAM_PORTMASTER_DIR/" || { failed=1; continue; }
-      restored=1
-      restore_count=$((restore_count + 1))
-      if [ "${PAM_TEST_FAIL_RESTORE_AFTER:-0}" = "$restore_count" ]; then return 1; fi
-    done
-  fi
-  if [ "$PAM_FRONTEND_NAMES" != "-" ]; then
-    old_ifs=$IFS; IFS=,; set -- $PAM_FRONTEND_NAMES; IFS=$old_ifs
-    for name in "$@"; do
-      [ -n "$name" ] || continue
-      backup="$frontend_rollback/$name"
-      live="$PAM_FRONTEND_DIR/$name"
-      if [ -e "$backup" ] || [ -L "$backup" ]; then
-        if [ -e "$live" ] || [ -L "$live" ]; then failed=1
-        else mv -- "$backup" "$live" || failed=1; restored=1; fi
-      elif rollback_frontend_was_present "$frontend_rollback" "$name"; then
-        [ -e "$live" ] || [ -L "$live" ] || failed=1
-      elif [ "$sweep" = "1" ] || [ -e "$rollback/restoring" ]; then
-        [ ! -e "$live" ] && [ ! -L "$live" ] || failed=1
-      fi
-    done
-  fi
-  rollback_has_core "$rollback" && failed=1
-  rollback_has_frontend "$frontend_rollback" && failed=1
-  if [ "$expected_count" != "-" ]; then
-    while IFS= read -r top; do
-      [ -e "$PAM_PORTMASTER_DIR/$top" ] || [ -L "$PAM_PORTMASTER_DIR/$top" ] || failed=1
-    done < "$rollback/expected-tops.tsv"
-  fi
-  [ "$failed" = "0" ] || return 1
-  rm -rf -- "$rollback" || return 1
-  [ "$frontend_rollback" = "$rollback" ] || rm -rf -- "$frontend_rollback" || return 1
-  [ "$restored" = "1" ] && return 0
-  return 2
-}
-
-rollback_pending_core() {
-  local file="$CONFDIR/pending-install.tsv" rollback backup_count backup_hash protocol_version
-  local frontend_count frontend_hash frontend_rollback recorded_frontend_dir recorded_frontend_names
-  local sweep=1 rc recorded_target recorded_scripts
-  recorded_target=$(state_value "$file" target 2>/dev/null || true)
-  recorded_scripts=$(state_value "$file" scripts 2>/dev/null || true)
-  [ "$recorded_target" = "$PAM_PORTMASTER_DIR" ] && [ "$recorded_scripts" = "$SCRIPTS_DIR" ] || return 1
-  protocol_version=$(state_value "$file" version 2>/dev/null || true)
-  [ "$protocol_version" = "1" ] || return 1
-  rollback=$(state_value "$file" rollback 2>/dev/null || true)
-  backup_count=$(state_value "$file" backup_top_count 2>/dev/null || true)
-  backup_hash=$(state_value "$file" backup_top_sha256 2>/dev/null || true)
-  recorded_frontend_dir=$(state_value "$file" frontend_dir 2>/dev/null || true)
-  recorded_frontend_names=$(state_value "$file" frontend_names 2>/dev/null || true)
-  [ "$recorded_frontend_dir" = "$PAM_FRONTEND_DIR" ] && [ "$recorded_frontend_names" = "$PAM_FRONTEND_NAMES" ] || return 1
-  frontend_count=$(state_value "$file" frontend_backup_count 2>/dev/null || true)
-  frontend_hash=$(state_value "$file" frontend_backup_sha256 2>/dev/null || true)
-  frontend_rollback=$(state_value "$file" frontend_rollback 2>/dev/null || true)
-  [ "$frontend_rollback" = "$PAM_FRONTEND_DIR/.appmanager-rollback" ] || return 1
-  [ "$rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
-  # The existence of backup content is safer evidence than damaged mode
-  # metadata. It prevents a truncated update record from becoming first-install cleanup.
-  restore_rollback "$rollback" "$frontend_rollback" "$sweep" "$backup_count" "$backup_hash" \
-    "$frontend_count" "$frontend_hash"; rc=$?
-  [ "$rc" = "1" ] && return 1
-  rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
-    "$CONFDIR/pending-frontend-manifest.tsv" \
-    "$CONFDIR/install-transaction.tsv" || return 1
-  [ "$rc" = "0" ] && return 0
-  return 2
-}
-
-recover_interrupted_transaction() {
-  local file="$CONFDIR/install-transaction.tsv" protocol_version phase mode target scripts rollback had_launcher
-  local backup_count backup_hash frontend_count frontend_hash frontend_dir frontend_names frontend_rollback sweep rc
-  protocol_version=$(state_value "$file" version) || return 1
-  phase=$(state_value "$file" phase) || return 1
-  mode=$(state_value "$file" mode) || return 1
-  target=$(state_value "$file" target) || return 1
-  scripts=$(state_value "$file" scripts) || return 1
-  rollback=$(state_value "$file" rollback) || return 1
-  had_launcher=$(state_value "$file" had_launcher) || return 1
-  backup_count=$(state_value "$file" backup_top_count) || return 1
-  backup_hash=$(state_value "$file" backup_top_sha256) || return 1
-  [ "$protocol_version" = "1" ] || return 1
-  [ "$target" = "$PAM_PORTMASTER_DIR" ] && [ "$scripts" = "$SCRIPTS_DIR" ] || return 1
-  frontend_dir=$(state_value "$file" frontend_dir) || return 1
-  frontend_names=$(state_value "$file" frontend_names) || return 1
-  frontend_count=$(state_value "$file" frontend_backup_count) || return 1
-  frontend_hash=$(state_value "$file" frontend_backup_sha256) || return 1
-  [ "$frontend_dir" = "$PAM_FRONTEND_DIR" ] && [ "$frontend_names" = "$PAM_FRONTEND_NAMES" ] || return 1
-  frontend_rollback=$(state_value "$file" frontend_rollback) || return 1
-  [ "$frontend_rollback" = "$PAM_FRONTEND_DIR/.appmanager-rollback" ] || return 1
-  [ "$rollback" = "$PAM_PORTMASTER_DIR/.appmanager-rollback" ] || return 1
-  case "$mode:$had_launcher" in install:0|install:1|update:0|update:1) ;; *) return 1 ;; esac
-  case "$phase" in
-    prepared) sweep=0; backup_count="-"; backup_hash="-" ;;
-    backed-up) sweep=1 ;;
-    *) return 1 ;;
+pam_validate_pending_native() {
+  local native_launcher output="$CONFDIR/validate-pending.$$" core_health rc
+  local validation_schema validation_status validation_detail
+  [ "$PAM_NATIVE_PROFILE_ACTIVE" = 1 ] && [ -x "$PAM_APPMANAGER_CLI" ] || return 1
+  native_launcher="${PAM_NATIVE_LAUNCHER_OVERRIDE:-$PAM_LAUNCHER_SOURCE}"
+  case "$native_launcher" in /*) ;; *) native_launcher="$PAM_DIR/$(basename "$native_launcher")" ;; esac
+  core_health=$(pam_core_health)
+  if [ "$core_health" = healthy ] && [ -z "$(pam_core_version)" ]; then core_health=damaged; fi
+  set -- --config-dir "$PAM_CONFIG_DIR" validate-pending-install \
+    --launcher "$native_launcher" \
+    --app-state "$CONFDIR" \
+    --trash "$TRASH_DIR" \
+    --core-health "$core_health"
+  [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
+  [ -s "$DEVICE_CONFIG_FILE" ] && set -- "$@" --remote-config "$DEVICE_CONFIG_FILE" --remote-config-dir "$DEVICE_CONFIG_DIR"
+  [ -z "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || set -- "$@" --target-override "$PAM_NATIVE_TARGET_DEVICE"
+  [ "${PAM_TEST_INTERRUPT_VALIDATION:-0}" != 1 ] || set -- "$@" --test-interrupt-before-mutation
+  case "${PAM_TEST_FAIL_RESTORE_AFTER:-0}" in
+    0|"") ;;
+    *[!0-9]*) return 1 ;;
+    *) set -- "$@" --test-fail-restore-after "$PAM_TEST_FAIL_RESTORE_AFTER" ;;
   esac
-  restore_rollback "$rollback" "$frontend_rollback" "$sweep" "$backup_count" "$backup_hash" \
-    "$frontend_count" "$frontend_hash"; rc=$?
-  [ "$rc" = "1" ] && return 1
-  rm -f -- "$file" "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
-    "$CONFDIR/pending-frontend-manifest.tsv" || return 1
-  if [ "$rc" = "0" ] || { [ "$phase" = "prepared" ] && [ "$mode" = "update" ]; }; then return 0; fi
-  return 2
-}
-
-validate_pending_install_inner() {
-  local mode rc
-  if [ ! -s "$CONFDIR/pending-install.tsv" ] && [ -s "$CONFDIR/install-transaction.tsv" ]; then
-    validation_write checking "Recovering an interrupted PortMaster transaction"
-    if recover_interrupted_transaction; then
-      validation_write restored "The previous PortMaster environment was restored"
-      return 1
-    else
-      rc=$?
-      if [ "$rc" = "2" ]; then
-        validation_write no-usable "The incomplete first installation was removed"
-      else
-        validation_write interrupted "Automatic recovery could not complete; recovery state was preserved"
-      fi
-      return 1
-    fi
+  "$PAM_APPMANAGER_CLI" "$@" > "$output" 2>> "$PAM_APP_ROOT/log.txt"; rc=$?
+  if [ "$rc" = 0 ]; then
+    IFS=$'\t' read -r validation_schema validation_status validation_detail < "$VALIDATION_RESULT_FILE" || {
+      validation_schema=""; validation_status="";
+    }
+    case "$validation_schema:$validation_status" in
+      1:valid|1:none) rc=0 ;;
+      1:restored|1:no-usable) rc=1 ;;
+      1:interrupted|1:checking) rc=75 ;;
+      *) rc=1 ;;
+    esac
   fi
-  [ -s "$CONFDIR/pending-install.tsv" ] || { validation_write none "No pending installation"; return 0; }
-  validation_write checking "Validating installed PortMaster core"
-  if [ "${PAM_TEST_INTERRUPT_VALIDATION:-0}" = "1" ]; then
-    validation_write interrupted "Validation was interrupted before any state changed"
-    return 75
-  fi
-  if pending_core_valid; then
-    local frontend_rollback
-    frontend_rollback=$(state_value "$CONFDIR/pending-install.tsv" frontend_rollback 2>/dev/null || true)
-    rm -f -- "$CONFDIR/pending-install.tsv" "$CONFDIR/pending-manifest.tsv" \
-      "$CONFDIR/pending-frontend-manifest.tsv" \
-      "$CONFDIR/install-transaction.tsv" || {
-        validation_write interrupted "Validated core could not finalize its pending state"
-        return 75
-      }
-    rm -rf -- "$PAM_PORTMASTER_DIR/.appmanager-rollback" "$CONFDIR/rollback"
-    rm -rf -- "$frontend_rollback"
-    validation_write valid "PortMaster environment validated"
-    return 0
-  fi
-  mode=$(pending_value mode)
-  rollback_pending_core; rc=$?
-  if [ "$rc" = "0" ]; then
-    validation_write restored "The previous PortMaster environment was restored"
-  elif [ "$rc" = "2" ]; then
-    validation_write no-usable "The incomplete first installation was removed"
-  else
-    validation_write interrupted "Automatic rollback could not complete; recovery state was preserved"
-  fi
-  echo "$LOG_PREFIX pending PortMaster validation failed (mode=$mode)"
-  return 1
-}
-
-validate_pending_install() {
-  local lock="$CONFDIR/validation.lock" rc token
-  if ! pam_lock_acquire "$lock" --validate-pending; then
-    validation_write checking "Another validation process is still running"
-    return 75
-  fi
-  token="$PAM_LOCK_TOKEN"
-  validate_pending_install_inner; rc=$?
-  pam_lock_release "$lock" "$token" || true
+  rm -f -- "$output"
   return "$rc"
 }
 
@@ -2025,7 +1678,7 @@ if [ "$RUNTIME_METADATA_ONLY" = "1" ]; then
 fi
 
 if [ "$VALIDATE_ONLY" = "1" ]; then
-  validate_pending_install
+  pam_validate_pending_native
   rc=$?
   write_env
   exit "$rc"

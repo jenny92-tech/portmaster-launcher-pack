@@ -6,9 +6,10 @@ use std::process::ExitCode;
 
 use appmanager_core::{
     AppOwnedPaths, CacheGenerations, FileApplyRequest, InstallPlan, InstallRequest, Inventory,
-    InventoryOptions, OperationKind, ResolvedContextInput, ResolvedDeviceContext, RuntimeMetadata,
-    RuntimeRepairRequest, SizeScanRequest, apply_file_plan, install_portmaster,
-    plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
+    InventoryOptions, OperationKind, PendingValidationRequest, ResolvedContextInput,
+    ResolvedDeviceContext, RuntimeMetadata, RuntimeRepairRequest, SizeScanRequest, apply_file_plan,
+    install_portmaster, plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
+    validate_pending_install,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use portkit_core::github::{Capability, GitHubTransport};
@@ -206,6 +207,30 @@ enum Command {
         environment: Vec<String>,
         #[arg(long)]
         cancel_file: Option<PathBuf>,
+    },
+    /// Validate or roll back the PortMaster transaction left by installation.
+    ValidatePendingInstall {
+        #[arg(long)]
+        launcher: PathBuf,
+        #[arg(long)]
+        app_state: PathBuf,
+        #[arg(long)]
+        trash: PathBuf,
+        #[arg(long)]
+        remote_config: Option<PathBuf>,
+        #[arg(long)]
+        target_override: Option<PathBuf>,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long = "env")]
+        environment: Vec<String>,
+        /// Config-derived health status: healthy, damaged, or missing.
+        #[arg(long)]
+        core_health: String,
+        #[arg(long, hide = true)]
+        test_interrupt_before_mutation: bool,
+        #[arg(long, hide = true)]
+        test_fail_restore_after: Option<usize>,
     },
     /// Repair official PortMaster Runtime images with strict validation.
     RepairRuntimes {
@@ -617,6 +642,30 @@ fn run(
             cancel_file,
             config_directories,
         ),
+        Command::ValidatePendingInstall {
+            launcher,
+            app_state,
+            trash,
+            remote_config,
+            target_override,
+            root,
+            environment,
+            core_health,
+            test_interrupt_before_mutation,
+            test_fail_restore_after,
+        } => validate_device_pending_install(
+            launcher,
+            app_state,
+            trash,
+            remote_config,
+            target_override,
+            root,
+            environment,
+            core_health,
+            test_interrupt_before_mutation,
+            test_fail_restore_after,
+            config_directories,
+        ),
         Command::RepairRuntimes {
             metadata,
             runtimes,
@@ -951,6 +1000,7 @@ fn install_device_portmaster(
         probe_root: root,
         plan,
         fail_after_backup: false,
+        fail_restore_after: None,
     })
     .map_err(|error| domain_error(name, "install-failed", error))?;
     Ok((
@@ -962,6 +1012,62 @@ fn install_device_portmaster(
             "device_class": resolved.context.device_class,
             "target_confirmed": resolved.context.target_confirmed,
             "installation": outcome,
+        }),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_device_pending_install(
+    launcher: PathBuf,
+    app_state: PathBuf,
+    trash: PathBuf,
+    remote_config: Option<PathBuf>,
+    target_override: Option<PathBuf>,
+    root: Option<PathBuf>,
+    environment: Vec<String>,
+    core_health: String,
+    test_interrupt_before_mutation: bool,
+    test_fail_restore_after: Option<usize>,
+    config_directories: &ConfigDirectories,
+) -> Result<(&'static str, Value), CliError> {
+    let name = "validate-pending-install";
+    if !matches!(core_health.as_str(), "healthy" | "damaged" | "missing") {
+        return Err(CliError {
+            command: name,
+            code: "invalid-core-health",
+            message: "core health must be healthy, damaged, or missing".to_owned(),
+        });
+    }
+    let resolved = resolve_device_context(
+        name,
+        launcher,
+        app_state.clone(),
+        trash,
+        remote_config,
+        target_override,
+        root,
+        environment,
+        config_directories,
+    )?;
+    let plan = InstallPlan::from_context(&resolved.context)
+        .map_err(|error| domain_error(name, "validation-rejected", error))?
+        .validate(&resolved.context)
+        .map_err(|error| domain_error(name, "validation-rejected", error))?;
+    let outcome = validate_pending_install(&PendingValidationRequest {
+        state_dir: app_state,
+        plan,
+        core_health_healthy: core_health == "healthy",
+        interrupt_before_mutation: test_interrupt_before_mutation,
+        fail_restore_after: test_fail_restore_after,
+    })
+    .map_err(|error| domain_error(name, "validation-failed", error))?;
+    Ok((
+        name,
+        json!({
+            "config_origin": resolved.config_origin,
+            "platform_id": resolved.context.profile,
+            "model_id": resolved.model_id,
+            "validation": outcome,
         }),
     ))
 }
@@ -1412,6 +1518,24 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command, Command::InstallPortmaster { .. }));
+
+        let cli = Cli::try_parse_from([
+            "appmanager-cli",
+            "validate-pending-install",
+            "--launcher",
+            "/ports/App.sh",
+            "--app-state",
+            "/tmp/state",
+            "--trash",
+            "/tmp/trash",
+            "--core-health",
+            "healthy",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::ValidatePendingInstall { .. }
+        ));
 
         let cli = Cli::try_parse_from([
             "appmanager-cli",

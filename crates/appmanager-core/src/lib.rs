@@ -1,8 +1,8 @@
 //! App-specific business and transaction building blocks for Port App Manager.
 //!
-//! Read-only inventory/config logic and the rollback-safe PortMaster installer
-//! live here. Downloads and ordinary game-management mutations remain in the
-//! launcher helper; no config text is executed as shell code.
+//! Inventory/config logic, ordinary file mutations, Runtime repair, and the
+//! rollback-safe PortMaster installer live here. The launcher only orchestrates
+//! these native operations; no config text is executed as shell code.
 
 pub mod cache;
 pub mod context;
@@ -20,7 +20,9 @@ pub use context::{
     FrontendMapEntry, FrontendTransform, ManagedRoots, ManagementMode, ResolvedDeviceContext,
 };
 pub use installer::{
-    InstallError, InstallMode, InstallOutcome, InstallRequest, install_portmaster,
+    InstallError, InstallMode, InstallOutcome, InstallRequest, PendingValidationError,
+    PendingValidationOutcome, PendingValidationRequest, PendingValidationStatus,
+    install_portmaster, validate_pending_install,
 };
 pub use inventory::{
     DeadScriptFact, ImageFact, Inventory, InventoryEntry, InventoryKind, InventoryOptions,
