@@ -197,6 +197,10 @@ impl TryFrom<&Resolution> for ResolvedPlatformContext {
                 inventory: capability(&resolution.capabilities, "manage_ports"),
                 install_plan: capability(&resolution.capabilities, "install_portmaster"),
                 cache_invalidation: capability(&resolution.capabilities, "manage_ports"),
+                manage_ports: capability(&resolution.capabilities, "manage_ports"),
+                trash: capability(&resolution.capabilities, "trash"),
+                leftovers: capability(&resolution.capabilities, "leftovers"),
+                cleanup_appledouble: capability(&resolution.capabilities, "cleanup_appledouble"),
             },
             management,
             roots: PlatformRoots {

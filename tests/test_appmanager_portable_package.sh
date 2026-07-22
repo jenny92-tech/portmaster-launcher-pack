@@ -65,8 +65,10 @@ assert_exact_files "$APP/runtime" \
   love.aarch64 \
   musl/libc.musl-aarch64.so.1
 assert_exact_files "$APP/licenses" \
+  LICENSE-FreeType-FTL.txt \
   LICENSE-busybox-GPL-2.0.txt \
   LICENSE-certifi.txt \
+  LICENSE-freetype-sys-MIT.txt \
   LICENSE-gptokeyb.txt \
   LICENSE-json.lua-MIT.txt \
   LICENSE-love-lite-APACHE-2.0.txt \
@@ -78,6 +80,7 @@ grep -Fq 'Copyright (c) 2020 rxi' "$APP/love_ui/json.lua"
 grep -Fq 'local json = { _version = "0.1.2" }' "$APP/love_ui/json.lua"
 grep -Fq 'dbf4b2dd2eb7c23be2773c89eb059dadd6436f94' "$APP/licenses/THIRD-PARTY-SOURCES.md"
 grep -Fq 'be8930d3c9fd70ab210918218f7cbffd2df1a30a' "$APP/licenses/THIRD-PARTY-SOURCES.md"
+grep -Fq 'statically links FreeType' "$APP/licenses/THIRD-PARTY-SOURCES.md"
 
 [ -x "$APP/bin/busybox-portable" ]
 grep -Fq 'runtime/musl' "$APP/bin/busybox-portable"

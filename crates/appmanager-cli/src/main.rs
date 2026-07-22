@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use appmanager_core::{
-    AppOwnedPaths, CacheGenerations, InstallPlan, InstallRequest, Inventory, InventoryOptions,
-    OperationKind, ResolvedContextInput, ResolvedDeviceContext, RuntimeMetadata,
-    RuntimeRepairRequest, install_portmaster, repair_runtimes,
+    AppOwnedPaths, CacheGenerations, FileApplyRequest, InstallPlan, InstallRequest, Inventory,
+    InventoryOptions, OperationKind, ResolvedContextInput, ResolvedDeviceContext, RuntimeMetadata,
+    RuntimeRepairRequest, SizeScanRequest, apply_file_plan, install_portmaster,
+    plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use portkit_core::github::{Capability, GitHubTransport};
@@ -226,6 +227,62 @@ enum Command {
         /// Optional presence-based cancellation file.
         #[arg(long)]
         cancel_file: Option<PathBuf>,
+    },
+    /// Apply a game-management file plan inside config-resolved managed roots.
+    ApplyFilePlan {
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        result: PathBuf,
+        #[arg(long)]
+        size_cache: Option<PathBuf>,
+        #[arg(long)]
+        progress: Option<PathBuf>,
+        #[arg(long)]
+        self_launcher: PathBuf,
+        #[arg(long)]
+        self_port: String,
+        /// Optional sudo/doas-style command used only when a validated mutation needs elevation.
+        #[arg(long)]
+        privilege_command: Option<PathBuf>,
+        /// Argument passed to the privilege command before the validated filesystem command.
+        #[arg(long = "privilege-arg", requires = "privilege_command")]
+        privilege_arguments: Vec<String>,
+        #[arg(long)]
+        launcher: PathBuf,
+        #[arg(long)]
+        app_state: PathBuf,
+        #[arg(long)]
+        trash: PathBuf,
+        #[arg(long)]
+        remote_config: Option<PathBuf>,
+        #[arg(long)]
+        target_override: Option<PathBuf>,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long = "env")]
+        environment: Vec<String>,
+    },
+    /// Rebuild the allocated-size cache for managed Port items.
+    ScanDeviceSizes {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        self_port: String,
+        #[arg(long)]
+        launcher: PathBuf,
+        #[arg(long)]
+        app_state: PathBuf,
+        #[arg(long)]
+        trash: PathBuf,
+        #[arg(long)]
+        remote_config: Option<PathBuf>,
+        #[arg(long)]
+        target_override: Option<PathBuf>,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long = "env")]
+        environment: Vec<String>,
     },
     /// Calculate the next cache generations; does not modify any file.
     CacheInvalidate {
@@ -580,6 +637,105 @@ fn run(
             })
             .map_err(|error| domain_error(name, "runtime-repair-failed", error))?;
             Ok((name, json!(outcome)))
+        }
+        Command::ApplyFilePlan {
+            plan,
+            result,
+            size_cache,
+            progress,
+            self_launcher,
+            self_port,
+            privilege_command,
+            privilege_arguments,
+            launcher,
+            app_state,
+            trash,
+            remote_config,
+            target_override,
+            root,
+            environment,
+        } => {
+            let name = "apply-file-plan";
+            if !plan_contains_only_file_actions(&plan)
+                .map_err(|error| domain_error(name, "invalid-file-plan", error))?
+            {
+                return Err(CliError {
+                    command: name,
+                    code: "mixed-operation-plan",
+                    message: "file-plan execution does not accept network operations".to_owned(),
+                });
+            }
+            let resolved = resolve_device_context(
+                name,
+                launcher,
+                app_state,
+                trash,
+                remote_config,
+                target_override,
+                root,
+                environment,
+                config_directories,
+            )?;
+            let outcome = apply_file_plan(&FileApplyRequest {
+                context: &resolved.context,
+                plan: &plan,
+                result: &result,
+                size_cache: size_cache.as_deref(),
+                self_launcher: &self_launcher,
+                self_port: &self_port,
+                privilege_command: privilege_command.as_deref(),
+                privilege_arguments: &privilege_arguments,
+                progress_file: progress.as_deref(),
+            })
+            .map_err(|error| domain_error(name, "file-operation-failed", error))?;
+            Ok((
+                name,
+                json!({
+                    "config_origin": resolved.config_origin,
+                    "platform_id": resolved.context.profile,
+                    "model_id": resolved.model_id,
+                    "operations": outcome,
+                }),
+            ))
+        }
+        Command::ScanDeviceSizes {
+            output,
+            self_port,
+            launcher,
+            app_state,
+            trash,
+            remote_config,
+            target_override,
+            root,
+            environment,
+        } => {
+            let name = "scan-device-sizes";
+            let resolved = resolve_device_context(
+                name,
+                launcher,
+                app_state,
+                trash,
+                remote_config,
+                target_override,
+                root,
+                environment,
+                config_directories,
+            )?;
+            let outcome = scan_size_cache(&SizeScanRequest {
+                context: &resolved.context,
+                output: &output,
+                self_port: &self_port,
+            })
+            .map_err(|error| domain_error(name, "size-scan-failed", error))?;
+            Ok((
+                name,
+                json!({
+                    "config_origin": resolved.config_origin,
+                    "platform_id": resolved.context.profile,
+                    "model_id": resolved.model_id,
+                    "scan": outcome,
+                }),
+            ))
         }
         Command::CacheInvalidate {
             context,
@@ -1280,6 +1436,47 @@ mod tests {
             panic!("wrong command")
         };
         assert_eq!(runtimes, ["godot_4.5", "mono_6"]);
+
+        let cli = Cli::try_parse_from([
+            "appmanager-cli",
+            "apply-file-plan",
+            "--plan",
+            "/tmp/plan.tsv",
+            "--result",
+            "/tmp/result.tsv",
+            "--self-launcher",
+            "/ports/APP Manager.sh",
+            "--self-port",
+            "jenny92-appmanager",
+            "--privilege-command",
+            "sudo",
+            "--privilege-arg=--preserve-env=DEVICE,SDL_GAMECONTROLLERCONFIG_FILE",
+            "--launcher",
+            "/ports/APP Manager.sh",
+            "--app-state",
+            "/tmp/state",
+            "--trash",
+            "/tmp/trash",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Command::ApplyFilePlan { .. }));
+
+        let cli = Cli::try_parse_from([
+            "appmanager-cli",
+            "scan-device-sizes",
+            "--output",
+            "/tmp/sizes.tsv",
+            "--self-port",
+            "jenny92-appmanager",
+            "--launcher",
+            "/ports/APP Manager.sh",
+            "--app-state",
+            "/tmp/state",
+            "--trash",
+            "/tmp/trash",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Command::ScanDeviceSizes { .. }));
 
         let cli = Cli::try_parse_from([
             "appmanager-cli",

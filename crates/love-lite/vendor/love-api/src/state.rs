@@ -1,4 +1,4 @@
-use ab_glyph::{point, Font, FontArc, PxScale, ScaleFont};
+use freetype_sys as ft;
 use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -371,7 +371,31 @@ impl GameSource {
 
 /// A loaded TTF font for text rendering
 pub struct FontData {
-    pub font: FontArc,
+    face: Mutex<FreeTypeFace>,
+}
+
+struct FreeTypeFace {
+    library: ft::FT_Library,
+    face: ft::FT_Face,
+    // FT_New_Memory_Face borrows this allocation for the lifetime of `face`.
+    _bytes: Vec<u8>,
+}
+
+// Each face is private to one FontData and every access is serialized by its
+// mutex. FreeType faces are not otherwise shared between threads.
+unsafe impl Send for FreeTypeFace {}
+
+impl Drop for FreeTypeFace {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.face.is_null() {
+                ft::FT_Done_Face(self.face);
+            }
+            if !self.library.is_null() {
+                ft::FT_Done_FreeType(self.library);
+            }
+        }
+    }
 }
 
 pub struct RasterizedGlyph {
@@ -384,27 +408,99 @@ pub struct RasterizedGlyph {
 }
 
 impl FontData {
+    pub fn new(bytes: Vec<u8>) -> Option<Self> {
+        let mut library = std::ptr::null_mut();
+        if unsafe { ft::FT_Init_FreeType(&mut library) } != 0 {
+            return None;
+        }
+        let mut face = std::ptr::null_mut();
+        let length = match ft::FT_Long::try_from(bytes.len()) {
+            Ok(length) => length,
+            Err(_) => {
+                unsafe { ft::FT_Done_FreeType(library) };
+                return None;
+            }
+        };
+        if unsafe { ft::FT_New_Memory_Face(library, bytes.as_ptr(), length, 0, &mut face) } != 0 {
+            unsafe { ft::FT_Done_FreeType(library) };
+            return None;
+        }
+        Some(Self {
+            face: Mutex::new(FreeTypeFace {
+                library,
+                face,
+                _bytes: bytes,
+            }),
+        })
+    }
+
+    fn set_pixel_size(face: ft::FT_Face, size: f32) -> bool {
+        let size = size.max(1.0).round().min(u32::MAX as f32) as u32;
+        unsafe { ft::FT_Set_Pixel_Sizes(face, 0, size) == 0 }
+    }
+
+    fn measure_flags() -> ft::FT_Int32 {
+        ft::FT_LOAD_FORCE_AUTOHINT | ft::FT_LOAD_TARGET_NORMAL
+    }
+
+    fn load_glyph(face: ft::FT_Face, ch: char, size: f32, render: bool) -> bool {
+        if unsafe { ft::FT_Load_Char(face, ch as ft::FT_ULong, Self::measure_flags()) } != 0 {
+            return false;
+        }
+        // Noto Sans SC Regular becomes too light on small 480p handheld LCDs.
+        // FreeType's synthetic weight adds roughly one physical pixel below
+        // 24px, without changing UIKit geometry or making headings oversized.
+        let slot = unsafe { (*face).glyph };
+        if size.round() < 24.0 {
+            unsafe { ft::FT_GlyphSlot_Embolden(slot) };
+        }
+        !render || unsafe { ft::FT_Render_Glyph(slot, ft::FT_RENDER_MODE_NORMAL) } == 0
+    }
+
+    fn size_metrics(face: ft::FT_Face) -> Option<ft::FT_Size_Metrics> {
+        let size = unsafe { (*face).size };
+        (!size.is_null()).then(|| unsafe { (*size).metrics })
+    }
+
     /// Measure the width of a text string at a given size in pixels
     pub fn text_width_at(&self, text: &str, size: f32) -> f32 {
-        let scaled = self.font.as_scaled(PxScale::from(size));
+        let font = self.face.lock();
+        if !Self::set_pixel_size(font.face, size) {
+            return 0.0;
+        }
         text.chars()
-            .map(|ch| scaled.h_advance(scaled.glyph_id(ch)))
+            .filter_map(|ch| {
+                Self::load_glyph(font.face, ch, size, false)
+                    .then(|| unsafe { (*(*font.face).glyph).advance.x as f32 / 64.0 })
+            })
             .sum()
     }
 
     /// Get the line height at the stored size
     pub fn line_height_at(&self, size: f32) -> f32 {
-        let scaled = self.font.as_scaled(PxScale::from(size));
-        scaled.ascent() - scaled.descent() + scaled.line_gap()
+        let font = self.face.lock();
+        if !Self::set_pixel_size(font.face, size) {
+            return 0.0;
+        }
+        Self::size_metrics(font.face).map_or(0.0, |metrics| metrics.height as f32 / 64.0)
     }
 
     pub fn height_at(&self, size: f32) -> f32 {
-        let scaled = self.font.as_scaled(PxScale::from(size));
-        scaled.ascent() - scaled.descent()
+        let font = self.face.lock();
+        if !Self::set_pixel_size(font.face, size) {
+            return 0.0;
+        }
+        Self::size_metrics(font.face).map_or(0.0, |metrics| {
+            (metrics.ascender - metrics.descender) as f32 / 64.0
+        })
     }
 
     pub fn ascent_at(&self, size: f32) -> f32 {
-        self.font.as_scaled(PxScale::from(size)).ascent()
+        let font = self.face.lock();
+        if !Self::set_pixel_size(font.face, size) {
+            return 0.0;
+        }
+        Self::size_metrics(font.face).map_or(0.0, |metrics| metrics.ascender as f32 / 64.0)
     }
 
     pub fn rasterize_glyph_at(
@@ -414,37 +510,48 @@ impl FontData {
         x: f32,
         baseline: f32,
     ) -> RasterizedGlyph {
-        let scaled = self.font.as_scaled(PxScale::from(size));
-        let glyph_id = scaled.glyph_id(ch);
-        let advance = scaled.h_advance(glyph_id);
-        let glyph = glyph_id.with_scale_and_position(PxScale::from(size), point(x, baseline));
-        let Some(outlined) = self.font.outline_glyph(glyph) else {
+        let font = self.face.lock();
+        if !Self::set_pixel_size(font.face, size) || !Self::load_glyph(font.face, ch, size, true) {
             return RasterizedGlyph {
-                x: x.floor() as i32,
-                y: baseline.floor() as i32,
+                x: x.round() as i32,
+                y: baseline.round() as i32,
                 width: 0,
                 height: 0,
                 alpha: Vec::new(),
-                advance,
+                advance: 0.0,
             };
-        };
-        let bounds = outlined.px_bounds();
-        let width = bounds.width().max(0.0).round() as u32;
-        let height = bounds.height().max(0.0).round() as u32;
+        }
+        let slot = unsafe { (*font.face).glyph };
+        let bitmap = unsafe { &(*slot).bitmap };
+        let width = bitmap.width.max(0) as u32;
+        let height = bitmap.rows.max(0) as u32;
         let mut alpha = vec![0; width as usize * height as usize];
-        outlined.draw(|px, py, coverage| {
-            if px < width && py < height {
-                alpha[py as usize * width as usize + px as usize] =
-                    (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+        if bitmap.pixel_mode as u32 == ft::FT_PIXEL_MODE_GRAY && !bitmap.buffer.is_null() {
+            let pitch = bitmap.pitch.unsigned_abs() as usize;
+            for row in 0..height as usize {
+                let source_row = if bitmap.pitch >= 0 {
+                    row
+                } else {
+                    height as usize - 1 - row
+                };
+                let source = unsafe { bitmap.buffer.add(source_row * pitch) };
+                let count = width as usize;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        source,
+                        alpha.as_mut_ptr().add(row * count),
+                        count,
+                    );
+                }
             }
-        });
+        }
         RasterizedGlyph {
-            x: bounds.min.x.round() as i32,
-            y: bounds.min.y.round() as i32,
+            x: x.round() as i32 + unsafe { (*slot).bitmap_left },
+            y: baseline.round() as i32 - unsafe { (*slot).bitmap_top },
             width,
             height,
             alpha,
-            advance,
+            advance: unsafe { (*slot).advance.x as f32 / 64.0 },
         }
     }
 

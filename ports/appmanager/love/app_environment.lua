@@ -13,7 +13,7 @@ function Environment.new(model,operations,pages_ui)
     local function can_update() return can_install() and enabled("capability_update_portmaster") end
     local function note(label,value,id)
         return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=4,
-            expanded_lines=4,label_px=16,value_px=20,surface=false})
+            expanded_lines=4,label_px=18,value_px=20,surface=false})
     end
 
     local function health_label()
@@ -280,6 +280,21 @@ function Environment.new(model,operations,pages_ui)
             footer_left=L("Installation in progress","正在安装"),footer_right=L("Please wait…","请稍候……"),
         })
         operations.task={kind="active-repair",elapsed=0,poll=0,timeout=1800}
+    end
+
+    function self.start_active_operation_wait()
+        kit.set_page(page.HOME,L("Finishing the previous operation","正在完成上一次操作"),{
+            note(L("Please wait","请稍候"),
+                L("App Manager is still updating files. Home will open automatically when it finishes.",
+                    "APP 仍在处理文件，完成后会自动进入首页。"),"operation:running"),
+        },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+        kit.set_busy(true,L("Finishing operation…","正在完成操作……"),{
+            indeterminate=true,progress=0,
+            stage=L("Updating files safely","正在安全更新文件"),
+            detail=L("Do not start another operation.","请勿重复执行操作。"),
+            footer_left=L("Operation in progress","正在处理"),footer_right=L("Please wait…","请稍候……"),
+        })
+        operations.task={kind="active-operation",elapsed=0,poll=0,timeout=1800}
     end
 
     return self

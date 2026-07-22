@@ -171,13 +171,14 @@ grep -Fq $'1\tvalid\t' "$TMP/validation-stale/state/validation-result.tsv"
 
 # A live validator owns the lock and a contender performs no mutation.
 install_case validation-locked update
-cat > "$TMP/validation-locked/state/apply-helper.sh" <<'HELPER'
+validation_helper="$TMP/validation-locked/state/apply-helper.sh"
+cat > "$validation_helper" <<'HELPER'
 #!/bin/sh
 trap 'exit 0' TERM INT
 while :; do sleep 1; done
 HELPER
-chmod +x "$TMP/validation-locked/state/apply-helper.sh"
-"$TMP/validation-locked/state/apply-helper.sh" --validate-pending &
+chmod +x "$validation_helper"
+"$validation_helper" --validate-pending &
 validation_pid=$!
 mkdir "$TMP/validation-locked/state/validation.lock"
 cat > "$TMP/validation-locked/state/validation.lock/owner.tsv" <<EOF
@@ -188,7 +189,7 @@ mode	--validate-pending
 EOF
 mkdir -p "$TMP/proc-live/$validation_pid"
 printf 'sh\0%s\0--validate-pending\0' \
-  "$TMP/validation-locked/state/apply-helper.sh" > "$TMP/proc-live/$validation_pid/cmdline"
+  "$validation_helper" > "$TMP/proc-live/$validation_pid/cmdline"
 PAM_PROC_ROOT="$TMP/proc-live" validate_case validation-locked || true
 grep -Fq $'1\tchecking\tAnother validation process is still running' \
   "$TMP/validation-locked/state/validation-result.tsv"

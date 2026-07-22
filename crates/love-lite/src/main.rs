@@ -191,21 +191,13 @@ fn native_render_dimensions(
     native: Option<(u32, u32)>,
     enabled: bool,
 ) -> (u32, u32) {
-    let Some((mut width, mut height)) = native.filter(|_| enabled) else {
+    let Some((width, height)) = native.filter(|_| enabled) else {
         return (requested_width, requested_height);
     };
-    let requested_landscape = requested_width >= requested_height;
-    if (width >= height) != requested_landscape {
-        std::mem::swap(&mut width, &mut height);
-    }
-    let requested_aspect = requested_width as f64 / requested_height as f64;
-    let native_aspect = width as f64 / height as f64;
-    let aspect_error = ((native_aspect / requested_aspect) - 1.0).abs();
-    if aspect_error <= 0.03 {
-        (width, height)
-    } else {
-        (requested_width, requested_height)
-    }
+    // The configured size describes a platform fallback, not a device model.
+    // SDL is the authority once the active display is available: one OS can
+    // run on 4:3, square, portrait and widescreen handhelds.
+    (width, height)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -338,26 +330,23 @@ mod tests {
     use super::native_render_dimensions;
 
     #[test]
-    fn native_resolution_follows_requested_orientation() {
+    fn native_resolution_wins_over_platform_fallback() {
         assert_eq!(
             native_render_dimensions(960, 720, Some((720, 960)), true),
-            (960, 720)
+            (720, 960)
         );
         assert_eq!(
-            native_render_dimensions(1280, 720, Some((1920, 1080)), true),
-            (1920, 1080)
+            native_render_dimensions(1280, 720, Some((640, 480)), true),
+            (640, 480)
         );
     }
 
     #[test]
-    fn incompatible_native_aspect_keeps_configured_fallback() {
-        assert_eq!(
-            native_render_dimensions(960, 720, Some((1920, 1080)), true),
-            (960, 720)
-        );
+    fn configured_resolution_is_only_a_fallback() {
         assert_eq!(
             native_render_dimensions(960, 720, Some((720, 960)), false),
             (960, 720)
         );
+        assert_eq!(native_render_dimensions(960, 720, None, true), (960, 720));
     }
 }

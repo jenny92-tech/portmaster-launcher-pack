@@ -15,7 +15,7 @@ function Pages.new(model,operations)
     local function button(label,action,opts) return kit.button(label,action,opts) end
     local function note(label,value,id)
         return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=3,
-            expanded_lines=3,label_px=16,value_px=19,surface=false})
+            expanded_lines=3,label_px=18,value_px=20,surface=false})
     end
     local function empty(values) return function() return model.selected_count(values)==0 end end
     local function enabled(name) return env[name]~=false end
@@ -285,7 +285,7 @@ function Pages.new(model,operations)
             "Ordinary orphan SH files and data folders are selected by default. When several SH launchers reference the same folder, they are grouped below as duplicate references and left unselected. Choose the launchers yourself; cleanup moves only the selected items to Trash.",
             "普通的孤儿 SH 与孤儿数据目录会默认勾选。多个 SH 指向同一目录时，会在下方按目录聚合为“重复引用”，并默认不勾选。请自行选择要处理的启动器；清理只会把选中项移入回收站。"),{
             id="leftovers:rules",focusable=false,expandable=false,max_lines=5,expanded_lines=5,
-            label_px=16,value_px=18,surface=false})
+            label_px=18,value_px=20,surface=false})
         local function add(label,detail,path,default_selected)
             item_count=item_count+1
             if selected_junk[path]==nil then selected_junk[path]=default_selected==true end
@@ -324,7 +324,7 @@ function Pages.new(model,operations)
                     string.format("%d SH launchers reference this same folder. This may be intentional or duplicated; review carefully and select the launcher files you want to remove.",#shared[name]),
                     string.format("有 %d 个 SH 启动器引用同一个目录，可能是有意共用，也可能是重复启动项。请谨慎核对，并自行选择要清理的 SH。",#shared[name])),{
                     id="leftovers:shared:"..name,focusable=false,expandable=false,max_lines=4,expanded_lines=4,
-                    label_px=16,value_px=18,surface=false})
+                    label_px=18,value_px=20,surface=false})
                 for _,script in ipairs(shared[name]) do
                     local path=env.scripts_dir.."/"..script
                     add(model.display_name(script),L(
@@ -406,7 +406,7 @@ function Pages.new(model,operations)
         local rows,details={},{}
         local function section(label) rows[#rows+1]=kit.section(label,{font_px=22}) end
         local function info(key,label,value,title,body)
-            rows[#rows+1]=kit.textview(label,model.provided(value),{id=key,label_px=16,value_px=18})
+            rows[#rows+1]=kit.textview(label,model.provided(value),{id=key,label_px=18,value_px=20})
             details[key]={title=title or label,body=body}
         end
         section(L("Key paths","关键路径"))

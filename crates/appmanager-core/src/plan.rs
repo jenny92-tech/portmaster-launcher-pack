@@ -488,6 +488,7 @@ mod tests {
                     inventory: CapabilityState::Current,
                     install_plan: CapabilityState::Current,
                     cache_invalidation: CapabilityState::Current,
+                    ..ContextCapabilities::default()
                 },
                 roots: ManagedRoots {
                     portmaster: Some(temp.path().join("core")),

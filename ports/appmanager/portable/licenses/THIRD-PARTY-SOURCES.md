@@ -11,8 +11,9 @@ assets. Corresponding license notices are stored in this directory.
   `be8930d3c9fd70ab210918218f7cbffd2df1a30a`, with the API surface reduced to
   the calls exercised by APP Manager:
   <https://github.com/4RH1T3CT0R7/balatro-port-tui/tree/be8930d3c9fd70ab210918218f7cbffd2df1a30a>.
-- The UI runtime uses `ab_glyph` for lazy font parsing and glyph rasterization
-  under its Apache-2.0/MIT dual license.
+- The UI runtime statically links FreeType through `freetype-sys` for lazy,
+  auto-hinted glyph rasterization. FreeType is distributed under the FreeType
+  Project License; the Rust binding is MIT licensed.
 - classic gptokeyb and SDL controller database: PortMaster-GUI's aarch64
   distribution.
 - Noto Sans SC Regular: the Noto CJK archive distributed by PortMaster-GUI.

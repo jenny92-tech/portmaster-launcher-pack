@@ -25,14 +25,16 @@ are excluded.
 - Selects the GPU renderer automatically. If accelerated SDL2 is unavailable,
   or an individual frame uses an unsupported operation such as the first-run
   guide's stencil, that work falls back to the CPU renderer.
-- Chooses a native display mode with the configured orientation when its
-  aspect ratio matches, then renders UIKit at SDL2's physical output size.
+- Uses SDL's active display dimensions when available. Platform dimensions are
+  only a startup fallback because one OS can run on different screen ratios.
+  UIKit then renders at SDL2's physical output size.
   Text baselines and textures stay on the physical pixel grid instead of
   relying on compositor enlargement.
 - Runs the real shared launcher UIKit in an automated contract test.
 - Loads and draws the real modular App Manager Lua frontend in a contract test.
-- Parses the bundled CJK font lazily with `ab_glyph`; loading the font no
-  longer expands every glyph outline into memory at startup.
+- Parses the bundled CJK font lazily with statically linked FreeType and uses
+  its auto-hinter at integer physical-pixel sizes. Loading the font does not
+  expand every glyph outline into memory at startup.
 - Produces an approximately 2 MB aarch64 Linux release binary against Debian
   11's glibc and
   the target device's SDL2 shared library.

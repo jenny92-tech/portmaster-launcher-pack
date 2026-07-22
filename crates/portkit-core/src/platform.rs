@@ -427,6 +427,89 @@ impl DetectionContext {
             (None, _) => Ok(path.to_path_buf()),
         }
     }
+
+    fn display_dimensions(&self) -> Option<(u64, u64)> {
+        // fb*/modes describes the active scanout and, unlike virtual_size,
+        // cannot accidentally report a double-buffered height (640x960 for a
+        // 640x480 panel). Prefer it before the DRM connector mode list.
+        let graphics = self.rooted_path("/sys/class/graphics").ok()?;
+        if let Some(dimensions) = display_dimensions_in(&graphics, "fb", |entry| {
+            std::fs::read_to_string(entry.join("modes")).ok()
+        }) {
+            return Some(dimensions);
+        }
+
+        let drm = self.rooted_path("/sys/class/drm").ok()?;
+        display_dimensions_in(&drm, "card", |entry| {
+            let name = entry.file_name()?.to_str()?;
+            if !name.contains('-') {
+                return None;
+            }
+            let status = std::fs::read_to_string(entry.join("status")).ok()?;
+            if status.trim() != "connected" {
+                return None;
+            }
+            if let Ok(enabled) = std::fs::read_to_string(entry.join("enabled"))
+                && enabled.trim() == "disabled"
+            {
+                return None;
+            }
+            std::fs::read_to_string(entry.join("modes")).ok()
+        })
+    }
+}
+
+fn display_dimensions_in(
+    directory: &Path,
+    prefix: &str,
+    read_modes: impl Fn(&Path) -> Option<String>,
+) -> Option<(u64, u64)> {
+    let mut entries = std::fs::read_dir(directory)
+        .ok()?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(prefix))
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    for entry in entries {
+        if let Some(dimensions) = read_modes(&entry)
+            .as_deref()
+            .and_then(|modes| modes.lines().find_map(parse_display_mode))
+        {
+            return Some(dimensions);
+        }
+    }
+    None
+}
+
+fn parse_display_mode(value: &str) -> Option<(u64, u64)> {
+    let bytes = value.as_bytes();
+    for (separator, byte) in bytes.iter().enumerate() {
+        if *byte != b'x' {
+            continue;
+        }
+        let width_start = bytes[..separator]
+            .iter()
+            .rposition(|byte| !byte.is_ascii_digit())
+            .map_or(0, |index| index + 1);
+        let height_end = bytes[separator + 1..]
+            .iter()
+            .position(|byte| !byte.is_ascii_digit())
+            .map_or(bytes.len(), |index| separator + 1 + index);
+        if width_start == separator || height_end == separator + 1 {
+            continue;
+        }
+        let width = value[width_start..separator].parse::<u64>().ok()?;
+        let height = value[separator + 1..height_end].parse::<u64>().ok()?;
+        if width > 0 && height > 0 {
+            return Some((width, height));
+        }
+    }
+    None
 }
 
 fn read_os_release(path: &Path) -> BTreeMap<String, String> {
@@ -516,6 +599,17 @@ impl Config {
             }
             _ => false,
         };
+        let mut display = merged_model_value(
+            &platform.display,
+            model.map(|(_, model)| &model.display),
+            model.and_then(|(_, model)| model.overrides.display.as_ref()),
+        );
+        if let (Some((width, height)), Some(display)) =
+            (context.display_dimensions(), display.as_object_mut())
+        {
+            display.insert("default_width".into(), width.into());
+            display.insert("default_height".into(), height.into());
+        }
         Ok(Resolution {
             platform_id: platform_id.clone(),
             platform_display_name: platform.display_name.clone(),
@@ -539,11 +633,7 @@ impl Config {
             managed_roots: platform.managed_roots.clone(),
             lifecycle: platform.lifecycle.clone(),
             environment_scopes: platform.environment_scopes.clone(),
-            display: merged_model_value(
-                &platform.display,
-                model.map(|(_, model)| &model.display),
-                model.and_then(|(_, model)| model.overrides.display.as_ref()),
-            ),
+            display,
             input: model
                 .and_then(|(_, model)| model.overrides.input.clone())
                 .unwrap_or_else(|| platform.input.clone()),
@@ -651,5 +741,47 @@ mod tests {
             PathBuf::from("/fixture/opt/system")
         );
         assert!(context.rooted_path("/tmp/../etc").is_err());
+    }
+
+    #[test]
+    fn detects_active_framebuffer_mode_without_using_virtual_buffer_size() {
+        let fixture = tempfile::tempdir().unwrap();
+        let fb = fixture.path().join("sys/class/graphics/fb0");
+        std::fs::create_dir_all(&fb).unwrap();
+        std::fs::write(fb.join("modes"), "U:640x480p-0\n").unwrap();
+        std::fs::write(fb.join("virtual_size"), "640,960\n").unwrap();
+        let context = DetectionContext {
+            root: Some(fixture.path().to_path_buf()),
+            launcher_path: "/storage/roms/ports/App.sh".into(),
+            environment: BTreeMap::new(),
+            os_release: BTreeMap::new(),
+            target_override: None,
+        };
+        assert_eq!(context.display_dimensions(), Some((640, 480)));
+    }
+
+    #[test]
+    fn detects_enabled_connected_drm_mode_as_secondary_source() {
+        let fixture = tempfile::tempdir().unwrap();
+        let connector = fixture.path().join("sys/class/drm/card0-DSI-1");
+        std::fs::create_dir_all(&connector).unwrap();
+        std::fs::write(connector.join("status"), "connected\n").unwrap();
+        std::fs::write(connector.join("enabled"), "enabled\n").unwrap();
+        std::fs::write(connector.join("modes"), "720x720\n640x480\n").unwrap();
+        let context = DetectionContext {
+            root: Some(fixture.path().to_path_buf()),
+            launcher_path: "/storage/roms/ports/App.sh".into(),
+            environment: BTreeMap::new(),
+            os_release: BTreeMap::new(),
+            target_override: None,
+        };
+        assert_eq!(context.display_dimensions(), Some((720, 720)));
+    }
+
+    #[test]
+    fn display_mode_parser_accepts_kernel_and_drm_formats() {
+        assert_eq!(parse_display_mode("U:640x480p-0"), Some((640, 480)));
+        assert_eq!(parse_display_mode("1920x1080"), Some((1920, 1080)));
+        assert_eq!(parse_display_mode("640,960"), None);
     }
 }

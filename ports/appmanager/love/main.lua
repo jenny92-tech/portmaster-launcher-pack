@@ -14,7 +14,7 @@ local function blocking_notice(title,message,id,on_wait)
     kit.set_busy(false)
     local rows={
         kit.textview(L("What to do","请执行"),message,{id=id..":note",focusable=false,
-            expandable=false,max_lines=4,expanded_lines=4,label_px=16,value_px=20,surface=false}),
+            expandable=false,max_lines=4,expanded_lines=4,label_px=18,value_px=20,surface=false}),
     }
     if on_wait then rows[#rows+1]=kit.button(L("Keep waiting","继续等待"),on_wait,{id=id..":wait"}) end
     rows[#rows+1]=kit.button(L("Exit","退出"),operations.show_exit_dialog,{id=id..":exit"})
@@ -86,7 +86,22 @@ local function poll_task(dt)
         end
         return
     end
-
+    if task.kind=="active-operation" then
+        if not model.file_exists(env.operation_active) then
+            kit.set_busy(false); operations.task=nil; model.load_env(); model.invalidate_all()
+            pages.reset_selection()
+            if env.portmaster_health=="healthy" or env.portmaster_management=="system" then
+                pages.build_home(); kit.goto_page(page.HOME); kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
+            else environment.build_repair_gate(); kit.goto_page(page.HOME) end
+        elseif task.elapsed>(task.timeout or 1800) then
+            operations.task=nil
+            blocking_notice(L("The operation is still running","操作仍在进行"),
+                L("Keep waiting, or exit and reopen App Manager later. Do not start another operation.",
+                    "请继续等待，或稍后退出并重新打开 APP。不要重复执行操作。"),"operation-timeout",
+                environment.start_active_operation_wait)
+        end
+        return
+    end
     if task.kind=="validation" then
         local status,detail=environment.validation_result()
         if status=="valid" or status=="restored" or status=="no-usable" or status=="interrupted" then
@@ -144,6 +159,10 @@ finish_initial_load=function(skip_config_refresh)
     end
     if env.portmaster_management~="system" and model.file_exists(env.portmaster_active) then
         environment.start_active_repair_wait()
+        return
+    end
+    if model.file_exists(env.operation_active) then
+        environment.start_active_operation_wait()
         return
     end
     if not skip_config_refresh and env.apply_script and env.apply_script~="" and

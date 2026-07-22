@@ -25,7 +25,8 @@ docker run --rm --platform linux/arm64 \
     set -euo pipefail
     apt-get update >/dev/null
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libsdl2-dev >/dev/null
-    CARGO_TARGET_DIR=/tmp/love-lite-target cargo build --locked --release -p love-lite --features sdl-backend
+    FREETYPE2_NO_PKG_CONFIG=1 CARGO_TARGET_DIR=/tmp/love-lite-target \
+      cargo build --locked --release -p love-lite --features sdl-backend
     install -m 0755 /tmp/love-lite-target/release/love-lite /work/.tmp/love-lite-build/love.aarch64
   '
 
@@ -39,6 +40,10 @@ case "$description" in
 esac
 grep -aFq 'liblove-11.5.so' "$OUT" && {
   echo "LOVE-lite unexpectedly references PortMaster's LÖVE runtime" >&2
+  exit 65
+}
+grep -aFq 'libfreetype.so' "$OUT" && {
+  echo "LOVE-lite unexpectedly references the device FreeType runtime" >&2
   exit 65
 }
 grep -aFq "$REVISION" "$OUT" || {

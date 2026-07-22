@@ -14,7 +14,7 @@ replace Crossterm event collection with an external-backend seam, add the
 filesystem calls required by the launcher UIKit, and provide an SDL2 runner
 with an APP-specific GPU command renderer and software fallback.
 
-Font parsing and on-demand glyph rasterization use `ab_glyph` under its
-Apache-2.0/MIT dual license instead of the upstream eager `fontdue` parser.
+Font parsing and on-demand glyph rasterization use statically linked FreeType
+with auto-hinting instead of the upstream eager `fontdue` parser.
 
 See `LICENSE-UPSTREAM-APACHE-2.0.txt` for the upstream license text.

@@ -8,6 +8,7 @@ pub mod cache;
 pub mod context;
 pub mod installer;
 pub mod inventory;
+pub mod operations;
 pub mod path;
 pub mod plan;
 pub mod resolution;
@@ -24,6 +25,11 @@ pub use installer::{
 pub use inventory::{
     DeadScriptFact, ImageFact, Inventory, InventoryEntry, InventoryKind, InventoryOptions,
     PortFact, RuntimeFact, RuntimeHealth, RuntimeInventory, TrashFact,
+};
+pub use operations::{
+    FileAction, FileActionKind, FileApplyOutcome, FileApplyRequest, FileOperationError,
+    SizeScanOutcome, SizeScanRequest, apply_file_plan, plan_contains_only_file_actions,
+    scan_size_cache,
 };
 pub use path::{ManagedRoot, PathSafetyError};
 pub use plan::{InstallPlan, PlanError, REQUIRED_PRESERVED_CORE_DIRS, ValidatedInstallPlan};

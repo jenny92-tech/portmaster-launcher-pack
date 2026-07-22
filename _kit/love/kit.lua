@@ -39,7 +39,11 @@ kit.BASE_STRINGS = {
 local BAR_H, SUB_PX          = 58, 18
 local ROW_MAX, ROW_MIN, GAP  = 58, 48, 9
 local TITLE_PX, ROW_PX, CRED_PX, BTN_PX = 28, 24, 18, 23
+local SIDEBAR_FOOTER_PRIMARY_PX, SIDEBAR_FOOTER_SECONDARY_PX = 19, 18
+local SIDEBAR_FOOTER_LINE_H, SIDEBAR_FOOTER_PAD = 25, 12
+local DIALOG_BODY_PX, DIALOG_ITEM_PX, DIALOG_AUX_PX, TOAST_PX = 20, 20, 19, 21
 local BODY_TEXT_SCALE = 1.08       -- small handheld readability boost; titles keep their designed size
+local APP_MINCS = 0.80             -- 480p APP geometry and typography scale together
 local MINCS, MAXCS = 0.72, 1.15   -- content scale bounds (readability floor / cap on big screens)
 local ROW_MAX_W = 540             -- hard row-width cap (px, does not grow with cs): keeps wide screens narrow
 
@@ -1028,7 +1032,7 @@ end
 layout=function()
     local rows = cur(); local n = #rows; local count=math.max(1,n)
     if is_app() then
-        local cs=math.max(0.72,math.min(1,H/720))
+        local cs=math.max(APP_MINCS,math.min(1,H/720))
         local margin=18*cs
         local has_sidebar=#sidebar()>0
         local side_w=has_sidebar and math.min(280*cs,W*0.27) or 0
@@ -1072,15 +1076,15 @@ layout=function()
                         local min_h=(row.height or 74)*cs
                         local tx=70*cs; local inner_w=math.max(1,width-tx-18*cs)
                         local label_font=body_fnt((row.label_px or 22)*cs)
-                        local detail_font=body_fnt((row.detail_px or 18)*cs)
+                        local detail_font=body_fnt((row.detail_px or 19)*cs)
                         local _,detail_lines=wrapped_text(row.detail,detail_font,inner_w,row.detail_max_lines or 1)
                         return math.max(min_h,10*cs+label_font:getHeight()+6*cs+
                             detail_lines*detail_font:getHeight()+10*cs)
                     end
                     if row.kind~="textview" then return rh end
                     local pad=12*cs
-                    local label_px=(row.label_px or 15)*cs
-                    local value_px=(row.value_px or 17)*cs
+                    local label_px=(row.label_px or 17)*cs
+                    local value_px=(row.value_px or 19)*cs
                     local label_font,value_font=body_fnt(label_px),body_fnt(value_px); local inner_w=width-pad*2
                     local _,label_lines=wrapped_text(row.label,label_font,inner_w,2)
                     local label_h=label_lines*label_font:getHeight()
@@ -1296,17 +1300,22 @@ end
 local function draw_dialog(L)
     local d=dialog_state
     if not d then return end
-    local cs=math.max(0.72,math.min(1,H/720))
+    local cs=math.max(APP_MINCS,math.min(1,H/720))
     local checked=d._checkbox_checked==true
     local effective_danger=d.danger==true or (d.checkbox and d.checkbox.danger==true and checked)
     local title=checked and d.title_checked or d.title
     local message=checked and d.message_checked or d.message
     local items=d.items or {}; local shown=math.min(4,#items)
-    local message_h=message and 48*cs or 0
-    local more_h=#items>shown and 24*cs or 0
-    local checkbox_h=d.checkbox and 58*cs or 0
     local dw=math.min(W-36*cs,640*cs)
-    local dh=math.max(230*cs,112*cs+message_h+shown*32*cs+more_h+checkbox_h+70*cs)
+    local pad=26*cs
+    local message_text,message_lines="",0
+    local message_font=body_fnt(DIALOG_BODY_PX*cs)
+    if message then message_text,message_lines=wrapped_text(message,message_font,dw-pad*2,3) end
+    local message_h=message and (message_lines*message_font:getHeight()+10*cs) or 0
+    local item_line_h=math.max(33*cs,body_fnt(DIALOG_ITEM_PX*cs):getHeight()+4*cs)
+    local more_h=#items>shown and 27*cs or 0
+    local checkbox_h=d.checkbox and 62*cs or 0
+    local dh=math.max(240*cs,118*cs+message_h+shown*item_line_h+more_h+checkbox_h+72*cs)
     dh=math.min(dh,H-44*cs)
     local dx,dy=(W-dw)/2,(H-dh)/2
 
@@ -1318,12 +1327,12 @@ local function draw_dialog(L)
         love.graphics.setColor(0.72,0.18,0.22,1); love.graphics.rectangle("fill",dx,dy,dw,5*cs,10,10)
     end
 
-    local pad=26*cs; local content_y=dy+24*cs
+    local content_y=dy+24*cs
     outlined(t(title or {en="Confirm action",zh="确认操作"}),dx+pad,content_y,28*cs,
         effective_danger and {1,0.72,0.72} or {1,1,1},"left",dw-pad*2)
     content_y=content_y+43*cs
     if message then
-        plain(t(message),dx+pad,content_y,18*cs,{0.82,0.82,0.88},"left",dw-pad*2)
+        plain(message_text,dx+pad,content_y,DIALOG_BODY_PX*cs,{0.86,0.86,0.92},"left",dw-pad*2)
         content_y=content_y+message_h
     end
     local function clip_line(value,px,max_w)
@@ -1337,24 +1346,24 @@ local function draw_dialog(L)
         return out.."…"
     end
     for i=1,shown do
-        local label=clip_line("• "..t(items[i]),19*cs,dw-pad*2)
-        plain(label,dx+pad,content_y+(i-1)*32*cs,19*cs,{0.94,0.94,0.97},"left",dw-pad*2)
+        local label=clip_line("• "..t(items[i]),DIALOG_ITEM_PX*cs,dw-pad*2)
+        plain(label,dx+pad,content_y+(i-1)*item_line_h,DIALOG_ITEM_PX*cs,{0.94,0.94,0.97},"left",dw-pad*2)
     end
-    content_y=content_y+shown*32*cs
+    content_y=content_y+shown*item_line_h
     if #items>shown then
         local more=#items-shown
         local label=state.ui_lang=="zh" and string.format("另有 %d 项",more) or string.format("%d more items",more)
-        plain(label,dx+pad,content_y,17*cs,{0.68,0.68,0.76},"left",dw-pad*2)
+        plain(label,dx+pad,content_y,DIALOG_AUX_PX*cs,{0.72,0.72,0.80},"left",dw-pad*2)
     end
 
     local gap=12*cs; local bw=(dw-pad*2-gap)/2; local bh=50*cs; local by=dy+dh-pad-bh
     if d.checkbox then
-        local option_h=46*cs; local option_y=by-gap-option_h
+        local option_h=50*cs; local option_y=by-gap-option_h
         panel(dx+pad,option_y,dw-pad*2,option_h,dialog_focus==3,false,L.app)
         local check_size=26*cs; local check_x=dx+pad+14*cs
         draw_checkbox(check_x,option_y+(option_h-check_size)/2,check_size,checked,dialog_focus==3,false)
         local color=d.checkbox.danger and checked and {1,0.62,0.62} or {0.96,0.94,1}
-        plain(t(d.checkbox.label or ""),check_x+40*cs,option_y+vcen(19*cs,option_h),19*cs,
+        plain(t(d.checkbox.label or ""),check_x+40*cs,option_y+vcen(DIALOG_BODY_PX*cs,option_h),DIALOG_BODY_PX*cs,
             color,"left",dw-pad*2-68*cs)
     end
     local function draw_button(index,x,label,danger)
@@ -1384,7 +1393,7 @@ local function guide_target_rect(L,target)
         for index,g in pairs(geometry) do
             if side[index].group=="bottom" then bottom=math.min(bottom,g.y-L.gap) end
         end
-        local h=(#lines*22+12)*L.cs
+        local h=(#lines*SIDEBAR_FOOTER_LINE_H+SIDEBAR_FOOTER_PAD)*L.cs
         return {x=L.side_x,y=bottom-h,w=L.side_w,h=h}
     end
     local side=sidebar(); local geometry=sidebar_geometry(L)
@@ -1601,7 +1610,7 @@ function kit.draw()
             local tx=x+(L.app and 70 or 56)*L.cs
             if r.detail then
                 local label_px=(r.label_px or (L.app and 22 or 20))*L.cs
-                local detail_px=(r.detail_px or (L.app and 18 or 14))*L.cs
+                local detail_px=(r.detail_px or (L.app and 19 or 16))*L.cs
                 local inner_w=math.max(1,rw-(tx-x)-(L.app and 18 or 12)*L.cs)
                 local badge=meta_badge(r); local label_w=inner_w-(badge and 76*L.cs or 0)
                 local label=clip_ellipsis(tostring(t(r.label) or ""),body_fnt(label_px),math.max(1,label_w))
@@ -1628,17 +1637,17 @@ function kit.draw()
             love.graphics.setColor(0.98,0.98,1,1)
             love.graphics.rectangle("fill",knob_x,track_y+3*L.cs,knob,knob,knob/2,knob/2)
         elseif r.kind=="info" then
-            plain(t(r.label),x+16*L.cs,y+6*L.cs,16*L.cs,{0.72,0.72,0.82})
-            plain(t(r.value),x+16*L.cs,y+27*L.cs,18*L.cs,{1,1,1},"left",rw-32*L.cs)
+            plain(t(r.label),x+16*L.cs,y+6*L.cs,18*L.cs,{0.72,0.72,0.82})
+            plain(t(r.value),x+16*L.cs,y+29*L.cs,20*L.cs,{1,1,1},"left",rw-32*L.cs)
         elseif r.kind=="list_item" then
-            local px=(r.font_px or 18)*L.cs; local inner_w=math.max(1,rw-32*L.cs); local font=body_fnt(px)
+            local px=(r.font_px or 19)*L.cs; local inner_w=math.max(1,rw-32*L.cs); local font=body_fnt(px)
             local value=clip_ellipsis(tostring(t(r.value) or ""),font,inner_w)
             plain(value,x+16*L.cs,centred_text_y(px,y,row_h,0.5*L.cs),px,
                 disabled(r) and {0.55,0.55,0.57} or {0.96,0.94,1},"left",inner_w)
         elseif r.kind=="textview" then
             local pad=12*L.cs
-            local label_px=(r.label_px or 15)*L.cs
-            local value_px=(r.value_px or 17)*L.cs
+            local label_px=(r.label_px or 17)*L.cs
+            local value_px=(r.value_px or 19)*L.cs
             local label_font,value_font=body_fnt(label_px),body_fnt(value_px); local inner_w=rw-pad*2
             local label,label_lines=wrapped_text(r.label,label_font,inner_w,2)
             local label_h=label_lines*label_font:getHeight()
@@ -1653,7 +1662,7 @@ function kit.draw()
         local badge=meta_badge(r)
         if badge then
             local color=badge.color or {1,0.78,0.35}
-            plain(t(badge.text),x,y+7*L.cs,14*L.cs,color,"right",rw-14*L.cs)
+            plain(t(badge.text),x,y+7*L.cs,16*L.cs,color,"right",rw-14*L.cs)
         end
         end
     end
@@ -1699,13 +1708,13 @@ function kit.draw()
                 for index,g in pairs(geometry) do
                     if side[index].group=="bottom" then footer_bottom=math.min(footer_bottom,g.y-L.gap) end
                 end
-                local line_h=22*L.cs
-                local footer_h=(#footer_lines*22+12)*L.cs
+                local line_h=SIDEBAR_FOOTER_LINE_H*L.cs
+                local footer_h=(#footer_lines*SIDEBAR_FOOTER_LINE_H+SIDEBAR_FOOTER_PAD)*L.cs
                 footer_top=footer_bottom-footer_h
                 love.graphics.setColor(1,1,1,0.20); love.graphics.setLineWidth(1)
                 love.graphics.line(L.side_x,footer_top,L.side_x+L.side_w,footer_top)
                 for index,line in ipairs(footer_lines) do
-                    local px=(index==1 and 17 or 16)*L.cs
+                    local px=(index==1 and SIDEBAR_FOOTER_PRIMARY_PX or SIDEBAR_FOOTER_SECONDARY_PX)*L.cs
                     local color=index==1 and {0.86,0.82,0.91} or {1.0,0.78,0.36}
                     plain(t(line),L.side_x,footer_top+7*L.cs+(index-1)*line_h,px,color,"center",L.side_w)
                 end
@@ -1734,7 +1743,7 @@ function kit.draw()
                     plain(title,L.side_x+pad,detail_top+pad,title_px,{1.0,0.78,0.36},"left",inner_w)
 
                     local body_y=detail_top+pad+title_h+12*L.cs
-                    local body_px=18*L.cs; local body_font=body_fnt(body_px)
+                    local body_px=20*L.cs; local body_font=body_fnt(body_px)
                     local max_lines=math.max(1,math.floor((detail_top+detail_h-pad-body_y)/body_font:getHeight()))
                     local body=wrapped_text(detail.body or "",body_font,inner_w,max_lines)
                     plain(body,L.side_x+pad,body_y,body_px,{0.92,0.90,0.96},"left",inner_w)
@@ -1784,7 +1793,7 @@ function kit.draw()
             local pad=24*L.cs
             plain(t(busy_message or "working"),bx+pad,by+20*L.cs,23*L.cs,{1,1,1},"left",bw-pad*2)
             plain(t(busy_info.stage or ""),bx+pad,by+55*L.cs,19*L.cs,{0.88,0.82,1},"left",bw-pad*2)
-            plain(t(busy_info.detail or ""),bx+pad,by+83*L.cs,16*L.cs,{0.72,0.72,0.80},"left",bw-pad*2)
+            plain(t(busy_info.detail or ""),bx+pad,by+83*L.cs,18*L.cs,{0.76,0.76,0.84},"left",bw-pad*2)
             local indeterminate=busy_info.indeterminate==true
             local progress=math.max(0,math.min(1,tonumber(busy_info.progress) or 0))
             local track_x,track_y,track_w,track_h=bx+pad,by+116*L.cs,bw-pad*2,20*L.cs
@@ -1804,9 +1813,9 @@ function kit.draw()
             end
             love.graphics.setColor(1,1,1,0.5); love.graphics.rectangle("line",track_x,track_y,track_w,track_h,6,6)
             plain(indeterminate and "…" or string.format("%d%%",math.floor(progress*100+0.5)),
-                track_x,track_y+vcen(14*L.cs,track_h),14*L.cs,{1,1,1},"center",track_w)
-            plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"left",track_w)
-            plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,16*L.cs,{0.82,0.82,0.88},"right",track_w)
+                track_x,track_y+vcen(16*L.cs,track_h),16*L.cs,{1,1,1},"center",track_w)
+            plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,18*L.cs,{0.84,0.84,0.90},"left",track_w)
+            plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,18*L.cs,{0.84,0.84,0.90},"right",track_w)
             if cancellable then
                 local cy=by+190*L.cs; local ch=48*L.cs
                 panel(track_x,cy,track_w,ch,true,busy_info.cancel_disabled==true,L.app)
@@ -1834,7 +1843,7 @@ function kit.draw()
         local cs=L.cs
         local tw=math.min(W-36*cs,620*cs)
         local pad_x,pad_y=22*cs,15*cs
-        local font=body_fnt(19*cs)
+        local font=body_fnt(TOAST_PX*cs)
         local text,lines=wrapped_text(toast_state.message,font,tw-pad_x*2,2)
         local th=math.max(58*cs,lines*font:getHeight()+pad_y*2)
         local tx=(W-tw)/2
@@ -1852,7 +1861,7 @@ function kit.draw()
         love.graphics.setColor(accent[1],accent[2],accent[3],0.55*visibility)
         love.graphics.setLineWidth(1)
         love.graphics.rectangle("line",tx,ty,tw,th,10,10)
-        plain(text,tx+pad_x,ty+(th-lines*font:getHeight())/2,19*cs,{1,1,1,visibility},"left",tw-pad_x*2)
+        plain(text,tx+pad_x,ty+(th-lines*font:getHeight())/2,TOAST_PX*cs,{1,1,1,visibility},"left",tw-pad_x*2)
     end
 
     if letterbox then

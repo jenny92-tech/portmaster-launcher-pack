@@ -3104,7 +3104,7 @@ fn load_font(state: &SharedState, source: Option<FontSource>) -> u64 {
     let Some(ttf_data) = data else {
         return 0;
     };
-    let Ok(font) = ab_glyph::FontArc::try_from_vec(ttf_data) else {
+    let Some(font) = FontData::new(ttf_data) else {
         return 0;
     };
     let font_id = {
@@ -3116,7 +3116,7 @@ fn load_font(state: &SharedState, source: Option<FontSource>) -> u64 {
     state
         .fonts
         .lock()
-        .insert(font_id, std::sync::Arc::new(FontData { font }));
+        .insert(font_id, std::sync::Arc::new(font));
     state.font_source_cache.lock().insert(cache_key, font_id);
     font_id
 }
@@ -3192,25 +3192,56 @@ fn new_font_table(lua: &Lua, state: &SharedState, font_id: u64, size: f32) -> Lu
                 };
 
                 let mut lines_vec: Vec<String> = Vec::new();
-                let mut current_line = String::new();
-                let mut current_width: f32 = 0.0;
+                let space_width = char_w_fn(" ");
 
-                for word in text.split_whitespace() {
-                    let word_width = char_w_fn(word);
-                    if current_width + word_width > limit && !current_line.is_empty() {
-                        lines_vec.push(current_line.clone());
-                        current_line.clear();
-                        current_width = 0.0;
+                for paragraph in text.split('\n') {
+                    let mut current_line = String::new();
+                    let mut current_width = 0.0f32;
+
+                    for word in paragraph.split_whitespace() {
+                        let word_width = char_w_fn(word);
+                        let separator_width = if current_line.is_empty() {
+                            0.0
+                        } else {
+                            space_width
+                        };
+                        if !current_line.is_empty()
+                            && current_width + separator_width + word_width <= limit
+                        {
+                            current_line.push(' ');
+                            current_line.push_str(word);
+                            current_width += separator_width + word_width;
+                            continue;
+                        }
+                        if !current_line.is_empty() {
+                            lines_vec.push(std::mem::take(&mut current_line));
+                            current_width = 0.0;
+                        }
+
+                        if word_width <= limit {
+                            current_line.push_str(word);
+                            current_width = word_width;
+                            continue;
+                        }
+
+                        // Paths, hashes and filenames often contain no spaces.
+                        // Break an overlong token at Unicode scalar boundaries so
+                        // LÖVE text views can still wrap it instead of clipping it.
+                        for ch in word.chars() {
+                            let ch_width = char_w_fn(ch.encode_utf8(&mut [0; 4]));
+                            if !current_line.is_empty() && current_width + ch_width > limit {
+                                lines_vec.push(std::mem::take(&mut current_line));
+                                current_width = 0.0;
+                            }
+                            current_line.push(ch);
+                            current_width += ch_width;
+                        }
                     }
                     if !current_line.is_empty() {
-                        current_line.push(' ');
-                        current_width += char_w_fn(" ");
+                        lines_vec.push(current_line);
+                    } else if paragraph.is_empty() {
+                        lines_vec.push(String::new());
                     }
-                    current_line.push_str(word);
-                    current_width += word_width;
-                }
-                if !current_line.is_empty() {
-                    lines_vec.push(current_line);
                 }
 
                 let max_width = lines_vec

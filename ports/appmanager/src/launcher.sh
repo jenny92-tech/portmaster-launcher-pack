@@ -4,11 +4,11 @@
 # APP Manager — PortMaster 端口管理器。
 #
 # The UI is self-contained: it starts from the launcher-adjacent jenny92-appmanager
-# directory even when PortMaster is missing. Safety-critical filesystem
-# mutations remain in this shell and are never performed directly by Lua.
+# directory even when PortMaster is missing. Lua submits declarative plans;
+# the native helper validates and performs filesystem mutations.
 #
 # UI writes plan.txt and invokes this script's --apply-plan mode. The helper
-# re-validates every path under $ESUDO, then the running LÖVE UI invalidates
+# re-validates every path, then the running LÖVE UI invalidates
 # only the affected in-memory snapshots.
 
 PORT_NAME="jenny92-appmanager"; LOG_PREFIX="[PAM]"
@@ -44,7 +44,11 @@ esac
 PAM_SCRIPT_DIR="$0"
 case "$PAM_SCRIPT_DIR" in */*) PAM_SCRIPT_DIR=${PAM_SCRIPT_DIR%/*} ;; *) PAM_SCRIPT_DIR=. ;; esac
 PAM_DIR="${PAM_SOURCE_DIR:-$(CDPATH= cd -- "$PAM_SCRIPT_DIR" && pwd)}"
-PAM_LAUNCHER_SOURCE="$0"
+# A state helper or temporary .port.sh still represents the stable Port entry.
+# Resolution uses its directory even when the frontend has already removed the
+# temporary file.
+if [ -n "${PAM_SOURCE_DIR:-}" ]; then PAM_LAUNCHER_SOURCE="$PAM_DIR/APP Manager.sh"
+else PAM_LAUNCHER_SOURCE="$0"; fi
 PAM_APP_ROOT="$PAM_DIR/jenny92-appmanager"
 [ -n "${PAM_APP_ROOT_OVERRIDE:-}" ] && PAM_APP_ROOT="$PAM_APP_ROOT_OVERRIDE"
 PAM_RUNTIME_DIR="$PAM_APP_ROOT/runtime"
@@ -235,15 +239,6 @@ else LIBS_DIR="$PAM_APP_ROOT/state/unavailable-libs"; fi
 portmaster_resolve_launcher_image_dir "$SCRIPTS_DIR"
 IMAGES_DIR="${PAM_IMAGES_DIR_DEFAULT:-$PORTMASTER_LAUNCHER_IMAGE_DIR}"
 
-# A same-stem image beside its SH belongs to the selected Port on every device.
-# A separate frontend image folder is managed only when the shared adapter has
-# positively identified a tested MiniLoong or TrimUI layout.
-pam_is_image_name() {
-  case "$1" in
-    *.png|*.PNG|*.jpg|*.JPG|*.jpeg|*.JPEG|*.webp|*.WEBP) return 0 ;;
-    *) return 1 ;;
-  esac
-}
 TRASH_DIR="$GAMEDIR/trash"
 PLAN_FILE="$CONFDIR/plan.txt"
 RESULT_FILE="$CONFDIR/result.txt"
@@ -253,6 +248,8 @@ UPDATE_CACHE_FILE="$CONFDIR/portmaster-update.tsv"
 VALIDATION_RESULT_FILE="$CONFDIR/validation-result.tsv"
 PORTMASTER_ACTIVE_FILE="$CONFDIR/portmaster-active.tsv"
 PORTMASTER_ACTIVE_LOCK="$CONFDIR/portmaster-active.lock"
+OPERATION_ACTIVE_FILE="$CONFDIR/operation-active.tsv"
+OPERATION_ACTIVE_LOCK="$CONFDIR/operation-active.lock"
 APPLY_HELPER="$CONFDIR/apply-helper.sh"
 SIZE_FILE="$CONFDIR/sizes.tsv"
 RUNTIME_METADATA="$CONFDIR/runtime-metadata.tsv"
@@ -410,6 +407,7 @@ pam_validate_capabilities || {
 
 mkdir -p "$PAM_APP_ROOT" "$CONFDIR" "$TRASH_DIR"
 PORTMASTER_ACTIVE=0
+OPERATION_ACTIVE=0
 
 # A killed UI must not make an in-flight background repair invisible. Remove
 # only demonstrably stale markers; a live helper keeps the next APP instance
@@ -420,6 +418,20 @@ if [ -s "$PORTMASTER_ACTIVE_FILE" ]; then
     rm -f -- "$PORTMASTER_ACTIVE_FILE"
   else
     PORTMASTER_ACTIVE=1
+  fi
+fi
+# Ordinary file/Runtime operations use the same lifecycle contract. A second
+# APP instance must not overwrite plan.txt or rescan a half-mutated SD card.
+if [ -s "$OPERATION_ACTIVE_FILE" ]; then
+  operation_pid=$(awk -F '\t' '$1 == "pid" {print $2; exit}' "$OPERATION_ACTIVE_FILE" 2>/dev/null || true)
+  if pam_helper_pid_alive "$operation_pid" --apply-plan; then
+    OPERATION_ACTIVE=1
+  else
+    rm -f -- "$OPERATION_ACTIVE_FILE"
+    if pam_lock_acquire "$OPERATION_ACTIVE_LOCK" --apply-plan; then
+      stale_operation_token="$PAM_LOCK_TOKEN"
+      pam_lock_release "$OPERATION_ACTIVE_LOCK" "$stale_operation_token" || true
+    fi
   fi
 fi
 cd "$PAM_APP_ROOT" || exit 1
@@ -437,11 +449,8 @@ if [ "$APPLY_ONLY" != "1" ] && [ "$SIZE_ONLY" != "1" ] && [ "$CHECK_UPDATE_ONLY"
    [ "$VALIDATE_ONLY" != "1" ] && [ "$RUNTIME_METADATA_ONLY" != "1" ] && [ "$INSTALL_PLAN_ONLY" != "1" ] &&
    [ "$CONFIG_REFRESH_ONLY" != "1" ] && [ "$ENV_ONLY" != "1" ] && [ "$INVENTORY_ONLY" != "1" ]; then
   helper_ready=0
-  # MiniLoong 用临时 .port.sh 启动，这个文件可能在执行期间就被
-  # 前端移除。Bash 仍在 fd 255 持有已打开的脚本；最后再回退到目录里
-  # 稳定的 APP Manager.sh，不假设任何一个文件名在这一瞬间必然存在。
-  if [ "$PORTMASTER_ACTIVE" = "0" ]; then
-    for helper_source in "$PAM_LAUNCHER_SOURCE" "/proc/$$/fd/255" "$PAM_DIR/APP Manager.sh"; do
+  if [ "$PORTMASTER_ACTIVE" = "0" ] && [ "$OPERATION_ACTIVE" = "0" ]; then
+    for helper_source in "$0" "/proc/$$/fd/255" "$PAM_DIR/APP Manager.sh"; do
       [ -f "$helper_source" ] || continue
       [ "$helper_source" = "$APPLY_HELPER" ] && continue
       if cp -f "$helper_source" "$APPLY_HELPER" 2>/dev/null; then
@@ -450,17 +459,13 @@ if [ "$APPLY_ONLY" != "1" ] && [ "$SIZE_ONLY" != "1" ] && [ "$CHECK_UPDATE_ONLY"
       fi
     done
   fi
-  # 设备上已有一份完整 helper 时绝不因临时源文件消失就把
-  # apply_script 清空。但必须检查函数标记，不复用截断的坏文件。
   if [ "$helper_ready" = "0" ] && grep -q '^apply_plan()' "$APPLY_HELPER" 2>/dev/null; then
     helper_ready=1
   fi
-  if [ "$helper_ready" = "1" ]; then
-    chmod +x "$APPLY_HELPER" 2>/dev/null
-  else
-    APPLY_HELPER=""
-  fi
+  if [ "$helper_ready" = "1" ]; then chmod +x "$APPLY_HELPER" 2>/dev/null
+  else APPLY_HELPER=""; fi
 fi
+
 [ "$HEALTH_ONLY" = "1" ] || [ "$INSTALL_PLAN_ONLY" = "1" ] ||
   echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} scripts=$SCRIPTS_DIR gamedirs=$GAMEDIRS_DIR"
 [ "$HEALTH_ONLY" = "1" ] || [ "$INSTALL_PLAN_ONLY" = "1" ] ||
@@ -707,6 +712,7 @@ write_env() {
   "pending_install": "$(json_escape "$CONFDIR/pending-install.tsv")",
   "install_transaction": "$(json_escape "$CONFDIR/install-transaction.tsv")",
   "portmaster_active": "$(json_escape "$PORTMASTER_ACTIVE_FILE")",
+  "operation_active": "$(json_escape "$OPERATION_ACTIVE_FILE")",
   "validation_result_file": "$(json_escape "$VALIDATION_RESULT_FILE")",
   "update_cache_file": "$(json_escape "$UPDATE_CACHE_FILE")",
   "update_checked": $update_checked,
@@ -718,300 +724,6 @@ write_env() {
 }
 EOF
   mv -f -- "$env_tmp" "$CONFDIR/env.json"
-}
-
-# ── 执行 UI 产出的行动清单 ───────────────────────────────────────────────
-# 首页卸载和残留清理一律是 mv 进回收站；只有回收站里用户明确
-# 确认“彻底删除选中”才会 rm -rf 已做过边界校验的选中项。目录名跟脚本名对不上
-# (A-文件管理器.sh 指向的是 FileManager/), 判定是靠解析脚本推出来的, 在真卡上
-# 跑够之前, 不做不可逆的事。
-size_cache_record_move() {
-  local source="$1" target="$2"
-  [ -f "$SIZE_FILE" ] && [ -n "${SIZE_MUTATIONS:-}" ] || return 0
-  case "$source$target" in *$'\t'*|*$'\r'*|*$'\n'*) return 0 ;; esac
-  printf 'M\t%s\t%s\n' "$source" "$target" >> "$SIZE_MUTATIONS"
-}
-
-size_cache_record_delete() {
-  local source="$1"
-  [ -f "$SIZE_FILE" ] && [ -n "${SIZE_MUTATIONS:-}" ] || return 0
-  case "$source" in *$'\t'*|*$'\r'*|*$'\n'*) return 0 ;; esac
-  printf 'D\t%s\n' "$source" >> "$SIZE_MUTATIONS"
-}
-
-size_cache_apply_mutations() {
-  local tmp missing target bytes
-  [ -f "$SIZE_FILE" ] && [ -s "${SIZE_MUTATIONS:-}" ] || return 0
-  tmp="${SIZE_FILE}.tmp.$$"
-  missing="${SIZE_FILE}.missing.$$"
-  : > "$missing" || return 1
-  LC_ALL=C awk -F '\t' -v missing="$missing" '
-    function dropped(path, i, root) {
-      for (i=1; i<=drop_count; i++) {
-        root=drops[i]
-        if (path==root || index(path, root "/")==1) return 1
-      }
-      return 0
-    }
-    NR==FNR {
-      if ($1=="M") {
-        move[$2]=$3; order[++count]=$2
-      } else if ($1=="D") drops[++drop_count]=$2
-      next
-    }
-    {
-      path=$0; sub(/^[^\t]*\t/, "", path)
-      if (path in move) {
-        print $1 "\t" move[path]
-        emitted[path]=1
-      } else if (!dropped(path)) print $0
-    }
-    END {
-      for (i=1; i<=count; i++) {
-        path=order[i]
-        if (!emitted[path]) {
-          print move[path] > missing
-          emitted[path]=1
-        }
-      }
-    }
-  ' "$SIZE_MUTATIONS" "$SIZE_FILE" > "$tmp" || {
-    rm -f -- "$tmp" "$missing"
-    return 1
-  }
-  while IFS= read -r target; do
-    bytes=$(size_bytes "$target")
-    case "$bytes" in ''|*[!0-9]*) continue ;; esac
-    printf '%s\t%s\n' "$bytes" "$target" >> "$tmp"
-  done < "$missing"
-  mv -f -- "$tmp" "$SIZE_FILE"
-  rm -f -- "$missing"
-}
-
-restore_one() {
-  local item="$1" target="$2" kind="$3" base
-  base=$(basename "$item")
-
-  # 回收站是用户可写目录，恢复时仍要重做边界检查，不能把人工塞入的
-  # 内容写成 PortMaster 或 APP Manager 本身。
-  case "$kind" in
-    scripts)
-      if [[ "$base" != *.sh ]] || [ "$base" = "PortMaster.sh" ] ||
-         [ "$base" = ".port.sh" ] || [ "$base" = "APP Manager.sh" ]; then
-        printf 'FAIL\trestore\t%s\n' "$base" >> "$RESULT_FILE"
-        return
-      fi
-      ;;
-    data)
-      if [ "$base" = "$PORT_NAME" ] || [ "$base" = "PortMaster" ] || [ "$base" = "images" ]; then
-        printf 'FAIL\trestore\t%s\n' "$base" >> "$RESULT_FILE"
-        return
-      fi
-      ;;
-    images|script-images)
-      if [ -z "$target" ]; then
-        printf 'FAIL\trestore\t%s\n' "$base" >> "$RESULT_FILE"
-        return
-      fi
-      ;;
-    *)
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      return
-      ;;
-  esac
-
-  # 绝不覆盖已有内容：删除后用户可能已重新安装了同名端口。
-  if [ -e "$target/$base" ] || [ -L "$target/$base" ]; then
-    printf 'FAIL\trestore\t%s\n' "$base" >> "$RESULT_FILE"
-    echo "$LOG_PREFIX restore kept in trash, destination exists: $base"
-    return
-  fi
-  if $ESUDO mkdir -p "$target" && $ESUDO mv -- "$item" "$target/$base"; then
-    size_cache_record_move "$item" "$target/$base"
-    echo "$LOG_PREFIX restored: $base"
-  else
-    printf 'FAIL\trestore\t%s\n' "$base" >> "$RESULT_FILE"
-  fi
-}
-
-restore_bucket() {
-  local source="$1" target="$2" kind="$3" item
-  [ -d "$source" ] || return
-  if [ -L "$source" ]; then
-    printf 'FAIL\trestore\t%s\n' "$(basename "$source")" >> "$RESULT_FILE"
-    return
-  fi
-  for item in "$source"/* "$source"/.[!.]* "$source"/..?*; do
-    [ -e "$item" ] || [ -L "$item" ] || continue
-    # 旧版在 SH/Data 同根的 MiniLoong 上可能把 Data 目录错放进
-    # scripts 桶。目录不可能是 SH，恢复时安全地纠正回 Data 根。
-    if [ "$kind" = "scripts" ] && [ -d "$item" ] && [ ! -L "$item" ]; then
-      restore_one "$item" "$GAMEDIRS_DIR" data
-    else
-      restore_one "$item" "$target" "$kind"
-    fi
-  done
-  $ESUDO rmdir -- "$source" 2>/dev/null || true
-}
-
-# 精确放回 UI 选中的一个回收站直接项。plan.txt 会被再次做边界和层级校验：
-# 只接受 trash/<批次>/<来源>/<项目>、旧格式 trash/<批次>/<项目>，以及旧版遗留的
-# trash/<项目>；更深层路径和任何逃逸路径都拒绝。
-restore_selected_item() {
-  local source="$1" rel parent bucket batch kind target cleanup_parent="" cleanup_batch=""
-
-  case "$source" in
-    "$TRASH_DIR"/*) ;;
-    *)
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      echo "$LOG_PREFIX rejected restore path: $source"
-      return
-      ;;
-  esac
-  rel=${source#"$TRASH_DIR"/}
-  case "$rel" in
-    ""|/*|../*|*/../*|*/..|./*|*/./*|*/.|*//*)
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      echo "$LOG_PREFIX rejected restore path: $source"
-      return
-      ;;
-  esac
-  if [ ! -e "$source" ] && [ ! -L "$source" ]; then
-    echo "$LOG_PREFIX already restored: $(basename "$source")"
-    return
-  fi
-
-  parent=$(dirname "$source")
-  bucket=$(basename "$parent")
-  batch=$(dirname "$parent")
-  if { [ "$bucket" = "scripts" ] || [ "$bucket" = "script-images" ] ||
-       [ "$bucket" = "images" ] || [ "$bucket" = "data" ]; } &&
-     [ "$(dirname "$batch")" = "$TRASH_DIR" ]; then
-    # 新格式：批次和来源桶都必须是真目录，不能借软链接跳出回收站。
-    if [ ! -d "$batch" ] || [ -L "$batch" ] || [ ! -d "$parent" ] || [ -L "$parent" ]; then
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      return
-    fi
-    kind="$bucket"
-    if [ "$kind" = "scripts" ] && [ -d "$source" ] && [ ! -L "$source" ]; then
-      kind="data"
-    fi
-    cleanup_parent="$parent"
-    cleanup_batch="$batch"
-  elif [ "$(dirname "$parent")" = "$TRASH_DIR" ]; then
-    # 旧格式扁平批次。
-    if [ ! -d "$parent" ] || [ -L "$parent" ]; then
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      return
-    fi
-    cleanup_batch="$parent"
-    if [ -d "$source" ] && [ ! -L "$source" ]; then kind="data"
-    elif [[ "$(basename "$source")" = *.sh ]]; then kind="scripts"
-    else kind="images"
-    fi
-  elif [ "$parent" = "$TRASH_DIR" ]; then
-    # 极旧版本可能把文件直接放在 trash 根目录。
-    if [ -d "$source" ] && [ ! -L "$source" ]; then kind="data"
-    elif [[ "$(basename "$source")" = *.sh ]]; then kind="scripts"
-    else kind="images"
-    fi
-  else
-    printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-    echo "$LOG_PREFIX rejected nested restore path: $source"
-    return
-  fi
-
-  case "$kind" in
-    scripts) target="$SCRIPTS_DIR" ;;
-    script-images) target="$SCRIPTS_DIR" ;;
-    images)  target="$IMAGES_DIR" ;;
-    data)    target="$GAMEDIRS_DIR" ;;
-  esac
-  restore_one "$source" "$target" "$kind"
-  if [ ! -e "$source" ] && [ ! -L "$source" ]; then
-    [ -z "$cleanup_parent" ] || $ESUDO rmdir -- "$cleanup_parent" 2>/dev/null || true
-    [ -z "$cleanup_batch" ] || $ESUDO rmdir -- "$cleanup_batch" 2>/dev/null || true
-  fi
-}
-
-
-# 永久删除 UI 选中的一个回收站直接项。边界和层级规则与单项
-# 放回完全一致：只接受新格式来源桶的项目、旧批次的项目以及极旧的
-# trash/<项目>，更深层内容和任何逃逸路径都拒绝。
-delete_selected_item() {
-  local source="$1" rel parent bucket batch cleanup_parent="" cleanup_batch="" base
-
-  case "$source" in
-    "$TRASH_DIR"/*) ;;
-    *)
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      echo "$LOG_PREFIX rejected delete path: $source"
-      return
-      ;;
-  esac
-  rel=${source#"$TRASH_DIR"/}
-  case "$rel" in
-    ""|/*|../*|*/../*|*/..|./*|*/./*|*/.|*//*)
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      echo "$LOG_PREFIX rejected delete path: $source"
-      return
-      ;;
-  esac
-  if [ ! -e "$source" ] && [ ! -L "$source" ]; then
-    echo "$LOG_PREFIX already permanently deleted: $(basename "$source")"
-    return
-  fi
-
-  base=$(basename "$source")
-  parent=$(dirname "$source")
-  bucket=$(basename "$parent")
-  batch=$(dirname "$parent")
-  # UI 永远只会提交批次内的直接 Item，不会提交整个批次或
-  # scripts/data/images 容器。即使 plan.txt 被损坏，也必须拒绝这两类
-  # 扩大删除范围的路径。回收站根下的极旧直接文件/软链仍可删除。
-  if [ "$parent" = "$TRASH_DIR" ] && [ -d "$source" ] && [ ! -L "$source" ]; then
-    printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-    echo "$LOG_PREFIX rejected trash container delete: $source"
-    return
-  fi
-  if [ "$(dirname "$parent")" = "$TRASH_DIR" ] && [ -d "$source" ] && [ ! -L "$source" ]; then
-    case "$base" in
-      scripts|script-images|images|data)
-        printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-        echo "$LOG_PREFIX rejected trash bucket delete: $source"
-        return
-        ;;
-    esac
-  fi
-  if { [ "$bucket" = "scripts" ] || [ "$bucket" = "script-images" ] ||
-       [ "$bucket" = "images" ] || [ "$bucket" = "data" ]; } &&
-     [ "$(dirname "$batch")" = "$TRASH_DIR" ]; then
-    if [ ! -d "$batch" ] || [ -L "$batch" ] || [ ! -d "$parent" ] || [ -L "$parent" ]; then
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      return
-    fi
-    cleanup_parent="$parent"
-    cleanup_batch="$batch"
-  elif [ "$(dirname "$parent")" = "$TRASH_DIR" ]; then
-    if [ ! -d "$parent" ] || [ -L "$parent" ]; then
-      printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-      return
-    fi
-    cleanup_batch="$parent"
-  elif [ "$parent" != "$TRASH_DIR" ]; then
-    printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-    echo "$LOG_PREFIX rejected nested delete path: $source"
-    return
-  fi
-
-  if $ESUDO rm -rf -- "$source"; then
-    size_cache_record_delete "$source"
-    echo "$LOG_PREFIX permanently deleted: $base"
-    [ -z "$cleanup_parent" ] || $ESUDO rmdir -- "$cleanup_parent" 2>/dev/null || true
-    [ -z "$cleanup_batch" ] || $ESUDO rmdir -- "$cleanup_batch" 2>/dev/null || true
-  else
-    printf 'FAIL\tdelete\t%s\n' "$base" >> "$RESULT_FILE"
-  fi
 }
 
 # ── Runtime repair ─────────────────────────────────────────────────────
@@ -1674,58 +1386,94 @@ ensure_portmaster_python_runtime() {
   runtime_matches_current_metadata "$runtime"
 }
 
-pam_cleanup_appledouble() {
-  local candidate root item count=0 duplicate
-  set --
-  for candidate in "$GAMEDIRS_DIR" "$SCRIPTS_DIR" "$IMAGES_DIR"; do
-    [ -n "$candidate" ] && [ "$candidate" != "/" ] && [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
-    case "$candidate" in /*) ;; *) continue ;; esac
-    duplicate=0
-    for root in "$@"; do
-      case "$candidate/" in "$root/"*) duplicate=1; break ;; esac
-    done
-    [ "$duplicate" = "1" ] || set -- "$@" "$candidate"
-  done
-  [ "$#" -gt 0 ] || return 1
+pam_plan_is_file_only() {
+  awk -F '\t' '
+    /^[[:space:]]*($|#)/ { next }
+    NF != 2 { exit 1 }
+    $1 !~ /^(TRASH|DELETE_MANAGED|EMPTY_TRASH|RESTORE_TRASH|RESTORE_ITEM|DELETE_ITEM|CLEAN_APPLEDOUBLE)$/ { exit 1 }
+    { found=1 }
+    END { exit !found }
+  ' "$PLAN_FILE" 2>/dev/null
+}
 
-  RUNTIME_PROGRESS_COUNT=1
-  RUNTIME_PROGRESS_INDEX=1
-  RUNTIME_PROGRESS_TOTAL_BYTES=0
-  RUNTIME_PROGRESS_RUNTIME="AppleDouble"
-  runtime_progress_write scanning 0 0 "Scanning Port directories"
-  for root in "$@"; do
-    while IFS= read -r -d '' item; do
-      [ -f "$item" ] && [ ! -L "$item" ] || continue
-      case "$(basename "$item")" in ._*) ;; *) continue ;; esac
-      if $ESUDO rm -f -- "$item"; then
-        count=$((count + 1))
-        if [ $((count % 10)) -eq 0 ]; then
-          runtime_progress_write cleaning "$count" 0 "Removed $count files"
-        fi
-      else
-        printf 'FAIL\tappledouble\t%s\n' "$count" >> "$RESULT_FILE"
-        return 1
-      fi
-    done < <(find "$root" -xdev -type f -name '._*' -print0 2>/dev/null)
-  done
-  runtime_progress_write indexing "$count" 0 "Updating size information"
-  scan_sizes || rm -f -- "$SIZE_FILE"
-  runtime_progress_write complete "$count" 0 "Removed $count files"
-  printf 'OK\tappledouble\t%s\n' "$count" >> "$RESULT_FILE"
+pam_plan_has_file_actions() {
+  awk -F '\t' '$1 ~ /^(TRASH|DELETE_MANAGED|EMPTY_TRASH|RESTORE_TRASH|RESTORE_ITEM|DELETE_ITEM|CLEAN_APPLEDOUBLE)$/ { found=1 } END { exit !found }' \
+    "$PLAN_FILE" 2>/dev/null
+}
+
+pam_apply_file_plan_native() {
+  local native_launcher output="$CONFDIR/apply-file-plan.$$"
+  [ "$PAM_NATIVE_PROFILE_ACTIVE" = 1 ] && [ -x "$PAM_APPMANAGER_CLI" ] || return 1
+  native_launcher="${PAM_NATIVE_LAUNCHER_OVERRIDE:-$PAM_LAUNCHER_SOURCE}"
+  case "$native_launcher" in /*) ;; *) native_launcher="$PAM_DIR/$(basename "$native_launcher")" ;; esac
+  set -- --config-dir "$PAM_CONFIG_DIR" apply-file-plan \
+    --plan "$PLAN_FILE" \
+    --result "$RESULT_FILE" \
+    --size-cache "$SIZE_FILE" \
+    --progress "$PROGRESS_FILE" \
+    --self-launcher "$native_launcher" \
+    --self-port "$PORT_NAME" \
+    --launcher "$native_launcher" \
+    --app-state "$CONFDIR" \
+    --trash "$TRASH_DIR"
+  [ -z "$ESUDO" ] || set -- "$@" --privilege-command "$ESUDO"
+  [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
+  [ -s "$DEVICE_CONFIG_FILE" ] && set -- "$@" --remote-config "$DEVICE_CONFIG_FILE" --remote-config-dir "$DEVICE_CONFIG_DIR"
+  [ -z "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || set -- "$@" --target-override "$PAM_NATIVE_TARGET_DEVICE"
+  if "$PAM_APPMANAGER_CLI" "$@" > "$output" 2>> "$PAM_APP_ROOT/log.txt"; then
+    rm -f -- "$output"
+    return 0
+  fi
+  rm -f -- "$output"
+  printf 'FAIL\toperation\tnative-file-operation\n' >> "$RESULT_FILE"
+  return 1
+}
+
+pam_operation_begin() {
+  if ! pam_lock_acquire "$OPERATION_ACTIVE_LOCK" --apply-plan; then return 1; fi
+  APPLY_OPERATION_TOKEN="$PAM_LOCK_TOKEN"
+  {
+    printf 'version\t1\n'
+    printf 'token\t%s\n' "$APPLY_OPERATION_TOKEN"
+    printf 'pid\t%s\n' "$$"
+    printf 'started\t%s\n' "$(date +%s 2>/dev/null || echo 0)"
+  } > "$OPERATION_ACTIVE_FILE.tmp.$$" &&
+    mv -f -- "$OPERATION_ACTIVE_FILE.tmp.$$" "$OPERATION_ACTIVE_FILE" || {
+      rm -f -- "$OPERATION_ACTIVE_FILE.tmp.$$"
+      pam_lock_release "$OPERATION_ACTIVE_LOCK" "$APPLY_OPERATION_TOKEN" || true
+      APPLY_OPERATION_TOKEN=""
+      return 1
+    }
+}
+
+pam_operation_end() {
+  local token="${APPLY_OPERATION_TOKEN:-}"
+  [ -n "$token" ] || return 1
+  if [ "$(awk -F '\t' '$1 == "token" {print $2; exit}' "$OPERATION_ACTIVE_FILE" 2>/dev/null || true)" = "$token" ]; then
+    rm -f -- "$OPERATION_ACTIVE_FILE"
+  fi
+  pam_lock_release "$OPERATION_ACTIVE_LOCK" "$token"
+  APPLY_OPERATION_TOKEN=""
 }
 
 apply_plan() {
-  local stamp kind arg dest base bucket batch item trash_failed=0 empty_failed=0
+  local kind arg
   local device_risk_ack=0 device_support_ack=0 runtime_metadata_ready=1 native_runtime_handled=0
-  stamp=$(date +%Y%m%d-%H%M%S)
   : > "$RESULT_FILE"
   rm -f -- "$PROGRESS_FILE" "$PROGRESS_FILE.tmp.$$"
   if [ ! -f "$PLAN_FILE" ]; then
     printf 'FAIL\toperation\n' >> "$RESULT_FILE"
     return
   fi
-  SIZE_MUTATIONS="$CONFDIR/size-mutations.$$"
-  : > "$SIZE_MUTATIONS"
+  if pam_plan_is_file_only; then
+    pam_apply_file_plan_native || true
+    sync
+    return
+  fi
+  if pam_plan_has_file_actions; then
+    printf 'FAIL\toperation\tmixed-file-plan\n' >> "$RESULT_FILE"
+    return
+  fi
   if grep -q $'^INSTALL_RUNTIME\t' "$PLAN_FILE" 2>/dev/null; then
     if ! pam_runtime_repair_allowed; then
       runtime_metadata_ready=0
@@ -1745,148 +1493,6 @@ apply_plan() {
   while IFS=$'\t' read -r kind arg; do
     case "$kind" in
       \#*|"") continue ;;
-
-      TRASH|DELETE_MANAGED)
-        if ! pam_capability_enabled "$PAM_CAPABILITY_MANAGE_PORTS" ||
-           ! pam_capability_enabled "$PAM_CAPABILITY_TRASH"; then
-          printf 'FAIL\toperation\tcapability-disabled\n' >> "$RESULT_FILE"
-          continue
-        fi
-        # UI 只能处理三个受管根目录的直接子项。即使 plan.txt 损坏，也不能让提权的
-        # shell 移动或删除任意路径；本 APP、PortMaster 和临时 .port.sh 再额外挡一次。
-        base=$(basename "$arg")
-        if ! { [ "$(dirname "$arg")" = "$SCRIPTS_DIR" ] &&
-                 { [[ "$base" = *.sh ]] || pam_is_image_name "$base"; } ||
-               { [ -n "$IMAGES_DIR" ] && [ "$(dirname "$arg")" = "$IMAGES_DIR" ] &&
-                 pam_is_image_name "$base"; } ||
-               [ "$(dirname "$arg")" = "$GAMEDIRS_DIR" ]; } ||
-           [ "$arg" = "$GAMEDIR" ] ||
-           [ "$arg" = "$PAM_DIR/$(basename "$0")" ] ||
-           [ "$base" = "APP Manager.sh" ] ||
-           { [ "$(dirname "$arg")" = "$PAM_DIR" ] && [ "$base" = "APP Manager.png" ]; } ||
-           [ "$base" = "PortMaster" ] || [ "$base" = "PortMaster.sh" ] ||
-           [ "$base" = ".port.sh" ]; then
-          printf 'FAIL\toperation\n' >> "$RESULT_FILE"
-          echo "$LOG_PREFIX rejected trash path: $arg"
-          trash_failed=1
-          continue
-        fi
-        if [ ! -e "$arg" ] && [ ! -L "$arg" ]; then
-          echo "$LOG_PREFIX already removed: $base"
-          continue
-        fi
-        if [ "$(dirname "$arg")" = "$GAMEDIRS_DIR" ] && [ "$trash_failed" = "1" ]; then
-          echo "$LOG_PREFIX kept game folder after earlier move failure: $base"
-          continue
-        fi
-        if [ "$kind" = "DELETE_MANAGED" ]; then
-          if $ESUDO rm -rf -- "$arg"; then
-            size_cache_record_delete "$arg"
-            echo "$LOG_PREFIX permanently deleted managed item: $base"
-          else
-            printf 'FAIL\tdelete\t%s\n' "$base" >> "$RESULT_FILE"
-            trash_failed=1
-          fi
-          continue
-        fi
-        # MiniLoong 的 SH 根和 Data 根是同一目录，不能只看父目录分类。
-        # 只有 .sh 文件是启动项；其余目录/文件都按 Data 保存来源。
-        if [[ "$base" = *.sh ]] && [ "$(dirname "$arg")" = "$SCRIPTS_DIR" ]; then bucket="scripts"
-        elif [ "$(dirname "$arg")" = "$SCRIPTS_DIR" ] && pam_is_image_name "$base"; then bucket="script-images"
-        elif [ -n "$IMAGES_DIR" ] && [ "$(dirname "$arg")" = "$IMAGES_DIR" ]; then bucket="images"
-        else bucket="data"
-        fi
-        # 保留来源类型，恢复时才能精确放回 SH / 图片 / Data 原根目录。
-        dest="$TRASH_DIR/$stamp/$bucket"
-        $ESUDO mkdir -p "$dest"
-        # 同来源根下理论上不会重名；仍保留防御，绝不覆盖回收站内容。
-        if [ -e "$dest/$base" ]; then
-          n=2
-          while [ -e "$dest/$base.$n" ]; do n=$((n + 1)); done
-          base="$base.$n"
-        fi
-        if $ESUDO mv -- "$arg" "$dest/$base"; then
-          size_cache_record_move "$arg" "$dest/$base"
-          echo "$LOG_PREFIX moved to trash: $base"
-        else
-          printf 'FAIL\ttrash\t%s\n' "$base" >> "$RESULT_FILE"
-          trash_failed=1
-          $ESUDO rmdir -- "$dest" "$TRASH_DIR/$stamp" 2>/dev/null || true
-        fi
-        ;;
-
-      EMPTY_TRASH)
-        if ! pam_capability_enabled "$PAM_CAPABILITY_TRASH"; then
-          printf 'FAIL\tempty_trash\tcapability-disabled\n' >> "$RESULT_FILE"
-          continue
-        fi
-        empty_failed=0
-        # 普通 * 不包含隐藏项；三组 glob 才能完整覆盖，并且始终限定在 APP 回收站内。
-        for item in "$TRASH_DIR"/* "$TRASH_DIR"/.[!.]* "$TRASH_DIR"/..?*; do
-          [ -e "$item" ] || [ -L "$item" ] || continue
-          if $ESUDO rm -rf -- "$item"; then
-            size_cache_record_delete "$item"
-          else
-            empty_failed=1
-          fi
-        done
-        if [ "$empty_failed" = "1" ]; then
-          printf 'FAIL\tempty_trash\n' >> "$RESULT_FILE"
-        else
-          echo "$LOG_PREFIX trash emptied"
-        fi
-        ;;
-
-      RESTORE_TRASH)
-        if ! pam_capability_enabled "$PAM_CAPABILITY_TRASH"; then
-          printf 'FAIL\trestore\tcapability-disabled\n' >> "$RESULT_FILE"
-          continue
-        fi
-        # 新格式按来源分类，可精确恢复。旧版扁平批次则用安全可推导的
-        # 类型兼容：.sh 回 SH 目录，目录回 Data，其余文件回图片目录。
-        for batch in "$TRASH_DIR"/* "$TRASH_DIR"/.[!.]* "$TRASH_DIR"/..?*; do
-          [ -d "$batch" ] || continue
-          if [ -L "$batch" ]; then
-            printf 'FAIL\trestore\t%s\n' "$(basename "$batch")" >> "$RESULT_FILE"
-            continue
-          fi
-          restore_bucket "$batch/scripts" "$SCRIPTS_DIR" scripts
-          restore_bucket "$batch/script-images" "$SCRIPTS_DIR" script-images
-          restore_bucket "$batch/images" "$IMAGES_DIR" images
-          restore_bucket "$batch/data" "$GAMEDIRS_DIR" data
-          for item in "$batch"/* "$batch"/.[!.]* "$batch"/..?*; do
-            [ -e "$item" ] || [ -L "$item" ] || continue
-            base=$(basename "$item")
-            case "$base" in scripts|script-images|images|data) [ -d "$item" ] && continue ;; esac
-            if [ -d "$item" ]; then
-              restore_one "$item" "$GAMEDIRS_DIR" data
-            elif [[ "$base" = *.sh ]]; then
-              restore_one "$item" "$SCRIPTS_DIR" scripts
-            else
-              restore_one "$item" "$IMAGES_DIR" images
-            fi
-          done
-          $ESUDO rmdir -- "$batch" 2>/dev/null || true
-        done
-        echo "$LOG_PREFIX trash restore completed"
-        ;;
-
-      RESTORE_ITEM)
-        if pam_capability_enabled "$PAM_CAPABILITY_TRASH"; then restore_selected_item "$arg"
-        else printf 'FAIL\trestore\tcapability-disabled\n' >> "$RESULT_FILE"; fi
-        ;;
-
-      DELETE_ITEM)
-        if pam_capability_enabled "$PAM_CAPABILITY_TRASH"; then delete_selected_item "$arg"
-        else printf 'FAIL\tdelete\tcapability-disabled\n' >> "$RESULT_FILE"; fi
-        ;;
-
-      CLEAN_APPLEDOUBLE)
-        if ! pam_capability_enabled "$PAM_CAPABILITY_CLEANUP_APPLEDOUBLE" ||
-           [ "$arg" != "-" ] || ! pam_cleanup_appledouble; then
-          printf 'FAIL\tappledouble\n' >> "$RESULT_FILE"
-        fi
-        ;;
 
       INSTALL_RUNTIME)
         if ! pam_runtime_repair_allowed; then
@@ -1961,12 +1567,6 @@ apply_plan() {
      [ "$native_runtime_handled" = "0" ]; then
     runtime_progress_write complete "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Runtime repair complete"
   fi
-
-  # The UI treats plan.txt removal as the completion signal. Publish the
-  # small path-level delta first; never recursively rescan every game after a
-  # trash/delete/restore operation on a slow SD card.
-  size_cache_apply_mutations || echo "$LOG_PREFIX unable to update size cache"
-  rm -f -- "$SIZE_MUTATIONS"
 
   sync
 }
@@ -2357,102 +1957,29 @@ validate_pending_install() {
 }
 
 # ── 主入口 ────────────────────────────────────────────────────────────
-# 容量统计会递归读整个游戏目录，绝不能放在 LÖVE 渲染线程。
-# UI 用 --scan-sizes 后台启动这一模式；这里原子替换缓存，UI 始终可以
-# 先读上一份完整结果。du 统计占用的磁盘块，比逻辑文件长度更接近真实
-# 可释放空间。
-size_bytes() {
-  local path="$1" kb
-  [ -e "$path" ] || [ -L "$path" ] || return 0
-  if command -v nice >/dev/null 2>&1; then
-    kb=$(nice -n 19 du -sk "$path" 2>/dev/null | awk 'NR == 1 {print $1}')
-  else
-    kb=$(du -sk "$path" 2>/dev/null | awk 'NR == 1 {print $1}')
-  fi
-  case "$kb" in ''|*[!0-9]*) return 0 ;; esac
-  printf '%s\n' "$((kb * 1024))"
-}
-
-scan_sizes() {
-  local path batch bucket item structured
-  set --
-  SIZE_TMP="${SIZE_FILE}.tmp.$$"
-  : > "$SIZE_TMP" || return 1
-
-  # 首页与残留页使用的 Data 目录。APP Manager 自身另行统计
-  # trash 的直接项，不把 runtime 等自身文件算进可卸载内容。
-  for path in "$GAMEDIRS_DIR"/*; do
-    [ -d "$path" ] && [ ! -L "$path" ] || continue
-    [ "$path" = "$GAMEDIR" ] && continue
-    set -- "$@" "$path"
-  done
-
-  # SH 和图片都是直接文件，同样记录后才能精确合并一个 Item。
-  for path in "$SCRIPTS_DIR"/*.sh; do
-    [ -f "$path" ] || continue
-    set -- "$@" "$path"
-  done
-  for path in "$SCRIPTS_DIR"/*.png "$SCRIPTS_DIR"/*.PNG \
-              "$SCRIPTS_DIR"/*.jpg "$SCRIPTS_DIR"/*.JPG \
-              "$SCRIPTS_DIR"/*.jpeg "$SCRIPTS_DIR"/*.JPEG \
-              "$SCRIPTS_DIR"/*.webp "$SCRIPTS_DIR"/*.WEBP; do
-    [ -f "$path" ] || continue
-    set -- "$@" "$path"
-  done
-  if [ -n "$IMAGES_DIR" ]; then
-    for path in "$IMAGES_DIR"/*; do
-      [ -f "$path" ] || continue
-      set -- "$@" "$path"
-    done
-  fi
-
-  # 回收站 UI 展示的是 batch 下各类型的直接项，缓存也保持同样
-  # 粒度，才能对单个条目和彻底删除选中正确求和。
-  for batch in "$TRASH_DIR"/* "$TRASH_DIR"/.[!.]* "$TRASH_DIR"/..?*; do
-    [ -e "$batch" ] || [ -L "$batch" ] || continue
-    if [ ! -d "$batch" ] || [ -L "$batch" ]; then
-      set -- "$@" "$batch"
-      continue
-    fi
-    structured=0
-    for bucket in scripts script-images data images; do
-      [ -d "$batch/$bucket" ] || continue
-      structured=1
-      for item in "$batch/$bucket"/* "$batch/$bucket"/.[!.]* "$batch/$bucket"/..?*; do
-        [ -e "$item" ] || [ -L "$item" ] || continue
-        set -- "$@" "$item"
-      done
-    done
-    for item in "$batch"/* "$batch"/.[!.]* "$batch"/..?*; do
-      [ -e "$item" ] || [ -L "$item" ] || continue
-      if [ "$structured" = "1" ]; then
-        case "$(basename "$item")" in scripts|script-images|data|images) continue ;; esac
-      fi
-      set -- "$@" "$item"
-    done
-  done
-
-  # One du process handles every top-level item. This is materially cheaper
-  # than starting a new process per Port on low-end CPUs and slow SD cards.
-  if [ "$#" -gt 0 ]; then
-    if command -v nice >/dev/null 2>&1; then
-      nice -n 19 du -sk "$@" 2>/dev/null
-    else
-      du -sk "$@" 2>/dev/null
-    fi | awk '
-      $1 ~ /^[0-9]+$/ {
-        kb=$1; sub(/^[^[:space:]]+[[:space:]]+/, "")
-        print (kb * 1024) "\t" $0
-      }
-    ' >> "$SIZE_TMP"
-  fi
-
-  mv -f "$SIZE_TMP" "$SIZE_FILE"
-  echo "$LOG_PREFIX size cache updated"
+pam_scan_sizes_native() {
+  local native_launcher output="$CONFDIR/scan-sizes.$$"
+  [ "$PAM_NATIVE_PROFILE_ACTIVE" = 1 ] && [ -x "$PAM_APPMANAGER_CLI" ] || return 1
+  native_launcher="${PAM_NATIVE_LAUNCHER_OVERRIDE:-$PAM_LAUNCHER_SOURCE}"
+  case "$native_launcher" in /*) ;; *) native_launcher="$PAM_DIR/$(basename "$native_launcher")" ;; esac
+  set -- --config-dir "$PAM_CONFIG_DIR" scan-device-sizes \
+    --output "$SIZE_FILE" \
+    --self-port "$PORT_NAME" \
+    --launcher "$native_launcher" \
+    --app-state "$CONFDIR" \
+    --trash "$TRASH_DIR"
+  [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
+  [ -s "$DEVICE_CONFIG_FILE" ] && set -- "$@" --remote-config "$DEVICE_CONFIG_FILE" --remote-config-dir "$DEVICE_CONFIG_DIR"
+  [ -z "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || set -- "$@" --target-override "$PAM_NATIVE_TARGET_DEVICE"
+  "$PAM_APPMANAGER_CLI" "$@" > "$output" 2>> "$PAM_APP_ROOT/log.txt" || {
+    rm -f -- "$output"
+    return 1
+  }
+  rm -f -- "$output"
 }
 
 if [ "$SIZE_ONLY" = "1" ]; then
-  scan_sizes
+  pam_scan_sizes_native
   exit $?
 fi
 
@@ -2504,7 +2031,7 @@ if [ "$VALIDATE_ONLY" = "1" ]; then
   exit "$rc"
 fi
 
-if [ "$APPLY_ONLY" != "1" ]; then
+if [ "$APPLY_ONLY" != "1" ] && [ "$OPERATION_ACTIVE" = "0" ]; then
   PAM_CORE_HEALTH_CACHE=$(pam_core_health)
   if [ "$PAM_PORTMASTER_MANAGEMENT" = system ] || [ "$PAM_CORE_HEALTH_CACHE" = healthy ]; then
     pam_refresh_native_inventory || rm -f -- "$INVENTORY_FILE"
@@ -2517,6 +2044,10 @@ if [ "$ENV_ONLY" = "1" ]; then
   exit 0
 fi
 if [ "$APPLY_ONLY" = "1" ]; then
+  # One helper owns plan.txt, result.txt and inventory publication from start
+  # to finish. A restarted UI observes operation-active.tsv instead of starting
+  # another worker against the same SD card.
+  pam_operation_begin || exit 75
   apply_plan
   unset PAM_CORE_HEALTH_CACHE
   PAM_CORE_HEALTH_CACHE=$(pam_core_health)
@@ -2529,6 +2060,7 @@ if [ "$APPLY_ONLY" = "1" ]; then
   # plan.txt is the UI's completion signal. Remove it only after env.json is
   # fully refreshed, otherwise the renderer can race a partially-written file.
   $ESUDO rm -f "$PLAN_FILE"
+  pam_operation_end || true
   exit 0
 fi
 
@@ -2572,7 +2104,8 @@ run_portable_ui() {
     set -- env exec --config-dir "$PAM_CONFIG_DIR" --scope love_ui --launcher "$native_launcher" \
       --var "app_root=$PAM_APP_ROOT" \
       --var "state_dir=$CONFDIR" \
-      --var "scripts_dir=$SCRIPTS_DIR"
+      --var "scripts_dir=$SCRIPTS_DIR" \
+      --set "PAM_SOURCE_DIR=$PAM_DIR"
     [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
     [ -s "$DEVICE_CONFIG_FILE" ] && set -- "$@" --remote-config "$DEVICE_CONFIG_FILE" --remote-config-dir "$DEVICE_CONFIG_DIR"
     [ -z "${PAM_PORTMASTER_DIR_OVERRIDE:-}" ] || set -- "$@" --target-override "$PAM_NATIVE_TARGET_DEVICE"

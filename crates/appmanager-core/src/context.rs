@@ -34,6 +34,14 @@ pub struct ContextCapabilities {
     pub install_plan: CapabilityState,
     #[serde(default = "unknown_capability")]
     pub cache_invalidation: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub manage_ports: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub trash: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub leftovers: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub cleanup_appledouble: CapabilityState,
 }
 
 impl Default for ContextCapabilities {
@@ -42,6 +50,10 @@ impl Default for ContextCapabilities {
             inventory: CapabilityState::Unknown,
             install_plan: CapabilityState::Unknown,
             cache_invalidation: CapabilityState::Unknown,
+            manage_ports: CapabilityState::Unknown,
+            trash: CapabilityState::Unknown,
+            leftovers: CapabilityState::Unknown,
+            cleanup_appledouble: CapabilityState::Unknown,
         }
     }
 }

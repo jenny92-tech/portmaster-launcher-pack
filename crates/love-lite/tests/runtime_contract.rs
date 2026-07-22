@@ -193,8 +193,83 @@ fn loads_the_packaged_chinese_font_from_file_data() {
         )
         .eval()
         .expect("load font from FileData");
-    assert!(height > 0.0);
-    assert!(width > 0.0);
+    assert!(
+        (28.0..=30.0).contains(&height),
+        "font size must retain LÖVE's pixels-per-em semantics, got height {height}"
+    );
+    assert!(
+        (39.0..=43.0).contains(&width),
+        "two full-width glyphs at 20px plus handheld weight compensation must remain about 40px wide, got {width}"
+    );
+}
+
+#[test]
+fn fractional_font_sizes_snap_to_physical_pixels() {
+    let directory = game("");
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ports/appmanager/portable/share/NotoSansSC-Regular.ttf");
+    let bytes = fs::read(font_path).expect("read packaged font");
+    engine
+        .runtime
+        .lua
+        .globals()
+        .set(
+            "font_bytes",
+            engine.runtime.lua.create_string(&bytes).unwrap(),
+        )
+        .expect("publish font bytes");
+    let (integer_width, fractional_width, integer_height, fractional_height): (f32, f32, f32, f32) =
+        engine
+            .runtime
+            .lua
+            .load(
+                r#"
+                local data = love.filesystem.newFileData(font_bytes, "NotoSansSC-Regular.ttf")
+                local integer = love.graphics.newFont(data, 20)
+                local fractional = love.graphics.newFont(data, 20.4)
+                return integer:getWidth("像素 Pixel"), fractional:getWidth("像素 Pixel"),
+                    integer:getHeight(), fractional:getHeight()
+                "#,
+            )
+            .eval()
+            .expect("measure snapped font sizes");
+    assert!((integer_width - fractional_width).abs() < 0.001);
+    assert!((integer_height - fractional_height).abs() < 0.001);
+}
+
+#[test]
+fn wraps_long_paths_without_spaces() {
+    let directory = game("");
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ports/appmanager/portable/share/NotoSansSC-Regular.ttf");
+    let bytes = fs::read(font_path).expect("read packaged font");
+    engine
+        .runtime
+        .lua
+        .globals()
+        .set(
+            "font_bytes",
+            engine.runtime.lua.create_string(&bytes).unwrap(),
+        )
+        .expect("publish font bytes");
+    let (count, first_width, last_width): (usize, f32, f32) = engine
+        .runtime
+        .lua
+        .load(
+            r#"
+            local data = love.filesystem.newFileData(font_bytes, "NotoSansSC-Regular.ttf")
+            local font = love.graphics.newFont(data, 20)
+            local _, lines = font:getWrap("/mnt/sdcard/roms/ports/PortMaster/libs", 120)
+            return #lines, font:getWidth(lines[1]), font:getWidth(lines[#lines])
+            "#,
+        )
+        .eval()
+        .expect("wrap path");
+    assert!(count >= 2, "an unbroken path was not wrapped");
+    assert!(first_width <= 120.5, "first line exceeds wrap width");
+    assert!(last_width <= 120.5, "last line exceeds wrap width");
 }
 
 #[test]
@@ -417,7 +492,7 @@ fn loads_the_real_launcher_uikit() {
 }
 
 #[test]
-fn loads_the_real_app_manager_lua_frontend() {
+fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
     let directory = tempfile::tempdir().expect("temporary App Manager directory");
     fs::write(
         directory.path().join("kit.lua"),
@@ -434,17 +509,35 @@ fn loads_the_real_app_manager_lua_frontend() {
         }
     }
 
-    let engine = Engine::load(directory.path(), 960, 720).expect("load App Manager frontend");
-    engine
-        .update_and_draw(1.0 / 60.0)
-        .expect("draw App Manager frontend");
-    assert!(engine.frame_rgba().iter().any(|value| *value != 0));
-    let commands = engine
-        .draw_gpu()
-        .expect("record App Manager GPU frame")
-        .expect("App Manager frame uses the supported GPU subset");
-    assert!(
-        commands.len() > 10,
-        "App Manager GPU frame is unexpectedly empty"
-    );
+    for (width, height, expected_scale) in
+        [(640, 480, 0.80f32), (960, 720, 1.0f32), (1028, 720, 1.0f32)]
+    {
+        let engine = Engine::load(directory.path(), width, height)
+            .unwrap_or_else(|error| panic!("load App Manager at {width}x{height}: {error:#}"));
+        engine
+            .update_and_draw(1.0 / 60.0)
+            .unwrap_or_else(|error| panic!("draw App Manager at {width}x{height}: {error:#}"));
+        assert!(
+            engine.frame_rgba().iter().any(|value| *value != 0),
+            "App Manager rendered an empty {width}x{height} frame"
+        );
+        let scale: f32 = engine
+            .runtime
+            .lua
+            .load("return require('kit').debug_layout().cs")
+            .eval()
+            .expect("read responsive layout scale");
+        assert!(
+            (scale - expected_scale).abs() < 0.001,
+            "unexpected layout scale {scale} at {width}x{height}"
+        );
+        let commands = engine
+            .draw_gpu()
+            .expect("record App Manager GPU frame")
+            .expect("App Manager frame uses the supported GPU subset");
+        assert!(
+            commands.len() > 10,
+            "App Manager GPU frame is unexpectedly empty at {width}x{height}"
+        );
+    }
 }
