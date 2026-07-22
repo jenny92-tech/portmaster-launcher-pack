@@ -1463,7 +1463,7 @@ else
   export PAM_ENV="$CONFDIR/env.json"
 fi
 export PAM_SOURCE_DIR="$PAM_DIR"
-run_portable_ui() {
+run_appmanager_ui() {
   local love_pid key_pid=0 exit_code=1 native_launcher
   local wayland_dir="${XDG_RUNTIME_DIR:-/run}" wayland_name="${WAYLAND_DISPLAY:-wayland-0}"
   if [ ! -x "$PAM_APP_ROOT/runtime/love.aarch64" ] || [ ! -f "$PAM_APP_ROOT/love_ui/main.lua" ]; then
@@ -1513,6 +1513,6 @@ run_portable_ui() {
   return "$exit_code"
 }
 
-run_portable_ui || true
+run_appmanager_ui || true
 pm_finish
 exit 0

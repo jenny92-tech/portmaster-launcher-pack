@@ -28,7 +28,7 @@ impl Engine {
         );
         anyhow::ensure!(
             pixels <= MAX_FRAME_PIXELS,
-            "LOVE frame exceeds the experimental 16-megapixel budget"
+            "LOVE frame exceeds the supported 16-megapixel budget"
         );
         let source = source
             .as_ref()

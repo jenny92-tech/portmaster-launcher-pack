@@ -32,7 +32,7 @@ fn main() -> ExitCode {
 fn run() -> Result<i32> {
     let mut args = env::args().skip(1);
     if matches!(args.next().as_deref(), Some("--version")) {
-        println!("love-lite {BUILD_REVISION}");
+        println!("love-lite {} {BUILD_REVISION}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
     let mut args = env::args().skip(1);

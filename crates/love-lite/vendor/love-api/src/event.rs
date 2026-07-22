@@ -7,7 +7,7 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
     let event = lua.create_table()?;
 
     // Event collection belongs to the selected platform backend. The SDL2
-    // experiment injects keyboard/controller state itself; Lua code that uses
+    // APP Manager runtime injects keyboard/controller state itself; Lua code that uses
     // the normal love.run loop may still call pump safely.
     event.set("pump", lua.create_function(|_, ()| Ok(()))?)?;
 

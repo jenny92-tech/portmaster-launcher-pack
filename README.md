@@ -14,7 +14,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
-| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled LOVE-lite + static Rust helpers | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
+| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled production LOVE-lite 1.x + static Rust helpers | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
@@ -30,8 +30,9 @@ standard filename `screenshot.png` in both the port root and `dist/`.
 
 LÖVE launchers package the shared `kit.lua`, declarative launcher schema, common
 `conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. Port App
-Manager uses the same component kit, but packages its own bootstrap runtime and
-static Rust helpers so it can repair a missing PortMaster environment. Godot
+Manager uses the same component kit, but packages its own production runtime and
+static Rust helpers so it can repair a missing PortMaster environment. Every
+ordinary game launcher remains on PortMaster's installed LÖVE 11.5. Godot
 game-runtime tooling stays inside the relevant port.
 
 ## Documentation

@@ -7,10 +7,16 @@ import hashlib
 import sys
 from pathlib import Path
 
+from cargo_revision import update_lock_closure, update_paths, update_toml_section
+
 
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    files = [root / "Cargo.toml", root / "Cargo.lock"]
+    files = [
+        root / "_kit" / "appmanager_native_revision.py",
+        root / "_kit" / "build_appmanager_native.sh",
+        root / "_kit" / "cargo_revision.py",
+    ]
     native_crates = (
         "appmanager-cli",
         "appmanager-core",
@@ -24,15 +30,14 @@ def main() -> int:
     files.append(root / "config" / "config.json")
     files.extend(sorted((root / "config" / "platforms").glob("*.json")))
     digest = hashlib.sha256()
-    for path in files:
-        if not path.is_file():
-            raise SystemExit(f"missing native source: {path}")
-        relative = path.relative_to(root).as_posix().encode("utf-8")
-        payload = path.read_bytes()
-        digest.update(len(relative).to_bytes(4, "big"))
-        digest.update(relative)
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
+    update_paths(digest, root, files)
+    update_toml_section(digest, root / "Cargo.toml", ("workspace", "package"), "workspace.package")
+    update_lock_closure(
+        digest,
+        root / "Cargo.lock",
+        ["appmanager-cli", "portkit-cli"],
+        "appmanager-native",
+    )
     print(digest.hexdigest())
     return 0
 

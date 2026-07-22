@@ -2761,7 +2761,7 @@ fn register_graphics_object_stubs(
     // love.graphics.getRendererInfo()
     g.set(
         "getRendererInfo",
-        lua.create_function(|_, ()| Ok(("love-lite", "0.1", "Software", "SDL2")))?,
+        lua.create_function(|_, ()| Ok(("love-lite", "1.0", "APP Manager", "SDL2")))?,
     )?;
 
     // love.graphics.getSupported()

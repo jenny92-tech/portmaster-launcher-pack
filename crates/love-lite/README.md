@@ -1,8 +1,10 @@
 # APP Manager LOVE-lite runtime
 
-This crate runs Port App Manager's existing Lua/UIKit without the complete
-LÖVE 11.5 runtime. It intentionally implements only the API used by APP
-Manager; other launchers continue to use their existing engines.
+This is Port App Manager's production UI runtime. It runs the existing
+Lua/UIKit without the complete LÖVE 11.5 runtime and intentionally implements
+only the API used by APP Manager. It is not a replacement for the shared game
+launcher runtime: every other launcher continues to use PortMaster's installed
+LÖVE 11.5.
 
 The runtime embeds vendored Lua 5.1 through `mlua` and implements the small
 LÖVE graphics surface used by APP Manager. Normal UIKit frames are translated
@@ -11,7 +13,7 @@ renderer adapted from `balatro-port-tui` remains available for unsupported
 frames and devices. The terminal/Sixel runner and all Balatro-specific patches
 are excluded.
 
-## Current result
+## Production contract
 
 - Loads a directory containing `main.lua` and optional `conf.lua`.
 - Supports the `love.*` API currently used by `_kit/love/kit.lua`.
@@ -40,6 +42,8 @@ are excluded.
   the target device's SDL2 shared library.
 - Is packaged as `jenny92-appmanager/runtime/love.aarch64`; the package no
   longer carries liblove, LuaJIT, ModPlug, Ogg, or Theora.
+- Is launched directly by APP Manager with no system-LÖVE fallback. A missing
+  or invalid executable is a broken APP package, not a device-runtime choice.
 
 ## Build and test
 

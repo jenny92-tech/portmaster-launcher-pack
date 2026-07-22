@@ -20,6 +20,7 @@ launcher fail to start.
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
 | `build_appmanager_native.sh` | Build and stage Port App Manager's static aarch64 Rust helpers. |
+| `build_appmanager_love_lite.sh` | Build App Manager's production aarch64 LOVE-lite runtime; never used by game launchers. |
 | `dist_trimui_app.sh` | Wrap a built launcher as a TrimUI MainUI APP ZIP prefixed with `[TrimUI App]`; the archive extracts directly under `Apps/`. |
 
 ## TrimUI system APP packages
