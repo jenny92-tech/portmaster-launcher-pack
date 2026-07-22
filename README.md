@@ -14,7 +14,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
-| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled production LOVE-lite 1.x + static Rust helpers | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
+| [`appmanager`](ports/appmanager) | Port and environment manager | Bundled production LOVE-lite 1.x Rust process | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
@@ -30,8 +30,9 @@ standard filename `screenshot.png` in both the port root and `dist/`.
 
 LÖVE launchers package the shared `kit.lua`, declarative launcher schema, common
 `conf.lua`/`ui.gptk`, and port-specific Lua modules into `dist/love_ui/`. Port App
-Manager uses the same component kit, but packages its own production runtime and
-static Rust helpers so it can repair a missing PortMaster environment. Every
+Manager uses the same component kit, but packages its own production Rust runtime
+with the management cores linked into the same process, so it can repair a missing
+PortMaster environment. Every
 ordinary game launcher remains on PortMaster's installed LÖVE 11.5. Godot
 game-runtime tooling stays inside the relevant port.
 
@@ -71,10 +72,9 @@ See [`_kit/README.md`](_kit/README.md) for the helpers each port can pull in:
   `ports/<port>/dist/`.
 - `port_json.py` — converts the repository build manifest into the PortMaster
   `port.json` shipped in `dist/`.
-- `build_appmanager_native.sh` — builds the static aarch64 `portkit` and
-  `appmanager-cli` helpers embedded in Port App Manager.
 - `build_appmanager_love_lite.sh` — builds APP Manager's small aarch64
-  Rust/Lua UI runtime; other launchers remain on LÖVE 11.5.
+  Rust/Lua main process with the PortKit and APP Manager cores linked into it;
+  other launchers remain on LÖVE 11.5.
 
 ## License
 

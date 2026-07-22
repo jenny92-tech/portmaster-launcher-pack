@@ -1,5 +1,7 @@
 local kit = require("kit")
-local model = require("app_model").new(kit,require("json"),require("scan"))
+local json = require("json")
+local native = require("app_native").new(json)
+local model = require("app_model").new(kit,json,native)
 local operations = require("app_operations").new(model)
 local pages = require("app_pages").new(model,operations)
 local environment = require("app_environment").new(model,operations,pages)
@@ -26,127 +28,80 @@ local function poll_task(dt)
     local task=operations.task
     if not task then return end
     task.elapsed=task.elapsed+dt; task.poll=task.poll+dt
-    if task.poll<0.25 then return end
+    if task.poll<0.1 then return end
     task.poll=0
 
-    if task.kind=="config-refresh" then
-        local text=model.read_all(env.config_refresh_result or "")
-        local status=text and text:match("^1\t([^\r\n]+)") or nil
-        if status=="updated" or status=="unchanged" or status=="error" then
+    local event=model.native.poll()
+    if event and event.task_id==task.id then
+        if event.status=="progress" then
+            local progress=model.runtime_progress(event.data)
+            if progress then
+                if task.kind=="portmaster" then
+                    progress.cancel=L("Cancel installation","取消安装")
+                    progress.on_cancel=operations.request_portmaster_cancel
+                    progress.cancel_requested=task.cancel_requested==true
+                    progress.cancelling_label=L("Cancelling…","正在取消…")
+                    progress.cancel_disabled=progress.phase=="installing" or progress.phase=="complete"
+                    kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster…"),progress)
+                elseif task.kind=="appledouble" then
+                    kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files…"),progress)
+                else kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),progress) end
+            end
+            return
+        end
+
+        local data=event.data or {}
+        if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
+        if task.kind=="config-refresh" then
             operations.task=nil; kit.set_busy(false)
-            if status=="updated" and env.apply_script and env.apply_script~="" then
-                os.execute(model.shquote(env.apply_script).." --write-env >/dev/null 2>&1")
-                model.load_env(); model.invalidate_all()
-            end
+            local status=tostring(data.config_refresh or ""):match("^1\t([^\r\n]+)")
             finish_initial_load(true)
-            if status=="updated" then
-                kit.toast(L("Device configuration updated.","设备配置已更新。"),{kind="success"})
-            elseif status=="error" then
+            if event.status=="error" or status=="error" then
                 kit.toast(L("Using the built-in device configuration.","正在使用随包设备配置。"),{kind="info"})
+            elseif status=="updated" then
+                kit.toast(L("Device configuration updated.","设备配置已更新。"),{kind="success"})
             end
-        elseif task.elapsed>(task.timeout or 45) then
-            operations.task=nil; kit.set_busy(false); finish_initial_load(true)
-            kit.toast(L("Using the cached device configuration.","正在使用已缓存的设备配置。"),{kind="info"})
-        end
-        return
-    end
-
-    if task.kind=="update-check" then
-        local status=model.load_update_cache()
-        if status=="ok" or status=="error" then
-            operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
-            if status=="ok" then
-                kit.toast(L("Update check completed.","更新检查完成。"),{kind="success"})
-            else
+        elseif task.kind=="update-check" or task.kind=="update-check-background" then
+            operations.task=nil; kit.set_busy(false)
+            if event.status=="error" then env.update_status="error" end
+            if task.kind=="update-check" then environment.build_manage(true); kit.goto_page(page.MANAGE) end
+            if event.status=="error" then
                 kit.toast(L("Update check failed. Try again later.","检查更新失败，请稍后重试。"),{kind="error"})
+            elseif task.kind=="update-check" then
+                kit.toast(L("Update check completed.","更新检查完成。"),{kind="success"})
             end
-        elseif task.elapsed>(task.timeout or 35) then
-            operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
-            kit.toast(L("Update check timed out. Try again later.","检查更新超时，请稍后重试。"),{kind="error"})
-        end
-        return
-    end
-
-    if task.kind=="active-repair" then
-        if not model.file_exists(env.portmaster_active) then
-            kit.set_busy(false); operations.task=nil; model.load_env(); model.invalidate_all()
-            if model.file_exists(env.pending_install) or model.file_exists(env.install_transaction) then
-                environment.start_pending_validation()
-            else
-                pages.reset_selection()
-                if env.portmaster_health=="healthy" or env.portmaster_management=="system" then pages.build_home(); kit.goto_page(page.HOME)
-                else environment.build_repair_gate(); kit.goto_page(page.HOME) end
+            if task.kind=="update-check-background" and not model.file_exists(env.size_file) then
+                local ok,task_id=pcall(model.native.start,"scan-sizes",{})
+                if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
             end
-        elseif task.elapsed>(task.timeout or 1800) then
-            operations.task=nil
-            blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
-                L("Keep waiting, or exit and reopen App Manager later. Do not start another installation.",
-                    "请继续等待，或稍后退出并重新打开 APP。不要重复安装。"),"install-timeout",
-                environment.start_active_repair_wait)
-        end
-        return
-    end
-    if task.kind=="active-operation" then
-        if not model.file_exists(env.operation_active) then
-            kit.set_busy(false); operations.task=nil; model.load_env(); model.invalidate_all()
-            pages.reset_selection()
-            if env.portmaster_health=="healthy" or env.portmaster_management=="system" then
-                pages.build_home(); kit.goto_page(page.HOME); kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
-            else environment.build_repair_gate(); kit.goto_page(page.HOME) end
-        elseif task.elapsed>(task.timeout or 1800) then
-            operations.task=nil
-            blocking_notice(L("The operation is still running","操作仍在进行"),
-                L("Keep waiting, or exit and reopen App Manager later. Do not start another operation.",
-                    "请继续等待，或稍后退出并重新打开 APP。不要重复执行操作。"),"operation-timeout",
-                environment.start_active_operation_wait)
-        end
-        return
-    end
-    if task.kind=="validation" then
-        local status,detail=environment.validation_result()
-        if status=="valid" or status=="restored" or status=="no-usable" or status=="interrupted" then
+        elseif task.kind=="validation" then
+            local status,detail=environment.validation_result(data.validation)
+            if event.status=="error" or not status then status="interrupted" end
             environment.finish_validation(status,detail)
-        elseif task.elapsed>(task.timeout or 120) then
-            environment.finish_validation("timeout",L("The check is taking longer than expected. Exit and reopen App Manager later. Do not reinstall PortMaster while it is still running.",
-                "检查时间较长。请退出并稍后重新打开 APP，检查完成前不要重复安装。"))
-        end
+        elseif task.kind=="scan-sizes" then
+            operations.task=nil
+        else operations.finish_task(event) end
         return
     end
 
-    if not model.file_exists(env.plan_file) then
-        operations.finish_task()
-    elseif not task.timeout_notified and task.elapsed>(task.timeout or 45) then
-        task.timeout_notified=true
-        kit.set_busy(false)
+    if not task.timeout_notified and task.elapsed>(task.timeout or 45) then
+        task.timeout_notified=true; kit.set_busy(false)
         if task.kind=="portmaster" then
             blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
                 L("Keep waiting, or exit and reopen App Manager later. Do not start another installation.",
-                    "请继续等待，或稍后退出并重新打开 APP。不要重复安装。"),"install-timeout",
-                environment.start_active_repair_wait)
+                    "请继续等待，或稍后退出并重新打开 APP。不要重复安装。"),"install-timeout")
+        elseif task.kind=="validation" then
+            environment.finish_validation("timeout",L("The check is taking longer than expected. Exit and reopen App Manager later.",
+                "检查时间较长，请退出并稍后重新打开 APP。"))
+        elseif task.kind=="config-refresh" then
+            operations.task=nil; finish_initial_load(true)
+            kit.toast(L("Using the cached device configuration.","正在使用已缓存的设备配置。"),{kind="info"})
+        elseif task.kind=="update-check" then
+            operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
+            kit.toast(L("Update check timed out. Try again later.","检查更新超时，请稍后重试。"),{kind="error"})
         elseif operations.confirm_return==page.RUNTIME then
+            operations.task=nil; pages.build_runtime(); kit.goto_page(page.RUNTIME)
             kit.toast(L("The operation timed out. Try again later.","操作超时，请稍后重试。"),{kind="error"})
-            pages.build_runtime(); kit.goto_page(page.RUNTIME)
-        else pages.build_home(); kit.goto_page(page.HOME) end
-    elseif task.timeout_notified then
-        -- The helper is still authoritative after the UI timeout. Keep only
-        -- the cheap completion-file poll alive; finish_task will invalidate
-        -- the affected caches if the background operation completes later.
-        return
-    elseif operations.confirm_return==page.RUNTIME or task.kind=="portmaster" or task.kind=="appledouble" then
-        local progress=model.runtime_progress()
-        if progress then
-            if task.kind=="portmaster" then
-                progress.cancel=L("Cancel installation","取消安装")
-                progress.on_cancel=operations.request_portmaster_cancel
-                progress.cancel_requested=task.cancel_requested==true
-                progress.cancelling_label=L("Cancelling…","正在取消…")
-                progress.cancel_disabled=progress.phase=="installing" or progress.phase=="complete"
-                kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster…"),progress)
-            elseif task.kind=="appledouble" then
-                kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files…"),progress)
-            else
-                kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),progress)
-            end
         end
     end
 end
@@ -165,28 +120,31 @@ finish_initial_load=function(skip_config_refresh)
         environment.start_active_operation_wait()
         return
     end
-    if not skip_config_refresh and env.apply_script and env.apply_script~="" and
-       env.config_refresh_result and env.config_refresh_result~="" then
-        os.remove(env.config_refresh_result)
-        operations.task={kind="config-refresh",elapsed=0,poll=0,timeout=45}
+    if not skip_config_refresh then
         kit.set_busy(true,L("Checking device configuration…","正在检查设备配置……"),{
             indeterminate=true,stage=L("Checking device configuration","正在检查设备配置"),
             detail=L("The built-in configuration remains available if the network is unavailable.",
                 "网络不可用时会继续使用随包配置。"),footer_left="",footer_right=L("Checking…","检查中……")})
-        os.execute(model.shquote(env.apply_script).." --refresh-device-config >/dev/null 2>&1 &")
-        return
+        local ok,task_id=pcall(model.native.start,"config-refresh",{})
+        if ok then
+            operations.task={id=task_id,kind="config-refresh",elapsed=0,poll=0,timeout=45}
+            return
+        end
+        kit.set_busy(false)
     end
     pages.reset_selection()
     if env.portmaster_health=="healthy" or env.portmaster_management=="system" then
         pages.build_home()
-        if env.portmaster_management~="system" and env.apply_script and env.apply_script~="" then
-            os.execute(model.shquote(env.apply_script).." --check-pm-update >/dev/null 2>&1 &")
+        if env.portmaster_management~="system" then
+            local ok,task_id=pcall(model.native.start,"update-check-if-stale",{})
+            if ok then operations.task={id=task_id,kind="update-check-background",elapsed=0,poll=0,timeout=35} end
         end
     else
         environment.build_repair_gate()
     end
-    if env.apply_script and env.apply_script~="" and not model.file_exists(env.size_file) then
-        os.execute(model.shquote(env.apply_script).." --scan-sizes >/dev/null 2>&1 &")
+    if not operations.task and not model.file_exists(env.size_file) then
+        local ok,task_id=pcall(model.native.start,"scan-sizes",{})
+        if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
     end
 end
 

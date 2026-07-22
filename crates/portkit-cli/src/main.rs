@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 const EMBEDDED_ROOT: &[u8] = include_bytes!("../../../config/config.json");
 
-fn main() {
+pub fn cli_main() {
     match run(std::env::args().skip(1).collect()) {
         Ok(0) => {}
         Ok(exit_code) => std::process::exit(exit_code),
@@ -28,6 +28,12 @@ fn main() {
             std::process::exit(2);
         }
     }
+}
+
+/// In-process entry point used by Port App Manager. Arguments are the values
+/// after `portkit config refresh`; no shell or helper process is involved.
+pub fn refresh_config(arguments: &[String]) -> std::result::Result<(), String> {
+    config_refresh(arguments).map_err(|error| error.to_string())
 }
 
 fn run(arguments: Vec<String>) -> Result<i32> {

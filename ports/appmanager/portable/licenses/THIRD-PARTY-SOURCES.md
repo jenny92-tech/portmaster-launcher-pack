@@ -18,10 +18,8 @@ assets. Corresponding license notices are stored in this directory.
   distribution.
 - Noto Sans SC Regular: the Noto CJK archive distributed by PortMaster-GUI.
 - CA certificate bundle: the certifi bundle distributed by PortMaster-GUI.
-- BusyBox and the musl loader: Alpine Linux aarch64 packages.
 
-The BusyBox launcher deliberately resolves its adjacent musl loader instead of
-relying on the handheld's glibc version. HTTPS, hashes, and ZIP inspection are
-implemented by the static Rust helpers. The APP Manager UI runtime is its own
-Linux 3.7-compatible aarch64 executable and no longer ships PortMaster's LÖVE,
-LuaJIT, ModPlug, Ogg or Theora libraries.
+HTTPS, hashes, ZIP inspection, filesystem operations, task coordination, device
+resolution, and the Lua UI host are linked into the single LOVE-lite Rust main
+executable. The package no longer ships separate PortKit/APP Manager helper
+processes or PortMaster's LÖVE, LuaJIT, ModPlug, Ogg or Theora libraries.

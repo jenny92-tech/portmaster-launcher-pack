@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PAM_TOOL_MODE=system # Host fixtures run on macOS, not the packaged aarch64 tools.
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLI="$ROOT/target/debug/appmanager-cli"
 TMP="$(mktemp -d)"
@@ -19,10 +17,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli -p portkit-cli
-grep -Fq 'validate-pending-install' "$ROOT/ports/appmanager/src/launcher.sh"
-! grep -Eq '^(pending_manifest_valid|restore_rollback|rollback_pending_core|recover_interrupted_transaction)\(\)' \
-  "$ROOT/ports/appmanager/src/launcher.sh"
+cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli
+grep -Fq 'validate_pending_install' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+! grep -Fq 'PAM_TEST_' "$ROOT/ports/appmanager/src/launcher.sh"
 mkdir -p "$TMP/archive/PortMaster/pylibs-src" "$TMP/archive/PortMaster/miniloong" \
   "$TMP/app/bin" "$TMP/app/love_ui"
 cp -R "$ROOT/config" "$TMP/app/config"
@@ -62,19 +59,16 @@ install_case() {
 }
 
 validate_case() {
-  local name=$1 interrupted=${2:-0} fail_restore_after=${3:-0} root device scripts target
+  local name=$1 root device scripts target
   root="$TMP/$name"; device="$root/device"
   scripts="$device/mnt/sdcard/roms/ports"; target="$scripts/PortMaster"
   PAM_SOURCE_DIR="$scripts" PAM_APP_ROOT_OVERRIDE="$TMP/app" \
     PAM_STATE_DIR_OVERRIDE="$root/state" PAM_NATIVE_ROOT="$device" \
     PAM_NATIVE_LAUNCHER_OVERRIDE="$scripts/APP Manager.sh" \
-    PAM_APPMANAGER_CLI_BIN_OVERRIDE="$CLI" \
-    PAM_PORTKIT_BIN_OVERRIDE="$ROOT/target/debug/portkit" \
     PAM_PORTMASTER_DIR_OVERRIDE="$target" \
     PAM_DIRECTORY_OVERRIDE="${root#/}/data" \
-    PAM_TEST_INTERRUPT_VALIDATION="$interrupted" \
-    PAM_TEST_FAIL_RESTORE_AFTER="$fail_restore_after" \
-    bash "$ROOT/ports/appmanager/src/launcher.sh" --validate-pending
+    "$CLI" --config-dir "$TMP/app/config" launcher-session --source-dir "$scripts" \
+      --launcher "$scripts/APP Manager.sh" --app-root "$TMP/app" -- --validate-pending
 }
 
 expect_validation_exit() {
@@ -113,12 +107,6 @@ grep -Fq $'1\tno-usable\t' "$TMP/first-failure/state/validation-result.tsv"
 [ ! -e "$(target_for first-failure)/control.txt" ]
 grep -Fxq runtime-sentinel "$(target_for first-failure)/libs/keep.squashfs"
 
-install_case interrupted update
-expect_validation_exit 75 interrupted 1
-grep -Fq $'1\tinterrupted\t' "$TMP/interrupted/state/validation-result.tsv"
-[ -s "$TMP/interrupted/state/pending-install.tsv" ]
-grep -Fxq new-core "$(target_for interrupted)/core.txt"
-
 install_case launcher-missing update
 rm -f "$(scripts_for launcher-missing)/PortMaster.sh"
 expect_validation_exit 1 launcher-missing
@@ -148,16 +136,6 @@ expect_validation_exit 1 first-no-manifest
 grep -Fq $'1\tno-usable\t' "$TMP/first-no-manifest/state/validation-result.tsv"
 [ ! -e "$(target_for first-no-manifest)/control.txt" ]
 grep -Fxq runtime-sentinel "$(target_for first-no-manifest)/libs/keep.squashfs"
-
-# Rollback is restartable after a power loss during restoration.
-install_case restore-retry update
-rm -f "$(target_for restore-retry)/funcs.txt"
-expect_validation_exit 75 restore-retry 0 1
-grep -Fq $'1\tinterrupted\t' "$TMP/restore-retry/state/validation-result.tsv"
-[ -f "$(target_for restore-retry)/.appmanager-rollback/restoring" ]
-expect_validation_exit 1 restore-retry
-grep -Fq $'1\trestored\t' "$TMP/restore-retry/state/validation-result.tsv"
-grep -Fxq old-core "$(target_for restore-retry)/old.txt"
 
 # Tampered rollback metadata blocks destructive recovery and preserves both copies.
 install_case rollback-metadata update

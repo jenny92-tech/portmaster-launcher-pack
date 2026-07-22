@@ -117,14 +117,14 @@ function Environment.new(model,operations,pages_ui)
             kit.toast(L("PortMaster updates are disabled for this device profile.",
                 "当前设备配置未启用 PortMaster 更新。"),{kind="info"}); return
         end
-        if not env.apply_script or env.apply_script=="" then
-            kit.toast(L("Cannot check for updates.","无法检查更新。"),{kind="error"}); return
-        end
-        if env.update_cache_file then os.remove(env.update_cache_file) end
         env.update_status="checking"; env.portmaster_latest=""
         kit.toast(L("Checking for updates…","正在检查更新……"),{kind="info"})
-        os.execute(model.shquote(env.apply_script).." --check-pm-update-force >/dev/null 2>&1 &")
-        operations.task={kind="update-check",elapsed=0,poll=0,timeout=35}
+        local ok,task_id=pcall(model.native.start,"update-check",{})
+        if not ok then
+            env.update_status="error"
+            kit.toast(L("Cannot check for updates.","无法检查更新。"),{kind="error"}); return
+        end
+        operations.task={id=task_id,kind="update-check",elapsed=0,poll=0,timeout=35}
     end
 
     function self.build_manage(preserve)
@@ -190,23 +190,13 @@ function Environment.new(model,operations,pages_ui)
         kit.set_page(page.HOME,page_title,rows,{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
     end
 
-    function self.validation_result()
-        local text=model.read_all(env.validation_result_file or "")
-        if not text then return nil,nil end
+    function self.validation_result(text)
+        if type(text)~="string" then return nil,nil end
         local status,detail=text:match("^1\t([^\t\r\n]+)\t([^\r\n]*)")
         return status,detail
     end
 
     function self.start_pending_validation()
-        if not env.apply_script or env.apply_script=="" then
-            kit.set_page(page.HOME,L("Cannot check PortMaster","无法检查 PortMaster"),{
-                note(L("What to do","请执行"),
-                    L("Reinstall Port App Manager, then try again.","请重新安装 Port App Manager 后重试。"),"validation:error"),
-                button(L("Exit","退出"),operations.show_exit_dialog,{id="validation:exit"}),
-            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
-            return
-        end
-        if env.validation_result_file then os.remove(env.validation_result_file) end
         kit.set_page(page.HOME,L("Checking PortMaster","检查 PortMaster"),{
             note(L("Please wait","请稍候"),
                 L("Checking the installed PortMaster. Home will open automatically when it finishes.",
@@ -218,8 +208,12 @@ function Environment.new(model,operations,pages_ui)
             detail=L("Please wait. App Manager will continue automatically.","请稍候，检查完成后会自动继续。"),
             footer_left=L("Automatic check","自动检查"),footer_right=L("Please wait…","请稍候……"),
         })
-        os.execute(model.shquote(env.apply_script).." --validate-pending >/dev/null 2>&1 &")
-        operations.task={kind="validation",elapsed=0,poll=0,timeout=120}
+        local ok,task_id=pcall(model.native.start,"validate-pending",{})
+        if not ok then
+            self.finish_validation("interrupted",L("Cannot start the PortMaster check. Reopen App Manager and try again.",
+                "无法开始检查 PortMaster，请重新打开 APP 后重试。")); return
+        end
+        operations.task={id=task_id,kind="validation",elapsed=0,poll=0,timeout=120}
     end
 
     function self.finish_validation(status,detail)

@@ -11,6 +11,8 @@ KIT = ROOT / "_kit" / "love"
 APP = ROOT / "ports" / "appmanager" / "love"
 
 source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(APP.glob("*.lua")))
+operations_source = (APP / "app_operations.lua").read_text(encoding="utf-8")
+assert operations_source.index("model.invalidate_for_plan") < operations_source.index("model.apply_snapshot")
 assert "Port App Manager 使用自带 UI 环境，因此仍可运行" not in source
 assert "无法启动提权操作助手" not in source
 assert "SquashFS 镜像" not in source
@@ -29,7 +31,7 @@ assert "surface=false" in source
 for contract in (
     'id="manage:latest"', 'id="manage:check"', 'id="manage:update"',
     'L("Update now","立即更新")', 'L("Up to date","已是最新版")',
-    'L("Reinstall","重新安装")', '--check-pm-update-force',
+    'L("Reinstall","重新安装")', 'model.native.start,"update-check"',
     'local actions={', 'sidebar_title=L("Maintenance","维护")',
     'sidebar=actions', 'row_layout={mode="grid",columns=2}',
     'for _,item in ipairs(self.confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
@@ -71,12 +73,14 @@ love.graphics.setScissor=function() end
 love.filesystem.getInfo=function() return nil end
 love.filesystem.getSource=function() return SOURCE end
 love.event.quit=function(code) LAST_QUIT=code end
-package.loaded.scan = {
-    run=function() return {ports={},refcount={},orphan_dirs={},orphan_images={},dead_scripts={},
-        runtimes={have={},need={},missing={}}} end,
-    entries=function() return {} end,
-    runtime_file_health=function() return "missing",0 end,
-    basename=function(path) return path:match("([^/]+)$") or path end,
+appmanager = {
+    snapshot=function() return APP_SNAPSHOT end,
+    start=function(kind)
+        if kind=="config-refresh" then error("offline fixture") end
+        return 1
+    end,
+    poll=function() return nil end,
+    cancel=function() end,
 }
 '''
 
@@ -88,7 +92,6 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
             (root / name).mkdir()
         env_path = root / "state" / "env.json"
         pending_path = root / "state" / "pending-install.tsv"
-        validation_path = root / "state" / "validation-result.tsv"
         if pending:
             pending_path.write_text("pending\n", encoding="utf-8")
         env_path.write_text(
@@ -109,16 +112,11 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
                     "device_name": "MiniLoong Pocket One",
                     "device_class": "tested",
                     "device_arch": "aarch64",
-                    "plan_file": str(root / "state" / "plan.txt"),
-                    "result_file": str(root / "state" / "result.txt"),
-                    "progress_file": str(root / "state" / "progress.tsv"),
                     "size_file": str(root / "state" / "sizes.tsv"),
                     "runtime_metadata_file": str(root / "state" / "runtime-metadata.tsv"),
-                    "apply_script": "/bin/true" if pending else "",
                     "pending_install": str(pending_path),
                     "install_transaction": str(root / "state" / "install-transaction.tsv"),
                     "portmaster_active": str(root / "state" / "portmaster-active.tsv"),
-                    "validation_result_file": str(validation_path),
                     "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
                     "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"],
                     "self_port": "jenny92-appmanager",
@@ -126,21 +124,19 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
             ),
             encoding="utf-8",
         )
-        previous = os.environ.get("PAM_ENV")
-        os.environ["PAM_ENV"] = str(env_path)
-        try:
-            lua = LuaRuntime(unpack_returned_tuples=True)
-            lua.globals().SOURCE = str(APP)
-            lua.execute(LOVE_MOCK)
-            lua.execute(f"package.path={str(APP / '?.lua')!r}..';'..{str(KIT / '?.lua')!r}..';'..package.path")
-            lua.execute(f"dofile({str(APP / 'main.lua')!r})")
-            lua.execute("love.load()")
-            return lua
-        finally:
-            if previous is None:
-                os.environ.pop("PAM_ENV", None)
-            else:
-                os.environ["PAM_ENV"] = previous
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals().SOURCE = str(APP)
+        lua.globals().APP_SNAPSHOT = json.dumps({
+            "env": json.loads(env_path.read_text(encoding="utf-8")),
+            "inventory": {"schema": 2, "ports": [], "refcount": {}, "orphan_dirs": [],
+                "orphan_images": [], "dead_scripts": [], "trash": [],
+                "runtimes": {"need": {}, "facts": []}},
+        })
+        lua.execute(LOVE_MOCK)
+        lua.execute(f"package.path={str(APP / '?.lua')!r}..';'..{str(KIT / '?.lua')!r}..';'..package.path")
+        lua.execute(f"dofile({str(APP / 'main.lua')!r})")
+        lua.execute("love.load()")
+        return lua
 
 
 healthy = run_case("healthy")
@@ -254,9 +250,9 @@ with tempfile.TemporaryDirectory() as temporary:
         encoding="utf-8",
     )
     healthy.execute(r'''
-        local model=require("app_model").new(require("kit"),require("json"),require("scan"))
-        model.env.progress_file=PROGRESS_PATH
-        local progress=model.runtime_progress()
+        local model=require("app_model").new(require("kit"),require("json"),{})
+        local progress=model.runtime_progress({phase="downloading",runtime="PortMaster",index=1,count=1,
+            current=22,total=100,speed=4096,detail="Downloading verified release assets"})
         assert(progress.stage.zh=="正在下载 PortMaster")
         assert(progress.footer_right.zh=="4.0 KB/秒")
         assert(progress.detail=="")
@@ -267,9 +263,9 @@ with tempfile.TemporaryDirectory() as temporary:
         encoding="utf-8",
     )
     healthy.execute(r'''
-        local model=require("app_model").new(require("kit"),require("json"),require("scan"))
-        model.env.progress_file=PROGRESS_PATH
-        local progress=model.runtime_progress()
+        local model=require("app_model").new(require("kit"),require("json"),{})
+        local progress=model.runtime_progress({phase="downloading",runtime="PortMaster",index=1,count=1,
+            current=78,total=100,speed=0,detail="Using local cache"})
         assert(progress.stage.zh=="正在下载 PortMaster")
         assert(progress.footer_right.zh=="使用缓存")
     ''')

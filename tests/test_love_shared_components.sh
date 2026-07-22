@@ -55,7 +55,7 @@ grep -Fq 'require("kit")' "$app_lua/main.lua"
 for module in app_model app_operations app_pages app_environment; do
   grep -Fq "require(\"$module\")" "$app_lua/main.lua"
 done
-grep -Fq 'kit=kit,json=json,scanner=scanner' "$app_lua/app_model.lua"
+grep -Fq 'kit=kit,json=json,native=native' "$app_lua/app_model.lua"
 [ "$(wc -l < "$app_lua/main.lua")" -lt 220 ]
 grep -Fq 'kit.checkbox' "$app_lua"/*.lua
 grep -Fq 'kit.checkbox(model.display_name(script),{' "$app_lua/app_pages.lua"
@@ -100,17 +100,15 @@ grep -Fq 'Installed Runtimes (%d)' "$app_lua/app_pages.lua"
 grep -Fq '已安装 Runtime（%d）' "$app_lua/app_pages.lua"
 grep -Fq 'INSTALL_RUNTIME' "$app_lua/app_pages.lua"
 launcher="$ROOT/ports/appmanager/src/launcher.sh"
-sources="$ROOT/ports/appmanager/src/appmanager_sources.sh"
+runner="$ROOT/crates/appmanager-cli/src/launcher.rs"
 [ ! -e "$ROOT/ports/appmanager/love/runtime_catalog.tsv" ]
-grep -Fq 'PAM_RUNTIME_REPOSITORY="${PAM_RUNTIME_REPOSITORY:-PortsMaster/PortMaster-New}"' "$sources"
-grep -Fq 'RUNTIME_METADATA_URL="${RUNTIME_METADATA_URL:-$PAM_RUNTIME_RELEASES_URL/latest/download/ports.json}"' "$sources"
-grep -Fq 'refresh-runtime-metadata' "$launcher"
-grep -Fq 'runtime_metadata_refresh()' "$launcher"
-grep -Fq 'runtime-metadata-entry' "$launcher"
-! grep -Fq 'runtime_expected_md5()' "$launcher"
-grep -Fq 'runtime_md5_file()' "$launcher"
-grep -Fq '[ "$VALIDATE_ONLY" = "1" ] || [ "$RUNTIME_METADATA_ONLY" = "1" ]' "$launcher"
-! grep -Fq 'RUNTIME_SOURCE_REF' "$launcher"
+grep -Fq 'runtime_metadata_url' "$runner"
+grep -Fq 'refresh_runtime_metadata' "$runner"
+grep -Fq 'RuntimeMetadata::parse' "$runner"
+grep -Fq 'digest_file(&image, DigestAlgorithm::Md5)' "$runner"
+! grep -Fq 'RUNTIME_SOURCE_REF' "$runner"
+grep -Fq 'runtime/love.aarch64' "$launcher"
+! grep -Fq 'launcher-session' "$launcher"
 ! grep -Fq '"Runtime "..index.."/"..#runtimes' "$app_lua"/*.lua
 grep -Fq 'mode=="flow"' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'font:getWidth(title)>title_w' "$ROOT/_kit/love/kit.lua"
@@ -126,7 +124,7 @@ for retired in bootstrap.pck appmanager.gptk runtime hacksdl; do
   }
 done
 for current in love_ui/kit.lua love_ui/main.lua love_ui/app_model.lua love_ui/app_operations.lua \
-  love_ui/app_pages.lua love_ui/app_environment.lua love_ui/scan.lua love_ui/ui.gptk; do
+  love_ui/app_pages.lua love_ui/app_environment.lua love_ui/app_native.lua love_ui/ui.gptk; do
   [ -f "$ROOT/ports/appmanager/dist/jenny92-appmanager/$current" ] || {
     echo "appmanager dist: missing $current" >&2
     exit 1

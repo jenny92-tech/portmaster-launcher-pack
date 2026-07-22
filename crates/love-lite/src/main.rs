@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use appmanager_cli::{EmbeddedRequest, EmbeddedService};
 use love_lite::{DEFAULT_HEIGHT, DEFAULT_WIDTH, Engine};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -42,6 +44,29 @@ fn run() -> Result<i32> {
     let requested_width = parse_dimension(args.next(), DEFAULT_WIDTH, "width")?;
     let requested_height = parse_dimension(args.next(), DEFAULT_HEIGHT, "height")?;
 
+    let source_path = std::path::PathBuf::from(&source);
+    let app_root = env::var_os("PAM_APP_ROOT")
+        .map(std::path::PathBuf::from)
+        .or_else(|| source_path.parent().map(std::path::Path::to_path_buf))
+        .context("resolve APP Manager root")?;
+    let source_dir = env::var_os("PAM_SOURCE_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| app_root.parent().map(std::path::Path::to_path_buf))
+        .context("resolve APP Manager launcher directory")?;
+    let launcher = env::var_os("PAM_LAUNCHER")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| source_dir.join("APP Manager.sh"));
+    let service = EmbeddedService::new(EmbeddedRequest {
+        source_dir,
+        launcher,
+        config_dir: Some(app_root.join("config")),
+        remote_config_dir: Some(app_root.join("state/device-config")),
+        app_root,
+    })
+    .map_err(anyhow::Error::msg)
+    .context("initialize APP Manager service")?;
+    apply_process_environment(service.process_environment().map_err(anyhow::Error::msg)?);
+
     let sdl = sdl2::init().map_err(anyhow::Error::msg)?;
     let video = sdl.video().map_err(anyhow::Error::msg)?;
     let native_enabled = env::var("LOVE_LITE_NATIVE_RESOLUTION").as_deref() != Ok("0");
@@ -67,7 +92,7 @@ fn run() -> Result<i32> {
         .output_size()
         .map_err(anyhow::Error::msg)
         .context("read SDL2 renderer output size")?;
-    let engine = Engine::load(&source, render_width, render_height)?;
+    let engine = Engine::load_appmanager(&source, render_width, render_height, service.clone())?;
     let title = engine.runtime.state.window_title.lock().clone();
     canvas
         .window_mut()
@@ -97,6 +122,15 @@ fn run() -> Result<i32> {
         .unwrap_or(previous);
     let mut exit_code = 0;
     let mut gpu_failures = 0_u8;
+    let process_name = env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "love.aarch64".into());
+    service.start_input_helper(&process_name);
+    let _input_helper = InputHelperGuard(service);
 
     'running: loop {
         let update_started = Instant::now();
@@ -179,6 +213,29 @@ fn run() -> Result<i32> {
     }
 
     Ok(exit_code)
+}
+
+struct InputHelperGuard(EmbeddedService);
+
+impl Drop for InputHelperGuard {
+    fn drop(&mut self) {
+        self.0.stop_input_helper();
+    }
+}
+
+fn apply_process_environment(resolved: BTreeMap<String, String>) {
+    // This runs before SDL or worker threads exist. Rust 2024 marks process
+    // environment mutation unsafe because concurrent readers would race.
+    unsafe {
+        for (name, _) in env::vars_os() {
+            if !resolved.contains_key(name.to_string_lossy().as_ref()) {
+                env::remove_var(name);
+            }
+        }
+        for (name, value) in resolved {
+            env::set_var(name, value);
+        }
+    }
 }
 
 fn positive_dimensions(width: i32, height: i32) -> Option<(u32, u32)> {

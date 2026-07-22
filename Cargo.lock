@@ -70,6 +70,8 @@ version = "0.1.0"
 dependencies = [
  "appmanager-core",
  "clap",
+ "libc",
+ "portkit-cli",
  "portkit-core",
  "serde",
  "serde_json",
@@ -542,9 +544,11 @@ name = "love-lite"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "appmanager-cli",
  "love-api",
  "mlua",
  "sdl2",
+ "serde_json",
  "tempfile",
 ]
 

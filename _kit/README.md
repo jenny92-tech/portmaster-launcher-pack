@@ -12,14 +12,12 @@ launcher fail to start.
 |---|---|
 | `love/kit.lua` | Shared LÖVE UI: pages, items, buttons, split layout, focus, localization and busy state. |
 | `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
-| `portable_tools.sh` | Capability probe and process-local all-or-nothing switch from system applets to an application-provided BusyBox. |
 | `launcher_artwork.sh` | Shared tested-device adapter for launcher artwork paths and safe same-name synchronization. |
 | `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
 | `launcher_unity_common.sh` | **Unity-loader only**: configuration, button remap and game launch. |
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
-| `build_appmanager_native.sh` | Build and stage Port App Manager's static aarch64 Rust helpers. |
 | `build_appmanager_love_lite.sh` | Build App Manager's production aarch64 LOVE-lite runtime; never used by game launchers. |
 | `dist_trimui_app.sh` | Wrap a built launcher as a TrimUI MainUI APP ZIP prefixed with `[TrimUI App]`; the archive extracts directly under `Apps/`. |
 
@@ -42,7 +40,7 @@ of APP Manager's Port scanning, uninstall, or leftover-cleanup model.
 
 ## GitHub transport
 
-The static Rust `portkit` helper treats a proxy as a typed registry entry
+The Rust PortKit core treats a proxy as a typed registry entry
 instead of assuming every endpoint supports every GitHub URL:
 
 ```text
@@ -50,13 +48,13 @@ id<TAB>formatter<TAB>release,raw,archive,clone,api,gist<TAB>base-url
 ```
 
 Formatters include direct, full-source prefix, mirror-host replacement,
-jsDelivr Raw files, and Git-smart-HTTP routes. `portkit github fetch` filters by
+jsDelivr Raw files, and Git-smart-HTTP routes. The transport filters by
 capability, probes at most five routes at once, validates content before atomic
 promotion, and resumes only from the same formatted endpoint. Route hints live
-only for the Rust process lifetime. APP-specific Runtime and stable-manifest
-validation is exposed by `appmanager-cli`; MD5/SHA-256 and ZIP inspection are
-provided by `portkit file`, so launchers do not carry curl or archive/hash shell
-wrappers.
+only for the Rust process lifetime. APP-specific Runtime, release-manifest,
+MD5/SHA-256 and ZIP validation are linked into APP Manager's single Rust process,
+so its launcher carries no curl or archive/hash shell wrappers. The workspace CLI
+targets remain available for diagnostics and tests, but are not packaged.
 
 Git LFS, GitHub Packages, and GHCR are intentionally not modeled as file
 downloads: they have separate authenticated protocols. Add them as distinct
@@ -141,7 +139,7 @@ background, then overlays the port's Lua modules and optional asset overrides in
 `dist/love_ui/`. The CJK font is provisioned from PortMaster on first launch.
 See [`love/README.md`](love/README.md) for the component and device details.
 
-Port App Manager is packaged differently: it includes a private bootstrap runtime,
-font, input and network tools next to its UI. See
+Port App Manager is packaged differently: it includes a private Rust bootstrap/runtime,
+font and input helper next to its UI. See
 [`../docs/architecture.md`](../docs/architecture.md) for the repository boundary and
 publication routing.

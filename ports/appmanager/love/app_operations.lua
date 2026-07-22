@@ -18,24 +18,15 @@ function Operations.new(model)
         })
     end
 
-    local function write_plan(items)
-        local path=env.plan_file or ""; local f=io.open(path,"wb")
-        if not f then return false end
-        f:write("# APP Manager plan — validated and applied by launcher.sh\n")
-        for _,item in ipairs(items) do
-            if tostring(item.arg):find("[\t\r\n]") then f:close(); os.remove(path); return false end
-            f:write(item.kind,"\t",item.arg,"\n")
-        end
-        f:close(); return true
-    end
-
-    function self.finish_task()
+    function self.finish_task(event)
         kit.set_busy(false)
         local completed_task=self.task
         self.task=nil
-        if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
-        local result=model.read_all(env.result_file or "")
-        local failed=result and result:match("FAIL")
+        local data=event and event.data or {}
+        model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
+        if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
+        local result=tostring(data.result or "")
+        local failed=event and event.status=="error" or result:match("FAIL")
         if failed then
             kit.toast(L("The operation failed. See log.txt.","操作失败，请查看 log.txt。"),{kind="error"})
         elseif completed_task and completed_task.kind=="appledouble" then
@@ -45,8 +36,6 @@ function Operations.new(model)
         else
             kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
         end
-        model.load_env()
-        model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
         page_builders.reset_selection()
         if completed_task and completed_task.kind=="portmaster" then
             if failed then
@@ -74,24 +63,17 @@ function Operations.new(model)
 
     function self.request_portmaster_cancel()
         if self.task then self.task.cancel_requested=true end
-        local f=io.open(env.cancel_file or "","wb")
-        if f then f:write("cancel\n"); f:close() end
+        pcall(model.native.cancel)
     end
 
     function self.start_apply()
         if not self.confirm_plan or #self.confirm_plan==0 then return end
-        if not write_plan(self.confirm_plan) or not env.apply_script or env.apply_script=="" then
-            kit.toast(L("Cannot start the operation.","无法开始操作。"),{kind="error"})
-            kit.goto_page(self.confirm_return); return
-        end
-        if env.progress_file and env.progress_file~="" then os.remove(env.progress_file) end
         local portmaster,appledouble=false,false
         for _,item in ipairs(self.confirm_plan) do
             if item.kind=="INSTALL_PORTMASTER" then portmaster=true; break end
             if item.kind=="CLEAN_APPLEDOUBLE" then appledouble=true end
         end
         if portmaster then
-            if env.cancel_file and env.cancel_file~="" then os.remove(env.cancel_file) end
             kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster…"),{
                 progress=0,stage=L("Preparing PortMaster","正在准备 PortMaster"),detail="",
                 footer_left="0%",footer_right=L("Preparing…","准备中…"),
@@ -107,8 +89,13 @@ function Operations.new(model)
         else
             kit.set_busy(true,L("Working…","处理中…"))
         end
-        os.execute(model.shquote(env.apply_script).." --apply-plan >/dev/null 2>&1 &")
-        self.task={elapsed=0,poll=0,timeout=(self.confirm_return==pages.RUNTIME or portmaster or appledouble) and 1800 or 45,
+        local ok,task_id=pcall(model.native.start,"apply",self.confirm_plan)
+        if not ok then
+            kit.set_busy(false)
+            kit.toast(L("Cannot start the operation.","无法开始操作。"),{kind="error"})
+            kit.goto_page(self.confirm_return); return
+        end
+        self.task={id=task_id,elapsed=0,poll=0,timeout=(self.confirm_return==pages.RUNTIME or portmaster or appledouble) and 1800 or 45,
             kind=portmaster and "portmaster" or appledouble and "appledouble" or "operation",plan=self.confirm_plan}
     end
 

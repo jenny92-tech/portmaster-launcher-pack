@@ -5,7 +5,7 @@ local function clear(values)
 end
 
 function Pages.new(model,operations)
-    local kit,scanner,L=model.kit,model.scanner,model.L
+    local kit,L=model.kit,model.L
     local env,report,runtime_metadata=model.env,model.report,model.runtime_metadata
     local page=model.pages
     local self={}
@@ -260,7 +260,7 @@ function Pages.new(model,operations)
     local function remove_junk()
         local plan,labels={},{}
         for path,value in pairs(selected_junk) do
-            if value then plan[#plan+1]={kind="TRASH",arg=path}; labels[#labels+1]=scanner.basename(path) end
+            if value then plan[#plan+1]={kind="TRASH",arg=path}; labels[#labels+1]=model.basename(path) end
         end
         table.sort(labels)
         if #plan>0 then operations.show_confirm(L("Move leftovers to Trash","将残留项移入回收站"),plan,labels,page.JUNK,

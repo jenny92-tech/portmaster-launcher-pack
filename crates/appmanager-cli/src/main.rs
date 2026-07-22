@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -15,11 +17,15 @@ use appmanager_core::{
 use clap::{Parser, Subcommand, ValueEnum};
 use portkit_core::github::{Capability, GitHubTransport};
 use portkit_core::{
-    CandidateSelector, ConfigCandidate, ConfigLoader, ConfigOrigin, DetectionContext,
-    DigestAlgorithm, ExclusiveFileLock, LocalFragmentSource, digest_file,
+    CandidateSelector, Config, ConfigCandidate, ConfigLoader, ConfigOrigin, DetectionContext,
+    DigestAlgorithm, ExclusiveFileLock, LocalFragmentSource, Resolution, digest_file,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
+
+pub mod launcher;
+
+pub use launcher::{EmbeddedRequest, EmbeddedService, ServiceEvent};
 
 const EMBEDDED_ROOT: &[u8] = include_bytes!("../../../config/config.json");
 
@@ -37,7 +43,7 @@ struct Cli {
 }
 
 #[derive(Clone, Debug)]
-struct ConfigDirectories {
+pub(crate) struct ConfigDirectories {
     embedded: Option<PathBuf>,
     remote: Option<PathBuf>,
 }
@@ -50,6 +56,17 @@ enum OutputFormat {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run one explicit diagnostic or compatibility operation.
+    LauncherSession {
+        #[arg(long)]
+        source_dir: PathBuf,
+        #[arg(long)]
+        launcher: PathBuf,
+        #[arg(long)]
+        app_root: PathBuf,
+        #[arg(last = true, allow_hyphen_values = true)]
+        entry_arguments: Vec<String>,
+    },
     /// Refresh the official Runtime JSON and canonical TSV caches.
     RefreshRuntimeMetadata {
         #[arg(long)]
@@ -239,10 +256,6 @@ enum Command {
         /// Config-derived health status: healthy, damaged, or missing.
         #[arg(long)]
         core_health: String,
-        #[arg(long, hide = true)]
-        test_interrupt_before_mutation: bool,
-        #[arg(long, hide = true)]
-        test_fail_restore_after: Option<usize>,
     },
     /// Repair official PortMaster Runtime images with strict validation.
     RepairRuntimes {
@@ -349,7 +362,7 @@ struct ErrorBody {
     message: String,
 }
 
-fn main() -> ExitCode {
+pub fn cli_main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -365,6 +378,24 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Command::LauncherSession {
+        source_dir,
+        launcher,
+        app_root,
+        entry_arguments,
+    } = &cli.command
+    {
+        return launcher::run(launcher::Request {
+            source_dir: source_dir.clone(),
+            launcher: launcher.clone(),
+            app_root: app_root.clone(),
+            entry_arguments: entry_arguments.clone(),
+            config_directories: ConfigDirectories {
+                embedded: cli.config_dir.clone(),
+                remote: cli.remote_config_dir.clone(),
+            },
+        });
+    }
     let raw_tsv = matches!(
         &cli.command,
         Command::GenerateDeviceInstallPlan {
@@ -436,6 +467,7 @@ fn run(
     config_directories: &ConfigDirectories,
 ) -> Result<(&'static str, Value), CliError> {
     match command {
+        Command::LauncherSession { .. } => unreachable!("handled before command dispatch"),
         Command::RefreshRuntimeMetadata {
             source,
             json_cache,
@@ -619,8 +651,6 @@ fn run(
             root,
             environment,
             core_health,
-            test_interrupt_before_mutation,
-            test_fail_restore_after,
         } => validate_device_pending_install(
             launcher,
             app_state,
@@ -630,8 +660,6 @@ fn run(
             root,
             environment,
             core_health,
-            test_interrupt_before_mutation,
-            test_fail_restore_after,
             config_directories,
         ),
         Command::RepairRuntimes {
@@ -1392,8 +1420,6 @@ fn validate_device_pending_install(
     root: Option<PathBuf>,
     environment: Vec<String>,
     core_health: String,
-    test_interrupt_before_mutation: bool,
-    test_fail_restore_after: Option<usize>,
     config_directories: &ConfigDirectories,
 ) -> Result<(&'static str, Value), CliError> {
     let name = "validate-pending-install";
@@ -1423,8 +1449,8 @@ fn validate_device_pending_install(
         state_dir: app_state,
         plan,
         core_health_healthy: core_health == "healthy",
-        interrupt_before_mutation: test_interrupt_before_mutation,
-        fail_restore_after: test_fail_restore_after,
+        interrupt_before_mutation: false,
+        fail_restore_after: None,
     })
     .map_err(|error| domain_error(name, "validation-failed", error))?;
     Ok((
@@ -1441,6 +1467,8 @@ fn validate_device_pending_install(
 struct DeviceResolution {
     config_origin: ConfigOrigin,
     model_id: Option<String>,
+    config: Config,
+    resolution: Resolution,
     context: ResolvedDeviceContext,
 }
 
@@ -1513,9 +1541,11 @@ fn resolve_device_context(
     )
     .map_err(|error| domain_error(command, "device-resolution-failed", error))?;
     let config_origin = selected.selected.origin;
-    let model_id = selected.resolution.model_id.clone();
+    let config = selected.selected.config;
+    let resolution = selected.resolution;
+    let model_id = resolution.model_id.clone();
     let input = ResolvedContextInput {
-        resolution: selected.resolution,
+        resolution: resolution.clone(),
         app_owned: AppOwnedPaths {
             state: app_state,
             trash,
@@ -1526,6 +1556,8 @@ fn resolve_device_context(
     Ok(DeviceResolution {
         config_origin,
         model_id,
+        config,
+        resolution,
         context,
     })
 }

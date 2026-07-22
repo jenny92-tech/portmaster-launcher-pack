@@ -2,39 +2,28 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SOURCES="$ROOT/ports/appmanager/src/appmanager_sources.sh"
+CONFIG="$ROOT/config/config.json"
 
-bash -n "$SOURCES"
+python3 - "$CONFIG" <<'PY'
+import json, sys
 
-(
-  source "$SOURCES"
-  [ "$PAM_FORK_RELEASES_URL" = "https://github.com/jenny92-tech/PortMaster-GUI/releases" ]
-  [ "$PAM_OFFICIAL_RELEASES_URL" = "https://github.com/PortsMaster/PortMaster-GUI/releases" ]
-  [ "$PAM_RUNTIME_RELEASES_URL" = "https://github.com/PortsMaster/PortMaster-New/releases" ]
-  [ "$PAM_CUSTOM_VERSION_URL" = "$PAM_FORK_RELEASES_URL/latest/download/version.json" ]
-  [ "$PAM_OFFICIAL_VERSION_URL" = "$PAM_OFFICIAL_RELEASES_URL/latest/download/version.json" ]
-  [ "$PAM_DEVICE_CONFIG_URL" = "https://raw.githubusercontent.com/jenny92-tech/portmaster-launcher-pack/main/config/config.json" ]
-  [ "$RUNTIME_METADATA_URL" = "$PAM_RUNTIME_RELEASES_URL/latest/download/ports.json" ]
-)
+config=json.load(open(sys.argv[1], encoding="utf-8"))
+sources=config["sources"]
+endpoints=sources["endpoints"]
+routes=sources["release_routes"]
+assert endpoints["jenny92_portmaster"] == "https://github.com/jenny92-tech/PortMaster-GUI/releases/latest/download/version.json"
+assert endpoints["official_portmaster"] == "https://github.com/PortsMaster/PortMaster-GUI/releases/latest/download/version.json"
+assert endpoints["runtime_metadata"] == "https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json"
+assert routes["miniloong-custom"]["manifest"] == "jenny92_portmaster"
+assert routes["official"]["manifest"] == "official_portmaster"
+assert routes["system"]["install_allowed"] is False
+assert sources["runtime"]["metadata"] == "runtime_metadata"
+assert config["bootstrap"]["config_url"] == "https://raw.githubusercontent.com/jenny92-tech/portmaster-launcher-pack/main/config/config.json"
+PY
 
-(
-  PAM_GITHUB_WEB_ORIGIN=https://mirror.example
-  PAM_GITHUB_RAW_ORIGIN=https://raw.example
-  PAM_FORK_REPOSITORY=owner/fork
-  PAM_OFFICIAL_REPOSITORY=owner/upstream
-  PAM_RUNTIME_REPOSITORY=owner/runtimes
-  source "$SOURCES"
-  [ "$PAM_FORK_RELEASES_URL" = "https://mirror.example/owner/fork/releases" ]
-  [ "$PAM_OFFICIAL_RELEASES_URL" = "https://mirror.example/owner/upstream/releases" ]
-  [ "$PAM_RUNTIME_RELEASES_URL" = "https://mirror.example/owner/runtimes/releases" ]
-  [ "$PAM_DEVICE_CONFIG_URL" = "https://raw.example/jenny92-tech/portmaster-launcher-pack/main/config/config.json" ]
-)
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-"$ROOT/_kit/assemble.sh" "$ROOT/ports/appmanager/src/launcher.sh" "$TMP/appmanager.sh" >/dev/null
-grep -Fq 'PAM_FORK_REPOSITORY=' "$TMP/appmanager.sh"
-! grep -Fq 'source "$PORT_SRC/appmanager_sources.sh"' "$TMP/appmanager.sh"
-bash -n "$TMP/appmanager.sh"
+[ ! -e "$ROOT/ports/appmanager/src/appmanager_sources.sh" ]
+! grep -Fq 'PAM_OFFICIAL_VERSION_URL' "$ROOT/ports/appmanager/src/launcher.sh"
+grep -Fq 'release_routes' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+grep -Fq 'runtime_metadata_url' "$ROOT/crates/appmanager-cli/src/launcher.rs"
 
 echo "appmanager publication sources: PASS"

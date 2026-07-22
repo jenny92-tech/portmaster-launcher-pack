@@ -14,10 +14,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p portkit-cli
-grep -Fq 'config refresh' "$ROOT/ports/appmanager/src/launcher.sh"
-! grep -Eq '^(pam_config_refresh_session_matches|pam_config_version_is_newer|pam_valid_config_version)\(\)' \
-  "$ROOT/ports/appmanager/src/launcher.sh"
+cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli
+grep -Fq 'fn refresh_device_config' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+! grep -Fq 'config refresh' "$ROOT/ports/appmanager/src/launcher.sh"
 mkdir -p "$TMP/source" "$TMP/app/bin" "$TMP/state" "$TMP/served/platforms"
 cp -R "$ROOT/config" "$TMP/app/config"
 make_config_version() {
@@ -73,12 +72,13 @@ run_refresh() {
   cp "$1" "$TMP/served/config.json"
   cp "$2" "$TMP/served/platforms/trimui.json"
   printf '%s\n' "${PAM_TEST_CONFIG_DELAY:-0}" > "$TMP/served/delay"
-  env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$ROOT/target/debug/portkit" \
-    PORTKIT_GITHUB_ROUTES="http://127.0.0.1:$port" \
+  env PORTKIT_GITHUB_ROUTES="http://127.0.0.1:$port" \
     PAM_DEVICE_CONFIG_URL="https://raw.githubusercontent.com/jenny92-tech/appmanager-config-test-fixture/main/config/config.json" \
     PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' CFW_NAME=TrimUI \
-    PAM_SOURCE_DIR="$TMP/source" PAM_APP_ROOT_OVERRIDE="$TMP/app" PAM_STATE_DIR_OVERRIDE="$TMP/state" \
-    bash "$ROOT/ports/appmanager/src/launcher.sh" --refresh-device-config
+    PAM_STATE_DIR_OVERRIDE="$TMP/state" \
+    "$ROOT/target/debug/appmanager-cli" --config-dir "$TMP/app/config" launcher-session \
+      --source-dir "$TMP/source" --launcher "$ROOT/ports/appmanager/src/launcher.sh" \
+      --app-root "$TMP/app" -- --refresh-device-config
 }
 
 run_refresh "$TMP/newer.json" "$TMP/newer-detail.json"

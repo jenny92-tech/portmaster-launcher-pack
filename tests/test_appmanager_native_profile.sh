@@ -5,8 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p portkit-cli -p appmanager-cli
-PORTKIT="$ROOT/target/debug/portkit"
+cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli
 APPMANAGER_CLI="$ROOT/target/debug/appmanager-cli"
 LAUNCHER="$ROOT/ports/appmanager/src/launcher.sh"
 
@@ -15,9 +14,9 @@ run_health() {
   shift
   mkdir -p "$TMP/$name/source" "$TMP/$name/app/state"
   cp -R "$ROOT/config" "$TMP/$name/app/config"
-  env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$PORTKIT" \
-    PAM_SOURCE_DIR="$TMP/$name/source" PAM_APP_ROOT_OVERRIDE="$TMP/$name/app" \
-    "$@" bash "$LAUNCHER" --health-check
+  env "$@" "$APPMANAGER_CLI" --config-dir "$TMP/$name/app/config" launcher-session \
+      --source-dir "$TMP/$name/source" --launcher "$LAUNCHER" --app-root "$TMP/$name/app" \
+      -- --health-check
 }
 
 trimui=$(run_health trimui env CFW_NAME=TrimUI \
@@ -42,10 +41,10 @@ esac
 
 mkdir -p "$TMP/env/source" "$TMP/env/app/state"
 cp -R "$ROOT/config" "$TMP/env/app/config"
-env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$PORTKIT" CFW_NAME=TrimUI \
+env CFW_NAME=TrimUI \
   PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' \
-  PAM_SOURCE_DIR="$TMP/env/source" PAM_APP_ROOT_OVERRIDE="$TMP/env/app" \
-  bash "$LAUNCHER" --scan
+  "$APPMANAGER_CLI" --config-dir "$TMP/env/app/config" launcher-session \
+  --source-dir "$TMP/env/source" --launcher "$LAUNCHER" --app-root "$TMP/env/app" -- --write-env
 python3 - "$TMP/env/app/state/env.json" <<'PY'
 import json, sys
 
@@ -98,10 +97,10 @@ root["platforms"]["trimui"]["sha256"] = hashlib.sha256(detail_raw).hexdigest()
 )
 PY
 
-env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$PORTKIT" CFW_NAME=TrimUI \
+env CFW_NAME=TrimUI \
   PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' \
-  PAM_SOURCE_DIR="$TMP/env/source" PAM_APP_ROOT_OVERRIDE="$TMP/env/app" \
-  bash "$LAUNCHER" --write-env
+  "$APPMANAGER_CLI" --config-dir "$TMP/env/app/config" launcher-session \
+  --source-dir "$TMP/env/source" --launcher "$LAUNCHER" --app-root "$TMP/env/app" -- --write-env
 python3 - "$TMP/env/app/state/env.json" <<'PY'
 import json, sys
 
@@ -121,11 +120,10 @@ assert env["health_contract"] == "portkit.health.v1"
 assert "required_file" in env["health_required"]
 PY
 
-if env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$PORTKIT" \
-  PAM_APPMANAGER_CLI_BIN_OVERRIDE="$APPMANAGER_CLI" CFW_NAME=TrimUI \
+if env CFW_NAME=TrimUI \
   PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' \
-  PAM_SOURCE_DIR="$TMP/env/source" PAM_APP_ROOT_OVERRIDE="$TMP/env/app" \
-  bash "$LAUNCHER" --write-install-plan >/dev/null; then
+  "$APPMANAGER_CLI" --config-dir "$TMP/env/app/config" launcher-session \
+  --source-dir "$TMP/env/source" --launcher "$LAUNCHER" --app-root "$TMP/env/app" -- --write-install-plan >/dev/null; then
   echo "native install capability was not enforced" >&2
   exit 1
 fi
@@ -134,11 +132,10 @@ fi
 # native device configuration, without consulting its legacy platform table.
 mkdir -p "$TMP/plan/source" "$TMP/plan/app/state"
 cp -R "$ROOT/config" "$TMP/plan/app/config"
-env PAM_TOOL_MODE=system PAM_PORTKIT_BIN_OVERRIDE="$PORTKIT" \
-  PAM_APPMANAGER_CLI_BIN_OVERRIDE="$APPMANAGER_CLI" CFW_NAME=TrimUI \
+env CFW_NAME=TrimUI \
   PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' \
-  PAM_SOURCE_DIR="$TMP/plan/source" PAM_APP_ROOT_OVERRIDE="$TMP/plan/app" \
-  bash "$LAUNCHER" --write-install-plan > "$TMP/plan/result.tsv"
+  "$APPMANAGER_CLI" --config-dir "$TMP/plan/app/config" launcher-session \
+  --source-dir "$TMP/plan/source" --launcher "$LAUNCHER" --app-root "$TMP/plan/app" -- --write-install-plan > "$TMP/plan/result.tsv"
 grep -Fxq $'device\ttrimui' "$TMP/plan/result.tsv"
 grep -Fxq $'target\t/mnt/SDCARD/Apps/PortMaster/PortMaster' "$TMP/plan/result.tsv"
 grep -Fxq $'frontend_map\ttrimui/PortMaster.txt=launch.sh,trimui/config.json=config.json,trimui/icon.png=icon.png' "$TMP/plan/result.tsv"

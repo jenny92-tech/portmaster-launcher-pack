@@ -512,7 +512,19 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
     for (width, height, expected_scale) in
         [(640, 480, 0.80f32), (960, 720, 1.0f32), (1028, 720, 1.0f32)]
     {
-        let engine = Engine::load(directory.path(), width, height)
+        let engine = Engine::load_with_lua_setup(directory.path(), width, height, |lua| {
+            let api = lua.create_table()?;
+            api.set("snapshot", lua.create_function(|lua, ()| lua.create_string(
+                br#"{"env":{"portmaster_health":"missing","portmaster_management":"app","device_class":"unknown-path","target_confirmed":"0","capability_install_portmaster":false,"capability_update_portmaster":false,"capability_repair_runtimes":false,"pending_install":"","install_transaction":"","portmaster_active":"","operation_active":"","size_file":""},"inventory":null}"#
+            ))?)?;
+            api.set("start", lua.create_function(|_, (_kind, _payload): (String, String)| {
+                Err::<u64, _>(mlua::Error::external("offline test fixture"))
+            })?)?;
+            api.set("poll", lua.create_function(|_, ()| Ok(None::<String>))?)?;
+            api.set("cancel", lua.create_function(|_, ()| Ok(()))?)?;
+            lua.globals().set("appmanager", api)?;
+            Ok(())
+        })
             .unwrap_or_else(|error| panic!("load App Manager at {width}x{height}: {error:#}"));
         engine
             .update_and_draw(1.0 / 60.0)

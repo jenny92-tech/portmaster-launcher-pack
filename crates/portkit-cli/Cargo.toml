@@ -1,13 +1,17 @@
 [package]
 name = "portkit-cli"
+autobins = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+path = "src/main.rs"
+
 [[bin]]
 name = "portkit"
-path = "src/main.rs"
+path = "src/bin.rs"
 
 [dependencies]
 portkit-core = { path = "../portkit-core" }

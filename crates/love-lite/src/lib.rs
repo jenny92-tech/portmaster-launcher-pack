@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use appmanager_cli::EmbeddedService;
 use love_api::LoveRuntime;
 pub use love_api::state::GpuCommand;
 use love_api::state::{LoveEvent, SharedState};
@@ -19,6 +20,26 @@ pub struct Engine {
 
 impl Engine {
     pub fn load(source: impl AsRef<Path>, width: u32, height: u32) -> Result<Self> {
+        Self::load_with_lua_setup(source, width, height, |_| Ok(()))
+    }
+
+    pub fn load_appmanager(
+        source: impl AsRef<Path>,
+        width: u32,
+        height: u32,
+        service: EmbeddedService,
+    ) -> Result<Self> {
+        Self::load_with_lua_setup(source, width, height, move |lua| {
+            install_appmanager_api(lua, service)
+        })
+    }
+
+    pub fn load_with_lua_setup(
+        source: impl AsRef<Path>,
+        width: u32,
+        height: u32,
+        setup: impl FnOnce(&mlua::Lua) -> Result<()>,
+    ) -> Result<Self> {
         let pixels = width
             .checked_mul(height)
             .context("LOVE frame dimensions overflow")?;
@@ -36,6 +57,7 @@ impl Engine {
             .with_context(|| format!("resolve LOVE source {}", source.as_ref().display()))?;
         let state = Arc::new(SharedState::new(&source, width, height)?);
         let runtime = LoveRuntime::new(state)?;
+        setup(&runtime.lua)?;
         let engine = Self { runtime, source };
         engine.load_lua_file_if_present("conf.lua")?;
         engine.load_lua_file("main.lua")?;
@@ -173,4 +195,43 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+pub fn install_appmanager_api(lua: &mlua::Lua, service: EmbeddedService) -> Result<()> {
+    let table = lua.create_table()?;
+    let snapshot = service.clone();
+    table.set(
+        "snapshot",
+        lua.create_function(move |lua, ()| {
+            let value = snapshot.snapshot().map_err(mlua::Error::external)?;
+            lua.create_string(&serde_json::to_vec(&value).map_err(mlua::Error::external)?)
+        })?,
+    )?;
+    let start = service.clone();
+    table.set(
+        "start",
+        lua.create_function(move |_, (kind, payload): (String, Option<String>)| {
+            start
+                .start(&kind, payload.as_deref().unwrap_or("{}"))
+                .map_err(mlua::Error::external)
+        })?,
+    )?;
+    let poll = service.clone();
+    table.set(
+        "poll",
+        lua.create_function(move |lua, ()| {
+            poll.poll()
+                .map(|event| {
+                    let bytes = serde_json::to_vec(&event).map_err(mlua::Error::external)?;
+                    lua.create_string(&bytes)
+                })
+                .transpose()
+        })?,
+    )?;
+    table.set(
+        "cancel",
+        lua.create_function(move |_, ()| service.cancel().map_err(mlua::Error::external))?,
+    )?;
+    lua.globals().set("appmanager", table)?;
+    Ok(())
 }

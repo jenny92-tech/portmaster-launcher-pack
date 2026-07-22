@@ -9,9 +9,9 @@ local function replace(target,source)
     for key,value in pairs(source or {}) do target[key]=value end
 end
 
-function Model.new(kit,json,scanner)
+function Model.new(kit,json,native)
     local self={
-        kit=kit,json=json,scanner=scanner,
+        kit=kit,json=json,native=native,
         env={},report={},size_map={},runtime_metadata={},missing_by_script={},native_inventory=nil,
         cache={},report_version=0,
         pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6},
@@ -38,47 +38,16 @@ function Model.new(kit,json,scanner)
         return value
     end
 
-    -- Coalesced async form. The first caller starts producer(resolve); later
-    -- callers for the same key only enqueue callbacks. Producer may either
-    -- resolve later or return an immediate value.
-    function self.request_cached(key,token,producer,callback,force)
-        local entry=self.cache[key]
-        if not force and entry and entry.token==token and entry.valid then
-            callback(entry.value,nil); return
-        end
-        if not entry or force or entry.token~=token then
-            entry={token=token,valid=false,loading=false,waiters={}}
-            self.cache[key]=entry
-        end
-        entry.waiters[#entry.waiters+1]=callback
-        if entry.loading then return end
-        entry.loading=true
-        local settled=false
-        local function resolve(value,err)
-            if settled then return end
-            settled=true; entry.loading=false; entry.value=value; entry.error=err
-            entry.valid=err==nil
-            local waiters=entry.waiters; entry.waiters={}
-            for _,waiter in ipairs(waiters) do pcall(waiter,value,err) end
-        end
-        local ok,value=pcall(producer,resolve)
-        if not ok then resolve(nil,tostring(value))
-        elseif value~=nil and not settled then resolve(value,nil) end
-    end
-
     function self.invalidate(...)
         for i=1,select("#",...) do self.cache[select(i,...)]=nil end
     end
 
     function self.invalidate_all()
         clear(self.cache)
-        if scanner.invalidate then scanner.invalidate() end
     end
 
     function self.L(en,zh) return {en=en,zh=zh} end
     function self.join(parts,sep) return table.concat(parts,sep or " · ") end
-    function self.shquote(value) return "'"..tostring(value):gsub("'","'\\''").."'" end
-
     function self.file_exists(path)
         local f=path and io.open(path,"rb")
         if f then f:close(); return true end
@@ -90,14 +59,24 @@ function Model.new(kit,json,scanner)
         local text=f:read("*a"); f:close(); return text
     end
 
-    function self.load_env()
-        local path=os.getenv("PAM_ENV") or ""
-        local text=self.read_all(path)
-        if not text then return false,"PAM_ENV is unavailable" end
-        local ok,value=pcall(json.decode,text)
-        if not ok or type(value)~="table" then return false,tostring(value) end
-        replace(self.env,value)
+    function self.basename(path)
+        return tostring(path or ""):gsub("/+$",""):match("([^/]+)$") or tostring(path or "")
+    end
+
+    function self.apply_snapshot(snapshot)
+        if type(snapshot)~="table" or type(snapshot.env)~="table" then
+            return false,"APP Manager service returned no environment"
+        end
+        replace(self.env,snapshot.env)
+        self.native_inventory=type(snapshot.inventory)=="table" and snapshot.inventory or nil
+        self.invalidate_all()
         return true
+    end
+
+    function self.load_env()
+        local ok,snapshot=pcall(self.native.snapshot)
+        if not ok then return false,tostring(snapshot) end
+        return self.apply_snapshot(snapshot)
     end
 
     local function load_sizes_file()
@@ -136,23 +115,7 @@ function Model.new(kit,json,scanner)
     local function collect_trash_snapshot()
         local native=self.load_native_inventory()
         if native and type(native.trash)=="table" then return native.trash end
-        local out={}; local root=(self.env.gamedir or "").."/trash"
-        local function append(entry,bucket)
-            out[#out+1]={name=entry.name,path=entry.path,is_dir=entry.is_dir,bucket=bucket}
-        end
-        for _,top in ipairs(scanner.entries(root)) do
-            if not top.is_dir then append(top,"item")
-            else
-                for _,entry in ipairs(scanner.entries(top.path)) do
-                    local bucket=entry.name
-                    if entry.is_dir and (bucket=="scripts" or bucket=="script-images" or
-                       bucket=="data" or bucket=="images") then
-                        for _,item in ipairs(scanner.entries(entry.path)) do append(item,bucket) end
-                    else append(entry,"legacy") end
-                end
-            end
-        end
-        return out
+        return {}
     end
 
     local function collect_required_runtimes()
@@ -167,7 +130,7 @@ function Model.new(kit,json,scanner)
             local fact=native_facts[name]
             local health,bytes
             if fact then health,bytes=fact.health,tonumber(fact.bytes) or 0
-            else health,bytes=scanner.runtime_file_health((self.env.libs_dir or "").."/"..name..".squashfs") end
+            else health,bytes="missing",0 end
             local needs_repair=health=="missing" or health=="invalid_magic" or health=="symlink"
             out[#out+1]={name=name,users=users,health=health,bytes=bytes,
                 missing=health=="missing",damaged=health=="invalid_magic",
@@ -192,12 +155,16 @@ function Model.new(kit,json,scanner)
         return tostring(bytes).." B"
     end
 
-    function self.runtime_progress()
+    function self.runtime_progress(data)
         local L=self.L
-        local text=self.read_all(self.env.progress_file or "")
-        if not text then return nil end
         local fields={}
-        for value in (text:gsub("[\r\n]+$","").."\t"):gmatch("(.-)\t") do fields[#fields+1]=value end
+        if type(data)=="table" then
+            fields={"1",tostring(data.phase or ""),tostring(data.runtime or ""),
+                tostring(data.index or 0),tostring(data.count or 0),tostring(data.current or 0),
+                tostring(data.total or 0),tostring(data.speed or 0),tostring(data.detail or "")}
+        else
+            return nil
+        end
         if fields[1]~="1" or #fields<9 then return nil end
         local phase,runtime=fields[2],fields[3]
         local index,count=tonumber(fields[4]) or 0,tonumber(fields[5]) or 0
@@ -310,20 +277,11 @@ function Model.new(kit,json,scanner)
     end
 
     function self.load_native_inventory(force)
-        if force then self.invalidate("native-inventory") end
-        local path=self.env.inventory_file or ""
-        if path=="" or not self.file_exists(path) then self.native_inventory=nil; return nil end
-        return cached("native-inventory",path,function()
-            local text=self.read_all(path)
-            local ok,envelope=pcall(self.json.decode,text or "")
-            if not ok or type(envelope)~="table" or envelope.ok~=true or
-               type(envelope.data)~="table" or envelope.data.schema~=1 then
-                self.native_inventory=nil
-                return nil
-            end
-            self.native_inventory=envelope.data
-            return self.native_inventory
-        end,force)
+        if force then
+            local ok,snapshot=pcall(self.native.snapshot)
+            if ok and type(snapshot)=="table" then self.apply_snapshot(snapshot) end
+        end
+        return self.native_inventory
     end
 
     function self.ensure_report(force)
@@ -333,23 +291,10 @@ function Model.new(kit,json,scanner)
             self.env.directory or "",self.env.controlfolder or ""},"\0")
         return cached("ports",token,function()
             local native=self.load_native_inventory(force)
-            replace(self.report,native or scanner.run(self.env))
+            replace(self.report,native or {ports={},refcount={},orphan_dirs={},orphan_images={},dead_scripts={},runtimes={need={},facts={}}})
             self.report_version=self.report_version+1
             return self.report
         end,force)
-    end
-
-    -- Compatibility entry point: force only the Port inventory and its direct
-    -- Runtime derivative, not unrelated Trash/metadata/size caches.
-    function self.refresh_scan()
-        if self.env.apply_script and self.env.apply_script~="" then
-            os.execute(self.shquote(self.env.apply_script).." --refresh-inventory >/dev/null 2>&1")
-        end
-        self.invalidate("native-inventory")
-        self.native_inventory=nil
-        if scanner.invalidate then scanner.invalidate(self.env.scripts_dir,self.env.gamedirs_dir,
-            self.env.images_dir) end
-        return self.ensure_report(true)
     end
 
     function self.trash_items(force)
@@ -385,23 +330,11 @@ function Model.new(kit,json,scanner)
                 table.sort(out)
                 return out
             end
-            local out={}
-            for _,entry in ipairs(scanner.entries(self.env.libs_dir or "")) do
-                if not entry.is_dir then
-                    local name=entry.name:match("^(.-)%.squashfs$")
-                    if name then out[#out+1]=name end
-                end
-            end
-            table.sort(out)
-            return out
+            return {}
         end,force) or {}
     end
 
     function self.load_update_cache()
-        local text=self.read_all(self.env.update_cache_file or "")
-        if not text then return self.env.update_status,self.env.portmaster_latest end
-        local _,status,latest=text:match("^(%d+)\t([^\t\r\n]+)\t([^\r\n]*)")
-        if status then self.env.update_status=status; self.env.portmaster_latest=latest or "" end
         return self.env.update_status,self.env.portmaster_latest
     end
 
@@ -436,15 +369,12 @@ function Model.new(kit,json,scanner)
         end
         if ports then
             self.invalidate("ports")
-            if scanner.invalidate then scanner.invalidate(self.env.scripts_dir,self.env.gamedirs_dir,self.env.images_dir) end
         end
         if trash then
             self.invalidate("trash")
-            if scanner.invalidate then scanner.invalidate((self.env.gamedir or "").."/trash") end
         end
         if runtimes then
             self.invalidate("required-runtimes","installed-runtimes","runtime-metadata")
-            if scanner.invalidate then scanner.invalidate(self.env.libs_dir) end
         end
         if sizes then self.invalidate("sizes") end
     end

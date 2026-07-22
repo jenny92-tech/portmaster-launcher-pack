@@ -27,8 +27,9 @@ lock = tomllib.loads((root / "Cargo.lock").read_text())
 closure = {record["name"] for record in module.lock_dependency_closure(lock, ["love-lite"])}
 assert "love-lite" in closure
 assert "mlua" in closure
-assert "portkit-core" not in closure
-assert "appmanager-core" not in closure
+assert "portkit-core" in closure
+assert "appmanager-core" in closure
+assert "appmanager-cli" in closure
 native = {
     record["name"]
     for record in module.lock_dependency_closure(lock, ["appmanager-cli", "portkit-cli"])
@@ -39,8 +40,9 @@ assert "love-lite" not in native
 assert "mlua" not in native
 PY
 
-grep -Fq 'run_appmanager_ui()' "$ROOT/ports/appmanager/src/launcher.sh"
-! grep -Fq 'run_portable_ui()' "$ROOT/ports/appmanager/src/launcher.sh"
+grep -Fq 'Engine::load_appmanager' "$ROOT/crates/love-lite/src/main.rs"
+grep -Fq 'runtime/love.aarch64' "$ROOT/ports/appmanager/src/launcher.sh"
+! grep -Fq 'launcher-session' "$ROOT/ports/appmanager/src/launcher.sh"
 ! grep -Fiq 'this experiment' "$ROOT/crates/love-lite/UPSTREAM.md"
 ! grep -Fiq 'experimental 16-megapixel' "$ROOT/crates/love-lite/src/lib.rs"
 

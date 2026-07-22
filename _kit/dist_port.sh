@@ -84,8 +84,7 @@ if [ -f "$LOVE_DIR/launcher.sh.template" ]; then
   USE_LOVE=1
   "$ROOT/_kit/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/$SCRIPT_NAME"
 elif [ -f "$LOVE_DIR/main.lua" ] && [ -f "$SRC/launcher.sh" ]; then
-  # Complex ports such as APP Manager keep their safety-critical shell in src/
-  # while replacing only the UI/runtime layer with LÖVE.
+  # Ports may keep a private thin bootstrap in src/ while sharing the LÖVE UI payload.
   USE_LOVE=1
   "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
 fi
@@ -106,7 +105,7 @@ elif [ -f "$SRC/launcher.sh" ]; then
   "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
 fi
 
-# A portable app may own native runtime, input and network assets next to its
+# A portable app may own its runtime and input assets next to its
 # UI. Keep this generic so package assembly remains deterministic and does not
 # reach into another repository or an installed PortMaster tree.
 if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
@@ -117,23 +116,6 @@ if [ "$PORT" = "appmanager" ]; then
   mkdir -p "$APP_DIST_ROOT/config/platforms"
   cp "$ROOT/config/config.json" "$APP_DIST_ROOT/config/config.json"
   cp "$ROOT/config/platforms/"*.json "$APP_DIST_ROOT/config/platforms/"
-  for native_helper in portkit appmanager-cli; do
-    [ -x "$APP_DIST_ROOT/bin/$native_helper" ] || {
-      echo "missing native helper $native_helper; run _kit/build_appmanager_native.sh" >&2
-      exit 1
-    }
-    native_description=$(file "$APP_DIST_ROOT/bin/$native_helper")
-    case "$native_description" in
-      *ELF*ARM\ aarch64*statically\ linked*) ;;
-      *) echo "invalid native helper $native_helper: $native_description" >&2; exit 1 ;;
-    esac
-  done
-  expected_native_revision=$(python3 "$ROOT/_kit/appmanager_native_revision.py" "$ROOT")
-  packaged_native_revision=$(sed -n '1p' "$PORT_DIR/native-revision.txt" 2>/dev/null || true)
-  if [ -z "$packaged_native_revision" ] || [ "$packaged_native_revision" != "$expected_native_revision" ]; then
-    echo "stale native helpers; run _kit/build_appmanager_native.sh" >&2
-    exit 1
-  fi
   expected_love_lite_revision=$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")
   packaged_love_lite_revision=$(sed -n '1p' "$PORT_DIR/love-lite-revision.txt" 2>/dev/null || true)
   if [ -z "$packaged_love_lite_revision" ] || [ "$packaged_love_lite_revision" != "$expected_love_lite_revision" ]; then
