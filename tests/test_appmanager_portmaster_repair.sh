@@ -18,6 +18,11 @@ trap cleanup EXIT
 
 bash "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli -p portkit-cli
+grep -Fq 'refresh-runtime-metadata' "$ROOT/ports/appmanager/src/launcher.sh"
+! grep -Eq '^(runtime_metadata_parse|pam_cache_mtime)\(\)' "$ROOT/ports/appmanager/src/launcher.sh"
+grep -Fq 'fetch-stable-release' "$ROOT/ports/appmanager/src/launcher.sh"
+! grep -Eq '^(pam_stable_metadata_parse|pm_valid_stable_archive_url|pm_valid_md5)\(\)' \
+  "$ROOT/ports/appmanager/src/launcher.sh"
 mkdir -p "$TMP/release" "$TMP/archive/PortMaster/pylibs-src" "$TMP/archive/PortMaster/miniloong" "$TMP/app"
 cp -R "$ROOT/ports/appmanager/dist/jenny92-appmanager/." "$TMP/app/"
 rm -f "$TMP/app/bin/busybox-portable"
@@ -56,22 +61,44 @@ JSON
 cat > "$TMP/appmanager-test" <<'CLI'
 #!/bin/sh
 case "${1:-}" in
-  fetch-stable-manifest)
-    shift; out=""; source=""
+  refresh-runtime-metadata)
+    shift; json_cache=""; tsv_cache=""; source=""; force=0
     while [ "$#" -gt 0 ]; do
-      case "$1" in --source) source=$2; shift 2 ;; --output) out=$2; shift 2 ;; *) shift ;; esac
+      case "$1" in
+        --source) source=$2; shift 2 ;;
+        --json-cache) json_cache=$2; shift 2 ;;
+        --tsv-cache) tsv_cache=$2; shift 2 ;;
+        --force) force=1; shift ;;
+        *) shift ;;
+      esac
     done
+    if [ "$force" != 1 ] && [ -s "$json_cache" ] && [ -s "$tsv_cache" ]; then
+      printf '%s\n' '{"ok":true}'; exit 0
+    fi
     printf '%s\n' "$source" >> "$PAM_TEST_FETCH_LOG"
-    case "$source" in *PortsMaster/PortMaster-GUI*) file=official-version.json ;; *) file=version.json ;; esac
-    cp "$PAM_TEST_RELEASE/$file" "$out"; printf '%s\n' '{"ok":true}'; exit 0
+    cp "$PAM_TEST_RELEASE/ports.json" "$json_cache"
+    printf 'python_3.11\taarch64\t%s\t%s\thttps://github.com/PortsMaster/PortMaster-New/releases/download/test/python_3.11.squashfs\n' \
+      "$PAM_TEST_PYTHON_SIZE" "$PAM_TEST_PYTHON_MD5" > "$tsv_cache"
+    printf '%s\n' '{"ok":true}'; exit 0
     ;;
-  fetch-runtime-metadata)
-    shift; out=""; source=""
+  fetch-stable-release)
+    shift; out=""; source=""; archive_name=""
     while [ "$#" -gt 0 ]; do
-      case "$1" in --source) source=$2; shift 2 ;; --output) out=$2; shift 2 ;; *) shift ;; esac
+      case "$1" in
+        --source) source=$2; shift 2 ;;
+        --archive-name) archive_name=$2; shift 2 ;;
+        --output) out=$2; shift 2 ;;
+        *) shift ;;
+      esac
     done
     printf '%s\n' "$source" >> "$PAM_TEST_FETCH_LOG"
-    cp "$PAM_TEST_RELEASE/ports.json" "$out"; printf '%s\n' '{"ok":true}'; exit 0
+    case "$source" in
+      *PortsMaster/PortMaster-GUI*) repo=PortsMaster/PortMaster-GUI ;;
+      *) repo=jenny92-tech/PortMaster-GUI ;;
+    esac
+    printf '2026.07\thttps://github.com/%s/releases/download/2026.07/%s\t%s\n' \
+      "$repo" "$archive_name" "$PAM_TEST_ARCHIVE_MD5" > "$out"
+    printf '%s\n' '{"ok":true}'; exit 0
     ;;
 esac
 exec "$PAM_REAL_APPMANAGER" "$@"
@@ -172,7 +199,9 @@ run_repair() {
     PAM_PORTKIT_BIN_OVERRIDE="$TMP/portkit-test" \
     PAM_PYTHON3_CMD_OVERRIDE="$([ "$force_python_runtime" = 1 ] && echo /missing/python3 || echo python3)" \
     PAM_RUNTIME_CUSTOM_PROXIES='custom|test|https://proxy.invalid' PAM_RUNTIME_PROXIES='' \
-    PAM_TEST_RELEASE="$TMP/release" PAM_TEST_FETCH_LOG="$TMP/$name/fetch.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
+    PAM_TEST_RELEASE="$TMP/release" PAM_TEST_ARCHIVE_MD5="$archive_md5" \
+    PAM_TEST_PYTHON_SIZE="$python_size" PAM_TEST_PYTHON_MD5="$python_md5" \
+    PAM_TEST_FETCH_LOG="$TMP/$name/fetch.log" PAM_TEST_CORRUPT="$corrupt" PAM_TEST_SLOW="$slow" \
     PAM_TEST_PARTIAL="$partial" \
     PAM_TEST_CANCEL_ON_ASSET="$cancel_asset" PAM_TEST_CANCEL_FILE="$state/cancel.request" \
     bash "$ROOT/ports/appmanager/src/launcher.sh" --apply-plan || rc=$?

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use appmanager_core::{
     AppOwnedPaths, CacheGenerations, FileApplyRequest, InstallPlan, InstallRequest, Inventory,
@@ -15,7 +16,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use portkit_core::github::{Capability, GitHubTransport};
 use portkit_core::{
     CandidateSelector, ConfigCandidate, ConfigLoader, ConfigOrigin, DetectionContext,
-    LocalFragmentSource,
+    DigestAlgorithm, ExclusiveFileLock, LocalFragmentSource, digest_file,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -49,35 +50,46 @@ enum OutputFormat {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Download and validate official PortMaster Runtime metadata.
-    FetchRuntimeMetadata {
+    /// Refresh the official Runtime JSON and canonical TSV caches.
+    RefreshRuntimeMetadata {
         #[arg(long)]
         source: String,
         #[arg(long)]
-        output: PathBuf,
-    },
-    /// Download and validate a PortMaster stable-release manifest.
-    FetchStableManifest {
+        json_cache: PathBuf,
         #[arg(long)]
-        source: String,
+        tsv_cache: PathBuf,
         #[arg(long)]
-        output: PathBuf,
+        force: bool,
     },
-    /// Validate official PortMaster Runtime metadata and render canonical TSV.
-    ParseRuntimeMetadata {
-        /// Official PortMaster `ports.json` metadata file.
+    /// Read one Runtime entry from the canonical JSON metadata.
+    RuntimeMetadataEntry {
         #[arg(long)]
         metadata: PathBuf,
-        #[arg(long, value_enum, default_value_t = OutputFormat::Tsv)]
-        format: OutputFormat,
-    },
-    /// Validate a PortMaster version manifest and render its stable release.
-    ParseStableManifest {
-        /// PortMaster `version.json` manifest file.
         #[arg(long)]
-        manifest: PathBuf,
-        #[arg(long, value_enum, default_value_t = OutputFormat::Tsv)]
-        format: OutputFormat,
+        runtime: String,
+        #[arg(long)]
+        arch: String,
+        /// When supplied, fail unless this image matches the metadata entry.
+        #[arg(long)]
+        image: Option<PathBuf>,
+    },
+    /// Download and resolve the stable PortMaster release asset.
+    FetchStableRelease {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        archive_name: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Refresh the daily stable-version cache consumed by the UI.
+    RefreshStableCache {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        cache: PathBuf,
+        #[arg(long)]
+        force: bool,
     },
     /// Enumerate direct children of managed roots without following symlinks.
     Inventory {
@@ -364,13 +376,7 @@ fn main() -> ExitCode {
         } | Command::DeviceInventory {
             format: OutputFormat::Tsv,
             ..
-        } | Command::ParseRuntimeMetadata {
-            format: OutputFormat::Tsv,
-            ..
-        } | Command::ParseStableManifest {
-            format: OutputFormat::Tsv,
-            ..
-        }
+        } | Command::RuntimeMetadataEntry { .. }
     );
     let config_directories = ConfigDirectories {
         embedded: cli.config_dir,
@@ -430,66 +436,28 @@ fn run(
     config_directories: &ConfigDirectories,
 ) -> Result<(&'static str, Value), CliError> {
     match command {
-        Command::FetchRuntimeMetadata { source, output } => {
-            let name = "fetch-runtime-metadata";
-            let outcome = GitHubTransport::new()
-                .fetch(
-                    Capability::Release,
-                    &source,
-                    &output,
-                    |path| {
-                        fs::read(path)
-                            .ok()
-                            .and_then(|bytes| RuntimeMetadata::parse(&bytes).ok())
-                            .is_some()
-                    },
-                    None,
-                    None,
-                )
-                .map_err(|error| domain_error(name, "runtime-metadata-download-failed", error))?;
-            Ok((name, json!({"route": outcome.route_id(), "output": output})))
-        }
-        Command::FetchStableManifest { source, output } => {
-            let name = "fetch-stable-manifest";
-            let outcome = GitHubTransport::new()
-                .fetch(
-                    Capability::Release,
-                    &source,
-                    &output,
-                    |path| {
-                        fs::read(path)
-                            .ok()
-                            .and_then(|bytes| parse_stable_manifest(name, &bytes).ok())
-                            .is_some()
-                    },
-                    None,
-                    None,
-                )
-                .map_err(|error| domain_error(name, "stable-manifest-download-failed", error))?;
-            Ok((name, json!({"route": outcome.route_id(), "output": output})))
-        }
-        Command::ParseRuntimeMetadata { metadata, format } => {
-            let name = "parse-runtime-metadata";
-            let bytes = read_bytes(name, &metadata, "invalid-runtime-metadata")?;
-            let metadata = RuntimeMetadata::parse(&bytes)
-                .map_err(|error| domain_error(name, "invalid-runtime-metadata", error))?;
-            match format {
-                OutputFormat::Json => Ok((name, json!(metadata.entries().collect::<Vec<_>>()))),
-                OutputFormat::Tsv => Ok((name, json!({"tsv": metadata.to_tsv()}))),
-            }
-        }
-        Command::ParseStableManifest { manifest, format } => {
-            let name = "parse-stable-manifest";
-            let bytes = read_bytes(name, &manifest, "invalid-stable-manifest")?;
-            let stable = parse_stable_manifest(name, &bytes)?;
-            match format {
-                OutputFormat::Json => Ok((name, json!(stable))),
-                OutputFormat::Tsv => Ok((
-                    name,
-                    json!({"tsv": format!("{}\t{}\t{}\n", stable.version, stable.url, stable.md5)}),
-                )),
-            }
-        }
+        Command::RefreshRuntimeMetadata {
+            source,
+            json_cache,
+            tsv_cache,
+            force,
+        } => refresh_runtime_metadata(source, json_cache, tsv_cache, force),
+        Command::RuntimeMetadataEntry {
+            metadata,
+            runtime,
+            arch,
+            image,
+        } => runtime_metadata_entry(metadata, runtime, arch, image),
+        Command::FetchStableRelease {
+            source,
+            archive_name,
+            output,
+        } => fetch_stable_release(source, archive_name, output),
+        Command::RefreshStableCache {
+            source,
+            cache,
+            force,
+        } => refresh_stable_cache(source, cache, force),
         Command::Inventory {
             context,
             cache_state,
@@ -900,6 +868,404 @@ fn parse_stable_manifest(command: &'static str, bytes: &[u8]) -> Result<StableRe
     }
     stable.md5.make_ascii_lowercase();
     Ok(stable)
+}
+
+fn fetch_stable_release(
+    source: String,
+    archive_name: String,
+    output: PathBuf,
+) -> Result<(&'static str, Value), CliError> {
+    const NAME: &str = "fetch-stable-release";
+    let parent = output.parent().ok_or_else(|| CliError {
+        command: NAME,
+        code: "invalid-stable-output",
+        message: "stable release output has no parent directory".to_owned(),
+    })?;
+    fs::create_dir_all(parent)
+        .map_err(|error| domain_error(NAME, "stable-release-write-failed", error))?;
+    let manifest = parent.join(format!(
+        ".stable-release-manifest-{}.json",
+        std::process::id()
+    ));
+    let _download = DownloadGuard(manifest.clone());
+    let outcome = GitHubTransport::new()
+        .fetch(
+            Capability::Release,
+            &source,
+            &manifest,
+            |path| {
+                fs::read(path)
+                    .ok()
+                    .and_then(|bytes| parse_stable_manifest(NAME, &bytes).ok())
+                    .is_some()
+            },
+            None,
+            None,
+        )
+        .map_err(|error| domain_error(NAME, "stable-manifest-download-failed", error))?;
+    let bytes = read_bytes(NAME, &manifest, "invalid-stable-manifest")?;
+    let stable = parse_stable_manifest(NAME, &bytes)?;
+    validate_stable_release_route(&source, &archive_name, &stable)?;
+    let row = format!("{}\t{}\t{}\n", stable.version, stable.url, stable.md5);
+    atomic_write(&output, row.as_bytes(), NAME, "stable-release-write-failed")?;
+    Ok((
+        NAME,
+        json!({
+            "version": stable.version,
+            "url": stable.url,
+            "md5": stable.md5,
+            "route": outcome.route_id(),
+            "output": output,
+        }),
+    ))
+}
+
+fn validate_stable_release_route(
+    source: &str,
+    archive_name: &str,
+    stable: &StableRelease,
+) -> Result<(), CliError> {
+    const NAME: &str = "fetch-stable-release";
+    if archive_name.is_empty()
+        || matches!(archive_name, "." | "..")
+        || archive_name.contains(['/', '\\', '\t', '\r', '\n'])
+    {
+        return Err(CliError {
+            command: NAME,
+            code: "invalid-stable-release",
+            message: "stable archive name is unsafe".to_owned(),
+        });
+    }
+    let repository = source
+        .strip_suffix("/releases/latest/download/version.json")
+        .filter(|base| base.starts_with("https://github.com/"))
+        .ok_or_else(|| CliError {
+            command: NAME,
+            code: "invalid-stable-release",
+            message: "stable manifest URL is not a GitHub latest-release asset".to_owned(),
+        })?;
+    let expected = format!(
+        "{repository}/releases/download/{}/{}",
+        stable.version, archive_name
+    );
+    if stable.url != expected {
+        return Err(CliError {
+            command: NAME,
+            code: "invalid-stable-release",
+            message: "stable archive does not match its manifest repository, version, or name"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
+struct DownloadGuard(PathBuf);
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        for suffix in ["", ".part", ".part.route"] {
+            let mut path = self.0.as_os_str().to_os_string();
+            path.push(suffix);
+            let _ = fs::remove_file(PathBuf::from(path));
+        }
+    }
+}
+
+fn refresh_stable_cache(
+    source: String,
+    cache: PathBuf,
+    force: bool,
+) -> Result<(&'static str, Value), CliError> {
+    const NAME: &str = "refresh-stable-cache";
+    if !force && update_cache_is_fresh(&cache) && stable_cache_row_valid(&cache) {
+        return Ok((NAME, json!({"status": "cached", "cache": cache})));
+    }
+    let parent = cache.parent().ok_or_else(|| CliError {
+        command: NAME,
+        code: "invalid-update-cache",
+        message: "update cache has no parent directory".to_owned(),
+    })?;
+    fs::create_dir_all(parent)
+        .map_err(|error| domain_error(NAME, "update-cache-write-failed", error))?;
+    let manifest = parent.join(format!(".stable-manifest-{}.json", std::process::id()));
+    let _download = DownloadGuard(manifest.clone());
+    let fetch = GitHubTransport::new().fetch(
+        Capability::Release,
+        &source,
+        &manifest,
+        |path| {
+            fs::read(path)
+                .ok()
+                .and_then(|bytes| parse_stable_manifest(NAME, &bytes).ok())
+                .is_some()
+        },
+        None,
+        None,
+    );
+    let checked = epoch_seconds();
+    match fetch {
+        Ok(outcome) => {
+            let bytes = read_bytes(NAME, &manifest, "invalid-stable-manifest")?;
+            let stable = parse_stable_manifest(NAME, &bytes)?;
+            write_update_cache(&cache, checked, "ok", &stable.version)?;
+            Ok((
+                NAME,
+                json!({
+                    "status": "ok",
+                    "latest": stable.version,
+                    "route": outcome.route_id(),
+                    "cache": cache,
+                }),
+            ))
+        }
+        Err(error) => {
+            let _ = write_update_cache(&cache, checked, "error", "");
+            Err(domain_error(NAME, "stable-manifest-download-failed", error))
+        }
+    }
+}
+
+fn refresh_runtime_metadata(
+    source: String,
+    json_cache: PathBuf,
+    tsv_cache: PathBuf,
+    force: bool,
+) -> Result<(&'static str, Value), CliError> {
+    const NAME: &str = "refresh-runtime-metadata";
+    if !force
+        && update_cache_is_fresh(&json_cache)
+        && runtime_tsv_matches_json(&json_cache, &tsv_cache)
+    {
+        return Ok((NAME, json!({"status": "cached"})));
+    }
+    let parent = json_cache.parent().ok_or_else(|| CliError {
+        command: NAME,
+        code: "invalid-runtime-cache",
+        message: "Runtime JSON cache has no parent directory".to_owned(),
+    })?;
+    fs::create_dir_all(parent)
+        .map_err(|error| domain_error(NAME, "runtime-cache-write-failed", error))?;
+    let _refresh_lock =
+        ExclusiveFileLock::try_acquire(&parent.join(".runtime-metadata-refresh.lock"))
+            .map_err(|error| domain_error(NAME, "cache-refresh-running", error))?;
+    if repair_runtime_tsv_from_json(&json_cache, &tsv_cache)?
+        && !force
+        && update_cache_is_fresh(&json_cache)
+    {
+        return Ok((NAME, json!({"status": "cached"})));
+    }
+    let download = parent.join(format!(".runtime-metadata-{}.json", std::process::id()));
+    let _download = DownloadGuard(download.clone());
+    let fetched = GitHubTransport::new().fetch(
+        Capability::Release,
+        &source,
+        &download,
+        |path| {
+            fs::read(path)
+                .ok()
+                .and_then(|bytes| RuntimeMetadata::parse(&bytes).ok())
+                .is_some()
+        },
+        None,
+        None,
+    );
+    let outcome = match fetched {
+        Ok(outcome) => outcome,
+        Err(_) if !force && repair_runtime_tsv_from_json(&json_cache, &tsv_cache)? => {
+            return Ok((NAME, json!({"status": "cached-stale"})));
+        }
+        Err(error) => {
+            return Err(domain_error(
+                NAME,
+                "runtime-metadata-download-failed",
+                error,
+            ));
+        }
+    };
+    let bytes = read_bytes(NAME, &download, "invalid-runtime-metadata")?;
+    let metadata = RuntimeMetadata::parse(&bytes)
+        .map_err(|error| domain_error(NAME, "invalid-runtime-metadata", error))?;
+    atomic_write(&json_cache, &bytes, NAME, "runtime-cache-write-failed")?;
+    atomic_write(
+        &tsv_cache,
+        metadata.to_tsv().as_bytes(),
+        NAME,
+        "runtime-cache-write-failed",
+    )?;
+    Ok((
+        NAME,
+        json!({"status": "updated", "route": outcome.route_id()}),
+    ))
+}
+
+fn runtime_tsv_matches_json(json_cache: &Path, tsv_cache: &Path) -> bool {
+    fs::read(json_cache)
+        .ok()
+        .and_then(|json| RuntimeMetadata::parse(&json).ok())
+        .is_some_and(|metadata| {
+            fs::read(tsv_cache).is_ok_and(|tsv| tsv == metadata.to_tsv().as_bytes())
+        })
+}
+
+fn repair_runtime_tsv_from_json(json_cache: &Path, tsv_cache: &Path) -> Result<bool, CliError> {
+    const NAME: &str = "refresh-runtime-metadata";
+    let Ok(json) = fs::read(json_cache) else {
+        return Ok(false);
+    };
+    let Ok(metadata) = RuntimeMetadata::parse(&json) else {
+        return Ok(false);
+    };
+    let canonical = metadata.to_tsv();
+    if !fs::read(tsv_cache).is_ok_and(|tsv| tsv == canonical.as_bytes()) {
+        atomic_write(
+            tsv_cache,
+            canonical.as_bytes(),
+            NAME,
+            "runtime-cache-write-failed",
+        )?;
+    }
+    Ok(true)
+}
+
+fn runtime_metadata_entry(
+    metadata: PathBuf,
+    runtime: String,
+    arch: String,
+    image: Option<PathBuf>,
+) -> Result<(&'static str, Value), CliError> {
+    const NAME: &str = "runtime-metadata-entry";
+    let bytes = read_bytes(NAME, &metadata, "invalid-runtime-metadata")?;
+    let metadata = RuntimeMetadata::parse(&bytes)
+        .map_err(|error| domain_error(NAME, "invalid-runtime-metadata", error))?;
+    let entry = metadata.get(&runtime, &arch).ok_or_else(|| CliError {
+        command: NAME,
+        code: "runtime-metadata-missing",
+        message: format!("Runtime metadata has no {runtime} entry for {arch}"),
+    })?;
+    if let Some(image) = image {
+        let valid = image
+            .metadata()
+            .is_ok_and(|metadata| metadata.len() == entry.size)
+            && fs::File::open(&image)
+                .and_then(|mut file| {
+                    let mut magic = [0_u8; 4];
+                    file.read_exact(&mut magic)?;
+                    Ok(magic == *b"hsqs")
+                })
+                .unwrap_or(false)
+            && digest_file(&image, DigestAlgorithm::Md5).is_ok_and(|digest| digest == entry.md5);
+        if !valid {
+            return Err(CliError {
+                command: NAME,
+                code: "runtime-image-mismatch",
+                message: "Runtime image does not match official metadata".to_owned(),
+            });
+        }
+    }
+    Ok((
+        NAME,
+        json!({"tsv": format!("{}\t{}\t{}\t{}\t{}\n", entry.name, entry.arch, entry.size, entry.md5, entry.url)}),
+    ))
+}
+
+fn update_cache_is_fresh(path: &Path) -> bool {
+    path.metadata()
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age < Duration::from_secs(24 * 60 * 60))
+}
+
+fn stable_cache_row_valid(path: &Path) -> bool {
+    let Ok(row) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Some(row) = row.strip_suffix('\n') else {
+        return false;
+    };
+    if row.contains(['\n', '\r']) {
+        return false;
+    }
+    let fields = row.split('\t').collect::<Vec<_>>();
+    if fields.len() != 3 || fields[0].parse::<u64>().is_err() {
+        return false;
+    }
+    match fields[1] {
+        "ok" => {
+            !fields[2].is_empty()
+                && fields[2]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        }
+        "error" => fields[2].is_empty(),
+        _ => false,
+    }
+}
+
+fn epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn write_update_cache(
+    path: &Path,
+    checked: u64,
+    status: &str,
+    latest: &str,
+) -> Result<(), CliError> {
+    const NAME: &str = "refresh-stable-cache";
+    atomic_write(
+        path,
+        format!("{checked}\t{status}\t{latest}\n").as_bytes(),
+        NAME,
+        "update-cache-write-failed",
+    )
+}
+
+fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    command: &'static str,
+    code: &'static str,
+) -> Result<(), CliError> {
+    let parent = path.parent().ok_or_else(|| CliError {
+        command,
+        code,
+        message: "output path has no parent directory".to_owned(),
+    })?;
+    fs::create_dir_all(parent).map_err(|error| domain_error(command, code, error))?;
+    for counter in 0_u16..1000 {
+        let temporary = parent.join(format!(
+            ".appmanager-native-{}-{counter}.tmp",
+            std::process::id()
+        ));
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(domain_error(command, code, error)),
+        };
+        let result = (|| -> io::Result<()> {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        return result.map_err(|error| domain_error(command, code, error));
+    }
+    Err(CliError {
+        command,
+        code,
+        message: "unable to allocate output temporary file".to_owned(),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1604,17 +1970,46 @@ mod tests {
 
         let cli = Cli::try_parse_from([
             "appmanager-cli",
-            "parse-runtime-metadata",
-            "--metadata",
-            "/tmp/ports.json",
+            "refresh-stable-cache",
+            "--source",
+            "https://github.com/example/repo/releases/latest/download/version.json",
+            "--cache",
+            "/tmp/update.tsv",
+            "--force",
         ])
         .unwrap();
         assert!(matches!(
             cli.command,
-            Command::ParseRuntimeMetadata {
-                format: OutputFormat::Tsv,
-                ..
-            }
+            Command::RefreshStableCache { force: true, .. }
+        ));
+
+        let cli = Cli::try_parse_from([
+            "appmanager-cli",
+            "fetch-stable-release",
+            "--source",
+            "https://github.com/example/repo/releases/latest/download/version.json",
+            "--archive-name",
+            "PortMaster.zip",
+            "--output",
+            "/tmp/version.tsv",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Command::FetchStableRelease { .. }));
+
+        let cli = Cli::try_parse_from([
+            "appmanager-cli",
+            "refresh-runtime-metadata",
+            "--source",
+            "https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json",
+            "--json-cache",
+            "/tmp/ports.json",
+            "--tsv-cache",
+            "/tmp/runtime.tsv",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::RefreshRuntimeMetadata { force: false, .. }
         ));
     }
 
@@ -1626,6 +2021,156 @@ mod tests {
 
         let invalid = br#"{"stable":{"version":"2026.07\tbad","url":"https://example.test/file","md5":"00000000000000000000000000000000"}}"#;
         assert!(parse_stable_manifest("test", invalid).is_err());
+    }
+
+    #[test]
+    fn stable_release_is_bound_to_manifest_repository_version_and_asset() {
+        let source = "https://github.com/example/repo/releases/latest/download/version.json";
+        let valid = StableRelease {
+            version: "2026.07".to_owned(),
+            url: "https://github.com/example/repo/releases/download/2026.07/PortMaster.zip"
+                .to_owned(),
+            md5: "0".repeat(32),
+        };
+        validate_stable_release_route(source, "PortMaster.zip", &valid).unwrap();
+
+        let wrong_repository = StableRelease {
+            url: "https://github.com/attacker/repo/releases/download/2026.07/PortMaster.zip"
+                .to_owned(),
+            ..valid
+        };
+        assert!(
+            validate_stable_release_route(source, "PortMaster.zip", &wrong_repository).is_err()
+        );
+    }
+
+    #[test]
+    fn fresh_stable_cache_skips_the_network_and_atomic_rows_are_well_formed() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("update.tsv");
+        write_update_cache(&cache, 123, "ok", "2026.07").unwrap();
+        assert_eq!(fs::read_to_string(&cache).unwrap(), "123\tok\t2026.07\n");
+
+        let (_, data) = refresh_stable_cache(
+            "not-a-valid-network-source".to_owned(),
+            cache.clone(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(data["status"], "cached");
+        assert_eq!(fs::read_to_string(cache).unwrap(), "123\tok\t2026.07\n");
+    }
+
+    #[test]
+    fn malformed_stable_cache_does_not_suppress_refresh() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("update.tsv");
+        fs::write(&cache, "not-a-cache-row\n").unwrap();
+
+        assert!(
+            refresh_stable_cache(
+                "not-a-valid-network-source".to_owned(),
+                cache.clone(),
+                false,
+            )
+            .is_err()
+        );
+        assert!(stable_cache_row_valid(&cache));
+        assert!(fs::read_to_string(cache).unwrap().contains("\terror\t\n"));
+    }
+
+    #[test]
+    fn fresh_runtime_json_repairs_derived_tsv_without_the_network() {
+        let temp = tempfile::tempdir().unwrap();
+        let json_cache = temp.path().join("ports.json");
+        let tsv_cache = temp.path().join("runtime.tsv");
+        let json = serde_json::to_vec(&json!({
+            "utils": {"python": {
+                "runtime_name": "python_3.11.squashfs",
+                "runtime_arch": "aarch64",
+                "size": 4,
+                "md5": "00000000000000000000000000000000",
+                "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/python_3.11.squashfs"
+            }}
+        }))
+        .unwrap();
+        let tsv = RuntimeMetadata::parse(&json).unwrap().to_tsv();
+        fs::write(&json_cache, json).unwrap();
+        fs::write(&tsv_cache, "old generation\n").unwrap();
+
+        let (_, data) = refresh_runtime_metadata(
+            "not-a-valid-network-source".to_owned(),
+            json_cache,
+            tsv_cache.clone(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(data["status"], "cached");
+        assert_eq!(fs::read_to_string(tsv_cache).unwrap(), tsv);
+    }
+
+    #[test]
+    fn runtime_entry_validation_uses_json_as_the_single_source_of_truth() {
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join("ports.json");
+        let image = temp.path().join("python_3.11.squashfs");
+        fs::write(&image, b"hsqs").unwrap();
+        let md5 = digest_file(&image, DigestAlgorithm::Md5).unwrap();
+        fs::write(
+            &metadata,
+            serde_json::to_vec(&json!({
+                "utils": {"python": {
+                    "runtime_name": "python_3.11.squashfs",
+                    "runtime_arch": "aarch64",
+                    "size": 4,
+                    "md5": md5,
+                    "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/python_3.11.squashfs"
+                }}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let (_, data) = runtime_metadata_entry(
+            metadata.clone(),
+            "python_3.11".to_owned(),
+            "aarch64".to_owned(),
+            Some(image.clone()),
+        )
+        .unwrap();
+        assert!(
+            data["tsv"]
+                .as_str()
+                .unwrap()
+                .contains("python_3.11\taarch64\t4\t")
+        );
+        fs::write(image, b"nope").unwrap();
+        assert!(
+            runtime_metadata_entry(
+                metadata,
+                "python_3.11".to_owned(),
+                "aarch64".to_owned(),
+                Some(temp.path().join("python_3.11.squashfs")),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn runtime_refresh_rejects_a_concurrent_writer() {
+        let temp = tempfile::tempdir().unwrap();
+        let _lock =
+            ExclusiveFileLock::try_acquire(&temp.path().join(".runtime-metadata-refresh.lock"))
+                .unwrap();
+        assert!(
+            refresh_runtime_metadata(
+                "not-a-valid-network-source".to_owned(),
+                temp.path().join("ports.json"),
+                temp.path().join("runtime.tsv"),
+                true,
+            )
+            .is_err()
+        );
     }
 
     #[test]

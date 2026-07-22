@@ -715,6 +715,7 @@ dependencies = [
 name = "portkit-core"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "md5",
  "serde",
  "serde_json",

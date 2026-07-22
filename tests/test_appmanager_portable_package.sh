@@ -129,7 +129,7 @@ grep -A2 -Fq 'indeterminate=true,stage=L("Checking device configuration"' "$APP/
 grep -Fq 'pam_tools_init' "$DIST/APP Manager.sh"
 grep -Fq 'tools=$PAM_TOOL_PROVIDER${PAM_TOOL_PROBE_FAILURE:+ system_probe=$PAM_TOOL_PROBE_FAILURE}' "$DIST/APP Manager.sh"
 ! grep -Fq 'github_proxy_' "$DIST/APP Manager.sh"
-grep -Fq 'file digest --algorithm sha256' "$DIST/APP Manager.sh"
+grep -Fq 'fetch-stable-release' "$DIST/APP Manager.sh"
 grep -Fq 'file zip-readable --input' "$DIST/APP Manager.sh"
 # The three supported TrimUI firmware packages execute /bin/bash through
 # BusyBox. Keep generated device code inside the syntax subset that exact
@@ -190,19 +190,22 @@ case "$health" in
 esac
 cat > "$TMP/appmanager-test" <<'CLI'
 #!/bin/sh
-if [ "${1:-}" = "fetch-stable-manifest" ]; then
-  shift; out=""
+if [ "${1:-}" = "refresh-stable-cache" ]; then
+  shift; cache=""; force=0
   while [ "$#" -gt 0 ]; do
-    case "$1" in --output) out=$2; shift 2 ;; *) shift ;; esac
+    case "$1" in --cache) cache=$2; shift 2 ;; --force) force=1; shift ;; *) shift ;; esac
   done
+  [ "$force" = 1 ] || [ ! -s "$cache" ] || { printf '%s\n' '{"ok":true}'; exit 0; }
   printf '%s\n' called >> "$PAM_TEST_FETCH_LOG"
-  printf '%s\n' '{"stable":{"md5":"00000000000000000000000000000000","url":"https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.07/PortMaster.zip","version":"2026.07"}}' > "$out"
+  printf '%s\tok\t2026.07\n' "$(date +%s)" > "$cache"
   printf '%s\n' '{"ok":true}'
   exit 0
 fi
 exec "$PAM_REAL_APPMANAGER" "$@"
 CLI
 chmod +x "$TMP/appmanager-test"
+grep -Fq 'refresh-stable-cache' "$SPACED/APP Manager.sh"
+! grep -Fq 'pam_check_update()' "$SPACED/APP Manager.sh"
 PAM_REAL_APPMANAGER="$HOST_APPMANAGER" PAM_TEST_FETCH_LOG="$TMP/update-fetch.log" PAM_SOURCE_DIR="$SPACED" \
   PAM_PORTMASTER_DIR_OVERRIDE="$TMP/missing PortMaster" \
   PAM_PORTKIT_BIN_OVERRIDE="$HOST_PORTKIT" PAM_APPMANAGER_CLI_BIN_OVERRIDE="$TMP/appmanager-test" \

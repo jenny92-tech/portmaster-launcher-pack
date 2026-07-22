@@ -13,7 +13,7 @@ use std::str::FromStr;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DEFAULT_BATCH_SIZE: usize = 5;
 const MAX_BATCH_SIZE: usize = 10;
@@ -306,6 +306,55 @@ impl GitHubTransport {
     where
         F: Fn(&Path) -> bool,
     {
+        self.fetch_inner(
+            capability, source, output, validator, progress, max_bytes, None,
+        )
+    }
+
+    /// Fetches a file while bounding probing, retries, and transfer by one
+    /// shared wall-clock deadline.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fetch_with_timeout<F>(
+        &self,
+        capability: Capability,
+        source: &str,
+        output: &Path,
+        validator: F,
+        progress: Option<&dyn Progress>,
+        max_bytes: Option<u64>,
+        timeout: Duration,
+    ) -> Result<FetchOutcome, GitHubError>
+    where
+        F: Fn(&Path) -> bool,
+    {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or(GitHubError::DeadlineExceeded)?;
+        self.fetch_inner(
+            capability,
+            source,
+            output,
+            validator,
+            progress,
+            max_bytes,
+            Some(deadline),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn fetch_inner<F>(
+        &self,
+        capability: Capability,
+        source: &str,
+        output: &Path,
+        validator: F,
+        progress: Option<&dyn Progress>,
+        max_bytes: Option<u64>,
+        deadline: Option<Instant>,
+    ) -> Result<FetchOutcome, GitHubError>
+    where
+        F: Fn(&Path) -> bool,
+    {
         if capability == Capability::Clone {
             return Err(GitHubError::UnsupportedFileFetch { capability });
         }
@@ -323,7 +372,8 @@ impl GitHubTransport {
 
         let mut validation_failed = false;
         for batch in candidates.chunks(self.batch_size) {
-            let mut responsive = self.probe_batch(batch);
+            remaining(deadline)?;
+            let mut responsive = self.probe_batch(batch, deadline)?;
             if let Some(id) = self.preferred_route(capability) {
                 if let Some(index) = responsive
                     .iter()
@@ -335,7 +385,10 @@ impl GitHubTransport {
                 }
             }
             for candidate in responsive {
-                match self.transfer(&candidate, output, &validator, progress, max_bytes) {
+                remaining(deadline)?;
+                match self.transfer(
+                    &candidate, output, &validator, progress, max_bytes, deadline,
+                ) {
                     Ok(()) => {
                         self.set_preferred(capability, &candidate.route_id);
                         return Ok(FetchOutcome {
@@ -349,6 +402,7 @@ impl GitHubTransport {
                     Err(AttemptError::Transfer) => {
                         self.clear_if_preferred(capability, &candidate.route_id);
                     }
+                    Err(AttemptError::Deadline) => return Err(GitHubError::DeadlineExceeded),
                     Err(AttemptError::Io(error)) => return Err(GitHubError::Io(error)),
                 }
             }
@@ -356,27 +410,36 @@ impl GitHubTransport {
         Err(GitHubError::Exhausted { validation_failed })
     }
 
-    fn probe_batch(&self, batch: &[GitHubCandidate]) -> Vec<GitHubCandidate> {
-        std::thread::scope(|scope| {
+    fn probe_batch(
+        &self,
+        batch: &[GitHubCandidate],
+        deadline: Option<Instant>,
+    ) -> Result<Vec<GitHubCandidate>, GitHubError> {
+        let responsive = std::thread::scope(|scope| {
             let (sender, receiver) = std::sync::mpsc::channel();
             for candidate in batch.iter().cloned() {
                 let sender = sender.clone();
                 scope.spawn(move || {
-                    if self.probe(&candidate) {
+                    if self.probe(&candidate, deadline) {
                         let _ = sender.send(candidate);
                     }
                 });
             }
             drop(sender);
             receiver.into_iter().collect()
-        })
+        });
+        remaining(deadline)?;
+        Ok(responsive)
     }
 
-    fn probe(&self, candidate: &GitHubCandidate) -> bool {
+    fn probe(&self, candidate: &GitHubCandidate, deadline: Option<Instant>) -> bool {
+        let Ok(timeout) = remaining(deadline) else {
+            return false;
+        };
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .timeout_connect(Some(Duration::from_secs(3)))
-                .timeout_global(Some(Duration::from_secs(5)))
+                .timeout_global(Some(timeout.min(Duration::from_secs(5))))
                 .build(),
         );
         // A 2xx response (including 206 to the Range probe) means the route is
@@ -396,6 +459,7 @@ impl GitHubTransport {
         validator: &F,
         progress: Option<&dyn Progress>,
         max_bytes: Option<u64>,
+        deadline: Option<Instant>,
     ) -> Result<(), AttemptError>
     where
         F: Fn(&Path) -> bool,
@@ -405,9 +469,14 @@ impl GitHubTransport {
         let _lock = TransferLock::acquire(output).map_err(AttemptError::Io)?;
         prepare_partial(&part, &sidecar, &candidate.endpoint).map_err(AttemptError::Io)?;
 
-        if let Err(error) =
-            self.run_transfer(&candidate.endpoint, &part, &sidecar, progress, max_bytes)
-        {
+        if let Err(error) = self.run_transfer(
+            &candidate.endpoint,
+            &part,
+            &sidecar,
+            progress,
+            max_bytes,
+            deadline,
+        ) {
             // Keep a non-empty partial so a same-route retry can resume; clear
             // an empty one so the next attempt starts clean.
             if !part.metadata().is_ok_and(|metadata| metadata.len() > 0) {
@@ -433,17 +502,25 @@ impl GitHubTransport {
         sidecar: &Path,
         progress: Option<&dyn Progress>,
         max_bytes: Option<u64>,
+        deadline: Option<Instant>,
     ) -> Result<(), AttemptError> {
         // Mirror curl's `--retry 2 --retry-delay 1`: retry transient failures
         // twice before giving up.
         for attempt in 0..=2 {
+            remaining(deadline).map_err(|_| AttemptError::Deadline)?;
             if attempt > 0 {
+                if remaining(deadline).map_err(|_| AttemptError::Deadline)?
+                    <= Duration::from_secs(1)
+                {
+                    return Err(AttemptError::Deadline);
+                }
                 std::thread::sleep(Duration::from_secs(1));
             }
-            match self.single_transfer(endpoint, part, sidecar, progress, max_bytes) {
+            match self.single_transfer(endpoint, part, sidecar, progress, max_bytes, deadline) {
                 Ok(()) => return Ok(()),
                 Err(AttemptError::Io(error)) => return Err(AttemptError::Io(error)),
                 Err(AttemptError::Validation) => return Err(AttemptError::Validation),
+                Err(AttemptError::Deadline) => return Err(AttemptError::Deadline),
                 Err(AttemptError::Transfer) => continue,
             }
         }
@@ -457,12 +534,16 @@ impl GitHubTransport {
         sidecar: &Path,
         progress: Option<&dyn Progress>,
         max_bytes: Option<u64>,
+        deadline: Option<Instant>,
     ) -> Result<(), AttemptError> {
-        let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder()
-                .timeout_connect(Some(Duration::from_secs(8)))
-                .build(),
-        );
+        let mut config =
+            ureq::config::Config::builder().timeout_connect(Some(Duration::from_secs(8)));
+        if deadline.is_some() {
+            config = config.timeout_global(Some(
+                remaining(deadline).map_err(|_| AttemptError::Deadline)?,
+            ));
+        }
+        let agent = ureq::Agent::new_with_config(config.build());
         reject_symlink(part).map_err(AttemptError::Io)?;
         let mut existing_len = fs::metadata(part)
             .map(|metadata| metadata.len())
@@ -640,6 +721,7 @@ pub enum GitHubError {
     InvalidRoute,
     InvalidBatchSize,
     NoCandidates,
+    DeadlineExceeded,
     Exhausted { validation_failed: bool },
     Io(io::Error),
 }
@@ -668,6 +750,7 @@ impl fmt::Display for GitHubError {
                 )
             }
             Self::NoCandidates => formatter.write_str("no GitHub transport routes are available"),
+            Self::DeadlineExceeded => formatter.write_str("GitHub transport deadline exceeded"),
             Self::Exhausted { validation_failed } if *validation_failed => {
                 formatter.write_str("all GitHub transport routes failed transfer or validation")
             }
@@ -725,7 +808,18 @@ impl fmt::Debug for GitHubCandidate {
 enum AttemptError {
     Transfer,
     Validation,
+    Deadline,
     Io(io::Error),
+}
+
+fn remaining(deadline: Option<Instant>) -> Result<Duration, GitHubError> {
+    match deadline {
+        Some(deadline) => deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(GitHubError::DeadlineExceeded),
+        None => Ok(Duration::MAX),
+    }
 }
 
 fn validate_source(capability: Capability, source: &str) -> Result<(), GitHubError> {
@@ -1426,7 +1520,7 @@ mod tests {
         fs::write(&part, b"bad").unwrap();
         write_partial_state(&sidecar, &endpoint, Some("\"entity-1\"")).unwrap();
         GitHubTransport::new()
-            .single_transfer(&endpoint, &part, &sidecar, None, Some(4))
+            .single_transfer(&endpoint, &part, &sidecar, None, Some(4), None)
             .unwrap();
         server.join().unwrap();
         assert_eq!(fs::read(&part).unwrap(), b"good");
@@ -1464,7 +1558,7 @@ mod tests {
         fs::write(&part, b"goo").unwrap();
         write_partial_state(&sidecar, &endpoint, Some("\"entity-1\"")).unwrap();
         GitHubTransport::new()
-            .single_transfer(&endpoint, &part, &sidecar, None, Some(4))
+            .single_transfer(&endpoint, &part, &sidecar, None, Some(4), None)
             .unwrap();
         server.join().unwrap();
         assert_eq!(fs::read(&part).unwrap(), b"good");

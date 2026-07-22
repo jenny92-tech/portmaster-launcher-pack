@@ -1,6 +1,9 @@
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
+
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 
 use sha2::{Digest as _, Sha256};
 
@@ -10,6 +13,39 @@ use crate::{Error, Result};
 pub enum DigestAlgorithm {
     Md5,
     Sha256,
+}
+
+/// A process-scoped advisory lock. The kernel releases it on exit or crash;
+/// the persistent lock file itself never carries stale ownership state.
+#[derive(Debug)]
+pub struct ExclusiveFileLock {
+    file: File,
+}
+
+impl ExclusiveFileLock {
+    #[cfg(unix)]
+    pub fn try_acquire(path: &Path) -> std::io::Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self { file })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 
 impl DigestAlgorithm {
@@ -85,6 +121,21 @@ mod tests {
             digest_file(temp.path(), DigestAlgorithm::Sha256).unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_file_lock_is_released_with_its_owner() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let first = ExclusiveFileLock::try_acquire(temp.path()).unwrap();
+        assert_eq!(
+            ExclusiveFileLock::try_acquire(temp.path())
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        drop(first);
+        drop(ExclusiveFileLock::try_acquire(temp.path()).unwrap());
     }
 
     #[test]

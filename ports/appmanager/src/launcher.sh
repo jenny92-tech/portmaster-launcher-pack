@@ -51,7 +51,6 @@ if [ -n "${PAM_SOURCE_DIR:-}" ]; then PAM_LAUNCHER_SOURCE="$PAM_DIR/APP Manager.
 else PAM_LAUNCHER_SOURCE="$0"; fi
 PAM_APP_ROOT="$PAM_DIR/jenny92-appmanager"
 [ -n "${PAM_APP_ROOT_OVERRIDE:-}" ] && PAM_APP_ROOT="$PAM_APP_ROOT_OVERRIDE"
-PAM_RUNTIME_DIR="$PAM_APP_ROOT/runtime"
 PAM_BIN_DIR="$PAM_APP_ROOT/bin"
 PAM_SHARE_DIR="$PAM_APP_ROOT/share"
 PAM_PORTKIT="${PAM_PORTKIT_BIN_OVERRIDE:-$PAM_BIN_DIR/portkit}"
@@ -257,7 +256,6 @@ RUNTIME_METADATA_JSON="$CONFDIR/ports.json"
 DEVICE_CONFIG_DIR="$CONFDIR/device-config"
 DEVICE_CONFIG_FILE="$DEVICE_CONFIG_DIR/config.json"
 CONFIG_REFRESH_RESULT="$CONFDIR/config-refresh.tsv"
-CONFIG_REFRESH_SESSION="$CONFDIR/config-refresh-session.tsv"
 INVENTORY_FILE="$CONFDIR/inventory.json"
 
 # PID values can be reused after a reboot. A marker is live only when /proc
@@ -731,12 +729,8 @@ EOF
 # metadata source used by PortMaster itself. Only a state cache is retained;
 # the APP package carries no Runtime inventory.
 RUNTIME_PROGRESS_COUNT=0
-RUNTIME_PROGRESS_INDEX=0
 RUNTIME_PROGRESS_TOTAL_BYTES=0
-RUNTIME_PROGRESS_DONE_BYTES=0
 RUNTIME_PROGRESS_RUNTIME=""
-RUNTIME_PROGRESS_SOURCE_BASE=0
-RUNTIME_PROGRESS_DETAIL=""
 PORTMASTER_PROGRESS=0
 PORTMASTER_PROGRESS_FLOOR=0
 PORTMASTER_BOOTSTRAP_PROGRESS=0
@@ -766,7 +760,7 @@ runtime_progress_write() {
   detail=${detail//$'\t'/ }; detail=${detail//$'\r'/ }; detail=${detail//$'\n'/ }
   tmp="$PROGRESS_FILE.tmp.$$"
   printf '1\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$phase" "$RUNTIME_PROGRESS_RUNTIME" "$RUNTIME_PROGRESS_INDEX" "$RUNTIME_PROGRESS_COUNT" \
+    "$phase" "$RUNTIME_PROGRESS_RUNTIME" 0 "$RUNTIME_PROGRESS_COUNT" \
     "$current" "$RUNTIME_PROGRESS_TOTAL_BYTES" "$speed" "$detail" > "$tmp" &&
     mv -f -- "$tmp" "$PROGRESS_FILE"
 }
@@ -774,9 +768,7 @@ runtime_progress_write() {
 runtime_progress_prepare_plan() {
   local kind arg bytes
   RUNTIME_PROGRESS_COUNT=0
-  RUNTIME_PROGRESS_INDEX=0
   RUNTIME_PROGRESS_TOTAL_BYTES=0
-  RUNTIME_PROGRESS_DONE_BYTES=0
   PORTMASTER_PROGRESS=0
   while IFS=$'\t' read -r kind arg; do
     if [ "$kind" = "INSTALL_RUNTIME" ]; then
@@ -810,69 +802,20 @@ runtime_arch() {
 runtime_metadata_field() {
   local runtime="$1" field="$2" arch
   arch=$(runtime_arch)
-  [ -f "$RUNTIME_METADATA" ] || return 1
-  awk -F '\t' -v runtime="$runtime" -v arch="$arch" -v field="$field" \
-    '$1 == runtime && $2 == arch { print $field; exit }' "$RUNTIME_METADATA"
+  [ -f "$RUNTIME_METADATA_JSON" ] || return 1
+  "$PAM_APPMANAGER_CLI" runtime-metadata-entry --metadata "$RUNTIME_METADATA_JSON" \
+    --runtime "$runtime" --arch "$arch" 2>> "$PAM_APP_ROOT/log.txt" |
+    awk -F '\t' -v field="$field" 'NF == 5 { print $field; exit }'
 }
 
 runtime_expected_size() { runtime_metadata_field "$1" 3; }
-runtime_expected_md5() { runtime_metadata_field "$1" 4; }
-
-runtime_has_magic() {
-  [ -f "$1" ] && [ "$(LC_ALL=C head -c 4 "$1" 2>/dev/null)" = "hsqs" ]
-}
-
-runtime_metadata_parse() {
-  local source="$1" output="$2"
-  [ -f "$source" ] && [ ! -L "$source" ] && [ -x "$PAM_APPMANAGER_CLI" ] || return 1
-  rm -f -- "$output"
-  "$PAM_APPMANAGER_CLI" parse-runtime-metadata --metadata "$source" --format tsv > "$output" || {
-    rm -f -- "$output"
-    return 1
-  }
-  awk -F '\t' '
-    NF != 5 || $1 !~ /^[A-Za-z0-9._+-]+$/ ||
-    $2 !~ /^(aarch64|armhf|x86_64)$/ || $3 !~ /^[0-9]+$/ ||
-    $4 !~ /^[0-9a-f]+$/ || length($4) != 32 ||
-    $5 !~ /^https:\/\/github.com\/PortsMaster\/PortMaster-New\/releases\/download\/[^\/]+\/[A-Za-z0-9._+-]+\.squashfs$/ ||
-    seen[$1 SUBSEP $2]++ { exit 1 }
-  ' "$output"
-}
-
-pam_stable_metadata_parse() {
-  local source="$1" output="$2"
-  [ -f "$source" ] && [ ! -L "$source" ] && [ -x "$PAM_APPMANAGER_CLI" ] || return 1
-  rm -f -- "$output"
-  "$PAM_APPMANAGER_CLI" parse-stable-manifest --manifest "$source" --format tsv > "$output" || {
-    rm -f -- "$output"
-    return 1
-  }
-  awk -F '\t' 'NF != 3 || $1 == "" || $2 == "" || $3 == "" { exit 1 }' "$output"
-}
 
 runtime_metadata_refresh() {
-  local force="${1:-0}" now mtime root json_tmp metadata_tmp
-  if [ "$force" != "1" ] && [ -s "$RUNTIME_METADATA" ] && [ -s "$RUNTIME_METADATA_JSON" ]; then
-    now=$(date +%s 2>/dev/null || printf 0)
-    mtime=$(pam_cache_mtime "$RUNTIME_METADATA")
-    case "$now:$mtime" in *[!0-9:]*|:) mtime=0 ;; esac
-    [ "$mtime" -le 0 ] || [ $((now - mtime)) -ge 86400 ] || return 0
-  fi
-  root="$CONFDIR/runtime-metadata.$$"
-  rm -rf -- "$root"; mkdir -p "$root" || return 1
-  json_tmp="$root/ports.json"; metadata_tmp="$root/runtime-metadata.tsv"
-  if "$PAM_APPMANAGER_CLI" fetch-runtime-metadata \
-       --source "$RUNTIME_METADATA_URL" --output "$json_tmp" >/dev/null 2>> "$PAM_APP_ROOT/log.txt" &&
-     runtime_metadata_parse "$json_tmp" "$metadata_tmp"; then
-    mv -f -- "$json_tmp" "$RUNTIME_METADATA_JSON" &&
-      mv -f -- "$metadata_tmp" "$RUNTIME_METADATA"
-  else
-    rm -rf -- "$root"
-    [ "$force" != "1" ] && [ -s "$RUNTIME_METADATA" ] && [ -s "$RUNTIME_METADATA_JSON" ]
-    return
-  fi
-  rm -rf -- "$root"
-  return 0
+  local force="${1:-0}"
+  set -- refresh-runtime-metadata --source "$RUNTIME_METADATA_URL" \
+    --json-cache "$RUNTIME_METADATA_JSON" --tsv-cache "$RUNTIME_METADATA"
+  [ "$force" != 1 ] || set -- "$@" --force
+  "$PAM_APPMANAGER_CLI" "$@" >/dev/null 2>> "$PAM_APP_ROOT/log.txt"
 }
 
 pam_repair_runtime_native() {
@@ -928,187 +871,27 @@ pam_repair_plan_runtimes_native() {
   return 1
 }
 
-pam_cache_mtime() {
-  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf 0
-}
-
-pam_check_update() {
-  local now mtime tmp parsed latest _url _md5 status="error"
+pam_refresh_stable_cache() {
   pam_update_allowed || return 0
-  now=$(date +%s 2>/dev/null || printf 0)
-  mtime=$(pam_cache_mtime "$UPDATE_CACHE_FILE")
-  case "$now:$mtime" in *[!0-9:]*|:) mtime=0 ;; esac
-  if [ "$FORCE_UPDATE_CHECK" != "1" ] && [ "$mtime" -gt 0 ] && [ $((now - mtime)) -lt 86400 ]; then return 0; fi
-
-  tmp="$CONFDIR/.portmaster-version.$$"
-  rm -f -- "$tmp"
-  rm -f -- "$CANCEL_FILE"
-  "$PAM_APPMANAGER_CLI" fetch-stable-manifest \
-    --source "$(pm_release_version_url)" --output "$tmp" >/dev/null 2>> "$PAM_APP_ROOT/log.txt" || true
-  parsed="$tmp.stable"
-  if pam_stable_metadata_parse "$tmp" "$parsed"; then
-    IFS=$'\t' read -r latest _url _md5 < "$parsed"
-  fi
-  rm -f -- "$parsed"
-  case "$latest" in ""|*[!A-Za-z0-9._-]*) latest="" ;; *) status="ok" ;; esac
-  printf '%s\t%s\t%s\n' "$now" "$status" "$latest" > "$UPDATE_CACHE_FILE.tmp" &&
-    mv -f "$UPDATE_CACHE_FILE.tmp" "$UPDATE_CACHE_FILE"
-  rm -f -- "$tmp"
-  [ "$status" = "ok" ]
-}
-
-runtime_file_size() {
-  [ -f "$1" ] || { echo 0; return; }
-  wc -c < "$1" | tr -d '[:space:]'
+  set -- refresh-stable-cache --source "$(pam_release_manifest_url)" --cache "$UPDATE_CACHE_FILE"
+  [ "$FORCE_UPDATE_CHECK" != 1 ] || set -- "$@" --force
+  "$PAM_APPMANAGER_CLI" "$@" >/dev/null 2>> "$PAM_APP_ROOT/log.txt"
 }
 
 pm_cancel_requested() { [ -e "$CANCEL_FILE" ]; }
 
-pam_config_refresh_deadline() {
-  local seconds="${PAM_CONFIG_REFRESH_TIMEOUT_SECONDS:-40}"
-  case "$seconds" in ''|*[!0-9]*) seconds=40 ;; esac
-  # Lua waits 45 seconds.  Leave a margin for validation and atomic promotion.
-  [ "$seconds" -ge 1 ] && [ "$seconds" -le 44 ] || seconds=40
-  printf '%s\n' "$seconds"
-}
-
-pam_config_refresh_session_matches() {
-  local token="$1" deadline="$2" current_token current_deadline now
-  IFS=$'\t' read -r current_token current_deadline < "$CONFIG_REFRESH_SESSION" 2>/dev/null || return 1
-  [ "$current_token" = "$token" ] && [ "$current_deadline" = "$deadline" ] || return 1
-  now=$(date +%s 2>/dev/null || printf 0)
-  case "$now:$deadline" in *[!0-9:]*|:) return 1 ;; esac
-  [ "$now" -le "$deadline" ]
-}
-
-pam_config_version_is_newer() {
-  local candidate="$1" baseline="$2" c1 c2 c3 extra b1 b2 b3
-  IFS=. read -r c1 c2 c3 extra <<EOF
-$candidate
-EOF
-  [ -z "$extra" ] || return 1
-  IFS=. read -r b1 b2 b3 extra <<EOF
-$baseline
-EOF
-  [ -z "$extra" ] || return 1
-  case "$c1:$c2:$c3:$b1:$b2:$b3" in *[!0-9:]*) return 1 ;; esac
-  awk -v c1="$c1" -v c2="$c2" -v c3="$c3" -v b1="$b1" -v b2="$b2" -v b3="$b3" \
-    'BEGIN { exit !((c1 > b1) || (c1 == b1 && c2 > b2) || (c1 == b1 && c2 == b2 && c3 > b3)) }'
-}
-
-pam_valid_config_version() {
-  local root="$1" config_dir="$2" launcher="$3" output="$4" platform version extra
-  set -- config select-detail --config "$root" --launcher "$launcher" --format tsv
-  [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
-  "$PAM_PORTKIT" "$@" > "$output" 2>/dev/null || return 1
-  platform=$(awk -F '\t' '$1 == "platform_id" && NF == 2 {print $2}' "$output")
-  version=$(awk -F '\t' '$1 == "config_version" && NF == 2 {print $2}' "$output")
-  [ -n "$platform" ] && [ -n "$version" ] || return 1
-  "$PAM_PORTKIT" config validate --config "$root" --config-dir "$config_dir" \
-    --platform "$platform" >/dev/null 2>&1 || return 1
-  printf '%s\n' "$version"
-}
-
 pam_refresh_device_config() {
-  local stage="$CONFDIR/device-config-stage.$$" staged detail_file detail_target detail_url
-  local status=unchanged rc=0 started timeout deadline token native_launcher
-  local packaged_version cached_version baseline_version
-  local key value schema="" config_version="" platform_id="" detail_ref="" detail_sha256=""
-  started=$(date +%s 2>/dev/null || printf 0)
-  timeout=$(pam_config_refresh_deadline)
-  case "$started" in ''|*[!0-9]*) started=0 ;; esac
-  deadline=$((started + timeout))
-  token="$$-$started-$RANDOM"
-  printf '%s\t%s\n' "$token" "$deadline" > "$CONFIG_REFRESH_SESSION.tmp.$$" &&
-    mv -f -- "$CONFIG_REFRESH_SESSION.tmp.$$" "$CONFIG_REFRESH_SESSION" || return 1
-  printf '1\trunning\n' > "$CONFIG_REFRESH_RESULT.tmp.$$" &&
-    mv -f -- "$CONFIG_REFRESH_RESULT.tmp.$$" "$CONFIG_REFRESH_RESULT" || return 1
-  PAM_CONFIG_REFRESH_DEADLINE="$deadline"
-  export PAM_CONFIG_REFRESH_DEADLINE
-  rm -rf -- "$stage"
-  if [ -L "$DEVICE_CONFIG_DIR" ] || [ -L "$DEVICE_CONFIG_DIR/platforms" ] ||
-     ! mkdir -p "$stage/platforms"; then
-    rc=74; status=error
-  else
-    staged="$stage/config.json"
-    native_launcher="${PAM_NATIVE_LAUNCHER_OVERRIDE:-$PAM_LAUNCHER_SOURCE}"
-    case "$native_launcher" in /*) ;; *) native_launcher="$PAM_DIR/$(basename "$native_launcher")" ;; esac
-    if ! "$PAM_PORTKIT" github fetch --capability raw --source "$PAM_DEVICE_CONFIG_URL" \
-         --output "$staged" --max-bytes 4194304 --validator config-root >/dev/null 2>&1; then
-      rc=$?; [ "$rc" = "0" ] && rc=69; status=error
-    else
-      set -- config select-detail --config "$staged" --launcher "$native_launcher" --format tsv
-      [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
-      if ! "$PAM_PORTKIT" "$@" > "$stage/selection.tsv" 2>/dev/null; then
-        rc=65; status=error
-      else
-        while IFS=$'\t' read -r key value extra; do
-          [ -z "$extra" ] || { rc=65; break; }
-          case "$value" in *$'\t'*|*$'\r'*|*$'\n'*) rc=65; break ;; esac
-          case "$key" in
-            schema) [ -z "$schema" ] || { rc=65; break; }; schema="$value" ;;
-            config_version) [ -z "$config_version" ] || { rc=65; break; }; config_version="$value" ;;
-            platform_id) [ -z "$platform_id" ] || { rc=65; break; }; platform_id="$value" ;;
-            detail_ref) [ -z "$detail_ref" ] || { rc=65; break; }; detail_ref="$value" ;;
-            detail_sha256) [ -z "$detail_sha256" ] || { rc=65; break; }; detail_sha256="$value" ;;
-            *) rc=65; break ;;
-          esac
-        done < "$stage/selection.tsv"
-        case "$schema:$platform_id:$detail_ref:$detail_sha256" in
-          1:[A-Za-z0-9_-]*:./platforms/[A-Za-z0-9_.-]*.json:[0-9a-f][0-9a-f]*) ;;
-          *) rc=65 ;;
-        esac
-        case "$detail_sha256" in *[!0-9a-f]*) rc=65 ;; esac
-        [ "${#detail_sha256}" = 64 ] || rc=65
-        [ "$detail_ref" = "./platforms/$platform_id.json" ] || rc=65
-        if [ "$rc" = "0" ]; then
-          detail_file="$stage/${detail_ref#./}"
-          detail_url="${PAM_DEVICE_CONFIG_URL%/config.json}/${detail_ref#./}"
-          "$PAM_PORTKIT" github fetch --capability raw --source "$detail_url" \
-            --output "$detail_file" --max-bytes 4194304 --expected-sha256 "$detail_sha256" \
-            >/dev/null 2>&1 || rc=$?
-        fi
-        if [ "$rc" = "0" ]; then
-          "$PAM_PORTKIT" config validate --config "$staged" --config-dir "$stage" \
-            --platform "$platform_id" >/dev/null 2>&1 || rc=65
-        fi
-        if [ "$rc" = "0" ] && pam_config_refresh_session_matches "$token" "$deadline"; then
-          detail_target="$DEVICE_CONFIG_DIR/${detail_ref#./}"
-          packaged_version=$(pam_valid_config_version "$PAM_CONFIG_DIR/config.json" "$PAM_CONFIG_DIR" \
-            "$native_launcher" "$stage/packaged-selection.tsv" 2>/dev/null || true)
-          [ -n "$packaged_version" ] || { rc=65; status=error; }
-          baseline_version="$packaged_version"
-          if [ "$rc" = "0" ] && [ -s "$DEVICE_CONFIG_FILE" ]; then
-            cached_version=$(pam_valid_config_version "$DEVICE_CONFIG_FILE" "$DEVICE_CONFIG_DIR" \
-              "$native_launcher" "$stage/cached-selection.tsv" 2>/dev/null || true)
-            if [ -n "$cached_version" ] && pam_config_version_is_newer "$cached_version" "$baseline_version"; then
-              baseline_version="$cached_version"
-            fi
-          fi
-          if [ "$rc" = "0" ] && ! pam_config_version_is_newer "$config_version" "$baseline_version"; then
-            status=unchanged
-          elif [ "$rc" = "0" ] && [ -s "$DEVICE_CONFIG_FILE" ] && [ -s "$detail_target" ] &&
-             cmp -s "$staged" "$DEVICE_CONFIG_FILE" && cmp -s "$detail_file" "$detail_target"; then
-            status=unchanged
-          elif [ "$rc" = "0" ] && mkdir -p "$DEVICE_CONFIG_DIR/platforms" &&
-               mv -f -- "$detail_file" "$detail_target" &&
-               mv -f -- "$staged" "$DEVICE_CONFIG_FILE"; then
-            status=updated
-          elif [ "$rc" = "0" ]; then
-            rc=74; status=error
-          fi
-        elif [ "$rc" = "0" ]; then
-          rc=70; status=error
-        else
-          status=error
-        fi
-      fi
-    fi
-  fi
-  rm -rf -- "$stage"
-  printf '1\t%s\n' "$status" > "$CONFIG_REFRESH_RESULT.tmp.$$" &&
-    mv -f -- "$CONFIG_REFRESH_RESULT.tmp.$$" "$CONFIG_REFRESH_RESULT"
-  return "$rc"
+  local native_launcher timeout="${PAM_CONFIG_REFRESH_TIMEOUT_SECONDS:-40}"
+  case "$timeout" in ''|*[!0-9]*) timeout=40 ;; esac
+  [ "$timeout" -ge 1 ] && [ "$timeout" -le 44 ] || timeout=40
+  native_launcher="${PAM_NATIVE_LAUNCHER_OVERRIDE:-$PAM_LAUNCHER_SOURCE}"
+  case "$native_launcher" in /*) ;; *) native_launcher="$PAM_DIR/$(basename "$native_launcher")" ;; esac
+  set -- config refresh --source "$PAM_DEVICE_CONFIG_URL" \
+    --config "$PAM_CONFIG_DIR/config.json" --config-dir "$PAM_CONFIG_DIR" \
+    --cache "$DEVICE_CONFIG_FILE" --cache-dir "$DEVICE_CONFIG_DIR" \
+    --result "$CONFIG_REFRESH_RESULT" --launcher "$native_launcher" --timeout-seconds "$timeout"
+  [ -z "${PAM_NATIVE_ROOT:-}" ] || set -- "$@" --root "$PAM_NATIVE_ROOT"
+  "$PAM_PORTKIT" "$@" >/dev/null 2>> "$PAM_APP_ROOT/log.txt"
 }
 
 pam_refresh_native_inventory() {
@@ -1144,11 +927,6 @@ pam_refresh_native_inventory() {
     rm -f -- "$tmp"
     return 1
   fi
-}
-
-pm_sha256_file() {
-  [ -x "$PAM_PORTKIT" ] &&
-    "$PAM_PORTKIT" file digest --algorithm sha256 --input "$1" --format raw
 }
 
 pam_fetch_release_archive() {
@@ -1187,33 +965,6 @@ pam_write_native_install_plan() {
   [ -s "$tmp" ] && mv -f -- "$tmp" "$plan" || { rm -f -- "$tmp"; return 1; }
 }
 
-pam_write_install_plan() {
-  pam_write_native_install_plan "$1"
-}
-
-pm_release_version_url() {
-  pam_release_manifest_url
-}
-
-pm_valid_stable_archive_url() {
-  local manifest base archive_name
-  manifest=$(pam_release_manifest_url)
-  archive_name=$(pam_release_archive_name) || return 1
-  case "$manifest" in
-    https://github.com/*/*/releases/latest/download/version.json)
-      base=${manifest%/latest/download/version.json}/download
-      case "$1" in "$base"/*/"$archive_name") return 0 ;; esac
-      return 1
-      ;;
-  esac
-  return 1
-}
-
-pm_valid_md5() {
-  case "$1" in ""|*[!0-9A-Fa-f]*) return 1 ;; esac
-  [ "${#1}" = 32 ]
-}
-
 pam_install_portmaster_native() {
   local archive="$1" native_launcher
   [ -x "$PAM_APPMANAGER_CLI" ] || return 69
@@ -1232,12 +983,11 @@ pam_install_portmaster_native() {
 }
 
 install_portmaster_release_inner() {
-  local cache="$CONFDIR/portmaster-download" version metadata archive archive_dir rc
-  local version_url stable_url stable_version expected_hash actual_hash archive_valid=0 reason archive_name
-  version="$cache/version.json"
+  local cache="$CONFDIR/portmaster-download" metadata archive archive_dir rc
+  local stable_url stable_version expected_hash actual_hash archive_valid=0 reason archive_name
   metadata="$cache/version.tsv"
   rm -f -- "$CANCEL_FILE"; mkdir -p "$cache" || return 1
-  rm -f -- "$version" "$metadata" "$cache/appmanager-installer.sh" "$cache/appmanager-installer.sh.new"
+  rm -f -- "$cache/version.json" "$metadata" "$cache/appmanager-installer.sh" "$cache/appmanager-installer.sh.new"
   RUNTIME_PROGRESS_RUNTIME="PortMaster"
   runtime_progress_write preparing 1 0 "Preparing PortMaster"
   ensure_portmaster_python_runtime || {
@@ -1245,22 +995,17 @@ install_portmaster_release_inner() {
     return 1
   }
   pam_release_route_allowed || { printf 'FAIL\tportmaster\tcapability-disabled\n' >> "$RESULT_FILE"; return 1; }
-  version_url=$(pm_release_version_url)
-  "$PAM_APPMANAGER_CLI" fetch-stable-manifest \
-    --source "$version_url" --output "$version" >/dev/null 2>> "$PAM_APP_ROOT/log.txt" || {
+  archive_name=$(pam_release_archive_name) || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
+  "$PAM_APPMANAGER_CLI" fetch-stable-release --source "$(pam_release_manifest_url)" \
+    --archive-name "$archive_name" --output "$metadata" >/dev/null 2>> "$PAM_APP_ROOT/log.txt" || {
       rc=$?; printf 'FAIL\tportmaster\t%s\n' "$([ -e "$CANCEL_FILE" ] && echo cancelled || echo network)" >> "$RESULT_FILE"; return 1;
     }
-  pam_stable_metadata_parse "$version" "$metadata" || { printf 'FAIL\tportmaster\tversion\n' >> "$RESULT_FILE"; return 1; }
-  IFS=$'\t' read -r stable_version stable_url expected_hash < "$metadata"
-  case "$stable_version" in ""|*[!A-Za-z0-9._-]*) printf 'FAIL\tportmaster\tversion\n' >> "$RESULT_FILE"; return 1 ;; esac
-  pm_valid_stable_archive_url "$stable_url" || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
-  archive_name=$(pam_release_archive_name) || { printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1; }
-  case "$stable_url" in */releases/download/"$stable_version"/"$archive_name") ;; *) printf 'FAIL\tportmaster\tversion-url\n' >> "$RESULT_FILE"; return 1 ;; esac
+  IFS=$'\t' read -r stable_version stable_url expected_hash < "$metadata" || {
+    printf 'FAIL\tportmaster\tversion\n' >> "$RESULT_FILE"; return 1;
+  }
   archive_dir="$cache/$stable_version"; archive="$archive_dir/$archive_name"
   mkdir -p "$archive_dir" || return 1
 
-  pm_valid_md5 "$expected_hash" || { printf 'FAIL\tportmaster\tversion-md5\n' >> "$RESULT_FILE"; return 1; }
-  expected_hash=$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')
   if [ -s "$archive" ]; then
     actual_hash=$(runtime_md5_file "$archive" 2>/dev/null || true)
     [ "$(printf '%s' "$actual_hash" | tr '[:upper:]' '[:lower:]')" = "$expected_hash" ] && archive_valid=1
@@ -1342,17 +1087,12 @@ runtime_md5_file() {
 }
 
 runtime_matches_current_metadata() {
-  local runtime="$1" target expected_size expected_md5 actual_size actual_md5
+  local runtime="$1" target
   target="$LIBS_DIR/$runtime.squashfs"
-  expected_size=$(runtime_expected_size "$runtime")
-  expected_md5=$(runtime_expected_md5 "$runtime")
-  case "$expected_size" in ""|*[!0-9]*|0) return 1 ;; esac
-  [[ "$expected_md5" =~ ^[0-9a-f]{32}$ ]] || return 1
-  runtime_has_magic "$target" || return 1
-  actual_size=$(runtime_file_size "$target")
-  [ "$actual_size" = "$expected_size" ] || return 1
-  actual_md5=$(runtime_md5_file "$target" 2>/dev/null || true)
-  [ "$actual_md5" = "$expected_md5" ]
+  [ -f "$RUNTIME_METADATA_JSON" ] || return 1
+  "$PAM_APPMANAGER_CLI" runtime-metadata-entry --metadata "$RUNTIME_METADATA_JSON" \
+    --runtime "$runtime" --arch "$(runtime_arch)" --image "$target" \
+    >/dev/null 2>> "$PAM_APP_ROOT/log.txt"
 }
 
 ensure_portmaster_python_runtime() {
@@ -1565,7 +1305,7 @@ apply_plan() {
 
   if [ "$RUNTIME_PROGRESS_COUNT" -gt 0 ] && [ "$PORTMASTER_PROGRESS" != "1" ] &&
      [ "$native_runtime_handled" = "0" ]; then
-    runtime_progress_write complete "$RUNTIME_PROGRESS_DONE_BYTES" 0 "Runtime repair complete"
+    runtime_progress_write complete 0 0 "Runtime repair complete"
   fi
 
   sync
@@ -1647,7 +1387,7 @@ if [ "$INSTALL_PLAN_ONLY" = "1" ]; then
     exit 1
   fi
   install_plan="$CONFDIR/portmaster-install-plan.tsv"
-  pam_write_install_plan "$install_plan" || exit 1
+  pam_write_native_install_plan "$install_plan" || exit 1
   cat "$install_plan"
   exit 0
 fi
@@ -1664,7 +1404,7 @@ if [ "$INVENTORY_ONLY" = "1" ]; then
 fi
 
 if [ "$CHECK_UPDATE_ONLY" = "1" ]; then
-  pam_check_update
+  pam_refresh_stable_cache
   rc=$?
   write_env
   exit "$rc"

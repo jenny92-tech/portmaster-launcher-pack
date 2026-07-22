@@ -4,7 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 server_pid=""
+lock_pid=""
 cleanup() {
+  [ -z "$lock_pid" ] || kill "$lock_pid" 2>/dev/null || true
+  [ -z "$lock_pid" ] || wait "$lock_pid" 2>/dev/null || true
   [ -z "$server_pid" ] || kill "$server_pid" 2>/dev/null || true
   [ -z "$server_pid" ] || wait "$server_pid" 2>/dev/null || true
   rm -rf "$TMP"
@@ -12,6 +15,9 @@ cleanup() {
 trap cleanup EXIT
 
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p portkit-cli
+grep -Fq 'config refresh' "$ROOT/ports/appmanager/src/launcher.sh"
+! grep -Eq '^(pam_config_refresh_session_matches|pam_config_version_is_newer|pam_valid_config_version)\(\)' \
+  "$ROOT/ports/appmanager/src/launcher.sh"
 mkdir -p "$TMP/source" "$TMP/app/bin" "$TMP/state" "$TMP/served/platforms"
 cp -R "$ROOT/config" "$TMP/app/config"
 make_config_version() {
@@ -51,7 +57,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        if not head: self.wfile.write(body)
+        if not head:
+            try: self.wfile.write(body)
+            except BrokenPipeError: pass
 with socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler) as server:
     print(server.server_address[1], flush=True)
     server.serve_forever()
@@ -89,12 +97,33 @@ cmp "$TMP/newer.json" "$TMP/state/device-config/config.json"
 # The UI gives refresh a bounded startup window. A download that outlives that
 # window must never promote its staged file over the active configuration.
 cp "$TMP/state/device-config/config.json" "$TMP/active-before.json"
+SECONDS=0
 if PAM_TEST_CONFIG_DELAY=2 PAM_CONFIG_REFRESH_TIMEOUT_SECONDS=1 run_refresh "$TMP/newest.json" "$TMP/newest-detail.json"; then
   echo "expired device config refresh unexpectedly succeeded" >&2
   exit 1
 fi
+[ "$SECONDS" -le 2 ] || { echo "device config refresh did not honor its global deadline" >&2; exit 1; }
 grep -Fxq $'1\terror' "$TMP/state/config-refresh.tsv"
 cmp "$TMP/active-before.json" "$TMP/state/device-config/config.json"
+
+# Only one refresh may select and promote a generation at a time.
+python3 - "$TMP/state/.device-config-refresh.lock" "$TMP/lock-ready" <<'PY' &
+import fcntl, pathlib, sys, time
+lock = open(sys.argv[1], "a+")
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+pathlib.Path(sys.argv[2]).write_text("ready")
+time.sleep(10)
+PY
+lock_pid=$!
+for _ in $(seq 1 50); do [ -s "$TMP/lock-ready" ] && break; sleep 0.02; done
+if run_refresh "$TMP/newest.json" "$TMP/newest-detail.json"; then
+  echo "concurrent device config refresh unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fxq $'1\terror' "$TMP/state/config-refresh.tsv"
+kill "$lock_pid" 2>/dev/null || true
+wait "$lock_pid" 2>/dev/null || true
+lock_pid=""
 
 printf '{"format":"broken"}\n' > "$TMP/broken.json"
 if run_refresh "$TMP/broken.json" "$ROOT/config/platforms/trimui.json"; then
