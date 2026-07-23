@@ -55,7 +55,7 @@ grep -Fq 'require("kit")' "$app_lua/main.lua"
 for module in app_model app_operations app_pages app_environment; do
   grep -Fq "require(\"$module\")" "$app_lua/main.lua"
 done
-grep -Fq 'kit=kit,json=json,native=native' "$app_lua/app_model.lua"
+grep -Fq 'kit=kit,native=native' "$app_lua/app_model.lua"
 [ "$(wc -l < "$app_lua/main.lua")" -lt 220 ]
 grep -Fq 'kit.checkbox' "$app_lua"/*.lua
 grep -Fq 'kit.checkbox(model.display_name(script),{' "$app_lua/app_pages.lua"
@@ -100,7 +100,7 @@ grep -Fq 'Installed Runtimes (%d)' "$app_lua/app_pages.lua"
 grep -Fq '已安装 Runtime（%d）' "$app_lua/app_pages.lua"
 grep -Fq 'INSTALL_RUNTIME' "$app_lua/app_pages.lua"
 launcher="$ROOT/ports/appmanager/src/launcher.sh"
-runner="$ROOT/crates/appmanager-cli/src/launcher.rs"
+runner="$ROOT/crates/appmanager-service/src/launcher.rs"
 [ ! -e "$ROOT/ports/appmanager/love/runtime_catalog.tsv" ]
 grep -Fq 'runtime_metadata_url' "$runner"
 grep -Fq 'refresh_runtime_metadata' "$runner"

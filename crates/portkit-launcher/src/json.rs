@@ -25,7 +25,7 @@ pub fn merge_file(path: &Path, patch: &Value) -> io::Result<()> {
     merge(&mut value, patch);
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(invalid_data)?;
     bytes.push(b'\n');
-    crate::atomic_write(path, &bytes)
+    portkit_core::atomic_write(path, &bytes)
 }
 
 fn merge(target: &mut Value, patch: &Value) {

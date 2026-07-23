@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 
@@ -45,7 +44,7 @@ pub fn sync_newer(request: &SyncRequest) -> io::Result<usize> {
         if !needs_copy(&source.metadata()?, destination.metadata().ok().as_ref())? {
             continue;
         }
-        atomic_copy(&source, &destination)?;
+        portkit_core::atomic_copy(&source, &destination)?;
         copied += 1;
     }
     Ok(copied)
@@ -59,17 +58,4 @@ fn needs_copy(
         return Ok(true);
     };
     Ok(source.modified()? > destination.modified()?)
-}
-
-fn atomic_copy(source: &std::path::Path, destination: &std::path::Path) -> io::Result<()> {
-    let temporary = crate::temporary_sibling(destination);
-    let result = (|| {
-        std::fs::copy(source, &temporary)?;
-        File::open(&temporary)?.sync_all()?;
-        std::fs::rename(&temporary, destination)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(temporary);
-    }
-    result
 }

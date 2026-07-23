@@ -48,16 +48,18 @@ config/platforms/<platform-id>.json
 
 根文件只含共享策略、平台识别和 detail 引用；detail 含当前平台和它的机型。
 根文件以 SHA-256 绑定 detail，并要求 format、schema、config version 和 platform ID
-一致。随包包含根和全部 detail；在线刷新时，`portkit` 先用远端根识别当前平台，
+一致。随包包含根和全部 detail；在线刷新时，`appmanager-service` 通过
+`portkit-core` 先用远端根识别当前平台，
 只下载对应 detail，完整验证后再将 root/detail 对提升为本次远端候选。失败、降级、
 摘要不一致或当前设备需要未知 adapter 时，继续使用随包配置。
 
-生产包只有一个 Rust 主程序，其中链接了两个可独立测试的核心：
+生产包只有一个 Rust 主程序，其中链接了三个可独立测试的层：
 
 | Core | 职责 |
 | --- | --- |
 | `portkit-core` | 设备/机型识别、路径和环境解析、配置刷新与校验、GitHub transport、通用文件原语 |
 | `appmanager-core` | APP 设备上下文、资源元数据、inventory、安装事务、Runtime 修复、缓存与任务状态 |
+| `appmanager-service` | 将 APP 业务组织成 snapshot、task、progress、cancel，并直接暴露为 Lua table |
 
 生产路径中的 resolver 出错会直接停止相关危险操作，不会静默退回 Shell。Lua 只通过
 `appmanager` API 读取快照、启动任务、轮询事件和请求取消，不执行命令，也不通过任务文件

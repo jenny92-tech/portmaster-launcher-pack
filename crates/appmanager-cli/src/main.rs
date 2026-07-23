@@ -20,10 +20,6 @@ use serde_json::{Value, json};
 #[cfg(test)]
 use portkit_core::ExclusiveFileLock;
 
-pub mod launcher;
-
-pub use launcher::{EmbeddedRequest, EmbeddedService, ServiceEvent};
-
 const EMBEDDED_ROOT: &[u8] = include_bytes!("../../../config/config.json");
 
 #[derive(Debug, Parser)]
@@ -382,18 +378,14 @@ pub fn cli_main() -> ExitCode {
         entry_arguments,
     } = &cli.command
     {
-        return launcher::run(launcher::Request {
-            source_dir: source_dir.clone(),
-            launcher: launcher.clone(),
-            app_root: app_root.clone(),
-            entry_arguments: entry_arguments.clone(),
-            config_directories: ConfigDirectories {
-                embedded: cli.config_dir.clone(),
-                remote: cli.remote_config_dir.clone(),
-            },
-            cancel_token: None,
-            progress_channel: None,
-        });
+        return appmanager_service::run_diagnostic(
+            source_dir.clone(),
+            launcher.clone(),
+            app_root.clone(),
+            cli.config_dir.clone(),
+            cli.remote_config_dir.clone(),
+            entry_arguments.clone(),
+        );
     }
     let raw_tsv = matches!(
         &cli.command,
@@ -902,7 +894,7 @@ fn refresh_runtime_metadata(
         appmanager_core::refresh_runtime_metadata(&appmanager_core::RuntimeMetadataRequest {
             source,
             json_cache,
-            tsv_cache,
+            tsv_cache: Some(tsv_cache),
             force,
         })
         .map_err(|error| domain_error(NAME, "runtime-metadata-download-failed", error))?;

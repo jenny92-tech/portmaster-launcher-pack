@@ -1,7 +1,6 @@
 local kit = require("kit")
-local json = require("json")
-local native = require("app_native").new(json)
-local model = require("app_model").new(kit,json,native)
+local native = require("app_native").new()
+local model = require("app_model").new(kit,native)
 local operations = require("app_operations").new(model)
 local pages = require("app_pages").new(model,operations)
 local environment = require("app_environment").new(model,operations,pages)
@@ -54,7 +53,7 @@ local function poll_task(dt)
         if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
         if task.kind=="config-refresh" then
             operations.task=nil; kit.set_busy(false)
-            local status=tostring(data.config_refresh or ""):match("^1\t([^\r\n]+)")
+            local status=type(data.config_refresh)=="table" and data.config_refresh.status or nil
             finish_initial_load(true)
             if event.status=="error" or status=="error" then
                 kit.toast(L("Using the built-in device configuration.","正在使用随包设备配置。"),{kind="info"})
@@ -70,7 +69,7 @@ local function poll_task(dt)
             elseif task.kind=="update-check" then
                 kit.toast(L("Update check completed.","更新检查完成。"),{kind="success"})
             end
-            if task.kind=="update-check-background" and not model.file_exists(env.size_file) then
+            if task.kind=="update-check-background" and not env.size_cache_ready then
                 local ok,task_id=pcall(model.native.start,"scan-sizes",{})
                 if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
             end
@@ -108,15 +107,15 @@ end
 
 finish_initial_load=function(skip_config_refresh)
     if env.portmaster_management~="system" and
-       (model.file_exists(env.pending_install) or model.file_exists(env.install_transaction)) then
+       (env.pending_install_exists or env.install_transaction_exists) then
         environment.start_pending_validation()
         return
     end
-    if env.portmaster_management~="system" and model.file_exists(env.portmaster_active) then
+    if env.portmaster_management~="system" and env.portmaster_active_exists then
         environment.start_active_repair_wait()
         return
     end
-    if model.file_exists(env.operation_active) then
+    if env.operation_active_exists then
         environment.start_active_operation_wait()
         return
     end
@@ -142,7 +141,7 @@ finish_initial_load=function(skip_config_refresh)
     else
         environment.build_repair_gate()
     end
-    if not operations.task and not model.file_exists(env.size_file) then
+    if not operations.task and not env.size_cache_ready then
         local ok,task_id=pcall(model.native.start,"scan-sizes",{})
         if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
     end

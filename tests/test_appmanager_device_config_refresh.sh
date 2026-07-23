@@ -15,7 +15,7 @@ cleanup() {
 trap cleanup EXIT
 
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli
-grep -Fq 'fn refresh_device_config' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+grep -Fq 'fn refresh_device_config' "$ROOT/crates/appmanager-service/src/launcher.rs"
 ! grep -Fq 'config refresh' "$ROOT/ports/appmanager/src/launcher.sh"
 mkdir -p "$TMP/source" "$TMP/app/bin" "$TMP/state" "$TMP/served/platforms"
 cp -R "$ROOT/config" "$TMP/app/config"

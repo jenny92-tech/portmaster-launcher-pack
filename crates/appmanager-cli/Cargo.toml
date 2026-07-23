@@ -16,8 +16,8 @@ path = "src/bin.rs"
 
 [dependencies]
 appmanager-core = { path = "../appmanager-core" }
+appmanager-service = { path = "../appmanager-service" }
 clap = { version = "4", features = ["derive"] }
-libc = "0.2"
 portkit-core = { path = "../portkit-core" }
 serde.workspace = true
 serde_json.workspace = true

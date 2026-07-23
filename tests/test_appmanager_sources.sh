@@ -23,7 +23,7 @@ PY
 
 [ ! -e "$ROOT/ports/appmanager/src/appmanager_sources.sh" ]
 ! grep -Fq 'PAM_OFFICIAL_VERSION_URL' "$ROOT/ports/appmanager/src/launcher.sh"
-grep -Fq 'release_routes' "$ROOT/crates/appmanager-cli/src/launcher.rs"
-grep -Fq 'runtime_metadata_url' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+grep -Fq 'release_routes' "$ROOT/crates/appmanager-service/src/launcher.rs"
+grep -Fq 'runtime_metadata_url' "$ROOT/crates/appmanager-service/src/launcher.rs"
 
 echo "appmanager publication sources: PASS"

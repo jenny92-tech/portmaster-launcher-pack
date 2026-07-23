@@ -57,8 +57,9 @@ only for the Rust process lifetime. APP-specific Runtime, release-manifest,
 MD5/SHA-256 and ZIP validation are linked into APP Manager's single Rust process,
 so its launcher carries no curl or archive/hash shell wrappers. Selected ordinary
 game launchers instead package the small `bin/portkit-launcher` helper only for
-operations that are unreliable across BusyBox versions. The complete PortKit CLI
-with HTTPS/config/health commands is not shipped with games. Their simple Shell
+operations that are unreliable across BusyBox versions. There is no complete
+device-side PortKit CLI; APP Manager links shared PortKit capabilities in process.
+The launchers' simple Shell
 flow, PortMaster environment sourcing and game launch remain in Shell.
 
 Git LFS, GitHub Packages, and GHCR are intentionally not modeled as file

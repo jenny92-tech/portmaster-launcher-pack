@@ -1,26 +1,20 @@
 local Native = {}
 
-function Native.new(json)
+function Native.new()
     assert(type(appmanager)=="table","APP Manager Rust service is unavailable")
     local self={}
 
-    local function decode(value)
-        if value==nil then return nil end
-        local ok,result=pcall(json.decode,tostring(value))
-        if not ok or type(result)~="table" then error("invalid Rust service response") end
-        return result
-    end
-
     function self.snapshot()
-        return decode(appmanager.snapshot())
+        return appmanager.snapshot()
     end
 
     function self.start(kind,payload)
-        return appmanager.start(kind,json.encode(payload or {}))
+        if kind=="apply" then return appmanager.start(kind,payload or {}) end
+        return appmanager.start(kind)
     end
 
     function self.poll()
-        return decode(appmanager.poll())
+        return appmanager.poll()
     end
 
     function self.cancel()

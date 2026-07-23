@@ -9,9 +9,9 @@ local function replace(target,source)
     for key,value in pairs(source or {}) do target[key]=value end
 end
 
-function Model.new(kit,json,native)
+function Model.new(kit,native)
     local self={
-        kit=kit,json=json,native=native,
+        kit=kit,native=native,
         env={},report={},size_map={},runtime_metadata={},missing_by_script={},native_inventory=nil,
         cache={},report_version=0,
         pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6},
@@ -48,17 +48,6 @@ function Model.new(kit,json,native)
 
     function self.L(en,zh) return {en=en,zh=zh} end
     function self.join(parts,sep) return table.concat(parts,sep or " · ") end
-    function self.file_exists(path)
-        local f=path and io.open(path,"rb")
-        if f then f:close(); return true end
-        return false
-    end
-
-    function self.read_all(path)
-        local f=path and io.open(path,"rb"); if not f then return nil end
-        local text=f:read("*a"); f:close(); return text
-    end
-
     function self.basename(path)
         return tostring(path or ""):gsub("/+$",""):match("([^/]+)$") or tostring(path or "")
     end
@@ -69,6 +58,8 @@ function Model.new(kit,json,native)
         end
         replace(self.env,snapshot.env)
         self.native_inventory=type(snapshot.inventory)=="table" and snapshot.inventory or nil
+        replace(self.size_map,type(snapshot.sizes)=="table" and snapshot.sizes or {})
+        replace(self.runtime_metadata,type(snapshot.runtime_metadata)=="table" and snapshot.runtime_metadata or {})
         self.invalidate_all()
         return true
     end
@@ -77,39 +68,6 @@ function Model.new(kit,json,native)
         local ok,snapshot=pcall(self.native.snapshot)
         if not ok then return false,tostring(snapshot) end
         return self.apply_snapshot(snapshot)
-    end
-
-    local function load_sizes_file()
-        clear(self.size_map)
-        local f=io.open(self.env.size_file or "","rb"); if not f then return end
-        for line in f:lines() do
-            local bytes,path=line:match("^(%d+)\t(.+)$")
-            if bytes and path then self.size_map[path]=tonumber(bytes) or 0 end
-        end
-        f:close()
-    end
-
-    local function runtime_arch(value)
-        value=tostring(value or ""):lower()
-        if value=="arm64" or value=="armv8" then return "aarch64" end
-        if value=="armv7" or value=="armv7l" then return "armhf" end
-        if value=="amd64" then return "x86_64" end
-        return value
-    end
-
-    local function load_runtime_metadata_file()
-        clear(self.runtime_metadata)
-        local f=io.open(self.env.runtime_metadata_file or "","rb")
-        if not f then return end
-        local arch=runtime_arch(self.env.device_arch)
-        for line in f:lines() do
-            local name,row_arch,bytes,md5,url=line:match("^([^\t]+)\t([^\t]+)\t(%d+)\t([0-9a-f]+)\t([^\t]+)$")
-            if name and row_arch==arch then
-                self.runtime_metadata[name]={arch=row_arch,bytes=tonumber(bytes),md5=md5,url=url}
-            end
-        end
-        f:close()
-        return self.runtime_metadata
     end
 
     local function collect_trash_snapshot()
@@ -258,22 +216,11 @@ function Model.new(kit,json,native)
     end
 
     function self.load_sizes(force)
-        -- A first-run background scan may still be producing this file. Do
-        -- not cache the temporary absence; the next page build can consume
-        -- the atomically published snapshot without an explicit invalidation.
-        if not self.file_exists(self.env.size_file or "") then
-            clear(self.size_map)
-            self.invalidate("sizes")
-            return self.size_map
-        end
-        return cached("sizes",self.env.size_file or "",function()
-            load_sizes_file(); return self.size_map
-        end,force)
+        return self.size_map
     end
 
     function self.load_runtime_metadata(force)
-        return cached("runtime-metadata",(self.env.runtime_metadata_file or "").."\0"..tostring(self.env.device_arch or ""),
-            load_runtime_metadata_file,force)
+        return self.runtime_metadata
     end
 
     function self.load_native_inventory(force)

@@ -135,6 +135,26 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Copies one regular file and atomically promotes the complete copy.
+pub fn atomic_copy(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| std::io::Error::other("destination path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = unique_sibling(destination, "atomic-copy");
+    let result = (|| {
+        fs::copy(source, &temporary)?;
+        File::open(&temporary)?.sync_all()?;
+        fs::rename(&temporary, destination)?;
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 fn unique_sibling(path: &Path, label: &str) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -202,6 +222,28 @@ mod tests {
         atomic_write(&output, b"first").unwrap();
         atomic_write(&output, b"second").unwrap();
         assert_eq!(std::fs::read(&output).unwrap(), b"second");
+        assert_eq!(
+            std::fs::read_dir(output.parent().unwrap())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn atomic_copy_replaces_the_complete_file_and_preserves_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.bin");
+        let output = temp.path().join("state/output.bin");
+        std::fs::write(&source, b"replacement").unwrap();
+        std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+        std::fs::write(&output, b"old").unwrap();
+
+        atomic_copy(&source, &output).unwrap();
+
+        assert_eq!(std::fs::read(&source).unwrap(), b"replacement");
+        assert_eq!(std::fs::read(&output).unwrap(), b"replacement");
         assert_eq!(
             std::fs::read_dir(output.parent().unwrap())
                 .unwrap()

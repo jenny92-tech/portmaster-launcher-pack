@@ -30,7 +30,6 @@ for file in \
   share/gamecontrollerdb.txt \
   share/cacert.pem \
   licenses/LICENSE-love-lite-APACHE-2.0.txt \
-  licenses/LICENSE-json.lua-MIT.txt \
   licenses/LICENSE-gptokeyb.txt \
   licenses/LICENSE-noto.txt; do
   [ -s "$APP/$file" ] || {
@@ -62,15 +61,11 @@ assert_exact_files "$APP/licenses" \
   LICENSE-certifi.txt \
   LICENSE-freetype-sys-MIT.txt \
   LICENSE-gptokeyb.txt \
-  LICENSE-json.lua-MIT.txt \
   LICENSE-love-lite-APACHE-2.0.txt \
   LICENSE-noto.txt \
   THIRD-PARTY-SOURCES.md
 
-cmp "$ROOT/ports/appmanager/love/json.lua" "$APP/love_ui/json.lua"
-grep -Fq 'Copyright (c) 2020 rxi' "$APP/love_ui/json.lua"
-grep -Fq 'local json = { _version = "0.1.2" }' "$APP/love_ui/json.lua"
-grep -Fq 'dbf4b2dd2eb7c23be2773c89eb059dadd6436f94' "$APP/licenses/THIRD-PARTY-SOURCES.md"
+! test -e "$APP/love_ui/json.lua"
 grep -Fq 'be8930d3c9fd70ab210918218f7cbffd2df1a30a' "$APP/licenses/THIRD-PARTY-SOURCES.md"
 grep -Fq 'statically links FreeType' "$APP/licenses/THIRD-PARTY-SOURCES.md"
 
@@ -114,7 +109,7 @@ grep -A2 -Fq 'indeterminate=true,stage=L("Checking device configuration"' "$APP/
 [ "$(grep -Ec '^(start|back) = f10$' "$APP/love_ui/ui.gptk")" = "2" ]
 ! grep -Eq '^(start|back) = (enter|esc)$' "$APP/love_ui/ui.gptk"
 grep -Fq 'env.portmaster_health=="healthy" or env.portmaster_management=="system"' "$APP/love_ui/main.lua"
-grep -Fq '"portmaster_management"' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+grep -Fq '"portmaster_management"' "$ROOT/crates/appmanager-service/src/launcher.rs"
 grep -Fq 'L("Environment Management","环境管理")' "$APP/love_ui/app_environment.lua"
 grep -Fq 'L("PortMaster required","需要安装 PortMaster")' "$APP/love_ui/app_environment.lua"
 grep -Fq 'model.native.start,"update-check-if-stale"' "$APP/love_ui/main.lua"

@@ -35,7 +35,7 @@ for contract in (
     'local actions={', 'sidebar_title=L("Maintenance","维护")',
     'sidebar=actions', 'row_layout={mode="grid",columns=2}',
     'for _,item in ipairs(self.confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
-    'file_exists(env.install_transaction)', 'file_exists(env.portmaster_active)',
+    'env.install_transaction_exists', 'env.portmaster_active_exists',
     'operations.task={kind="active-repair"',
     'L("Cached","使用缓存")', 'L("Downloading…","下载中…")',
 ):
@@ -112,11 +112,11 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
                     "device_name": "MiniLoong Pocket One",
                     "device_class": "tested",
                     "device_arch": "aarch64",
-                    "size_file": str(root / "state" / "sizes.tsv"),
-                    "runtime_metadata_file": str(root / "state" / "runtime-metadata.tsv"),
-                    "pending_install": str(pending_path),
-                    "install_transaction": str(root / "state" / "install-transaction.tsv"),
-                    "portmaster_active": str(root / "state" / "portmaster-active.tsv"),
+                    "size_cache_ready": False,
+                    "pending_install_exists": pending,
+                    "install_transaction_exists": False,
+                    "portmaster_active_exists": False,
+                    "operation_active_exists": False,
                     "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
                     "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"],
                     "self_port": "jenny92-appmanager",
@@ -126,12 +126,13 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
         )
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.globals().SOURCE = str(APP)
-        lua.globals().APP_SNAPSHOT = json.dumps({
+        lua.globals().APP_SNAPSHOT = lua.table_from({
             "env": json.loads(env_path.read_text(encoding="utf-8")),
             "inventory": {"schema": 2, "ports": [], "refcount": {}, "orphan_dirs": [],
                 "orphan_images": [], "dead_scripts": [], "trash": [],
                 "runtimes": {"need": {}, "facts": []}},
-        })
+            "sizes": {}, "runtime_metadata": {},
+        }, recursive=True)
         lua.execute(LOVE_MOCK)
         lua.execute(f"package.path={str(APP / '?.lua')!r}..';'..{str(KIT / '?.lua')!r}..';'..package.path")
         lua.execute(f"dofile({str(APP / 'main.lua')!r})")

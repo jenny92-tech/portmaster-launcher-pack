@@ -25,12 +25,12 @@ function Operations.new(model)
         local data=event and event.data or {}
         model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
         if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
-        local result=tostring(data.result or "")
-        local failed=event and event.status=="error" or result:match("FAIL")
+        local result=type(data.operation)=="table" and data.operation or {}
+        local failed=event and event.status=="error" or result.failed==true
         if failed then
             kit.toast(L("The operation failed. See log.txt.","操作失败，请查看 log.txt。"),{kind="error"})
         elseif completed_task and completed_task.kind=="appledouble" then
-            local count=tonumber(result and result:match("OK\tappledouble\t(%d+)")) or 0
+            local count=tonumber(result.appledouble_removed) or 0
             kit.toast(L(string.format("Removed %d ._Files garbage files.",count),
                 string.format("已清理 %d 个 ._Files 垃圾文件。",count)),{kind="success"})
         else

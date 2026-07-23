@@ -31,7 +31,7 @@ pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
     }
     let mut output = lines.join("\n");
     output.push('\n');
-    crate::atomic_write(&request.path, output.as_bytes())
+    portkit_core::atomic_write(&request.path, output.as_bytes())
 }
 
 fn upsert_root(lines: &mut Vec<String>, key: &str, value: &str) {

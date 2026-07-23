@@ -12,10 +12,9 @@ sdl-backend = ["dep:sdl2"]
 
 [dependencies]
 anyhow = "1.0"
-appmanager-cli = { path = "../appmanager-cli" }
+appmanager-service = { path = "../appmanager-service" }
 love-api = { path = "vendor/love-api" }
-mlua = { version = "0.10", features = ["lua51", "vendored", "send"] }
-serde_json.workspace = true
+mlua = { version = "0.10", features = ["lua51", "vendored", "send", "serialize"] }
 sdl2 = { version = "0.38", features = ["use-pkgconfig"], optional = true }
 
 [dev-dependencies]

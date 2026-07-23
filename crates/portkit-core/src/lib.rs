@@ -15,7 +15,9 @@ pub use config::{
 };
 pub use environment::{CommandEnvironment, EnvironmentOperation, EnvironmentPolicy};
 pub use error::{Error, Result};
-pub use file::{DigestAlgorithm, ExclusiveFileLock, atomic_write, digest_file, zip_readable};
+pub use file::{
+    DigestAlgorithm, ExclusiveFileLock, atomic_copy, atomic_write, digest_file, zip_readable,
+};
 pub use health::{HealthCheck, HealthReport, HealthStatus, evaluate_health};
 pub use platform::{DetectionContext, Resolution};
 pub use refresh::{ConfigRefreshRequest, ConfigRefreshStatus, refresh_config};

@@ -16,6 +16,7 @@ path = "src/bin.rs"
 
 [dependencies]
 lzma-rust2 = { version = "0.17", default-features = false, features = ["std", "xz"] }
+portkit-core = { path = "../portkit-core" }
 serde.workspace = true
 serde_json.workspace = true
 tar = { version = "0.4", default-features = false }

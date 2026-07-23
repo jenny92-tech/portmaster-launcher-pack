@@ -175,7 +175,7 @@ fn write_first(
 ) -> io::Result<ProvisionOutcome> {
     let mut last_error = None;
     for output in outputs {
-        match crate::atomic_write(output, font) {
+        match portkit_core::atomic_write(output, font) {
             Ok(()) if valid_font(output) => {
                 return Ok(ProvisionOutcome {
                     path: output.clone(),

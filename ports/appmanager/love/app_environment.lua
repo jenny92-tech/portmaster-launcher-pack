@@ -190,10 +190,9 @@ function Environment.new(model,operations,pages_ui)
         kit.set_page(page.HOME,page_title,rows,{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
     end
 
-    function self.validation_result(text)
-        if type(text)~="string" then return nil,nil end
-        local status,detail=text:match("^1\t([^\t\r\n]+)\t([^\r\n]*)")
-        return status,detail
+    function self.validation_result(result)
+        if type(result)~="table" then return nil,nil end
+        return result.status,result.detail
     end
 
     function self.start_pending_validation()

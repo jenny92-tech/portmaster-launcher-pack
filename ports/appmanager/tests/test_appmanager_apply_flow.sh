@@ -14,8 +14,8 @@ trap 'rm -rf "$TMP"' EXIT
 # linked into the Rust main process rather than duplicated in Lua or Shell.
 grep -Fq 'model.native.start,"apply"' "$APP_UI_DIR/app_operations.lua"
 grep -Fq 'model.native.start,"scan-sizes"' "$APP_UI_DIR/main.lua"
-grep -Fq 'apply_file_plan' "$REPO_ROOT/crates/appmanager-cli/src/launcher.rs"
-grep -Fq 'scan_size_cache' "$REPO_ROOT/crates/appmanager-cli/src/launcher.rs"
+grep -Fq 'apply_file_plan' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
+grep -Fq 'scan_size_cache' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
 grep -Fq 'runtime/love.aarch64' "$LAUNCHER"
 ! grep -Fq 'launcher-session' "$LAUNCHER"
 ! grep -Eq '^(restore_one|restore_bucket|restore_selected_item|delete_selected_item|size_cache_apply_mutations)\(\)' "$LAUNCHER"
@@ -33,7 +33,6 @@ mkdir -p "$scripts/PortMaster/libs" "$app/state" "$app/trash" "$app/love_ui" \
   "$app/runtime/libs.aarch64" "$app/bin" "$app/share"
 cp -R "$REPO_ROOT/config" "$app/config"
 cp "$LAUNCHER" "$scripts/APP Manager.sh"
-cp "$ROOT/love/json.lua" "$app/love_ui/json.lua"
 : > "$app/love_ui/main.lua"
 : > "$app/love_ui/ui.gptk"
 : > "$app/share/gamecontrollerdb.txt"

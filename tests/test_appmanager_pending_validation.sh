@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli
-grep -Fq 'validate_pending_install' "$ROOT/crates/appmanager-cli/src/launcher.rs"
+grep -Fq 'validate_pending_install' "$ROOT/crates/appmanager-service/src/launcher.rs"
 ! grep -Fq 'PAM_TEST_' "$ROOT/ports/appmanager/src/launcher.sh"
 mkdir -p "$TMP/archive/PortMaster/pylibs-src" "$TMP/archive/PortMaster/miniloong" \
   "$TMP/app/bin" "$TMP/app/love_ui"

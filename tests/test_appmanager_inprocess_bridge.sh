@@ -23,8 +23,14 @@ grep -Fq 'model.native.poll' "$LOVE/main.lua"
 grep -Fq 'appmanager.start' "$LOVE/app_native.lua"
 grep -Fq 'appmanager.poll' "$LOVE/app_native.lua"
 grep -Fq 'install_appmanager_api' "$RUST/lib.rs"
-grep -Fq 'CancellationToken' "$ROOT/crates/appmanager-cli/src/launcher.rs"
-grep -Fq 'ProgressChannel' "$ROOT/crates/appmanager-cli/src/launcher.rs"
-! sed -n '/pub fn cancel/,/^    }/p' "$ROOT/crates/appmanager-cli/src/launcher.rs" | grep -Fq 'write_text'
+grep -Fq 'LuaSerdeExt' "$RUST/lib.rs"
+! grep -Fq 'serde_json::to_vec' "$RUST/lib.rs"
+! grep -Eq 'json\.(encode|decode)|require\("json"\)' "$LOVE"/*.lua
+! test -e "$LOVE/json.lua"
+! grep -Eq 'io\.open|:lines\(\)|:match\("\^1\\\\t|result:match' \
+  "$LOVE/app_model.lua" "$LOVE/app_operations.lua" "$LOVE/app_environment.lua" "$LOVE/main.lua"
+grep -Fq 'CancellationToken' "$ROOT/crates/appmanager-service/src/launcher.rs"
+grep -Fq 'ProgressChannel' "$ROOT/crates/appmanager-service/src/launcher.rs"
+! sed -n '/pub fn cancel/,/^    }/p' "$ROOT/crates/appmanager-service/src/launcher.rs" | grep -Fq 'write_text'
 
 echo "APP Manager Lua/Rust in-process bridge contract passed"

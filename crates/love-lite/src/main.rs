@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use appmanager_cli::{EmbeddedRequest, EmbeddedService};
+use appmanager_service::{EmbeddedRequest, EmbeddedService};
 use love_lite::{DEFAULT_HEIGHT, DEFAULT_WIDTH, Engine};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;

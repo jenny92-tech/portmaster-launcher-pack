@@ -3,11 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use appmanager_cli::EmbeddedService;
+use appmanager_service::{EmbeddedAction, EmbeddedService};
 use love_api::LoveRuntime;
 pub use love_api::state::GpuCommand;
 use love_api::state::{LoveEvent, SharedState};
-use mlua::{Function as LuaFunction, IntoLuaMulti, Table as LuaTable};
+use mlua::{
+    Function as LuaFunction, IntoLuaMulti, LuaSerdeExt, Table as LuaTable, Value as LuaValue,
+};
 
 pub const DEFAULT_WIDTH: u32 = 960;
 pub const DEFAULT_HEIGHT: u32 = 720;
@@ -204,29 +206,23 @@ pub fn install_appmanager_api(lua: &mlua::Lua, service: EmbeddedService) -> Resu
         "snapshot",
         lua.create_function(move |lua, ()| {
             let value = snapshot.snapshot().map_err(mlua::Error::external)?;
-            lua.create_string(&serde_json::to_vec(&value).map_err(mlua::Error::external)?)
+            lua.to_value(&value)
         })?,
     )?;
     let start = service.clone();
     table.set(
         "start",
-        lua.create_function(move |_, (kind, payload): (String, Option<String>)| {
-            start
-                .start(&kind, payload.as_deref().unwrap_or("{}"))
-                .map_err(mlua::Error::external)
+        lua.create_function(move |lua, (kind, payload): (String, Option<LuaValue>)| {
+            let actions = payload
+                .map(|value| lua.from_value::<Vec<EmbeddedAction>>(value))
+                .transpose()?;
+            start.start(&kind, actions).map_err(mlua::Error::external)
         })?,
     )?;
     let poll = service.clone();
     table.set(
         "poll",
-        lua.create_function(move |lua, ()| {
-            poll.poll()
-                .map(|event| {
-                    let bytes = serde_json::to_vec(&event).map_err(mlua::Error::external)?;
-                    lua.create_string(&bytes)
-                })
-                .transpose()
-        })?,
+        lua.create_function(move |lua, ()| lua.to_value(&poll.poll()))?,
     )?;
     table.set(
         "cancel",

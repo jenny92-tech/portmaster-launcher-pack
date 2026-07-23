@@ -18,14 +18,14 @@ def main() -> int:
         root / "_kit" / "cargo_revision.py",
         root / "_kit" / "love_lite_revision.py",
         crate / "Cargo.toml",
-        root / "crates" / "appmanager-cli" / "Cargo.toml",
+        root / "crates" / "appmanager-service" / "Cargo.toml",
         root / "crates" / "appmanager-core" / "Cargo.toml",
         root / "crates" / "portkit-core" / "Cargo.toml",
     ]
     for source_dir in (
         crate / "src",
         crate / "vendor",
-        root / "crates" / "appmanager-cli" / "src",
+        root / "crates" / "appmanager-service" / "src",
         root / "crates" / "appmanager-core" / "src",
         root / "crates" / "portkit-core" / "src",
         root / "config",

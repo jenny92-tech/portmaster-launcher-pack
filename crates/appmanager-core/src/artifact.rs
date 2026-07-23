@@ -72,7 +72,7 @@ pub struct StableCacheOutcome {
 pub struct RuntimeMetadataRequest {
     pub source: String,
     pub json_cache: PathBuf,
-    pub tsv_cache: PathBuf,
+    pub tsv_cache: Option<PathBuf>,
     pub force: bool,
 }
 
@@ -286,7 +286,7 @@ pub fn refresh_runtime_metadata(
 ) -> Result<RuntimeMetadataOutcome, ArtifactError> {
     if !request.force
         && cache_is_fresh(&request.json_cache)
-        && runtime_tsv_matches_json(&request.json_cache, &request.tsv_cache)
+        && runtime_cache_valid(&request.json_cache, request.tsv_cache.as_deref())
     {
         return Ok(RuntimeMetadataOutcome {
             status: CacheRefreshStatus::Cached,
@@ -301,7 +301,7 @@ pub fn refresh_runtime_metadata(
     let _refresh_lock =
         ExclusiveFileLock::try_acquire(&parent.join(".runtime-metadata-refresh.lock"))
             .map_err(ArtifactError::Busy)?;
-    if repair_runtime_tsv_from_json(&request.json_cache, &request.tsv_cache)?
+    if repair_runtime_cache(&request.json_cache, request.tsv_cache.as_deref())?
         && !request.force
         && cache_is_fresh(&request.json_cache)
     {
@@ -328,7 +328,7 @@ pub fn refresh_runtime_metadata(
     let outcome = match fetched {
         Ok(outcome) => outcome,
         Err(_) if !request.force => {
-            if repair_runtime_tsv_from_json(&request.json_cache, &request.tsv_cache)? {
+            if repair_runtime_cache(&request.json_cache, request.tsv_cache.as_deref())? {
                 return Ok(RuntimeMetadataOutcome {
                     status: CacheRefreshStatus::CachedStale,
                     route: None,
@@ -344,7 +344,9 @@ pub fn refresh_runtime_metadata(
     let metadata = RuntimeMetadata::parse(&bytes)
         .map_err(|error| ArtifactError::Runtime(error.to_string()))?;
     atomic_write(&request.json_cache, &bytes)?;
-    atomic_write(&request.tsv_cache, metadata.to_tsv().as_bytes())?;
+    if let Some(tsv_cache) = &request.tsv_cache {
+        atomic_write(tsv_cache, metadata.to_tsv().as_bytes())?;
+    }
     Ok(RuntimeMetadataOutcome {
         status: CacheRefreshStatus::Updated,
         route: Some(outcome.route_id().to_owned()),
@@ -389,18 +391,20 @@ fn cache_is_fresh(path: &Path) -> bool {
         .is_some_and(|age| age < CACHE_MAX_AGE)
 }
 
-fn runtime_tsv_matches_json(json_cache: &Path, tsv_cache: &Path) -> bool {
+fn runtime_cache_valid(json_cache: &Path, tsv_cache: Option<&Path>) -> bool {
     fs::read(json_cache)
         .ok()
         .and_then(|json| RuntimeMetadata::parse(&json).ok())
         .is_some_and(|metadata| {
-            fs::read(tsv_cache).is_ok_and(|tsv| tsv == metadata.to_tsv().as_bytes())
+            tsv_cache.is_none_or(|path| {
+                fs::read(path).is_ok_and(|tsv| tsv == metadata.to_tsv().as_bytes())
+            })
         })
 }
 
-fn repair_runtime_tsv_from_json(
+fn repair_runtime_cache(
     json_cache: &Path,
-    tsv_cache: &Path,
+    tsv_cache: Option<&Path>,
 ) -> Result<bool, ArtifactError> {
     let Ok(json) = fs::read(json_cache) else {
         return Ok(false);
@@ -408,9 +412,11 @@ fn repair_runtime_tsv_from_json(
     let Ok(metadata) = RuntimeMetadata::parse(&json) else {
         return Ok(false);
     };
-    let canonical = metadata.to_tsv();
-    if !fs::read(tsv_cache).is_ok_and(|tsv| tsv == canonical.as_bytes()) {
-        atomic_write(tsv_cache, canonical.as_bytes())?;
+    if let Some(tsv_cache) = tsv_cache {
+        let canonical = metadata.to_tsv();
+        if !fs::read(tsv_cache).is_ok_and(|tsv| tsv == canonical.as_bytes()) {
+            atomic_write(tsv_cache, canonical.as_bytes())?;
+        }
     }
     Ok(true)
 }

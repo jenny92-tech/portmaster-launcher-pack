@@ -546,9 +546,9 @@ lua.execute(r'''
     local native={snapshot=function()
         snapshots=snapshots+1
         return {env={scripts_dir="/scripts",gamedirs_dir="/data",images_dir="/images",libs_dir="/libs",
-            gamedir="",size_file="",runtime_metadata_file=""},inventory=inventory}
+            gamedir=""},inventory=inventory,sizes={},runtime_metadata={}}
     end}
-    local model=require("app_model").new({get_state=function() return {ui_lang="en"} end},{},native)
+    local model=require("app_model").new({get_state=function() return {ui_lang="en"} end},native)
     assert(model.load_env())
     assert(model.ensure_report()==model.ensure_report() and snapshots==1)
     assert(model.required_runtimes()[1].health=="healthy")
@@ -577,14 +577,6 @@ with tempfile.TemporaryDirectory() as source:
     (base / "images" / "Installed.png").write_bytes(b"frontend image")
     (base / "images" / "Orphan.png").write_bytes(b"orphan image")
     env_path = app / "conf/env.json"
-    runtime_metadata = app / "conf/runtime-metadata.tsv"
-    runtime_metadata.write_text(
-        "godot_4.5\taarch64\t20\t03569a31f137dcf994ed737352cb746a\t"
-        "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs\n"
-        "godot_4.6.3\taarch64\t20\t00000000000000000000000000000000\t"
-        "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.6.3.squashfs\n",
-        encoding="utf-8",
-    )
     env_path.write_text(json.dumps({
         "controlfolder": str(base / "PortMaster"), "scripts_dir": str(scripts),
         "gamedirs_dir": str(data), "images_dir": str(base / "images"),
@@ -593,8 +585,7 @@ with tempfile.TemporaryDirectory() as source:
         "display_width": "960", "display_height": "720", "device_arch": "aarch64",
         "device": "test",
         "portmaster_health": "healthy", "portmaster_version": "2026.07",
-        "size_file": str(app / "conf/sizes.tsv"),
-        "runtime_metadata_file": str(runtime_metadata),
+        "size_cache_ready": False,
         "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
         "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "jenny92-appmanager"
     }), encoding="utf-8")
@@ -624,8 +615,18 @@ with tempfile.TemporaryDirectory() as source:
                 {"name": "godot_4.5", "health": "healthy", "bytes": 20},
             ]},
     }
-    lua.globals().APP_SNAPSHOT = json.dumps({
-        "env": json.loads(env_path.read_text(encoding="utf-8")), "inventory": inventory})
+    lua.globals().APP_SNAPSHOT = lua.table_from({
+        "env": json.loads(env_path.read_text(encoding="utf-8")), "inventory": inventory,
+        "sizes": {},
+        "runtime_metadata": {
+            "godot_4.5": {"arch": "aarch64", "bytes": 20,
+                "md5": "03569a31f137dcf994ed737352cb746a",
+                "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs"},
+            "godot_4.6.3": {"arch": "aarch64", "bytes": 20,
+                "md5": "00000000000000000000000000000000",
+                "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.6.3.squashfs"},
+        },
+    }, recursive=True)
     lua.execute(r'''
         appmanager={
             snapshot=function() return APP_SNAPSHOT end,
