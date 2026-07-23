@@ -14,7 +14,7 @@ local finish_initial_load
 local function blocking_notice(title,message,id,on_wait)
     kit.set_busy(false)
     local rows={
-        kit.textview(L("What to do","请执行"),message,{id=id..":note",focusable=false,
+        kit.textview(L("Status","状态"),message,{id=id..":note",focusable=false,
             expandable=false,max_lines=4,expanded_lines=4,label_px=18,value_px=20,surface=false}),
     }
     if on_wait then rows[#rows+1]=kit.button(L("Keep waiting","继续等待"),on_wait,{id=id..":wait"}) end
@@ -55,17 +55,13 @@ local function poll_task(dt)
             operations.task=nil; kit.set_busy(false)
             local status=type(data.config_refresh)=="table" and data.config_refresh.status or nil
             finish_initial_load(true)
-            if event.status=="error" or status=="error" then
-                kit.toast(L("Using the built-in device configuration.","正在使用随包设备配置。"),{kind="info"})
-            elseif status=="updated" then
-                kit.toast(L("Device configuration updated.","设备配置已更新。"),{kind="success"})
-            end
+            if status=="updated" then kit.toast(L("Device information updated.","设备信息已更新。"),{kind="success"}) end
         elseif task.kind=="update-check" or task.kind=="update-check-background" then
             operations.task=nil; kit.set_busy(false)
             if event.status=="error" then env.update_status="error" end
             if task.kind=="update-check" then environment.build_manage(true); kit.goto_page(page.MANAGE) end
             if event.status=="error" then
-                kit.toast(L("Update check failed. Try again later.","检查更新失败，请稍后重试。"),{kind="error"})
+                kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
             elseif task.kind=="update-check" then
                 kit.toast(L("Update check completed.","更新检查完成。"),{kind="success"})
             end
@@ -87,17 +83,15 @@ local function poll_task(dt)
         task.timeout_notified=true; kit.set_busy(false)
         if task.kind=="portmaster" then
             blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
-                L("Keep waiting, or exit and reopen App Manager later. Do not start another installation.",
-                    "请继续等待，或稍后退出并重新打开 APP。不要重复安装。"),"install-timeout")
+                L("Keep waiting, or reopen App Manager later to see the result.",
+                    "请继续等待，或稍后重新打开 APP 查看结果。"),"install-timeout")
         elseif task.kind=="validation" then
-            environment.finish_validation("timeout",L("The check is taking longer than expected. Exit and reopen App Manager later.",
-                "检查时间较长，请退出并稍后重新打开 APP。"))
+            environment.finish_validation("timeout")
         elseif task.kind=="config-refresh" then
             operations.task=nil; finish_initial_load(true)
-            kit.toast(L("Using the cached device configuration.","正在使用已缓存的设备配置。"),{kind="info"})
         elseif task.kind=="update-check" then
             operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
-            kit.toast(L("Update check timed out. Try again later.","检查更新超时，请稍后重试。"),{kind="error"})
+            kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
         elseif operations.confirm_return==page.RUNTIME then
             operations.task=nil; pages.build_runtime(); kit.goto_page(page.RUNTIME)
             kit.toast(L("The operation timed out. Try again later.","操作超时，请稍后重试。"),{kind="error"})
@@ -120,10 +114,9 @@ finish_initial_load=function(skip_config_refresh)
         return
     end
     if not skip_config_refresh then
-        kit.set_busy(true,L("Checking device configuration…","正在检查设备配置……"),{
-            indeterminate=true,stage=L("Checking device configuration","正在检查设备配置"),
-            detail=L("The built-in configuration remains available if the network is unavailable.",
-                "网络不可用时会继续使用随包配置。"),footer_left="",footer_right=L("Checking…","检查中……")})
+        kit.set_busy(true,L("Preparing device information…","正在准备设备信息……"),{
+            indeterminate=true,stage=L("Preparing device information","正在准备设备信息"),
+            detail="",footer_left="",footer_right=L("Please wait…","请稍候……")})
         local ok,task_id=pcall(model.native.start,"config-refresh",{})
         if ok then
             operations.task={id=task_id,kind="config-refresh",elapsed=0,poll=0,timeout=45}
@@ -157,10 +150,12 @@ local port={
             k.textview(L("Status","状态"),L("Loading…","正在加载……"),{focusable=false,expandable=false,surface=false})}) end
     end,
     on_load=function()
-        local ok,err=model.load_env()
+        local ok=model.load_env()
         if not ok then
             kit.set_page(page.HOME,L("Cannot start Port App Manager","Port App Manager 启动失败"),{
-                kit.textview(L("Error","错误"),model.provided(err),{id="startup:error",focusable=false,
+                kit.textview(L("Status","状态"),L(
+                    "Port App Manager could not start. Reinstall it and try again.",
+                    "Port App Manager 无法启动。请重新安装后再试。"),{id="startup:error",focusable=false,
                     expandable=false,max_lines=4,expanded_lines=4,surface=false}),
                 kit.button(L("Exit","退出"),operations.show_exit_dialog,{id="startup:exit"}),
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})

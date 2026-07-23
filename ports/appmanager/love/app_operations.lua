@@ -27,12 +27,14 @@ function Operations.new(model)
         if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
         local result=type(data.operation)=="table" and data.operation or {}
         local failed=event and event.status=="error" or result.failed==true
-        if failed then
-            kit.toast(L("The operation failed. See log.txt.","操作失败，请查看 log.txt。"),{kind="error"})
+        if completed_task and completed_task.kind=="portmaster" then
+            -- The blocking result dialog below already gives the next step.
+        elseif failed then
+            kit.toast(L("The operation failed. Please try again.","操作失败，请重试。"),{kind="error"})
         elseif completed_task and completed_task.kind=="appledouble" then
             local count=tonumber(result.appledouble_removed) or 0
-            kit.toast(L(string.format("Removed %d ._Files garbage files.",count),
-                string.format("已清理 %d 个 ._Files 垃圾文件。",count)),{kind="success"})
+            kit.toast(L(string.format("Removed %d ._Files.",count),
+                string.format("已清理 %d 个 ._Files。",count)),{kind="success"})
         else
             kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
         end
@@ -41,12 +43,12 @@ function Operations.new(model)
             if failed then
                 environment.build_manage(); kit.goto_page(pages.MANAGE)
                 kit.dialog({title=L("PortMaster installation failed","PortMaster 安装失败"),
-                    message=L("Check log.txt, then try again.","请查看 log.txt 后重试。"),
-                    confirm=L("Retry later","稍后重试"),cancel=L("Back","返回"),danger=false})
+                    message=L("Please try again later.","请稍后重试。"),
+                    confirm=L("OK","知道了"),cancel=L("Back","返回"),danger=false})
             else
                 kit.dialog({title=L("PortMaster installed","PortMaster 已安装"),
-                    message=L("Exit and reopen App Manager to finish the check.",
-                        "请退出并重新打开 APP，完成最后检查。"),
+                    message=L("Exit and reopen App Manager to finish setup.",
+                        "请退出并重新打开 APP，完成设置。"),
                     confirm=L("Exit now","立即退出"),cancel=L("Stay","暂不退出"),default_focus="cancel",danger=false,
                     on_confirm=kit.quit})
             end
@@ -83,8 +85,8 @@ function Operations.new(model)
                 progress=0,stage=L("Starting repair","正在启动修复"),detail="",
                 footer_left=L("Preparing…","准备中…"),footer_right=L("Preparing…","准备中…")})
         elseif appledouble then
-            kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files…"),{
-                progress=0,stage=L("Scanning Port directories","正在扫描 Port 目录"),detail="",
+            kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files……"),{
+                progress=0,stage=L("Scanning files","正在扫描文件"),detail="",
                 footer_left=L("0 files","0 个文件"),footer_right=L("Scanning…","扫描中…")})
         else
             kit.set_busy(true,L("Working…","处理中…"))
@@ -110,8 +112,8 @@ function Operations.new(model)
         local count=#(labels or {})
         kit.dialog({
             title=title,title_checked=opts.title_checked,
-            message=opts.message or L(string.format("Review %d selected item%s before continuing.",count,count==1 and "" or "s"),
-                string.format("即将处理 %d 个所选项目，请确认后继续。",count)),
+            message=opts.message or L(string.format("%d item%s selected.",count,count==1 and "" or "s"),
+                string.format("已选择 %d 个项目。",count)),
             message_checked=opts.message_checked,items=labels,
             confirm=opts.confirm or L("Confirm","确认"),confirm_checked=opts.confirm_checked,
             cancel=L("Cancel","取消"),danger=opts.danger~=false,checkbox=opts.checkbox,

@@ -131,9 +131,9 @@ function Model.new(kit,native)
         local appledouble=runtime=="AppleDouble"
         if appledouble then
             local stages={
-                scanning=L("Scanning Port directories","正在扫描 Port 目录"),
-                cleaning=L("Removing ._Files garbage files","正在清理 ._Files 垃圾文件"),
-                indexing=L("Updating size information","正在更新容量信息"),
+                scanning=L("Scanning files","正在扫描文件"),
+                cleaning=L("Removing ._Files","正在清理 ._Files"),
+                indexing=L("Updating file list","正在更新文件列表"),
                 complete=L("Cleanup completed","清理完成"),
             }
             return {progress=0,stage=stages[phase] or L("Cleaning ._Files","正在清理 ._Files"),
@@ -170,13 +170,7 @@ function Model.new(kit,native)
             else right=L("Downloading…","下载中…") end
         elseif phase=="probing" then right=L("Checking…","检查中…")
         else right="—" end
-        local detail=fields[9]
-        if portmaster then detail=""
-        elseif phase=="probing" or phase=="connected" then detail=""
-        elseif phase=="downloading" then
-            detail=fields[9]=="Using local cache" and L("Using local cache","正在使用本地缓存") or
-                L("Connection ready and in use","连接已就绪，正在使用")
-        end
+        local detail=""
         local display_stage=stage
         if not portmaster then
             display_stage=L(stage.en.." · "..(type(name)=="table" and name.en or name),
@@ -189,7 +183,7 @@ function Model.new(kit,native)
 
     function self.provided(value)
         if type(value)=="table" or type(value)=="function" then return value end
-        if value==nil or tostring(value)=="" then return self.L("Not provided","未提供") end
+        if value==nil or tostring(value)=="" then return self.L("Unknown","未识别") end
         return tostring(value)
     end
 

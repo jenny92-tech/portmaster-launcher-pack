@@ -87,7 +87,7 @@ file "$APP/bin/gptokeyb" | grep -Fq 'ARM aarch64'
 grep -Fq 'runtime/love.aarch64' "$DIST/APP Manager.sh"
 ! grep -Fq 'launcher-session' "$DIST/APP Manager.sh"
 [ "$(wc -l < "$DIST/APP Manager.sh" | tr -d ' ')" -le 120 ]
-grep -A2 -Fq 'indeterminate=true,stage=L("Checking device configuration"' "$APP/love_ui/main.lua"
+grep -A2 -Fq 'indeterminate=true,stage=L("Preparing device information"' "$APP/love_ui/main.lua"
 ! grep -Fq 'Event::ControllerButton' "$ROOT/crates/love-lite/src/main.rs"
 ! grep -Fq 'PAM_LOVE_LIBRARY_PATH' "$DIST/APP Manager.sh"
 ! grep -Fq 'resolved_love_library_path' "$DIST/APP Manager.sh"

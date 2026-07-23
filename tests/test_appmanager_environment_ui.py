@@ -17,17 +17,52 @@ assert "Port App Manager 使用自带 UI 环境，因此仍可运行" not in sou
 assert "无法启动提权操作助手" not in source
 assert "SquashFS 镜像" not in source
 assert "kit.info" not in source
-assert 'L("PortMaster is not installed. Repair it first.","未安装 PortMaster，请先修复。")' in source
-assert 'L("PortMaster is damaged. Repair it first.","PortMaster 已损坏，请先修复。")' in source
+assert 'L("PortMaster is not installed. Install it to continue.","未安装 PortMaster，请先安装。")' in source
+assert 'L("PortMaster needs repair. Repair it to continue.","PortMaster 需要修复，请先处理。")' in source
 assert 'L("Managed by system · Available","系统管理 · 当前可用")' in source
-assert "Port App Manager 不会安装、重装或覆盖它" in source
+assert "PortMaster 由系统维护。" in source
 assert 'L("Checking PortMaster","检查 PortMaster")' in source
-assert "正在检查刚安装的 PortMaster。完成后会自动进入首页。" in source
+assert "正在检查 PortMaster，完成后会自动继续。" in source
+assert "return result.status,nil" in source
+assert "result.status,result.detail" not in source
+assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true}' in source
+assert 'if checked then for _,item in ipairs(plan) do item.kind="DELETE_MANAGED" end end' in source
+assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true,checked=true}' not in source
 assert 'indeterminate=true' in source
 assert 'L("Keep waiting","继续等待")' in source
 assert 'cancel=L("Stay","暂不退出")' in source
 assert "focusable=false" in source
 assert "surface=false" in source
+for clear_copy in (
+    "当前设备暂不支持安装 PortMaster。",
+    "无法确定 PortMaster 安装位置，未进行任何修改。",
+    "这台设备尚未实测。确认后可以继续。",
+    "PortMaster 尚未支持这台设备。请确认安装位置。",
+    "安装未完成。请退出 APP，重新打开后再试。",
+    "未配套的启动项和数据目录会默认选中。多个启动项共用同一目录时不会默认选中，请确认后处理。选中内容会移入回收站。",
+    "存放菜单里的游戏启动脚本。",
+    "Port App Manager 无法启动。请重新安装后再试。",
+):
+    assert clear_copy in source, clear_copy
+for verbose_copy in (
+    "当前设备配置未启用 PortMaster 安装",
+    "APP Manager 无法安全确定此设备的 PortMaster 安装路径",
+    "我已了解此操作会修改 PortMaster 环境",
+    "当前设备配置不允许安装 PortMaster",
+    "无法使用的安装已清理",
+    "正在安全更新文件",
+    "普通的孤儿 SH 与孤儿数据目录",
+    "受管游戏依赖",
+    "这里是 directory/ports",
+    "这里是 controlfolder",
+    "配置档",
+    "请查看 log.txt 后重试",
+    "A mismatched binary cannot run",
+    "missing .so errors",
+    "squashfs",
+    "normally the folder of $0",
+):
+    assert verbose_copy not in source, verbose_copy
 for contract in (
     'id="manage:latest"', 'id="manage:check"', 'id="manage:update"',
     'L("Update now","立即更新")', 'L("Up to date","已是最新版")',
