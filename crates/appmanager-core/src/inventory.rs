@@ -406,6 +406,12 @@ fn scan_facts(
     let mut refcount = BTreeMap::<String, usize>::new();
     let mut parsed_dir_refs = BTreeSet::new();
     let mut diagnostics = Vec::new();
+    let data_dir_paths = data_dirs
+        .iter()
+        .map(|entry| (entry.name.clone(), entry.path.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut port_json_cache = BTreeMap::<String, Result<Option<Vec<String>>, String>>::new();
+    let mut reported_port_json_errors = BTreeSet::new();
     let seed = BTreeMap::from([
         ("directory".to_owned(), options.directory.clone()),
         ("controlfolder".to_owned(), options.controlfolder.clone()),
@@ -444,7 +450,31 @@ fn scan_facts(
                 missing_dir: claimed_dir.clone(),
             });
         }
-        let runtimes = runtimes_of(&text);
+        let shell_runtimes = runtimes_of(&text);
+        let runtimes = if dir_exists {
+            let declaration = port_json_cache
+                .entry(claimed_dir.clone())
+                .or_insert_with(|| {
+                    data_dir_paths
+                        .get(&claimed_dir)
+                        .map_or(Ok(None), |directory| port_json_runtimes(directory))
+                })
+                .clone();
+            match declaration {
+                Ok(Some(runtimes)) => runtimes,
+                Ok(None) => shell_runtimes,
+                Err(error) => {
+                    if reported_port_json_errors.insert(claimed_dir.clone()) {
+                        diagnostics.push(format!(
+                            "ignored invalid port.json for {claimed_dir}: {error}"
+                        ));
+                    }
+                    shell_runtimes
+                }
+            }
+        } else {
+            shell_runtimes
+        };
         ports.push(PortFact {
             script: entry.name.clone(),
             path: entry.path,
@@ -542,6 +572,52 @@ fn read_script(path: &Path) -> Result<String, InventoryError> {
         return Err(InventoryError::ScriptTooLarge(path.to_path_buf()));
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn port_json_runtimes(directory: &Path) -> Result<Option<Vec<String>>, String> {
+    let path = directory.join("port.json");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !metadata.file_type().is_file() {
+        return Err("port.json is not a regular file".to_owned());
+    }
+    if metadata.len() > MAX_SCRIPT_BYTES {
+        return Err("port.json exceeds the inventory read limit".to_owned());
+    }
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    let document: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    let Some(attributes) = document.get("attr").and_then(serde_json::Value::as_object) else {
+        return Ok(None);
+    };
+    let Some(runtime) = attributes.get("runtime") else {
+        return Ok(None);
+    };
+    let values = match runtime {
+        serde_json::Value::Null => Vec::new(),
+        serde_json::Value::String(value) => vec![value.as_str()],
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok_or_else(|| "attr.runtime array contains a non-string value".to_owned())
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("attr.runtime must be null, a string, or an array".to_owned()),
+    };
+    let mut runtimes = Vec::new();
+    for value in values {
+        let runtime = normalize_runtime_name(value)
+            .ok_or_else(|| format!("attr.runtime contains an invalid Runtime name: {value}"))?;
+        if !runtimes.contains(&runtime) {
+            runtimes.push(runtime);
+        }
+    }
+    Ok(Some(runtimes))
 }
 
 fn scan_trash(
@@ -970,24 +1046,75 @@ fn runtimes_of(text: &str) -> Vec<String> {
             continue;
         }
         let line = line.strip_prefix("export ").unwrap_or(line);
-        let Some((name, value)) = line.split_once('=') else {
-            continue;
-        };
-        if name != "runtime" && !name.ends_with("_runtime") {
-            continue;
+        if let Some((name, value)) = line.split_once('=') {
+            let name = name.to_ascii_lowercase();
+            if (name == "runtime" || name.ends_with("_runtime"))
+                && let Some(runtime) = normalize_runtime_assignment(value)
+            {
+                push_unique(&mut result, runtime);
+            }
         }
-        let value = value.trim_start_matches(['\'', '"']);
-        let value = value
+        for runtime in literal_runtime_paths(line) {
+            push_unique(&mut result, runtime);
+        }
+    }
+    result
+}
+
+fn normalize_runtime_assignment(value: &str) -> Option<String> {
+    let value = value.trim().trim_start_matches(['\'', '"', '/']);
+    let value = value
+        .split(|character: char| {
+            !character.is_ascii_alphanumeric() && !matches!(character, '_' | '.' | '+' | '-')
+        })
+        .next()
+        .unwrap_or_default();
+    normalize_runtime_name(value)
+}
+
+fn literal_runtime_paths(line: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut remaining = line;
+    while let Some(offset) = remaining.find("libs/") {
+        remaining = &remaining[offset + "libs/".len()..];
+        let value = remaining
             .split(|character: char| {
                 !character.is_ascii_alphanumeric() && !matches!(character, '_' | '.' | '+' | '-')
             })
             .next()
             .unwrap_or_default();
-        if !value.is_empty() && !result.iter().any(|item| item == value) {
-            result.push(value.to_owned());
+        if value.ends_with(".squashfs")
+            && let Some(runtime) = normalize_runtime_name(value)
+        {
+            push_unique(&mut result, runtime);
         }
+        if remaining.is_empty() {
+            break;
+        }
+        remaining = &remaining[remaining.len().min(value.len().saturating_add(1))..];
     }
     result
+}
+
+fn normalize_runtime_name(value: &str) -> Option<String> {
+    let value = value
+        .trim()
+        .trim_start_matches('/')
+        .strip_suffix(".squashfs")
+        .unwrap_or_else(|| value.trim().trim_start_matches('/'));
+    (!value.is_empty()
+        && !value.starts_with('.')
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'+' | b'-')))
+    .then(|| value.to_owned())
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
 }
 
 fn mentions(text: &str, name: &str) -> bool {
@@ -1439,5 +1566,114 @@ mod tests {
         assert_eq!(snapshot.diagnostics.len(), 1);
         assert!(snapshot.diagnostics[0].contains("Oversized.sh"));
         assert!(snapshot.to_tsv().contains("diagnostic\tskipped script"));
+    }
+
+    #[test]
+    fn port_json_runtime_declaration_is_the_primary_dependency_source() {
+        let fixture = fixture();
+        let game = fixture.context.roots.game_dirs.join("OfficialRuntime");
+        fs::create_dir(&game).unwrap();
+        fs::write(
+            game.join("port.json"),
+            br#"{
+                "attr": {
+                    "runtime": [
+                        "dotnet-8.0.12.squashfs",
+                        "gmtoolkit.squashfs",
+                        "weston_pkg_0.2"
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("Official Runtime.sh"),
+            b"GAMEDIR=/ports/OfficialRuntime\nruntime=stale_script_value\n",
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        assert_eq!(
+            snapshot.ports[0].runtimes,
+            ["dotnet-8.0.12", "gmtoolkit", "weston_pkg_0.2"]
+        );
+        assert!(!snapshot.runtimes.need.contains_key("stale_script_value"));
+    }
+
+    #[test]
+    fn port_json_runtime_accepts_string_and_explicitly_empty_declarations() {
+        let fixture = fixture();
+        for (directory, runtime) in [
+            ("StringRuntime", r#""ags_3.6.squashfs""#),
+            ("EmptyRuntime", "null"),
+        ] {
+            let game = fixture.context.roots.game_dirs.join(directory);
+            fs::create_dir(&game).unwrap();
+            fs::write(
+                game.join("port.json"),
+                format!(r#"{{"attr":{{"runtime":{runtime}}}}}"#),
+            )
+            .unwrap();
+            fs::write(
+                fixture
+                    .context
+                    .roots
+                    .scripts
+                    .join(format!("{directory}.sh")),
+                format!("GAMEDIR=/ports/{directory}\nruntime=script_fallback\n"),
+            )
+            .unwrap();
+        }
+
+        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        assert_eq!(snapshot.ports[0].script, "EmptyRuntime.sh");
+        assert!(snapshot.ports[0].runtimes.is_empty());
+        assert_eq!(snapshot.ports[1].script, "StringRuntime.sh");
+        assert_eq!(snapshot.ports[1].runtimes, ["ags_3.6"]);
+    }
+
+    #[test]
+    fn invalid_port_json_is_diagnostic_and_falls_back_to_the_launcher() {
+        let fixture = fixture();
+        let game = fixture.context.roots.game_dirs.join("BrokenMetadata");
+        fs::create_dir(&game).unwrap();
+        fs::write(game.join("port.json"), br#"{"attr":{"runtime":[42]}}"#).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("Broken Metadata.sh"),
+            b"GAMEDIR=/ports/BrokenMetadata\nruntime=ags_3.6\n",
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        assert_eq!(snapshot.ports[0].runtimes, ["ags_3.6"]);
+        assert_eq!(snapshot.diagnostics.len(), 1);
+        assert!(snapshot.diagnostics[0].contains("invalid port.json"));
+    }
+
+    #[test]
+    fn shell_runtime_fallback_accepts_real_world_portmaster_spellings() {
+        let fixture = fixture();
+        fs::create_dir(fixture.context.roots.game_dirs.join("LegacyRuntime")).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("Legacy Runtime.sh"),
+            br#"GAMEDIR=/ports/LegacyRuntime
+RUNTIME="renpy_8.1.3"
+java_runtime="/zulu8.86.0.25-ca-jdk8.0.452-linux"
+monofile="$controlfolder/libs/mono-6.12.0.122-aarch64.squashfs"
+DOTNETFILE="$controlfolder/libs/dotnet-8.0.12.squashfs"
+"#,
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        assert_eq!(
+            snapshot.ports[0].runtimes,
+            [
+                "renpy_8.1.3",
+                "zulu8.86.0.25-ca-jdk8.0.452-linux",
+                "mono-6.12.0.122-aarch64",
+                "dotnet-8.0.12",
+            ]
+        );
     }
 }
