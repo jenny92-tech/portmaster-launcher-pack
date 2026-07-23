@@ -361,6 +361,7 @@ fn scan_facts(
         .iter()
         .filter(|entry| {
             entry.kind == InventoryKind::File
+                && !is_appledouble(&entry.name)
                 && is_image(&entry.name)
                 && (entry.root == "images" || options.scan_script_images && entry.root == "scripts")
         })
@@ -385,6 +386,7 @@ fn scan_facts(
         .filter(|entry| {
             entry.root == "scripts"
                 && entry.kind == InventoryKind::File
+                && !is_appledouble(&entry.name)
                 && entry.name.to_ascii_lowercase().ends_with(".sh")
                 && !options.ignore_scripts.contains(&entry.name)
         })
@@ -396,6 +398,7 @@ fn scan_facts(
         .filter(|entry| {
             entry.root == "scripts"
                 && entry.kind == InventoryKind::File
+                && !is_appledouble(&entry.name)
                 && entry.name.to_ascii_lowercase().ends_with(".sh")
         })
         .map(|entry| stem(&entry.name).to_owned())
@@ -1147,6 +1150,10 @@ fn is_image(name: &str) -> bool {
         .any(|suffix| lower.ends_with(suffix))
 }
 
+fn is_appledouble(name: &str) -> bool {
+    name.starts_with("._")
+}
+
 fn path_sort_key(path: &Path) -> String {
     path.to_string_lossy().to_ascii_lowercase()
 }
@@ -1675,5 +1682,37 @@ DOTNETFILE="$controlfolder/libs/dotnet-8.0.12.squashfs"
                 "dotnet-8.0.12",
             ]
         );
+    }
+
+    #[test]
+    fn appledouble_files_never_appear_as_ports_or_leftovers() {
+        let fixture = fixture();
+        fs::write(
+            fixture.context.roots.scripts.join("._Broken.sh"),
+            b"AppleDouble metadata",
+        )
+        .unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("._Broken.png"),
+            b"AppleDouble metadata",
+        )
+        .unwrap();
+        fs::write(
+            fixture
+                .context
+                .roots
+                .images
+                .as_ref()
+                .unwrap()
+                .join("._Orphan.png"),
+            b"AppleDouble metadata",
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+
+        assert!(snapshot.ports.is_empty());
+        assert!(snapshot.images.is_empty());
+        assert!(snapshot.orphan_images.is_empty());
     }
 }
