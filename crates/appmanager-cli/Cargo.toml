@@ -19,7 +19,6 @@ appmanager-core = { path = "../appmanager-core" }
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 portkit-core = { path = "../portkit-core" }
-portkit-cli = { path = "../portkit-cli" }
 serde.workspace = true
 serde_json.workspace = true
 

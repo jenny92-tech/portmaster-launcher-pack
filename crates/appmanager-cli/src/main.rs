@@ -2,26 +2,23 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use appmanager_core::{
-    AppOwnedPaths, CacheGenerations, FileApplyRequest, InstallPlan, InstallRequest, Inventory,
-    InventoryOptions, OperationKind, PendingValidationRequest, ResolvedContextInput,
-    ResolvedDeviceContext, RuntimeMetadata, RuntimeRepairRequest, SizeScanRequest, apply_file_plan,
-    install_portmaster, plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
-    validate_pending_install,
+    CacheGenerations, FileApplyRequest, InstallPlan, InstallRequest, Inventory, InventoryOptions,
+    OperationKind, PendingValidationRequest, ResolvedContextInput, ResolvedDeviceContext,
+    RuntimeMetadata, RuntimeRepairRequest, SizeScanRequest, apply_file_plan, install_portmaster,
+    plan_contains_only_file_actions, repair_runtimes, scan_size_cache, validate_pending_install,
 };
 use clap::{Parser, Subcommand, ValueEnum};
-use portkit_core::github::{Capability, GitHubTransport};
-use portkit_core::{
-    CandidateSelector, Config, ConfigCandidate, ConfigLoader, ConfigOrigin, DetectionContext,
-    DigestAlgorithm, ExclusiveFileLock, LocalFragmentSource, Resolution, digest_file,
-};
+use portkit_core::{DigestAlgorithm, digest_file};
 use serde::Serialize;
 use serde_json::{Value, json};
+
+#[cfg(test)]
+use portkit_core::ExclusiveFileLock;
 
 pub mod launcher;
 
@@ -394,6 +391,8 @@ pub fn cli_main() -> ExitCode {
                 embedded: cli.config_dir.clone(),
                 remote: cli.remote_config_dir.clone(),
             },
+            cancel_token: None,
+            progress_channel: None,
         });
     }
     let raw_tsv = matches!(
@@ -679,6 +678,8 @@ fn run(
                 libs_root,
                 progress_file: progress,
                 cancel_file,
+                cancel_token: None,
+                progress_channel: None,
             })
             .map_err(|error| domain_error(name, "runtime-repair-failed", error))?;
             Ok((name, json!(outcome)))
@@ -818,84 +819,13 @@ fn run(
     }
 }
 
-#[derive(Debug, serde::Deserialize, Serialize)]
-struct StableRelease {
-    version: String,
-    url: String,
-    md5: String,
-}
+#[cfg(test)]
+type StableRelease = appmanager_core::StableRelease;
 
-#[derive(Debug, serde::Deserialize)]
-struct StableManifest {
-    stable: StableRelease,
-}
-
+#[cfg(test)]
 fn parse_stable_manifest(command: &'static str, bytes: &[u8]) -> Result<StableRelease, CliError> {
-    let manifest: StableManifest = serde_json::from_slice(bytes).map_err(|error| CliError {
-        command,
-        code: "invalid-stable-manifest",
-        message: error.to_string(),
-    })?;
-    let mut stable = manifest.stable;
-    for (field, value) in [
-        ("version", stable.version.as_str()),
-        ("url", stable.url.as_str()),
-        ("md5", stable.md5.as_str()),
-    ] {
-        if value.is_empty()
-            || value
-                .bytes()
-                .any(|byte| matches!(byte, b'\t' | b'\r' | b'\n'))
-        {
-            return Err(CliError {
-                command,
-                code: "invalid-stable-manifest",
-                message: format!("stable {field} is empty or contains a control separator"),
-            });
-        }
-    }
-    if !stable
-        .version
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
-        return Err(CliError {
-            command,
-            code: "invalid-stable-manifest",
-            message: "stable version contains unsupported characters".to_owned(),
-        });
-    }
-    if stable.md5.len() != 32 || !stable.md5.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(CliError {
-            command,
-            code: "invalid-stable-manifest",
-            message: "stable md5 is not a 32-character hexadecimal digest".to_owned(),
-        });
-    }
-    let Some(release_path) = stable.url.strip_prefix("https://github.com/") else {
-        return Err(CliError {
-            command,
-            code: "invalid-stable-manifest",
-            message: "stable URL is not a GitHub HTTPS release asset".to_owned(),
-        });
-    };
-    let segments = release_path.split('/').collect::<Vec<_>>();
-    if segments.len() != 6
-        || segments[0].is_empty()
-        || segments[1].is_empty()
-        || segments[2] != "releases"
-        || segments[3] != "download"
-        || segments[4].is_empty()
-        || segments[5].is_empty()
-    {
-        return Err(CliError {
-            command,
-            code: "invalid-stable-manifest",
-            message: "stable URL is not a GitHub release asset".to_owned(),
-        });
-    }
-    stable.md5.make_ascii_lowercase();
-    Ok(stable)
+    appmanager_core::parse_stable_manifest(bytes)
+        .map_err(|error| domain_error(command, "invalid-stable-manifest", error))
 }
 
 fn fetch_stable_release(
@@ -904,99 +834,33 @@ fn fetch_stable_release(
     output: PathBuf,
 ) -> Result<(&'static str, Value), CliError> {
     const NAME: &str = "fetch-stable-release";
-    let parent = output.parent().ok_or_else(|| CliError {
-        command: NAME,
-        code: "invalid-stable-output",
-        message: "stable release output has no parent directory".to_owned(),
-    })?;
-    fs::create_dir_all(parent)
-        .map_err(|error| domain_error(NAME, "stable-release-write-failed", error))?;
-    let manifest = parent.join(format!(
-        ".stable-release-manifest-{}.json",
-        std::process::id()
-    ));
-    let _download = DownloadGuard(manifest.clone());
-    let outcome = GitHubTransport::new()
-        .fetch(
-            Capability::Release,
-            &source,
-            &manifest,
-            |path| {
-                fs::read(path)
-                    .ok()
-                    .and_then(|bytes| parse_stable_manifest(NAME, &bytes).ok())
-                    .is_some()
-            },
-            None,
-            None,
-        )
-        .map_err(|error| domain_error(NAME, "stable-manifest-download-failed", error))?;
-    let bytes = read_bytes(NAME, &manifest, "invalid-stable-manifest")?;
-    let stable = parse_stable_manifest(NAME, &bytes)?;
-    validate_stable_release_route(&source, &archive_name, &stable)?;
-    let row = format!("{}\t{}\t{}\n", stable.version, stable.url, stable.md5);
-    atomic_write(&output, row.as_bytes(), NAME, "stable-release-write-failed")?;
+    let outcome = appmanager_core::fetch_stable_release(&appmanager_core::StableReleaseRequest {
+        manifest_url: source,
+        archive_name,
+        output,
+    })
+    .map_err(|error| domain_error(NAME, "stable-release-failed", error))?;
+    let stable = outcome.release;
     Ok((
         NAME,
         json!({
             "version": stable.version,
             "url": stable.url,
             "md5": stable.md5,
-            "route": outcome.route_id(),
-            "output": output,
+            "route": outcome.route,
+            "output": outcome.output,
         }),
     ))
 }
 
+#[cfg(test)]
 fn validate_stable_release_route(
     source: &str,
     archive_name: &str,
     stable: &StableRelease,
 ) -> Result<(), CliError> {
-    const NAME: &str = "fetch-stable-release";
-    if archive_name.is_empty()
-        || matches!(archive_name, "." | "..")
-        || archive_name.contains(['/', '\\', '\t', '\r', '\n'])
-    {
-        return Err(CliError {
-            command: NAME,
-            code: "invalid-stable-release",
-            message: "stable archive name is unsafe".to_owned(),
-        });
-    }
-    let repository = source
-        .strip_suffix("/releases/latest/download/version.json")
-        .filter(|base| base.starts_with("https://github.com/"))
-        .ok_or_else(|| CliError {
-            command: NAME,
-            code: "invalid-stable-release",
-            message: "stable manifest URL is not a GitHub latest-release asset".to_owned(),
-        })?;
-    let expected = format!(
-        "{repository}/releases/download/{}/{}",
-        stable.version, archive_name
-    );
-    if stable.url != expected {
-        return Err(CliError {
-            command: NAME,
-            code: "invalid-stable-release",
-            message: "stable archive does not match its manifest repository, version, or name"
-                .to_owned(),
-        });
-    }
-    Ok(())
-}
-
-struct DownloadGuard(PathBuf);
-
-impl Drop for DownloadGuard {
-    fn drop(&mut self) {
-        for suffix in ["", ".part", ".part.route"] {
-            let mut path = self.0.as_os_str().to_os_string();
-            path.push(suffix);
-            let _ = fs::remove_file(PathBuf::from(path));
-        }
-    }
+    appmanager_core::validate_stable_release_route(source, archive_name, stable)
+        .map_err(|error| domain_error("fetch-stable-release", "invalid-stable-release", error))
 }
 
 fn refresh_stable_cache(
@@ -1005,52 +869,26 @@ fn refresh_stable_cache(
     force: bool,
 ) -> Result<(&'static str, Value), CliError> {
     const NAME: &str = "refresh-stable-cache";
-    if !force && update_cache_is_fresh(&cache) && stable_cache_row_valid(&cache) {
-        return Ok((NAME, json!({"status": "cached", "cache": cache})));
-    }
-    let parent = cache.parent().ok_or_else(|| CliError {
-        command: NAME,
-        code: "invalid-update-cache",
-        message: "update cache has no parent directory".to_owned(),
-    })?;
-    fs::create_dir_all(parent)
-        .map_err(|error| domain_error(NAME, "update-cache-write-failed", error))?;
-    let manifest = parent.join(format!(".stable-manifest-{}.json", std::process::id()));
-    let _download = DownloadGuard(manifest.clone());
-    let fetch = GitHubTransport::new().fetch(
-        Capability::Release,
-        &source,
-        &manifest,
-        |path| {
-            fs::read(path)
-                .ok()
-                .and_then(|bytes| parse_stable_manifest(NAME, &bytes).ok())
-                .is_some()
-        },
-        None,
-        None,
-    );
-    let checked = epoch_seconds();
-    match fetch {
-        Ok(outcome) => {
-            let bytes = read_bytes(NAME, &manifest, "invalid-stable-manifest")?;
-            let stable = parse_stable_manifest(NAME, &bytes)?;
-            write_update_cache(&cache, checked, "ok", &stable.version)?;
-            Ok((
-                NAME,
-                json!({
-                    "status": "ok",
-                    "latest": stable.version,
-                    "route": outcome.route_id(),
-                    "cache": cache,
-                }),
-            ))
-        }
-        Err(error) => {
-            let _ = write_update_cache(&cache, checked, "error", "");
-            Err(domain_error(NAME, "stable-manifest-download-failed", error))
-        }
-    }
+    let outcome = appmanager_core::refresh_stable_cache(&appmanager_core::StableCacheRequest {
+        manifest_url: source,
+        cache: cache.clone(),
+        force,
+    })
+    .map_err(|error| domain_error(NAME, "stable-manifest-download-failed", error))?;
+    let status = if outcome.status == appmanager_core::CacheRefreshStatus::Cached {
+        "cached"
+    } else {
+        "ok"
+    };
+    Ok((
+        NAME,
+        json!({
+            "status": status,
+            "latest": outcome.latest,
+            "route": outcome.route,
+            "cache": cache,
+        }),
+    ))
 }
 
 fn refresh_runtime_metadata(
@@ -1060,99 +898,18 @@ fn refresh_runtime_metadata(
     force: bool,
 ) -> Result<(&'static str, Value), CliError> {
     const NAME: &str = "refresh-runtime-metadata";
-    if !force
-        && update_cache_is_fresh(&json_cache)
-        && runtime_tsv_matches_json(&json_cache, &tsv_cache)
-    {
-        return Ok((NAME, json!({"status": "cached"})));
-    }
-    let parent = json_cache.parent().ok_or_else(|| CliError {
-        command: NAME,
-        code: "invalid-runtime-cache",
-        message: "Runtime JSON cache has no parent directory".to_owned(),
-    })?;
-    fs::create_dir_all(parent)
-        .map_err(|error| domain_error(NAME, "runtime-cache-write-failed", error))?;
-    let _refresh_lock =
-        ExclusiveFileLock::try_acquire(&parent.join(".runtime-metadata-refresh.lock"))
-            .map_err(|error| domain_error(NAME, "cache-refresh-running", error))?;
-    if repair_runtime_tsv_from_json(&json_cache, &tsv_cache)?
-        && !force
-        && update_cache_is_fresh(&json_cache)
-    {
-        return Ok((NAME, json!({"status": "cached"})));
-    }
-    let download = parent.join(format!(".runtime-metadata-{}.json", std::process::id()));
-    let _download = DownloadGuard(download.clone());
-    let fetched = GitHubTransport::new().fetch(
-        Capability::Release,
-        &source,
-        &download,
-        |path| {
-            fs::read(path)
-                .ok()
-                .and_then(|bytes| RuntimeMetadata::parse(&bytes).ok())
-                .is_some()
-        },
-        None,
-        None,
-    );
-    let outcome = match fetched {
-        Ok(outcome) => outcome,
-        Err(_) if !force && repair_runtime_tsv_from_json(&json_cache, &tsv_cache)? => {
-            return Ok((NAME, json!({"status": "cached-stale"})));
-        }
-        Err(error) => {
-            return Err(domain_error(
-                NAME,
-                "runtime-metadata-download-failed",
-                error,
-            ));
-        }
-    };
-    let bytes = read_bytes(NAME, &download, "invalid-runtime-metadata")?;
-    let metadata = RuntimeMetadata::parse(&bytes)
-        .map_err(|error| domain_error(NAME, "invalid-runtime-metadata", error))?;
-    atomic_write(&json_cache, &bytes, NAME, "runtime-cache-write-failed")?;
-    atomic_write(
-        &tsv_cache,
-        metadata.to_tsv().as_bytes(),
-        NAME,
-        "runtime-cache-write-failed",
-    )?;
+    let outcome =
+        appmanager_core::refresh_runtime_metadata(&appmanager_core::RuntimeMetadataRequest {
+            source,
+            json_cache,
+            tsv_cache,
+            force,
+        })
+        .map_err(|error| domain_error(NAME, "runtime-metadata-download-failed", error))?;
     Ok((
         NAME,
-        json!({"status": "updated", "route": outcome.route_id()}),
+        json!({"status": outcome.status.as_str(), "route": outcome.route}),
     ))
-}
-
-fn runtime_tsv_matches_json(json_cache: &Path, tsv_cache: &Path) -> bool {
-    fs::read(json_cache)
-        .ok()
-        .and_then(|json| RuntimeMetadata::parse(&json).ok())
-        .is_some_and(|metadata| {
-            fs::read(tsv_cache).is_ok_and(|tsv| tsv == metadata.to_tsv().as_bytes())
-        })
-}
-
-fn repair_runtime_tsv_from_json(json_cache: &Path, tsv_cache: &Path) -> Result<bool, CliError> {
-    const NAME: &str = "refresh-runtime-metadata";
-    let Ok(json) = fs::read(json_cache) else {
-        return Ok(false);
-    };
-    let Ok(metadata) = RuntimeMetadata::parse(&json) else {
-        return Ok(false);
-    };
-    let canonical = metadata.to_tsv();
-    if !fs::read(tsv_cache).is_ok_and(|tsv| tsv == canonical.as_bytes()) {
-        atomic_write(
-            tsv_cache,
-            canonical.as_bytes(),
-            NAME,
-            "runtime-cache-write-failed",
-        )?;
-    }
-    Ok(true)
 }
 
 fn runtime_metadata_entry(
@@ -1196,47 +953,12 @@ fn runtime_metadata_entry(
     ))
 }
 
-fn update_cache_is_fresh(path: &Path) -> bool {
-    path.metadata()
-        .ok()
-        .and_then(|metadata| metadata.modified().ok())
-        .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|age| age < Duration::from_secs(24 * 60 * 60))
-}
-
+#[cfg(test)]
 fn stable_cache_row_valid(path: &Path) -> bool {
-    let Ok(row) = fs::read_to_string(path) else {
-        return false;
-    };
-    let Some(row) = row.strip_suffix('\n') else {
-        return false;
-    };
-    if row.contains(['\n', '\r']) {
-        return false;
-    }
-    let fields = row.split('\t').collect::<Vec<_>>();
-    if fields.len() != 3 || fields[0].parse::<u64>().is_err() {
-        return false;
-    }
-    match fields[1] {
-        "ok" => {
-            !fields[2].is_empty()
-                && fields[2]
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        }
-        "error" => fields[2].is_empty(),
-        _ => false,
-    }
+    appmanager_core::stable_cache_row_valid(path)
 }
 
-fn epoch_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
+#[cfg(test)]
 fn write_update_cache(
     path: &Path,
     checked: u64,
@@ -1252,48 +974,14 @@ fn write_update_cache(
     )
 }
 
+#[cfg(test)]
 fn atomic_write(
     path: &Path,
     bytes: &[u8],
     command: &'static str,
     code: &'static str,
 ) -> Result<(), CliError> {
-    let parent = path.parent().ok_or_else(|| CliError {
-        command,
-        code,
-        message: "output path has no parent directory".to_owned(),
-    })?;
-    fs::create_dir_all(parent).map_err(|error| domain_error(command, code, error))?;
-    for counter in 0_u16..1000 {
-        let temporary = parent.join(format!(
-            ".appmanager-native-{}-{counter}.tmp",
-            std::process::id()
-        ));
-        let mut file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(domain_error(command, code, error)),
-        };
-        let result = (|| -> io::Result<()> {
-            file.write_all(bytes)?;
-            file.sync_all()?;
-            drop(file);
-            fs::rename(&temporary, path)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        return result.map_err(|error| domain_error(command, code, error));
-    }
-    Err(CliError {
-        command,
-        code,
-        message: "unable to allocate output temporary file".to_owned(),
-    })
+    portkit_core::atomic_write(path, bytes).map_err(|error| domain_error(command, code, error))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1391,6 +1079,8 @@ fn install_device_portmaster(
         state_dir: app_state,
         trash_dir: trash,
         cancel_file,
+        cancel_token: None,
+        progress_channel: None,
         probe_root: root,
         plan,
         fail_after_backup: false,
@@ -1464,13 +1154,7 @@ fn validate_device_pending_install(
     ))
 }
 
-struct DeviceResolution {
-    config_origin: ConfigOrigin,
-    model_id: Option<String>,
-    config: Config,
-    resolution: Resolution,
-    context: ResolvedDeviceContext,
-}
+type DeviceResolution = appmanager_core::DeviceResolution;
 
 #[allow(clippy::too_many_arguments)]
 fn resolve_device_context(
@@ -1485,18 +1169,6 @@ fn resolve_device_context(
     config_directories: &ConfigDirectories,
 ) -> Result<DeviceResolution, CliError> {
     let environment = parse_assignments(command, &environment)?;
-    let mut detection = DetectionContext::current(launcher);
-    detection.root = root;
-    detection.target_override = target_override;
-    detection.environment.extend(environment);
-    if let Some(root) = &detection.root {
-        let os_release = root.join("etc/os-release");
-        if os_release.is_file() {
-            let bytes = read_bytes(command, &os_release, "invalid-os-release")?;
-            detection.os_release = parse_os_release(command, &bytes)?;
-        }
-    }
-
     let embedded_dir = config_directories
         .embedded
         .clone()
@@ -1510,56 +1182,21 @@ fn resolve_device_context(
             config.join("platforms").is_dir().then_some(config)
         })
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config"));
-    let remote_dir = remote_config.as_ref().map(|path| {
-        config_directories
-            .remote
-            .clone()
-            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf())
-    });
-    // A remote config is only an optional cache. Failure to read it must use
-    // the embedded contract, not turn a removable-media race into a startup
-    // failure.
-    let remote = remote_config
-        .as_ref()
-        .and_then(|path| std::fs::read(path).ok())
-        .map(ConfigCandidate::remote);
-    let embedded_details = LocalFragmentSource::new(embedded_dir);
-    let remote_details = remote_dir.map(LocalFragmentSource::new);
-    let remote = remote.zip(
-        remote_details
-            .as_ref()
-            .map(|source| source as &dyn portkit_core::FragmentSource),
-    );
-    let selected = CandidateSelector {
-        loader: ConfigLoader::default(),
-    }
-    .select_root_for_context(
-        ConfigCandidate::embedded(EMBEDDED_ROOT),
-        &embedded_details,
-        remote,
-        &detection,
-    )
-    .map_err(|error| domain_error(command, "device-resolution-failed", error))?;
-    let config_origin = selected.selected.origin;
-    let config = selected.selected.config;
-    let resolution = selected.resolution;
-    let model_id = resolution.model_id.clone();
-    let input = ResolvedContextInput {
-        resolution: resolution.clone(),
-        app_owned: AppOwnedPaths {
-            state: app_state,
-            trash,
+    appmanager_core::resolve_device(appmanager_core::DeviceResolutionRequest {
+        launcher,
+        app_state,
+        trash,
+        target_override,
+        probe_root: root,
+        environment,
+        config: appmanager_core::DeviceConfigSources {
+            embedded_root: EMBEDDED_ROOT.to_vec(),
+            embedded_dir,
+            remote_root: remote_config,
+            remote_dir: config_directories.remote.clone(),
         },
-    };
-    let context = ResolvedDeviceContext::try_from(input)
-        .map_err(|error| domain_error(command, "invalid-context", error))?;
-    Ok(DeviceResolution {
-        config_origin,
-        model_id,
-        config,
-        resolution,
-        context,
     })
+    .map_err(|error| domain_error(command, "device-resolution-failed", error))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1649,28 +1286,6 @@ fn generate_device_install_plan(
             "tsv": tsv,
         }),
     ))
-}
-
-fn parse_os_release(
-    command: &'static str,
-    bytes: &[u8],
-) -> Result<BTreeMap<String, String>, CliError> {
-    let text = std::str::from_utf8(bytes).map_err(|error| CliError {
-        command,
-        code: "invalid-os-release",
-        message: error.to_string(),
-    })?;
-    Ok(text
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                return None;
-            }
-            let (name, value) = line.split_once('=')?;
-            Some((name.to_owned(), value.trim_matches(['\'', '"']).to_owned()))
-        })
-        .collect())
 }
 
 fn parse_assignments(

@@ -1,8 +1,9 @@
 use portkit_core::github::{Capability, GitHubRegistry, GitHubTransport, Route, RouteFormatter};
 use portkit_core::{
     CandidateSelector, CommandEnvironment, Config, ConfigCandidate, ConfigLoader, ConfigOrigin,
-    DetectionContext, DigestAlgorithm, EnvironmentOperation, EnvironmentPolicy, Error,
-    ExclusiveFileLock, LocalFragmentSource, ResolvedSelection, Result, digest_file, zip_readable,
+    ConfigRefreshStatus, DetectionContext, DigestAlgorithm, EnvironmentOperation,
+    EnvironmentPolicy, Error, LocalFragmentSource, ResolvedSelection, Result, digest_file,
+    zip_readable,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -11,7 +12,6 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 const EMBEDDED_ROOT: &[u8] = include_bytes!("../../../config/config.json");
 
@@ -28,12 +28,6 @@ pub fn cli_main() {
             std::process::exit(2);
         }
     }
-}
-
-/// In-process entry point used by Port App Manager. Arguments are the values
-/// after `portkit config refresh`; no shell or helper process is involved.
-pub fn refresh_config(arguments: &[String]) -> std::result::Result<(), String> {
-    config_refresh(arguments).map_err(|error| error.to_string())
 }
 
 fn run(arguments: Vec<String>) -> Result<i32> {
@@ -561,30 +555,6 @@ fn config_validate(arguments: &[String]) -> Result<()> {
     }))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum ConfigRefreshStatus {
-    Updated,
-    Unchanged,
-}
-
-impl ConfigRefreshStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Updated => "updated",
-            Self::Unchanged => "unchanged",
-        }
-    }
-}
-
-struct TemporaryDirectory(PathBuf);
-
-impl Drop for TemporaryDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
 fn config_refresh(arguments: &[String]) -> Result<()> {
     let options = Options::parse(arguments)?;
     let result_path = PathBuf::from(required_option(&options, "result")?);
@@ -602,172 +572,26 @@ fn config_refresh(arguments: &[String]) -> Result<()> {
 }
 
 fn config_refresh_inner(options: &Options) -> Result<ConfigRefreshStatus> {
-    let source = required_option(options, "source")?;
-    let packaged = PathBuf::from(required_option(options, "config")?);
+    let source = required_option(options, "source")?.to_owned();
+    let packaged_root = PathBuf::from(required_option(options, "config")?);
     let packaged_dir = PathBuf::from(required_option(options, "config-dir")?);
-    let cached = PathBuf::from(required_option(options, "cache")?);
+    let cached_root = PathBuf::from(required_option(options, "cache")?);
     let cache_dir = PathBuf::from(required_option(options, "cache-dir")?);
     let timeout = options
         .one("timeout-seconds")
         .unwrap_or("40")
         .parse::<u64>()
         .map_err(|_| Error::InvalidConfig("--timeout-seconds must be an integer".into()))?;
-    if !(1..=44).contains(&timeout) {
-        return Err(Error::InvalidConfig(
-            "--timeout-seconds must be from 1 through 44".into(),
-        ));
-    }
-    reject_directory_symlink(&cache_dir)?;
-    reject_directory_symlink(&cache_dir.join("platforms"))?;
-    let cache_parent = cache_dir
-        .parent()
-        .ok_or_else(|| Error::InvalidConfig("cache directory has no parent".into()))?;
-    fs::create_dir_all(cache_parent)?;
-    let _refresh_lock =
-        ExclusiveFileLock::try_acquire(&cache_parent.join(".device-config-refresh.lock"))?;
-    let stage = unique_stage_directory(cache_parent)?;
-    let _stage = TemporaryDirectory(stage.clone());
-    fs::create_dir(stage.join("platforms"))?;
-    let staged_root = stage.join("config.json");
-    let deadline = Instant::now()
-        .checked_add(Duration::from_secs(timeout))
-        .ok_or_else(|| Error::InvalidConfig("invalid device config refresh deadline".into()))?;
-    let transport = GitHubTransport::with_registry(build_registry());
-    transport
-        .fetch_with_timeout(
-            Capability::Raw,
-            source,
-            &staged_root,
-            |path| {
-                fs::read(path).is_ok_and(|bytes| ConfigLoader::default().parse_root(&bytes).is_ok())
-            },
-            None,
-            Some(4 * 1024 * 1024),
-            config_refresh_remaining(deadline)?,
-        )
-        .map_err(github_error)?;
-
-    let loader = ConfigLoader::default();
-    let root_bytes = fs::read(&staged_root)?;
-    let root = loader.parse_root(&root_bytes)?;
     let context = detection_context(options)?;
-    let platform = loader.detect_root(&root, &context)?;
-    let entry = root
-        .platforms
-        .get(&platform)
-        .ok_or_else(|| Error::Resolution("selected platform detail is missing".into()))?;
-    let expected_ref = format!("./platforms/{platform}.json");
-    if entry.detail != expected_ref {
-        return Err(Error::InvalidConfig(
-            "selected platform detail ref is not canonical".into(),
-        ));
-    }
-    let source_base = source
-        .rsplit_once('/')
-        .map(|(base, _)| base)
-        .ok_or_else(|| Error::InvalidConfig("config source has no filename".into()))?;
-    let detail_source = format!("{source_base}/{}", entry.detail.trim_start_matches("./"));
-    let staged_detail = stage.join("platforms").join(format!("{platform}.json"));
-    transport
-        .fetch_with_timeout(
-            Capability::Raw,
-            &detail_source,
-            &staged_detail,
-            |path| {
-                digest_file(path, DigestAlgorithm::Sha256)
-                    .is_ok_and(|digest| digest == entry.sha256)
-            },
-            None,
-            Some(4 * 1024 * 1024),
-            config_refresh_remaining(deadline)?,
-        )
-        .map_err(github_error)?;
-    let candidate = loader.load_platform(root, &platform, &LocalFragmentSource::new(&stage))?;
-    loader.validate_resolved_closure(&candidate, &platform)?;
-
-    let packaged_version = validated_config_version(&loader, &packaged, &packaged_dir, &context)?;
-    let mut baseline = packaged_version;
-    if cached.is_file() {
-        if let Ok(version) = validated_config_version(&loader, &cached, &cache_dir, &context) {
-            if compare_config_versions(&version, &baseline)?.is_gt() {
-                baseline = version;
-            }
-        }
-    }
-    if !compare_config_versions(&candidate.config_version, &baseline)?.is_gt() {
-        return Ok(ConfigRefreshStatus::Unchanged);
-    }
-    config_refresh_remaining(deadline)?;
-    fs::create_dir_all(cache_dir.join("platforms"))?;
-    let detail_target = cache_dir.join("platforms").join(format!("{platform}.json"));
-    fs::rename(&staged_detail, &detail_target)?;
-    fs::rename(&staged_root, &cached)?;
-    Ok(ConfigRefreshStatus::Updated)
-}
-
-fn config_refresh_remaining(deadline: Instant) -> Result<Duration> {
-    deadline
-        .checked_duration_since(Instant::now())
-        .filter(|remaining| !remaining.is_zero())
-        .ok_or_else(|| {
-            Error::InvalidConfig("device config refresh exceeded its startup deadline".into())
-        })
-}
-
-fn validated_config_version(
-    loader: &ConfigLoader,
-    root_path: &Path,
-    detail_dir: &Path,
-    context: &DetectionContext,
-) -> Result<String> {
-    let root = loader.parse_root(&fs::read(root_path)?)?;
-    let platform = loader.detect_root(&root, context)?;
-    let config = loader.load_platform(root, &platform, &LocalFragmentSource::new(detail_dir))?;
-    loader.validate_resolved_closure(&config, &platform)?;
-    Ok(config.config_version)
-}
-
-fn compare_config_versions(left: &str, right: &str) -> Result<std::cmp::Ordering> {
-    fn parse(value: &str) -> Result<[u64; 3]> {
-        let parts = value
-            .split('.')
-            .map(|part| part.parse::<u64>())
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|_| Error::InvalidConfig(format!("invalid config version {value:?}")))?;
-        parts
-            .try_into()
-            .map_err(|_| Error::InvalidConfig(format!("invalid config version {value:?}")))
-    }
-    Ok(parse(left)?.cmp(&parse(right)?))
-}
-
-fn reject_directory_symlink(path: &Path) -> Result<()> {
-    match path.symlink_metadata() {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(Error::InvalidConfig(format!(
-            "config cache path is a symlink: {}",
-            path.display()
-        ))),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn unique_stage_directory(parent: &Path) -> Result<PathBuf> {
-    for counter in 0_u16..1000 {
-        let path = parent.join(format!(
-            ".device-config-stage-{}-{counter}",
-            std::process::id()
-        ));
-        match fs::create_dir(&path) {
-            Ok(()) => return Ok(path),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Err(Error::InvalidConfig(
-        "unable to allocate config staging directory".into(),
-    ))
+    portkit_core::refresh_config(&portkit_core::ConfigRefreshRequest {
+        source,
+        packaged_root,
+        packaged_dir,
+        cached_root,
+        cache_dir,
+        timeout: std::time::Duration::from_secs(timeout),
+        detection: context,
+    })
 }
 
 fn write_config_refresh_status(path: &Path, status: &str) -> Result<()> {

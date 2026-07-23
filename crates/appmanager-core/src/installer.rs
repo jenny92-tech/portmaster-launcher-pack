@@ -5,12 +5,16 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use portkit_core::atomic_write;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::{FrontendTransform, ManagedRoot, ValidatedInstallPlan};
+use crate::{
+    CancellationToken, FrontendTransform, ManagedRoot, ProgressChannel, TaskProgress,
+    ValidatedInstallPlan,
+};
 
 const PROTOCOL_VERSION: u8 = 1;
 #[derive(Clone, Copy)]
@@ -40,6 +44,8 @@ pub struct InstallRequest {
     pub state_dir: PathBuf,
     pub trash_dir: PathBuf,
     pub cancel_file: Option<PathBuf>,
+    pub cancel_token: Option<CancellationToken>,
+    pub progress_channel: Option<ProgressChannel>,
     /// Optional filesystem prefix used only to probe device-absolute library candidates in tests.
     pub probe_root: Option<PathBuf>,
     pub plan: ValidatedInstallPlan,
@@ -1146,9 +1152,13 @@ fn fail_before_mutation<T>(
 
 fn cancel(request: &InstallRequest) -> Result<(), InstallError> {
     if request
-        .cancel_file
+        .cancel_token
         .as_ref()
-        .is_some_and(|path| path.exists())
+        .is_some_and(CancellationToken::is_cancelled)
+        || request
+            .cancel_file
+            .as_ref()
+            .is_some_and(|path| path.exists())
     {
         let _ = progress(
             request,
@@ -1163,6 +1173,18 @@ fn cancel(request: &InstallRequest) -> Result<(), InstallError> {
 
 fn progress(request: &InstallRequest, phase: &str, percent: u8, detail: &str) -> io::Result<()> {
     let detail = detail.replace(['\t', '\r', '\n'], " ");
+    if let Some(channel) = &request.progress_channel {
+        channel.publish(TaskProgress {
+            phase: phase.to_owned(),
+            runtime: "PortMaster".into(),
+            index: 0,
+            count: 1,
+            current: u64::from(percent),
+            total: 100,
+            speed: 0,
+            detail: detail.clone(),
+        });
+    }
     atomic_write(
         &request.state_dir.join("install-progress.tsv"),
         format!("1\t{phase}\t{percent}\t{detail}\n").as_bytes(),
@@ -1889,18 +1911,6 @@ fn sha256_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
-    let mut file = File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(temporary, path)?;
-    sync_parent(path)
-}
-
 fn rename_synced(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)?;
     sync_parent(destination)?;
@@ -2034,6 +2044,8 @@ mod tests {
             state_dir: temp.path().join("state"),
             trash_dir: temp.path().join("trash"),
             cancel_file: None,
+            cancel_token: None,
+            progress_channel: None,
             probe_root: Some(temp.path().to_path_buf()),
             plan: plan(temp),
             fail_after_backup: false,

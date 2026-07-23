@@ -35,6 +35,8 @@ pub(crate) struct Request {
     pub app_root: PathBuf,
     pub entry_arguments: Vec<String>,
     pub config_directories: ConfigDirectories,
+    pub cancel_token: Option<appmanager_core::CancellationToken>,
+    pub progress_channel: Option<appmanager_core::ProgressChannel>,
 }
 
 /// Paths needed by the APP Manager UI process. The embedded service resolves
@@ -67,6 +69,8 @@ pub struct EmbeddedService {
     progress_path: PathBuf,
     last_progress: Arc<Mutex<String>>,
     input_helper: Arc<Mutex<Option<Child>>>,
+    cancel_token: appmanager_core::CancellationToken,
+    progress_channel: appmanager_core::ProgressChannel,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -192,6 +196,8 @@ struct Session {
     resolved: DeviceResolution,
     root: Option<PathBuf>,
     target_override: Option<PathBuf>,
+    cancel_token: Option<appmanager_core::CancellationToken>,
+    progress_channel: Option<appmanager_core::ProgressChannel>,
 }
 
 pub(crate) fn run(request: Request) -> ExitCode {
@@ -214,6 +220,8 @@ pub(crate) fn run(request: Request) -> ExitCode {
 
 impl EmbeddedService {
     pub fn new(request: EmbeddedRequest) -> Result<Self, String> {
+        let cancel_token = appmanager_core::CancellationToken::default();
+        let progress_channel = appmanager_core::ProgressChannel::default();
         let request = Request {
             source_dir: request.source_dir,
             launcher: request.launcher,
@@ -223,6 +231,8 @@ impl EmbeddedService {
                 embedded: request.config_dir,
                 remote: request.remote_config_dir,
             },
+            cancel_token: Some(cancel_token.clone()),
+            progress_channel: Some(progress_channel.clone()),
         };
         let paths = Paths::new(&request);
         let session = Session::new(request.clone())?;
@@ -238,6 +248,8 @@ impl EmbeddedService {
             progress_path: paths.progress,
             last_progress: Arc::new(Mutex::new(String::new())),
             input_helper: Arc::new(Mutex::new(None)),
+            cancel_token,
+            progress_channel,
         })
     }
 
@@ -362,6 +374,8 @@ impl EmbeddedService {
             .lock()
             .unwrap_or_else(|value| value.into_inner())
             .clear();
+        self.cancel_token.reset();
+        self.progress_channel.clear();
         let _ = fs::remove_file(&progress);
         let _ = fs::remove_file(&cancel);
         std::thread::Builder::new()
@@ -412,6 +426,14 @@ impl EmbeddedService {
         if !self.busy.load(Ordering::Acquire) {
             return None;
         }
+        if let Some(progress) = self.progress_channel.take() {
+            return Some(ServiceEvent {
+                task_id: self.next_task.load(Ordering::Relaxed).saturating_sub(1),
+                kind: "progress".into(),
+                status: "progress".into(),
+                data: serde_json::to_value(progress).unwrap_or_else(|_| json!({})),
+            });
+        }
         let text = fs::read_to_string(&self.progress_path).ok()?;
         let mut previous = self
             .last_progress
@@ -433,7 +455,8 @@ impl EmbeddedService {
         if !self.busy.load(Ordering::Acquire) {
             return Ok(());
         }
-        write_text(&self.cancel_path, "cancel\n")
+        self.cancel_token.cancel();
+        Ok(())
     }
 }
 
@@ -563,6 +586,8 @@ impl Session {
             resolved,
             root,
             target_override,
+            cancel_token: request.cancel_token,
+            progress_channel: request.progress_channel,
         })
     }
 
@@ -619,6 +644,13 @@ impl Session {
 
     fn portmaster_root(&self) -> Option<&Path> {
         self.resolved.context.roots.portmaster.as_deref()
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel_token
+            .as_ref()
+            .is_some_and(appmanager_core::CancellationToken::is_cancelled)
+            || self.paths.cancel.exists()
     }
 
     fn source(&self) -> Result<ReleaseSource, String> {
@@ -1030,8 +1062,12 @@ impl Session {
         if !source.install_allowed {
             return Ok(0);
         }
-        super::refresh_stable_cache(source.manifest_url, self.paths.update_cache.clone(), force)
-            .map_err(|error| error.message)?;
+        appmanager_core::refresh_stable_cache(&appmanager_core::StableCacheRequest {
+            manifest_url: source.manifest_url,
+            cache: self.paths.update_cache.clone(),
+            force,
+        })
+        .map_err(display_error)?;
         Ok(0)
     }
 
@@ -1039,13 +1075,7 @@ impl Session {
         if !self.capability("repair_runtimes") {
             return Ok(0);
         }
-        super::refresh_runtime_metadata(
-            self.runtime_metadata_url()?,
-            self.paths.runtime_metadata_json.clone(),
-            self.paths.runtime_metadata_tsv.clone(),
-            force,
-        )
-        .map_err(|error| error.message)?;
+        refresh_runtime_metadata_cache(self, force)?;
         Ok(0)
     }
 
@@ -1076,37 +1106,24 @@ impl Session {
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|value| (1..=44).contains(value))
-            .unwrap_or(40)
-            .to_string();
-        let mut arguments = vec![
-            "--source".into(),
+            .unwrap_or(40);
+        let mut detection = portkit_core::DetectionContext::current(self.paths.launcher.clone());
+        detection.root = self.root.clone();
+        detection.target_override = self.target_override.clone();
+        let status = portkit_core::refresh_config(&portkit_core::ConfigRefreshRequest {
             source,
-            "--config".into(),
-            self.paths
-                .config_dir
-                .join("config.json")
-                .display()
-                .to_string(),
-            "--config-dir".into(),
-            self.paths.config_dir.display().to_string(),
-            "--cache".into(),
-            self.paths.remote_config.display().to_string(),
-            "--cache-dir".into(),
-            self.paths.remote_config_dir.display().to_string(),
-            "--result".into(),
-            self.paths.config_refresh_result.display().to_string(),
-            "--launcher".into(),
-            self.paths.launcher.display().to_string(),
-            "--timeout-seconds".into(),
-            timeout,
-        ];
-        if let Some(root) = &self.root {
-            arguments.extend(["--root".into(), root.display().to_string()]);
-        }
-        if let Some(target) = &self.target_override {
-            arguments.extend(["--target-override".into(), target.display().to_string()]);
-        }
-        portkit_cli::refresh_config(&arguments)?;
+            packaged_root: self.paths.config_dir.join("config.json"),
+            packaged_dir: self.paths.config_dir.clone(),
+            cached_root: self.paths.remote_config.clone(),
+            cache_dir: self.paths.remote_config_dir.clone(),
+            timeout: std::time::Duration::from_secs(timeout),
+            detection,
+        })
+        .map_err(display_error)?;
+        write_text(
+            &self.paths.config_refresh_result,
+            &format!("1\t{}\n", status.as_str()),
+        )?;
         self.reload()?;
         self.refresh_inventory_state()?;
         Ok(0)
@@ -1322,13 +1339,7 @@ fn repair_runtime_batch(session: &Session, runtime_names: &[String]) -> Result<(
         }
         return Ok(());
     }
-    super::refresh_runtime_metadata(
-        session.runtime_metadata_url()?,
-        session.paths.runtime_metadata_json.clone(),
-        session.paths.runtime_metadata_tsv.clone(),
-        true,
-    )
-    .map_err(|error| error.message)?;
+    refresh_runtime_metadata_cache(session, true)?;
     let libs = session
         .resolved
         .context
@@ -1343,7 +1354,12 @@ fn repair_runtime_batch(session: &Session, runtime_names: &[String]) -> Result<(
         arch: runtime_arch(),
         libs_root: libs,
         progress_file: session.paths.progress.clone(),
-        cancel_file: Some(session.paths.cancel.clone()),
+        cancel_file: session
+            .cancel_token
+            .is_none()
+            .then(|| session.paths.cancel.clone()),
+        cancel_token: session.cancel_token.clone(),
+        progress_channel: session.progress_channel.clone(),
     });
     match outcome {
         Ok(_) => {
@@ -1367,7 +1383,7 @@ fn repair_runtime_batch(session: &Session, runtime_names: &[String]) -> Result<(
                     &format!(
                         "{}\truntime\t{name}\t{}\n",
                         if valid { "OK" } else { "FAIL" },
-                        if session.paths.cancel.exists() {
+                        if session.cancelled() {
                             "cancelled"
                         } else {
                             "repair"
@@ -1436,7 +1452,7 @@ fn install_portmaster_action(
         ),
         Err(error) => {
             session.log(&format!("PortMaster installation failed: {error}"));
-            let reason = if session.paths.cancel.exists() {
+            let reason = if session.cancelled() {
                 "cancelled"
             } else {
                 "installer"
@@ -1454,6 +1470,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     let _ = fs::remove_file(&session.paths.cancel);
     write_progress(
         &session.paths.progress,
+        session.progress_channel.as_ref(),
         "preparing",
         2,
         100,
@@ -1464,12 +1481,12 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     let cache = session.paths.state.join("portmaster-download");
     fs::create_dir_all(&cache).map_err(display_error)?;
     let release = cache.join("version.tsv");
-    super::fetch_stable_release(
-        source.manifest_url.clone(),
-        source.archive_name.clone(),
-        release.clone(),
-    )
-    .map_err(|error| error.message)?;
+    appmanager_core::fetch_stable_release(&appmanager_core::StableReleaseRequest {
+        manifest_url: source.manifest_url.clone(),
+        archive_name: source.archive_name.clone(),
+        output: release.clone(),
+    })
+    .map_err(display_error)?;
     let (version, url, expected_md5) = read_release_row(&release)?;
     let archive = cache.join(&source.archive_name);
     let valid = || {
@@ -1480,7 +1497,11 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     };
     if !valid() {
         let _ = fs::remove_file(&archive);
-        let progress = DownloadProgress::new(session.paths.progress.clone(), "PortMaster");
+        let progress = DownloadProgress::new(
+            session.paths.progress.clone(),
+            session.progress_channel.clone(),
+            "PortMaster",
+        );
         GitHubTransport::new()
             .fetch(
                 Capability::Release,
@@ -1496,34 +1517,19 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         let _ = fs::remove_file(&archive);
         return Err("downloaded PortMaster archive failed verification".into());
     }
-    if session.paths.cancel.exists() {
+    if session.cancelled() {
         return Err("PortMaster installation was cancelled".into());
     }
     write_progress(
         &session.paths.progress,
+        session.progress_channel.as_ref(),
         "installing",
         88,
         100,
         0,
         "Installing PortMaster",
     )?;
-    super::install_device_portmaster(
-        archive,
-        session.paths.launcher.clone(),
-        session.paths.state.clone(),
-        session.paths.trash.clone(),
-        session
-            .paths
-            .remote_config
-            .is_file()
-            .then(|| session.paths.remote_config.clone()),
-        session.target_override.clone(),
-        session.root.clone(),
-        Vec::new(),
-        Some(session.paths.cancel.clone()),
-        &session.config_directories,
-    )
-    .map_err(|error| error.message)?;
+    install_archive(session, archive)?;
     for name in [
         "pending-install.tsv",
         "pending-manifest.tsv",
@@ -1535,6 +1541,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     }
     write_progress(
         &session.paths.progress,
+        session.progress_channel.as_ref(),
         "complete",
         100,
         100,
@@ -1542,6 +1549,31 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         &format!("PortMaster {version} installed; reopen required"),
     )?;
     Ok(())
+}
+
+fn install_archive(session: &Session, archive: PathBuf) -> Result<(), String> {
+    let plan = appmanager_core::InstallPlan::from_context(&session.resolved.context)
+        .map_err(display_error)?
+        .validate(&session.resolved.context)
+        .map_err(display_error)?;
+    appmanager_core::install_portmaster(&appmanager_core::InstallRequest {
+        archive,
+        launcher: session.paths.launcher.clone(),
+        state_dir: session.paths.state.clone(),
+        trash_dir: session.paths.trash.clone(),
+        cancel_file: session
+            .cancel_token
+            .is_none()
+            .then(|| session.paths.cancel.clone()),
+        cancel_token: session.cancel_token.clone(),
+        progress_channel: session.progress_channel.clone(),
+        probe_root: session.root.clone(),
+        plan,
+        fail_after_backup: false,
+        fail_restore_after: None,
+    })
+    .map(|_| ())
+    .map_err(display_error)
 }
 
 fn ensure_python_runtime(session: &Session) -> Result<(), String> {
@@ -1557,13 +1589,7 @@ fn ensure_python_runtime(session: &Session) -> Result<(), String> {
     if metadata_ready {
         return Ok(());
     }
-    super::refresh_runtime_metadata(
-        session.runtime_metadata_url()?,
-        session.paths.runtime_metadata_json.clone(),
-        session.paths.runtime_metadata_tsv.clone(),
-        true,
-    )
-    .map_err(|error| error.message)?;
+    refresh_runtime_metadata_cache(session, true)?;
     let libs = session
         .resolved
         .context
@@ -1577,10 +1603,26 @@ fn ensure_python_runtime(session: &Session) -> Result<(), String> {
         arch: runtime_arch(),
         libs_root: libs,
         progress_file: session.paths.progress.clone(),
-        cancel_file: Some(session.paths.cancel.clone()),
+        cancel_file: session
+            .cancel_token
+            .is_none()
+            .then(|| session.paths.cancel.clone()),
+        cancel_token: session.cancel_token.clone(),
+        progress_channel: session.progress_channel.clone(),
     })
     .map_err(display_error)?;
     Ok(())
+}
+
+fn refresh_runtime_metadata_cache(session: &Session, force: bool) -> Result<(), String> {
+    appmanager_core::refresh_runtime_metadata(&appmanager_core::RuntimeMetadataRequest {
+        source: session.runtime_metadata_url()?,
+        json_cache: session.paths.runtime_metadata_json.clone(),
+        tsv_cache: session.paths.runtime_metadata_tsv.clone(),
+        force,
+    })
+    .map(|_| ())
+    .map_err(display_error)
 }
 
 fn runtime_arch() -> String {
@@ -1650,14 +1692,20 @@ impl Drop for ActivityGuard {
 
 struct DownloadProgress {
     path: PathBuf,
+    channel: Option<appmanager_core::ProgressChannel>,
     runtime: &'static str,
     state: Mutex<(Instant, u64)>,
 }
 
 impl DownloadProgress {
-    fn new(path: PathBuf, runtime: &'static str) -> Self {
+    fn new(
+        path: PathBuf,
+        channel: Option<appmanager_core::ProgressChannel>,
+        runtime: &'static str,
+    ) -> Self {
         Self {
             path,
+            channel,
             runtime,
             state: Mutex::new((Instant::now(), 0)),
         }
@@ -1683,7 +1731,17 @@ impl DownloadProgress {
             total,
             speed,
             self.runtime,
-        )
+        )?;
+        publish_progress(
+            self.channel.as_ref(),
+            "downloading",
+            self.runtime,
+            received,
+            total,
+            speed,
+            self.runtime,
+        );
+        Ok(())
     }
 }
 
@@ -1695,13 +1753,39 @@ impl Progress for DownloadProgress {
 
 fn write_progress(
     path: &Path,
+    channel: Option<&appmanager_core::ProgressChannel>,
     phase: &str,
     current: u64,
     total: u64,
     speed: u64,
     detail: &str,
 ) -> Result<(), String> {
-    write_progress_io(path, phase, current, total, speed, detail).map_err(display_error)
+    write_progress_io(path, phase, current, total, speed, detail).map_err(display_error)?;
+    publish_progress(channel, phase, "PortMaster", current, total, speed, detail);
+    Ok(())
+}
+
+fn publish_progress(
+    channel: Option<&appmanager_core::ProgressChannel>,
+    phase: &str,
+    runtime: &str,
+    current: u64,
+    total: u64,
+    speed: u64,
+    detail: &str,
+) {
+    if let Some(channel) = channel {
+        channel.publish(appmanager_core::TaskProgress {
+            phase: phase.to_owned(),
+            runtime: runtime.to_owned(),
+            index: 0,
+            count: 1,
+            current,
+            total,
+            speed,
+            detail: detail.replace(['\t', '\r', '\n'], " "),
+        });
+    }
 }
 
 fn write_progress_io(
@@ -1738,8 +1822,7 @@ fn append_result(path: &Path, value: &str) -> Result<(), String> {
 }
 
 fn write_text(path: &Path, value: &str) -> Result<(), String> {
-    super::atomic_write(path, value.as_bytes(), COMMAND, "state-write-failed")
-        .map_err(|error| error.message)
+    portkit_core::atomic_write(path, value.as_bytes()).map_err(display_error)
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -1857,7 +1940,7 @@ fn cleanup_marker(lock: &Path, marker: &Path) {
 
 fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(value).map_err(display_error)?;
-    super::atomic_write(path, &bytes, COMMAND, "state-write-failed").map_err(|error| error.message)
+    portkit_core::atomic_write(path, &bytes).map_err(display_error)
 }
 
 fn free_bytes(path: &Path) -> u64 {

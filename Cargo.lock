@@ -71,7 +71,6 @@ dependencies = [
  "appmanager-core",
  "clap",
  "libc",
- "portkit-cli",
  "portkit-core",
  "serde",
  "serde_json",

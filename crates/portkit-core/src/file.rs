@@ -1,6 +1,7 @@
-use std::fs::{File, OpenOptions};
-use std::io::Read;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
@@ -104,6 +105,46 @@ pub fn zip_readable(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Durably replaces one ordinary file without exposing a partially-written
+/// destination. Callers retain responsibility for validating that `path` is
+/// inside their managed root before invoking this filesystem primitive.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("output path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = unique_sibling(path, "atomic-write");
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        // Some removable-media filesystems reject directory fsync even after
+        // the rename has committed. Do not turn a complete replacement into
+        // a reported failure; the file itself was synced before the rename.
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn unique_sibling(path: &Path, label: &str) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut name = path
+        .file_name()
+        .map_or_else(|| "output".into(), |value| value.to_os_string());
+    name.push(format!(".{label}.{}.{}.tmp", std::process::id(), sequence));
+    path.with_file_name(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +193,21 @@ mod tests {
         assert!(zip_readable(temp.path()).unwrap());
         std::fs::write(temp.path(), b"not a zip").unwrap();
         assert!(zip_readable(temp.path()).is_err());
+    }
+
+    #[test]
+    fn atomic_write_replaces_the_complete_file_and_cleans_temporary_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("state/value.txt");
+        atomic_write(&output, b"first").unwrap();
+        atomic_write(&output, b"second").unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"second");
+        assert_eq!(
+            std::fs::read_dir(output.parent().unwrap())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .count(),
+            1
+        );
     }
 }

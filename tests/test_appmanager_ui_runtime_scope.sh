@@ -30,6 +30,7 @@ assert "mlua" in closure
 assert "portkit-core" in closure
 assert "appmanager-core" in closure
 assert "appmanager-cli" in closure
+assert "portkit-cli" not in closure
 native = {
     record["name"]
     for record in module.lock_dependency_closure(lock, ["appmanager-cli", "portkit-cli"])

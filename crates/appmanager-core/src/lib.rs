@@ -4,8 +4,10 @@
 //! rollback-safe PortMaster installer live here. The launcher only orchestrates
 //! these native operations; no config text is executed as shell code.
 
+pub mod artifact;
 pub mod cache;
 pub mod context;
+pub mod device;
 pub mod installer;
 pub mod inventory;
 pub mod operations;
@@ -13,11 +15,22 @@ pub mod path;
 pub mod plan;
 pub mod resolution;
 pub mod runtime;
+pub mod task;
 
+pub use artifact::{
+    ArtifactError, CacheRefreshStatus, RuntimeMetadataOutcome, RuntimeMetadataRequest,
+    StableCacheOutcome, StableCacheRequest, StableRelease, StableReleaseOutcome,
+    StableReleaseRequest, fetch_stable_release, parse_stable_manifest, refresh_runtime_metadata,
+    refresh_stable_cache, stable_cache_row_valid, validate_stable_release_route,
+};
 pub use cache::{CacheDomain, CacheGenerations, CacheInvalidation, OperationKind};
 pub use context::{
     CapabilityState, ContextCapabilities, ExpectedInstallContract, FrontendContext,
     FrontendMapEntry, FrontendTransform, ManagedRoots, ManagementMode, ResolvedDeviceContext,
+};
+pub use device::{
+    DeviceConfigSources, DeviceResolution, DeviceResolutionError, DeviceResolutionRequest,
+    resolve_device,
 };
 pub use installer::{
     InstallError, InstallMode, InstallOutcome, InstallRequest, PendingValidationError,
@@ -42,3 +55,4 @@ pub use runtime::{
     RuntimeMetadata, RuntimeMetadataEntry, RuntimeRepairError, RuntimeRepairItem,
     RuntimeRepairOutcome, RuntimeRepairRequest, RuntimeRepairSource, repair_runtimes,
 };
+pub use task::{CancellationToken, ProgressChannel, TaskProgress};

@@ -56,8 +56,8 @@ config/platforms/<platform-id>.json
 
 | Core | 职责 |
 | --- | --- |
-| `portkit-core` | 设备/机型识别、路径和环境解析、配置校验、GitHub transport |
-| `appmanager-core` | inventory、安装计划、PortMaster 事务、Runtime 修复、缓存失效决策 |
+| `portkit-core` | 设备/机型识别、路径和环境解析、配置刷新与校验、GitHub transport、通用文件原语 |
+| `appmanager-core` | APP 设备上下文、资源元数据、inventory、安装事务、Runtime 修复、缓存与任务状态 |
 
 生产路径中的 resolver 出错会直接停止相关危险操作，不会静默退回 Shell。Lua 只通过
 `appmanager` API 读取快照、启动任务、轮询事件和请求取消，不执行命令，也不通过任务文件
