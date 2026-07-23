@@ -31,7 +31,7 @@ local function poll_task(dt)
     task.poll=0
 
     local event=model.native.poll()
-    if event and event.task_id==task.id then
+    if type(event)=="table" and event.task_id==task.id then
         if event.status=="progress" then
             local progress=model.runtime_progress(event.data)
             if progress then

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use appmanager_service::{EmbeddedAction, EmbeddedService};
+use appmanager_service::{EmbeddedAction, EmbeddedService, ServiceEvent};
 use love_api::LoveRuntime;
 pub use love_api::state::GpuCommand;
 use love_api::state::{LoveEvent, SharedState};
@@ -222,7 +222,7 @@ pub fn install_appmanager_api(lua: &mlua::Lua, service: EmbeddedService) -> Resu
     let poll = service.clone();
     table.set(
         "poll",
-        lua.create_function(move |lua, ()| lua.to_value(&poll.poll()))?,
+        lua.create_function(move |lua, ()| service_event_to_lua(lua, poll.poll()))?,
     )?;
     table.set(
         "cancel",
@@ -230,4 +230,25 @@ pub fn install_appmanager_api(lua: &mlua::Lua, service: EmbeddedService) -> Resu
     )?;
     lua.globals().set("appmanager", table)?;
     Ok(())
+}
+
+fn service_event_to_lua(lua: &mlua::Lua, event: Option<ServiceEvent>) -> mlua::Result<LuaValue> {
+    match event {
+        Some(event) => lua.to_value(&event),
+        None => Ok(LuaValue::Nil),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_appmanager_poll_is_lua_nil() {
+        let lua = mlua::Lua::new();
+        assert!(matches!(
+            service_event_to_lua(&lua, None).expect("serialize idle poll"),
+            LuaValue::Nil
+        ));
+    }
 }
