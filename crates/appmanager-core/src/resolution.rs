@@ -318,6 +318,7 @@ mod tests {
             resolution: Resolution {
                 platform_id: "plugin-device-v2".to_owned(),
                 platform_display_name: "Plugin device".to_owned(),
+                device_manufacturer: None,
                 device_class: "official-untested".to_owned(),
                 target_confirmed: true,
                 model_id: None,

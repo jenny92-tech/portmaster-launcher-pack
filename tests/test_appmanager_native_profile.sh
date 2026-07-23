@@ -19,7 +19,7 @@ run_health() {
       -- --health-check
 }
 
-trimui=$(run_health trimui env CFW_NAME=TrimUI \
+trimui=$(run_health trimui env CFW_NAME=TrimUI CFW_VERSION=1.3.0 DEVICE=smart-pro \
   PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh')
 case "$trimui" in
   missing$'\t\t'tested$'\t/mnt/SDCARD/Apps/PortMaster/PortMaster') ;;
@@ -41,7 +41,7 @@ esac
 
 mkdir -p "$TMP/env/source" "$TMP/env/app/state"
 cp -R "$ROOT/config" "$TMP/env/app/config"
-env CFW_NAME=TrimUI \
+env CFW_NAME=CrossMix CFW_VERSION=1.3.0 DEVICE=smart-pro \
   PAM_NATIVE_LAUNCHER_OVERRIDE='/mnt/SDCARD/Roms/PORTS/APP Manager.sh' \
   "$APPMANAGER_CLI" --config-dir "$TMP/env/app/config" launcher-session \
   --source-dir "$TMP/env/source" --launcher "$LAUNCHER" --app-root "$TMP/env/app" -- --write-env
@@ -51,6 +51,11 @@ import json, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     env = json.load(handle)
 assert env["param_device"] == "trimui"
+assert env["device_name"] == "TrimUI Smart Pro"
+assert env["device_manufacturer"] == "TrimUI"
+assert env["device_submodel"] == "smart-pro"
+assert env["system_name"] == "CrossMix"
+assert env["system_version"] == "1.3.0"
 assert env["directory"] == "/mnt/SDCARD/Data"
 assert env["gamedirs_dir"] == "/mnt/SDCARD/Data/ports"
 assert env["images_dir"] == "/mnt/SDCARD/Roms/Imgs/PORTS"

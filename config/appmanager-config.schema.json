@@ -239,6 +239,7 @@
       "required": ["display_name", "priority", "support", "recognition", "required_adapters", "paths", "source_route", "frontend", "libraries", "python", "health", "preserved_dirs", "managed_roots", "capabilities", "environment_scopes", "lifecycle", "display", "input"],
       "properties": {
         "display_name": {"type": "string", "minLength": 1},
+        "device_manufacturer": {"type": "string", "minLength": 1},
         "priority": {"type": "integer"},
         "support": {"$ref": "#/$defs/support"},
         "recognition": {"$ref": "#/$defs/predicate"},
@@ -269,6 +270,7 @@
       "required": ["display_name", "recognition", "display"],
       "properties": {
         "display_name": {"type": "string", "minLength": 1},
+        "device_manufacturer": {"type": "string", "minLength": 1},
         "recognition": {"$ref": "#/$defs/predicate"},
         "display": {"$ref": "#/$defs/openObject"},
         "overrides": {

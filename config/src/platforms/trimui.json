@@ -1,5 +1,6 @@
 {
   "display_name": "TrimUI",
+  "device_manufacturer": "TrimUI",
   "priority": 900,
   "support": {
     "device_class": "tested",

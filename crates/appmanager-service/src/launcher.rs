@@ -929,6 +929,11 @@ impl Session {
             "portmaster_frontend_launcher": self.resolved.context.frontend.launcher,
             "portmaster_frontend_names": self.resolved.context.frontend.names.join(","),
             "device_name": self.resolved.resolution.model_display_name.as_ref().unwrap_or(&self.resolved.resolution.platform_display_name),
+            "device_manufacturer": self.resolved.resolution.device_manufacturer.as_deref()
+                .or(self.resolved.identity.manufacturer.as_deref()).unwrap_or(""),
+            "device_submodel": self.resolved.identity.submodel.as_deref().unwrap_or(""),
+            "system_name": self.resolved.identity.system_name.as_deref().unwrap_or(""),
+            "system_version": self.resolved.identity.system_version.as_deref().unwrap_or(""),
             "device_class": self.resolved.resolution.device_class,
             "target_confirmed": if self.resolved.resolution.target_confirmed { "1" } else { "0" },
             "pending_install": self.paths.state.join("pending-install.tsv"),

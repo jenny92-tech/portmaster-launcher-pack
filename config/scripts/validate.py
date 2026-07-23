@@ -264,6 +264,10 @@ def validate_platform(platform: Any, path: str) -> None:
         },
         path,
     )
+    if "device_manufacturer" in platform and (
+        not isinstance(platform["device_manufacturer"], str) or not platform["device_manufacturer"]
+    ):
+        fail(f"{path}.device_manufacturer", "must be a non-empty string")
     validate_predicate(platform["recognition"], f"{path}.recognition")
     support = platform["support"]
     require_type(support, dict, f"{path}.support")
@@ -518,8 +522,17 @@ def validate(config: Any) -> None:
         for model_name, model in models.items():
             model_path = f"$.platforms.{name}.models.{model_name}"
             require_type(model, dict, model_path)
-            allow_keys(model, {"display_name", "recognition", "display", "overrides"}, model_path)
+            allow_keys(
+                model,
+                {"display_name", "device_manufacturer", "recognition", "display", "overrides"},
+                model_path,
+            )
             require_keys(model, {"display_name", "recognition", "display"}, model_path)
+            if "device_manufacturer" in model and (
+                not isinstance(model["device_manufacturer"], str)
+                or not model["device_manufacturer"]
+            ):
+                fail(f"{model_path}.device_manufacturer", "must be a non-empty string")
             validate_predicate(model["recognition"], f"{model_path}.recognition")
             if "overrides" in model:
                 require_type(model["overrides"], dict, f"{model_path}.overrides")
@@ -592,8 +605,16 @@ def validate_platform_detail(config: dict) -> None:
         if not SAFE_ID.fullmatch(model_id):
             fail(model_path, "invalid model id")
         require_type(model, dict, model_path)
-        allow_keys(model, {"display_name", "recognition", "display", "overrides"}, model_path)
+        allow_keys(
+            model,
+            {"display_name", "device_manufacturer", "recognition", "display", "overrides"},
+            model_path,
+        )
         require_keys(model, {"display_name", "recognition", "display"}, model_path)
+        if "device_manufacturer" in model and (
+            not isinstance(model["device_manufacturer"], str) or not model["device_manufacturer"]
+        ):
+            fail(f"{model_path}.device_manufacturer", "must be a non-empty string")
         validate_predicate(model["recognition"], f"{model_path}.recognition")
     walk_no_code(config)
 

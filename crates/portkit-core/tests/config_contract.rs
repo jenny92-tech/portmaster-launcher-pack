@@ -340,6 +340,7 @@ fn model_and_platform_resolution_is_deterministic() {
     };
     let resolution = config.detect_and_resolve(&loader, &context).unwrap();
     assert_eq!(resolution.platform_id, "trimui");
+    assert_eq!(resolution.device_manufacturer.as_deref(), Some("TrimUI"));
     assert_eq!(resolution.model_id.as_deref(), Some("smart_pro"));
     assert_eq!(
         resolution.paths["images"],

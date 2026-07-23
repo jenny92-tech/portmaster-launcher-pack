@@ -1,5 +1,6 @@
 {
   "display_name": "MiniLoong Pocket One",
+  "device_manufacturer": "MiniLoong",
   "priority": 1000,
   "support": {
     "device_class": "tested",

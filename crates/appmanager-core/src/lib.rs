@@ -29,8 +29,8 @@ pub use context::{
     FrontendMapEntry, FrontendTransform, ManagedRoots, ManagementMode, ResolvedDeviceContext,
 };
 pub use device::{
-    DeviceConfigSources, DeviceResolution, DeviceResolutionError, DeviceResolutionRequest,
-    resolve_device,
+    DeviceConfigSources, DeviceIdentity, DeviceResolution, DeviceResolutionError,
+    DeviceResolutionRequest, resolve_device,
 };
 pub use installer::{
     InstallError, InstallMode, InstallOutcome, InstallRequest, PendingValidationError,

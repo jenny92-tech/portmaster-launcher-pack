@@ -38,9 +38,18 @@ pub struct DeviceResolutionRequest {
 pub struct DeviceResolution {
     pub config_origin: ConfigOrigin,
     pub model_id: Option<String>,
+    pub identity: DeviceIdentity,
     pub config: Config,
     pub resolution: Resolution,
     pub context: ResolvedDeviceContext,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeviceIdentity {
+    pub manufacturer: Option<String>,
+    pub submodel: Option<String>,
+    pub system_name: Option<String>,
+    pub system_version: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -64,9 +73,11 @@ pub fn resolve_device(
     detection.environment.extend(request.environment);
     if let Some(root) = &detection.root {
         let os_release = root.join("etc/os-release");
-        if os_release.is_file() {
-            detection.os_release = parse_os_release(&fs::read(os_release)?)?;
-        }
+        detection.os_release = if os_release.is_file() {
+            parse_os_release(&fs::read(os_release)?)?
+        } else {
+            BTreeMap::new()
+        };
     }
 
     let embedded_details = LocalFragmentSource::new(request.config.embedded_dir);
@@ -108,6 +119,11 @@ pub fn resolve_device(
     let config = selected.selected.config;
     let resolution = selected.resolution;
     let model_id = resolution.model_id.clone();
+    let identity = detect_identity(
+        &detection,
+        &resolution.platform_display_name,
+        resolution.model_id.as_deref(),
+    );
     let context = ResolvedDeviceContext::try_from(ResolvedContextInput {
         resolution: resolution.clone(),
         app_owned: AppOwnedPaths {
@@ -119,10 +135,63 @@ pub fn resolve_device(
     Ok(DeviceResolution {
         config_origin,
         model_id,
+        identity,
         config,
         resolution,
         context,
     })
+}
+
+fn detect_identity(
+    context: &DetectionContext,
+    platform_display_name: &str,
+    model_id: Option<&str>,
+) -> DeviceIdentity {
+    DeviceIdentity {
+        manufacturer: first_value([
+            context.environment.get("DEVICE_MANUFACTURER").cloned(),
+            context.environment.get("MANUFACTURER").cloned(),
+            read_probe(context, "/sys/class/dmi/id/sys_vendor"),
+        ]),
+        submodel: first_value([
+            context.environment.get("DEVICE").cloned(),
+            model_id.map(str::to_owned),
+            read_probe(context, "/sys/firmware/devicetree/base/model"),
+            read_probe(context, "/proc/device-tree/model"),
+            read_probe(context, "/sys/class/dmi/id/product_name"),
+        ]),
+        system_name: first_value([
+            context.environment.get("CFW_NAME").cloned(),
+            context.os_release.get("PRETTY_NAME").cloned(),
+            context.os_release.get("NAME").cloned(),
+            context.os_release.get("OS_NAME").cloned(),
+            context.os_release.get("ID").cloned(),
+            Some(platform_display_name.to_owned()),
+        ]),
+        system_version: first_value([
+            context.environment.get("CFW_VERSION").cloned(),
+            context.os_release.get("VERSION_ID").cloned(),
+            context.os_release.get("VERSION").cloned(),
+            context.os_release.get("BUILD_ID").cloned(),
+            read_probe(context, "/loong/loong_version"),
+            read_probe(context, "/etc/batocera-version"),
+        ]),
+    }
+}
+
+fn first_value<const N: usize>(values: [Option<String>; N]) -> Option<String> {
+    values.into_iter().flatten().find_map(|value| {
+        let value = value.trim_matches(['\0', ' ', '\t', '\r', '\n']);
+        (!value.is_empty()).then(|| value.to_owned())
+    })
+}
+
+fn read_probe(context: &DetectionContext, path: &str) -> Option<String> {
+    context
+        .rooted_path(path)
+        .ok()
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
 fn parse_os_release(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceResolutionError> {
@@ -148,5 +217,55 @@ mod tests {
         let parsed = parse_os_release(b"# comment\nOS_NAME='ROCKNIX'\nVERSION=2026.07\n").unwrap();
         assert_eq!(parsed["OS_NAME"], "ROCKNIX");
         assert_eq!(parsed["VERSION"], "2026.07");
+    }
+
+    #[test]
+    fn identity_prefers_firmware_and_model_facts_then_uses_platform_fallbacks() {
+        let context = DetectionContext {
+            root: None,
+            launcher_path: "/ports/Test.sh".into(),
+            environment: BTreeMap::from([
+                ("CFW_NAME".into(), "CrossMix".into()),
+                ("CFW_VERSION".into(), "1.3.0".into()),
+                ("DEVICE".into(), "smart-pro".into()),
+            ]),
+            os_release: BTreeMap::from([
+                ("PRETTY_NAME".into(), "Buildroot".into()),
+                ("VERSION_ID".into(), "2024.02".into()),
+            ]),
+            target_override: None,
+        };
+        let identity = detect_identity(&context, "TrimUI", Some("smart_pro"));
+        assert_eq!(identity.submodel.as_deref(), Some("smart-pro"));
+        assert_eq!(identity.manufacturer, None);
+        assert_eq!(identity.system_name.as_deref(), Some("CrossMix"));
+        assert_eq!(identity.system_version.as_deref(), Some("1.3.0"));
+    }
+
+    #[test]
+    fn identity_reads_hardware_and_miniloong_version_from_the_probed_root() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("sys/class/dmi/id")).unwrap();
+        fs::create_dir_all(root.path().join("loong")).unwrap();
+        fs::write(
+            root.path().join("sys/class/dmi/id/sys_vendor"),
+            b"Example Devices\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("loong/loong_version"), b"1.2.3\n").unwrap();
+        let context = DetectionContext {
+            root: Some(root.path().into()),
+            launcher_path: "/ports/Test.sh".into(),
+            environment: BTreeMap::new(),
+            os_release: BTreeMap::new(),
+            target_override: None,
+        };
+        let identity = detect_identity(&context, "MiniLoong Pocket One", None);
+        assert_eq!(identity.manufacturer.as_deref(), Some("Example Devices"));
+        assert_eq!(
+            identity.system_name.as_deref(),
+            Some("MiniLoong Pocket One")
+        );
+        assert_eq!(identity.system_version.as_deref(), Some("1.2.3"));
     }
 }

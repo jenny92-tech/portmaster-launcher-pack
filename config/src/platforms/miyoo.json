@@ -1,5 +1,6 @@
 {
   "display_name": "Miyoo / Spruce",
+  "device_manufacturer": "Miyoo",
   "priority": 500,
   "support": {
     "device_class": "official-untested",

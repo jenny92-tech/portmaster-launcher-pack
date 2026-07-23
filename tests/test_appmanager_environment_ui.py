@@ -34,6 +34,8 @@ for contract in (
     'L("Reinstall","重新安装")', 'model.native.start,"update-check"',
     'local actions={', 'sidebar_title=L("Maintenance","维护")',
     'sidebar=actions', 'row_layout={mode="grid",columns=2}',
+    'id="manage:manufacturer"', 'id="manage:submodel"',
+    'id="manage:system-name"', 'id="manage:system-version"',
     'for _,item in ipairs(self.confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
     'env.install_transaction_exists', 'env.portmaster_active_exists',
     'operations.task={kind="active-repair"',
@@ -110,6 +112,10 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
                     "portmaster_management": management,
                     "portmaster_version": "2026.07" if health == "healthy" else "",
                     "device_name": "MiniLoong Pocket One",
+                    "device_manufacturer": "MiniLoong",
+                    "device_submodel": "Pocket One",
+                    "system_name": "LoongOS",
+                    "system_version": "1.0",
                     "device_class": "tested",
                     "device_arch": "aarch64",
                     "size_cache_ready": False,
@@ -162,7 +168,7 @@ healthy.execute('require("kit").input("up"); require("kit").input("confirm")')
 page = healthy.eval('require("kit").debug_page()')
 assert page["title"] == "环境管理"
 assert page["section_count"] == 1
-assert page["row_count"] == 6
+assert page["row_count"] == 10
 assert page["sidebar_count"] == 4
 assert healthy.eval('require("kit").debug_navigation().depth') == 1
 
@@ -221,9 +227,9 @@ assert page["title"] == "Port App Manager"
 system_managed.execute('require("kit").close_guide(); require("kit").input("up"); require("kit").input("confirm")')
 page = system_managed.eval('require("kit").debug_page()')
 assert page["title"] == "环境管理"
-assert page["row_count"] == 7
+assert page["row_count"] == 11
 assert page["sidebar_count"] == 2
-assert page["row_kinds"][7] == "textview"
+assert page["row_kinds"][11] == "textview"
 system_managed.execute('require("kit").input("right"); require("kit").input("confirm")')
 assert system_managed.eval('require("kit").debug_page().title') == "Runtime 修复"
 

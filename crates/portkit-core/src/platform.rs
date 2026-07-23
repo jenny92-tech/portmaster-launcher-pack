@@ -275,6 +275,8 @@ fn safe_join(base: &Path, relative: &str) -> Result<PathBuf> {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Platform {
     pub display_name: String,
+    #[serde(default)]
+    pub device_manufacturer: Option<String>,
     pub priority: i32,
     pub recognition: Predicate,
     #[serde(default)]
@@ -335,6 +337,15 @@ impl Default for SupportPolicy {
 
 impl Platform {
     pub fn validate(&self, limits: &ParserLimits) -> Result<()> {
+        if self
+            .device_manufacturer
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(Error::InvalidConfig(
+                "device manufacturer must not be empty".into(),
+            ));
+        }
         self.recognition.validate(1, limits.max_depth)?;
         for path in self.paths.values() {
             path.validate(limits)?;
@@ -367,6 +378,8 @@ impl Platform {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Model {
     pub display_name: String,
+    #[serde(default)]
+    pub device_manufacturer: Option<String>,
     pub recognition: Predicate,
     #[serde(default)]
     pub display: serde_json::Value,
@@ -388,6 +401,15 @@ pub struct ModelOverrides {
 
 impl Model {
     pub fn validate(&self, limits: &ParserLimits) -> Result<()> {
+        if self
+            .device_manufacturer
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(Error::InvalidConfig(
+                "model device manufacturer must not be empty".into(),
+            ));
+        }
         self.recognition.validate(1, limits.max_depth)
     }
 }
@@ -533,6 +555,8 @@ fn read_os_release(path: &Path) -> BTreeMap<String, String> {
 pub struct Resolution {
     pub platform_id: String,
     pub platform_display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_manufacturer: Option<String>,
     pub device_class: String,
     pub target_confirmed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -613,6 +637,9 @@ impl Config {
         Ok(Resolution {
             platform_id: platform_id.clone(),
             platform_display_name: platform.display_name.clone(),
+            device_manufacturer: model
+                .and_then(|(_, model)| model.device_manufacturer.clone())
+                .or_else(|| platform.device_manufacturer.clone()),
             device_class: if target_confirmed {
                 platform.support.device_class.clone()
             } else {
