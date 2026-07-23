@@ -101,6 +101,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "zip",
 ]
 
 [[package]]
@@ -629,6 +630,7 @@ name = "love-lite"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "appmanager-core",
  "appmanager-service",
  "love-api",
  "mlua",

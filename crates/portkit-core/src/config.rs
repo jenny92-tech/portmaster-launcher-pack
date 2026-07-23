@@ -3,7 +3,6 @@ use crate::platform::Platform;
 use crate::predicate::Predicate;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -98,17 +97,10 @@ pub struct SupportedContract {
 
 impl Default for SupportedContract {
     fn default() -> Self {
-        let adapters = [
-            "predicate",
-            "path",
-            "frontend",
-            "library",
-            "python",
-            "lifecycle",
-        ]
-        .into_iter()
-        .map(|kind| (kind.to_owned(), 1))
-        .collect();
+        let adapters = ["predicate", "path", "frontend", "library", "python"]
+            .into_iter()
+            .map(|kind| (kind.to_owned(), 1))
+            .collect();
         Self {
             minimum_schema: 1,
             maximum_schema: 1,
@@ -145,7 +137,6 @@ pub struct PlatformEntry {
     pub priority: i32,
     pub recognition: Predicate,
     pub detail: String,
-    pub sha256: String,
 }
 
 /// Resolves a config fragment reference (e.g. "./platforms/miniloong.json") to
@@ -291,16 +282,6 @@ impl ConfigLoader {
                     "platform {id:?} detail ref exceeds max_path_bytes"
                 )));
             }
-            if entry.sha256.len() != 64
-                || !entry
-                    .sha256
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-            {
-                return Err(Error::InvalidConfig(format!(
-                    "platform {id:?} has an invalid sha256"
-                )));
-            }
         }
         root.environment.validate()?;
         Ok(())
@@ -330,7 +311,7 @@ impl ConfigLoader {
             .ok_or_else(|| Error::Resolution("no platform recognition predicate matched".into()))
     }
 
-    /// Parses one selected detail and binds it to the root by digest and
+    /// Parses one selected detail and binds it to the root by
     /// format/schema/config-version/platform identity.
     pub fn load_platform(
         &self,
@@ -343,11 +324,6 @@ impl ConfigLoader {
             .get(platform_id)
             .ok_or_else(|| Error::Resolution(format!("unknown platform {platform_id:?}")))?;
         let bytes = details.read(&entry.detail)?;
-        if fragment_sha256(&bytes) != entry.sha256 {
-            return Err(Error::InvalidConfig(format!(
-                "platform {platform_id:?} detail sha256 mismatch"
-            )));
-        }
         let mut raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
             Error::InvalidConfig(format!(
                 "platform {platform_id:?} detail is invalid: {error}"
@@ -526,11 +502,6 @@ fn detail_identity_error(platform_id: &str, field: &str) -> Error {
     Error::InvalidConfig(format!(
         "platform {platform_id:?} detail has mismatched {field}"
     ))
-}
-
-/// Returns the lowercase SHA-256 used to bind a root entry to detail bytes.
-pub fn fragment_sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn validate_identifier(kind: &str, value: &str) -> Result<()> {

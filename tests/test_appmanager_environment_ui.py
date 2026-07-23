@@ -25,8 +25,11 @@ assert 'L("Checking PortMaster","检查 PortMaster")' in source
 assert "正在检查 PortMaster，完成后会自动继续。" in source
 assert "return result.status,nil" in source
 assert "result.status,result.detail" not in source
-assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true}' in source
+assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),' in source
+assert 'checked=false,danger=true}' in source
 assert 'if checked then for _,item in ipairs(plan) do item.kind="DELETE_MANAGED" end end' in source
+assert 'model.native.start,"inventory-refresh"' in source
+assert 'L("Rescan","重新扫描")' in source
 assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true,checked=true}' not in source
 assert 'indeterminate=true' in source
 assert 'L("Keep waiting","继续等待")' in source
@@ -69,8 +72,10 @@ for contract in (
     'L("Reinstall","重新安装")', 'model.native.start,"update-check"',
     'local actions={', 'sidebar_title=L("Maintenance","维护")',
     'sidebar=actions', 'row_layout={mode="grid",columns=2}',
-    'id="manage:manufacturer"', 'id="manage:submodel"',
-    'id="manage:system-name"', 'id="manage:system-version"',
+    'id="manage:sh-dir"', 'id="manage:data-dir"',
+    'info("device:name"', 'info("device:manufacturer"',
+    'info("device:submodel"', 'info("device:system"',
+    'info("device:system-version"',
     'for _,item in ipairs(self.confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
     'env.install_transaction_exists', 'env.portmaster_active_exists',
     'operations.task={kind="active-repair"',
@@ -111,13 +116,18 @@ love.filesystem.getInfo=function() return nil end
 love.filesystem.getSource=function() return SOURCE end
 love.event.quit=function(code) LAST_QUIT=code end
 appmanager = {
-    snapshot=function() return APP_SNAPSHOT end,
-    start=function(kind)
-        if kind=="config-refresh" then error("offline fixture") end
-        return 1
+    request=function(method,payload)
+        if method=="snapshot" then return {ok=true,value=APP_SNAPSHOT} end
+        if method=="start" then
+            if payload.kind=="config-refresh" then
+                return {ok=false,error={code="offline",message="offline fixture"}}
+            end
+            return {ok=true,value=1}
+        end
+        if method=="poll" then return {ok=true} end
+        if method=="cancel" then return {ok=true,value=true} end
+        return {ok=false,error={code="unsupported_method",message="unsupported method"}}
     end,
-    poll=function() return nil end,
-    cancel=function() end,
 }
 '''
 

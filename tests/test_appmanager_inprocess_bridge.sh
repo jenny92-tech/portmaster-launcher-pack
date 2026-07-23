@@ -20,9 +20,16 @@ fi
 
 grep -Fq 'model.native.start' "$LOVE/app_operations.lua"
 grep -Fq 'model.native.poll' "$LOVE/main.lua"
-grep -Fq 'appmanager.start' "$LOVE/app_native.lua"
-grep -Fq 'appmanager.poll' "$LOVE/app_native.lua"
+grep -Fq 'appmanager.request' "$LOVE/app_native.lua"
+! grep -Eq 'appmanager\\.(snapshot|start|poll|cancel)' "$LOVE/app_native.lua"
+if grep -R -n -E 'appmanager\\.' "$LOVE" --include='*.lua' --exclude='app_native.lua'; then
+  echo "Lua bypasses the single native bridge module" >&2
+  exit 1
+fi
+grep -Fq 'invalid response type' "$LOVE/app_native.lua"
+grep -Fq 'pcall(model.native.poll)' "$LOVE/main.lua"
 grep -Fq 'install_appmanager_api' "$RUST/lib.rs"
+grep -Fq '"request"' "$RUST/lib.rs"
 grep -Fq 'LuaSerdeExt' "$RUST/lib.rs"
 ! grep -Fq 'serde_json::to_vec' "$RUST/lib.rs"
 ! grep -Eq 'json\.(encode|decode)|require\("json"\)' "$LOVE"/*.lua

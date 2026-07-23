@@ -72,7 +72,7 @@ PY
 # The remote configuration is not merely validated: resolved display/input,
 # capability and release-route fields must reach the real launcher contract.
 python3 - "$ROOT/config/config.json" "$ROOT/config/platforms/trimui.json" "$TMP/env/app/state/device-config" <<'PY'
-import hashlib, json, pathlib, sys
+import json, pathlib, sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     root = json.load(handle)
@@ -95,7 +95,6 @@ root["sources"]["release_routes"]["fixture"] = {
 detail["source_route"] = "fixture"
 detail_raw = (json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
 (output / "platforms/trimui.json").write_bytes(detail_raw)
-root["platforms"]["trimui"]["sha256"] = hashlib.sha256(detail_raw).hexdigest()
 (output / "config.json").write_text(
     json.dumps(root, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
     encoding="utf-8",

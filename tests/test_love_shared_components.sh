@@ -71,7 +71,7 @@ grep -Fq 'half=true' "$app_lua/app_pages.lua"
 grep -Fq 'group="bottom"' "$app_lua"/*.lua
 grep -Fq 'kit.dialog' "$app_lua"/*.lua
 ! grep -Fq 'CONFIRM' "$app_lua"/*.lua
-grep -Fq 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true}' "$app_lua/app_pages.lua"
+grep -Fq 'checked=false,danger=true}' "$app_lua/app_pages.lua"
 grep -Fq 'dialog_state._checkbox_checked=opts.checkbox and opts.checkbox.checked==true or false' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_layout' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'function kit.debug_layout_cache' "$ROOT/_kit/love/kit.lua"

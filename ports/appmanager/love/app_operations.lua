@@ -35,6 +35,8 @@ function Operations.new(model)
             local count=tonumber(result.appledouble_removed) or 0
             kit.toast(L(string.format("Removed %d ._Files.",count),
                 string.format("已清理 %d 个 ._Files。",count)),{kind="success"})
+        elseif completed_task and completed_task.kind=="inventory-refresh" then
+            kit.toast(L("Scan completed.","扫描完成。"),{kind="success"})
         else
             kit.toast(L("Operation completed.","操作已完成。"),{kind="success"})
         end
@@ -104,6 +106,23 @@ function Operations.new(model)
     function self.start_plan(plan,return_page)
         self.confirm_plan,self.confirm_return=plan,return_page or pages.HOME
         self.start_apply()
+    end
+
+    function self.refresh_inventory(return_page)
+        self.confirm_plan={}
+        self.confirm_return=return_page or pages.HOME
+        kit.set_busy(true,L("Scanning files…","正在扫描文件……"))
+        local ok,task_id=pcall(model.native.start,"inventory-refresh")
+        if not ok then
+            kit.set_busy(false)
+            if tostring(task_id):find("already running") then
+                kit.toast(L("Background sync is still running. Please rescan again later.","后台任务还在进行，请稍后再扫描。"),{kind="warning"})
+            else
+                kit.toast(L("Cannot start the scan.","无法开始扫描。"),{kind="error"})
+            end
+            return
+        end
+        self.task={id=task_id,elapsed=0,poll=0,timeout=120,kind="inventory-refresh",plan={}}
     end
 
     function self.show_confirm(title,plan,labels,return_page,opts)

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -81,7 +80,7 @@ def main() -> int:
         validate(config)
         outputs: dict = {}
         # Detail files carry their own contract identity, while detection stays
-        # exclusively in the root. The root binds the exact canonical bytes.
+        # exclusively in the root.
         detail_outputs: dict[str, bytes] = {}
         for pid, platform in config["platforms"].items():
             detail = {
@@ -99,14 +98,13 @@ def main() -> int:
             detail_outputs[pid] = rendered
             outputs[PLATFORMS_OUTPUT / f"{pid}.json"] = rendered
         # Root config.json: global keys + thin platform entries used only for
-        # detection, each pointing at and authenticating its detail file.
+        # detection, each pointing at its detail file.
         root = {key: config[key] for key in ROOT_KEYS if key in config}
         root["platforms"] = {
             pid: {
                 "priority": platform["priority"],
                 "recognition": platform["recognition"],
                 "detail": f"./platforms/{pid}.json",
-                "sha256": hashlib.sha256(detail_outputs[pid]).hexdigest(),
             }
             for pid, platform in config["platforms"].items()
         }

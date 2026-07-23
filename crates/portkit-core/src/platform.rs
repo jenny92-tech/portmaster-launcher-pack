@@ -294,12 +294,9 @@ pub struct Platform {
     #[serde(default)]
     pub preserved_dirs: Vec<String>,
     #[serde(default)]
-    pub managed_roots: Vec<serde_json::Value>,
-    #[serde(default)]
     pub capabilities: BTreeMap<String, bool>,
     #[serde(default)]
     pub environment_scopes: Vec<String>,
-    pub lifecycle: serde_json::Value,
     pub display: serde_json::Value,
     pub input: serde_json::Value,
     #[serde(default)]
@@ -347,6 +344,14 @@ impl Platform {
             ));
         }
         self.recognition.validate(1, limits.max_depth)?;
+        for (id, model) in &self.models {
+            model.validate(limits).map_err(|error| match error {
+                Error::InvalidConfig(message) => {
+                    Error::InvalidConfig(format!("model {id:?}: {message}"))
+                }
+                other => other,
+            })?;
+        }
         for path in self.paths.values() {
             path.validate(limits)?;
         }
@@ -572,8 +577,6 @@ pub struct Resolution {
     pub python: serde_json::Value,
     pub health: Vec<serde_json::Value>,
     pub preserved_dirs: Vec<String>,
-    pub managed_roots: Vec<serde_json::Value>,
-    pub lifecycle: serde_json::Value,
     pub environment_scopes: Vec<String>,
     pub display: serde_json::Value,
     pub input: serde_json::Value,
@@ -657,8 +660,6 @@ impl Config {
             python: platform.python.clone(),
             health: platform.health.clone(),
             preserved_dirs: platform.preserved_dirs.clone(),
-            managed_roots: platform.managed_roots.clone(),
-            lifecycle: platform.lifecycle.clone(),
             environment_scopes: platform.environment_scopes.clone(),
             display,
             input: model

@@ -348,8 +348,6 @@ mod tests {
                 python: json!({}),
                 health: Vec::new(),
                 preserved_dirs: vec!["libs".to_owned(), "config".to_owned(), "themes".to_owned()],
-                managed_roots: Vec::new(),
-                lifecycle: json!({}),
                 environment_scopes: Vec::new(),
                 display: json!({}),
                 input: json!({}),

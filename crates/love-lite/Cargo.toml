@@ -12,6 +12,7 @@ sdl-backend = ["dep:sdl2"]
 
 [dependencies]
 anyhow = "1.0"
+appmanager-core = { path = "../appmanager-core" }
 appmanager-service = { path = "../appmanager-service" }
 love-api = { path = "vendor/love-api" }
 mlua = { version = "0.10", features = ["lua51", "vendored", "send", "serialize"] }

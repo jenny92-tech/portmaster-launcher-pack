@@ -4,6 +4,12 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 pub const HEALTH_CONTRACT: &str = "portkit.health.v1";
+/// Comma-separated list of the required file-based health rule kinds, published
+/// to frontends as `health_required`. The authoritative healthRule kind set is
+/// the `kind` enum in `config/appmanager-config.schema.json`;
+/// `python_imports_or_runtime` is deliberately absent here because it is a
+/// Python-readiness gate, not a file rule. `config_contract.rs` has a test
+/// keeping the schema enum and this implementation in sync.
 pub const HEALTH_REQUIRED_KINDS: &str =
     "required_file,executable_file,one_of_files,archive_or_nonempty_directory";
 
@@ -107,6 +113,10 @@ pub fn evaluate_health(resolution: &Resolution) -> Result<HealthReport> {
             .ok_or_else(|| {
                 Error::InvalidConfig(format!("health rule {index} has no string kind"))
             })?;
+        // The kind set must match the healthRule `kind` enum in
+        // config/appmanager-config.schema.json (enforced by a config_contract
+        // test). `python_imports_or_runtime` is handled above as a special
+        // Python-readiness path and never produces a file check row.
         let passed = match kind {
             "required_file" => health_path(object, "path", &resolution.paths)?.is_file(),
             "executable_file" => {

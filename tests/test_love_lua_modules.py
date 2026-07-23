@@ -629,10 +629,18 @@ with tempfile.TemporaryDirectory() as source:
     }, recursive=True)
     lua.execute(r'''
         appmanager={
-            snapshot=function() return APP_SNAPSHOT end,
-            start=function(kind) if kind=="config-refresh" then error("offline fixture") end return 1 end,
-            poll=function() return nil end,
-            cancel=function() end,
+            request=function(method,payload)
+                if method=="snapshot" then return {ok=true,value=APP_SNAPSHOT} end
+                if method=="start" then
+                    if payload.kind=="config-refresh" then
+                        return {ok=false,error={code="offline",message="offline fixture"}}
+                    end
+                    return {ok=true,value=1}
+                end
+                if method=="poll" then return {ok=true} end
+                if method=="cancel" then return {ok=true,value=true} end
+                return {ok=false,error={code="unsupported_method",message="unsupported method"}}
+            end,
         }
     ''')
     lua.execute(f"dofile({str(root / 'ports/appmanager/love/main.lua')!r})")
@@ -707,8 +715,8 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("left"); love.keypressed("left")
         assert(k.debug_focus().zone=="rows")
     ''')
-    # Environment details use three sections: 4 key paths, 16 environment
-    # values, then a counted compact list of installed runtimes.
+    # Environment details use four sections: 4 key paths, 5 device fields,
+    # 16 environment values, then a counted compact list of installed runtimes.
     lua.execute(r'''
         local k=require("kit")
         -- Open Environment Management from the Home header, then choose its
@@ -722,11 +730,11 @@ with tempfile.TemporaryDirectory() as source:
         assert(k.debug_focus().sidebar_i==4)
         love.keypressed("return")
         local page=k.debug_page()
-        assert(page.index==4 and page.section_count==3 and page.row_count==25)
-        assert(page.section_labels[3]=="已安装 Runtime（2）")
-        assert(page.row_kinds[24]=="list_item" and page.row_kinds[25]=="list_item")
+        assert(page.index==4 and page.section_count==4 and page.row_count==31)
+        assert(page.section_labels[4]=="已安装 Runtime（2）")
+        assert(page.row_kinds[30]=="list_item" and page.row_kinds[31]=="list_item")
         assert(page.row_font_px[1]==22 and page.row_label_px[2]==16 and page.row_value_px[2]==18)
-        assert(page.row_font_px[24]==19)
+        assert(page.row_font_px[30]==19)
         assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==2)
         local detail=k.debug_sidebar_detail()
         assert(detail.key=="path:scripts" and detail.title=="SH 启动脚本目录")
@@ -736,7 +744,7 @@ with tempfile.TemporaryDirectory() as source:
         assert(layout.geometry[2].x < layout.geometry[3].x)
         assert(layout.geometry[2].y == layout.geometry[3].y)
         assert(layout.geometry[2].h == layout.geometry[3].h)
-        assert(layout.geometry[24].h < layout.rh and layout.geometry[25].h < layout.rh)
+        assert(layout.geometry[30].h < layout.rh and layout.geometry[31].h < layout.rh)
         love.keypressed("right")
         assert(k.debug_focus().focus_i==3)
         detail=k.debug_sidebar_detail()

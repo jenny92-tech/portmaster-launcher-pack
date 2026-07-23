@@ -190,10 +190,6 @@ pub enum EnvironmentOperation {
         name: String,
         value: String,
     },
-    SetDefault {
-        name: String,
-        value: String,
-    },
     Unset {
         name: String,
     },
@@ -217,7 +213,6 @@ impl EnvironmentOperation {
     fn name(&self) -> &str {
         match self {
             Self::Set { name, .. }
-            | Self::SetDefault { name, .. }
             | Self::Unset { name }
             | Self::Prepend { name, .. }
             | Self::Append { name, .. } => name,
@@ -234,10 +229,6 @@ impl EnvironmentOperation {
     fn expand(&self, variables: &BTreeMap<String, String>) -> Result<Self> {
         Ok(match self {
             Self::Set { name, value } => Self::Set {
-                name: name.clone(),
-                value: expand_placeholders(value, variables)?,
-            },
-            Self::SetDefault { name, value } => Self::SetDefault {
                 name: name.clone(),
                 value: expand_placeholders(value, variables)?,
             },
@@ -341,12 +332,6 @@ impl CommandEnvironment {
                     policy.require_allowed(name)?;
                     resolved.insert(name.clone(), value.clone());
                 }
-                EnvironmentOperation::SetDefault { name, value } => {
-                    policy.require_allowed(name)?;
-                    resolved
-                        .entry(name.clone())
-                        .or_insert_with(|| value.clone());
-                }
                 EnvironmentOperation::Unset { name } => {
                     policy.require_allowed(name)?;
                     resolved.remove(name);
@@ -440,10 +425,6 @@ mod tests {
         let environment = CommandEnvironment {
             clear: false,
             operations: vec![
-                EnvironmentOperation::SetDefault {
-                    name: "MODE".into(),
-                    value: "default".into(),
-                },
                 EnvironmentOperation::Set {
                     name: "PAYLOAD".into(),
                     value: "$(touch /tmp/must-not-run)".into(),
@@ -458,14 +439,9 @@ mod tests {
         let result = environment
             .resolve(
                 &EnvironmentPolicy::default(),
-                [
-                    ("MODE", "custom"),
-                    ("PATH", "/usr/bin"),
-                    ("LD_AUDIT", "bad"),
-                ],
+                [("PATH", "/usr/bin"), ("LD_AUDIT", "bad")],
             )
             .unwrap();
-        assert_eq!(result["MODE"], "custom");
         assert_eq!(result["PAYLOAD"], "$(touch /tmp/must-not-run)");
         assert_eq!(result["PATH"], "/portable/bin:/usr/bin");
         assert!(!result.contains_key("LD_AUDIT"));

@@ -29,13 +29,14 @@ const ARCHIVE_LIMITS: ArchiveLimits = ArchiveLimits {
     entry_bytes: 128 * 1024 * 1024,
     total_bytes: 512 * 1024 * 1024,
 };
-const FIXED_PRESERVED: &[&str] = &[
-    "log.txt",
-    "pugwash.txt",
-    "harbourmaster.txt",
-    ".appmanager-state",
-    ".appmanager-rollback",
-];
+/// Runtime state files written by the official PortMaster package. Preserving
+/// them across core reinstalls is part of the PortMaster package contract, so
+/// this list is a compiled-in constant shared with other consumers.
+pub const PORTMASTER_STATE_PRESERVED: &[&str] = &["log.txt", "pugwash.txt", "harbourmaster.txt"];
+
+/// APP-private transaction state files, always preserved across core
+/// reinstalls. These belong to the APP itself, not to PortMaster.
+const APP_TRANSACTION_PRESERVED: &[&str] = &[".appmanager-state", ".appmanager-rollback"];
 
 #[derive(Debug, Clone)]
 pub struct InstallRequest {
@@ -1495,7 +1496,8 @@ fn prepare_staging(
         .preserve_core_entries
         .iter()
         .map(String::as_str)
-        .chain(FIXED_PRESERVED.iter().copied())
+        .chain(PORTMASTER_STATE_PRESERVED.iter().copied())
+        .chain(APP_TRANSACTION_PRESERVED.iter().copied())
     {
         remove_any(&core.join(name))?;
     }
@@ -1792,7 +1794,8 @@ fn managed_top_entries(
         .preserve_core_entries
         .iter()
         .map(String::as_str)
-        .chain(FIXED_PRESERVED.iter().copied())
+        .chain(PORTMASTER_STATE_PRESERVED.iter().copied())
+        .chain(APP_TRANSACTION_PRESERVED.iter().copied())
         .collect::<BTreeSet<_>>();
     let mut result = Vec::new();
     for entry in fs::read_dir(&plan.target)? {

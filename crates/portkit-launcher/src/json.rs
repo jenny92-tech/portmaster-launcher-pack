@@ -28,6 +28,14 @@ pub fn merge_file(path: &Path, patch: &Value) -> io::Result<()> {
     portkit_core::atomic_write(path, &bytes)
 }
 
+/// Recursively merges `patch` into `target`.
+///
+/// This is a deep merge, **not** RFC 7396 JSON Merge Patch: a `null` in the
+/// patch is written as an ordinary value and never deletes a key. Objects are
+/// merged key by key; any non-object patch value replaces the target value
+/// outright. Current callers (patches generated from the ports'
+/// `launcher.sh.template`) never need to delete keys, so no deletion
+/// semantics are required.
 fn merge(target: &mut Value, patch: &Value) {
     let (Some(target), Some(patch)) = (target.as_object_mut(), patch.as_object()) else {
         *target = patch.clone();

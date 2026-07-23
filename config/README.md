@@ -1,8 +1,8 @@
 # Port App Manager configuration contract
 
 `config.json` is the canonical root: global policy plus thin platform detection
-entries. Each entry names one `platforms/<id>.json` detail and binds its exact
-bytes with SHA-256. Details repeat the format/schema/config-version identity,
+entries. Each entry names one `platforms/<id>.json` detail. Details repeat the
+format/schema/config-version identity,
 contain models under their parent platform, and omit root-only priority and
 recognition. The engine embeds only the root and loads exactly the detected
 detail; packaged local details provide the offline fallback. Generated files
@@ -28,7 +28,7 @@ when the generated contract changes.
 The engine first checks `format` and `schema_version`, compares root
 `config_version` without downgrading, detects from the root, then verifies and
 loads one detail. The detail must match the root's format, schema version,
-config version and platform ID, and its exact bytes must match the root SHA-256.
+config version and platform ID.
 Models provide recognition, display facts, and narrow display/input overrides;
 containment defines their parent platform.
 
@@ -36,8 +36,8 @@ Adapter definitions are an extension point. An engine may retain an unknown
 adapter used only by an unrelated device. It must reject the current resolved
 device closure if any referenced adapter kind or contract version is unknown.
 
-Predicates, path strategies, health checks, environment operations, and
-lifecycle policies are finite declarative vocabularies. There is no shell,
+Predicates, path strategies, health checks, and environment operations are
+finite declarative vocabularies. There is no shell,
 evaluation, or arbitrary-code operation. Environment values are copied
 literally. Inheritance is default-open and blocks exactly the names and prefix
 listed in `environment`; each platform explicitly references the five concrete

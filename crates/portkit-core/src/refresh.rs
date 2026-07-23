@@ -10,12 +10,10 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::DigestAlgorithm;
 use crate::config::parse_config_version;
 use crate::github::{Capability, GitHubTransport};
 use crate::{
     ConfigLoader, DetectionContext, Error, ExclusiveFileLock, LocalFragmentSource, Result,
-    digest_file,
 };
 
 #[derive(Clone, Debug)]
@@ -107,10 +105,7 @@ pub fn refresh_config(request: &ConfigRefreshRequest) -> Result<ConfigRefreshSta
             Capability::Raw,
             &detail_source,
             &staged_detail,
-            |path| {
-                digest_file(path, DigestAlgorithm::Sha256)
-                    .is_ok_and(|digest| digest == entry.sha256)
-            },
+            |path| fs::read(path).is_ok(),
             None,
             Some(4 * 1024 * 1024),
             remaining(deadline)?,

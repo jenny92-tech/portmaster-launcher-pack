@@ -21,6 +21,10 @@ def main() -> int:
         root / "crates" / "appmanager-service" / "Cargo.toml",
         root / "crates" / "appmanager-core" / "Cargo.toml",
         root / "crates" / "portkit-core" / "Cargo.toml",
+        # This is the only generated configuration compiled into the binary.
+        # The remaining config tree is packaged as external data and must not
+        # force a LOVE-lite rebuild when only schemas or source fragments move.
+        root / "config" / "config.json",
     ]
     for source_dir in (
         crate / "src",
@@ -28,9 +32,16 @@ def main() -> int:
         root / "crates" / "appmanager-service" / "src",
         root / "crates" / "appmanager-core" / "src",
         root / "crates" / "portkit-core" / "src",
-        root / "config",
     ):
-        files.extend(sorted(path for path in source_dir.rglob("*") if path.is_file()))
+        files.extend(
+            sorted(
+                path
+                for path in source_dir.rglob("*")
+                if path.is_file()
+                and "__pycache__" not in path.parts
+                and path.suffix not in {".pyc", ".pyo"}
+            )
+        )
     digest = hashlib.sha256()
     update_paths(digest, root, files)
     update_lock_closure(digest, root / "Cargo.lock", ["love-lite"], "love-lite")

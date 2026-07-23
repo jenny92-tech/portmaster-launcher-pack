@@ -56,7 +56,8 @@ function Pages.new(model,operations)
                 message_checked=L("The selected game files will be deleted and cannot be restored.",
                     "所选游戏文件将被永久删除，无法还原。"),
                 confirm=L("Move to Trash","移入回收站"),confirm_checked=L("Delete forever","永久删除"),danger=false,
-                checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true},
+                checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),
+                    checked=false,danger=true},
                 on_confirm=function(checked)
                     if checked then for _,item in ipairs(plan) do item.kind="DELETE_MANAGED" end end
                     operations.start_apply()
@@ -338,6 +339,7 @@ function Pages.new(model,operations)
             button(model.dynamic_count("Move to Trash (%d)","移入回收站 (%d)",selected_junk),remove_junk,{disabled=empty(selected_junk)}),
             button(L("Select all","全选"),function() select_all_junk(true) end,{half=true}),
             button(L("Select none","全不选"),function() select_all_junk(false) end,{half=true}),
+            button(L("Rescan","重新扫描"),function() operations.refresh_inventory(page.JUNK) end,{id="leftovers-rescan"}),
         }
         if enabled("capability_cleanup_appledouble") then
             sidebar[#sidebar+1]=button(L("Clean ._Files","清理 ._Files"),cleanup_appledouble,{id="clean-appledouble"})
@@ -426,6 +428,28 @@ function Pages.new(model,operations)
             L("Shared Runtime folder","共享 Runtime 目录"),
             L("Stores the Runtimes shared by Port games.",
                 "存放 Port 游戏共用的 Runtime。"))
+
+        section(L("Device information","设备信息"))
+        info("device:name",L("Device","设备"),env.device_name or env.param_device,
+            L("Device","设备"),
+            L("The detected device name used by this app.",
+                "当前识别到的设备名称。"))
+        info("device:manufacturer",L("Manufacturer","设备厂商"),env.device_manufacturer,
+            L("Manufacturer","设备厂商"),
+            L("The detected device manufacturer.",
+                "当前识别到的设备厂商。"))
+        info("device:submodel",L("Model","具体型号"),env.device_submodel,
+            L("Model","具体型号"),
+            L("The detected device model or hardware variant.",
+                "当前识别到的具体型号或硬件版本。"))
+        info("device:system",L("System","系统"),env.system_name,
+            L("System","系统"),
+            L("The operating system currently running on this device.",
+                "当前设备正在运行的系统。"))
+        info("device:system-version",L("System version","系统版本"),env.system_version,
+            L("System version","系统版本"),
+            L("The detected operating system version.",
+                "当前识别到的系统版本。"))
 
         local resolution=(env.display_width and env.display_width~="" and env.display_height and env.display_height~="")
             and tostring(env.display_width).."×"..tostring(env.display_height) or nil

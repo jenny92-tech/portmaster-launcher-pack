@@ -16,10 +16,6 @@
     "value_handling": "literal",
     "operation_kinds": ["set", "prepend", "append", "unset"],
     "profiles": {
-      "graphics": [
-        {"operation": "set", "name": "LIBGL_ES", "value": "2"},
-        {"operation": "set", "name": "LIBGL_GL", "value": "21"}
-      ],
       "input": [
         {"operation": "set", "name": "SDL_GAMECONTROLLERCONFIG_FILE", "value": "{app_root}/share/gamecontrollerdb.txt"}
       ],
@@ -32,38 +28,11 @@
       ]
     },
     "scopes": {
-      "appmanager": {
-        "profiles": ["network"],
-        "operations": [
-          {"operation": "set", "name": "PAM_ENV", "value": "{state_dir}/env.json"},
-          {"operation": "set", "name": "PAM_SOURCE_DIR", "value": "{scripts_dir}"}
-        ]
-      },
       "love_ui": {
       "profiles": ["input", "network", "runtime"],
         "operations": [
           {"operation": "set", "name": "LOVE_IDENTITY", "value": "port_app_manager"},
           {"operation": "set", "name": "LOVE_WINDOW_TITLE", "value": "Port App Manager"}
-        ]
-      },
-      "portmaster": {
-        "profiles": ["network"],
-        "operations": [
-          {"operation": "set", "name": "param_device", "value": "{platform_id}"},
-          {"operation": "set", "name": "controlfolder", "value": "{portmaster_core}"}
-        ]
-      },
-      "runtime_tool": {
-      "profiles": ["network"],
-        "operations": [
-          {"operation": "set", "name": "SDL_VIDEODRIVER", "value": "dummy"},
-          {"operation": "set", "name": "SDL_AUDIODRIVER", "value": "dummy"}
-        ]
-      },
-      "game_launcher": {
-        "profiles": ["graphics", "input"],
-        "operations": [
-          {"operation": "set", "name": "PORTMASTER_PLATFORM", "value": "{platform_id}"}
         ]
       }
     }
@@ -73,7 +42,6 @@
     "path.v1": {"kind": "path", "contract_version": 1},
     "frontend.v1": {"kind": "frontend", "contract_version": 1},
     "library.v1": {"kind": "library", "contract_version": 1},
-    "python.v1": {"kind": "python", "contract_version": 1},
-    "lifecycle.v1": {"kind": "lifecycle", "contract_version": 1}
+    "python.v1": {"kind": "python", "contract_version": 1}
   }
 }

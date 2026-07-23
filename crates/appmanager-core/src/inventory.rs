@@ -409,6 +409,7 @@ fn scan_facts(
     let mut refcount = BTreeMap::<String, usize>::new();
     let mut parsed_dir_refs = BTreeSet::new();
     let mut diagnostics = Vec::new();
+    let mut orphan_classification_uncertain = false;
     let data_dir_paths = data_dirs
         .iter()
         .map(|entry| (entry.name.clone(), entry.path.clone()))
@@ -424,6 +425,7 @@ fn scan_facts(
         let text = match read_script(&entry.path) {
             Ok(text) => text,
             Err(error) => {
+                orphan_classification_uncertain = true;
                 diagnostics.push(format!("skipped script {}: {error}", entry.name));
                 continue;
             }
@@ -440,6 +442,7 @@ fn scan_facts(
             parsed_existing_dir_refs(&text, &real_dirs, &seed, &options.ignore_dirs);
         parsed_dir_refs.extend(refs);
         if uncertain {
+            orphan_classification_uncertain = true;
             diagnostics.push(format!(
                 "orphan classification uncertain for script {}",
                 entry.name
@@ -500,7 +503,7 @@ fn scan_facts(
         (&left.script, &left.missing_dir).cmp(&(&right.script, &right.missing_dir))
     });
 
-    let mut orphan_dirs = if diagnostics.is_empty() {
+    let mut orphan_dirs = if !orphan_classification_uncertain {
         real_dirs
             .difference(&parsed_dir_refs)
             .cloned()
@@ -1644,6 +1647,7 @@ mod tests {
         let fixture = fixture();
         let game = fixture.context.roots.game_dirs.join("BrokenMetadata");
         fs::create_dir(&game).unwrap();
+        fs::create_dir(fixture.context.roots.game_dirs.join("UnrelatedOrphan")).unwrap();
         fs::write(game.join("port.json"), br#"{"attr":{"runtime":[42]}}"#).unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Broken Metadata.sh"),
@@ -1655,6 +1659,7 @@ mod tests {
         assert_eq!(snapshot.ports[0].runtimes, ["ags_3.6"]);
         assert_eq!(snapshot.diagnostics.len(), 1);
         assert!(snapshot.diagnostics[0].contains("invalid port.json"));
+        assert_eq!(snapshot.orphan_dirs, ["UnrelatedOrphan"]);
     }
 
     #[test]

@@ -30,7 +30,10 @@ local function poll_task(dt)
     if task.poll<0.1 then return end
     task.poll=0
 
-    local event=model.native.poll()
+    local poll_ok,event=pcall(model.native.poll)
+    if not poll_ok then
+        event={task_id=task.id,kind=task.kind,status="error",data={}}
+    end
     if type(event)=="table" and event.task_id==task.id then
         if event.status=="progress" then
             local progress=model.runtime_progress(event.data)
@@ -92,6 +95,9 @@ local function poll_task(dt)
         elseif task.kind=="update-check" then
             operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
             kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
+        elseif task.kind=="inventory-refresh" then
+            operations.task=nil; pages.build_junk(); kit.goto_page(page.JUNK)
+            kit.toast(L("The scan timed out. Please try again.","扫描超时，请重试。"),{kind="error"})
         elseif operations.confirm_return==page.RUNTIME then
             operations.task=nil; pages.build_runtime(); kit.goto_page(page.RUNTIME)
             kit.toast(L("The operation timed out. Try again later.","操作超时，请稍后重试。"),{kind="error"})

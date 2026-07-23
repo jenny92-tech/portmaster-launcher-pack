@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import importlib.util
 import json
 import subprocess
@@ -40,8 +39,6 @@ class ConfigContractTests(unittest.TestCase):
         cls.config["platforms"] = {}
         for platform_id, entry in cls.root_config["platforms"].items():
             detail_raw = (CONFIG_DIR / "platforms" / f"{platform_id}.json").read_bytes()
-            if hashlib.sha256(detail_raw).hexdigest() != entry["sha256"]:
-                raise AssertionError(f"digest mismatch for {platform_id}")
             detail = json.loads(detail_raw)
             for key in ("format", "schema_version", "config_version", "platform_id"):
                 detail.pop(key)
@@ -121,7 +118,7 @@ class ConfigContractTests(unittest.TestCase):
         self.assertEqual(policy["blocked_prefixes"], ["BASH_FUNC_"])
         self.assertEqual(
             set(policy["scopes"]),
-            {"appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"},
+            {"love_ui"},
         )
         self.assertEqual(policy["operation_kinds"], ["set", "prepend", "append", "unset"])
         for scope in policy["scopes"].values():
@@ -144,14 +141,9 @@ class ConfigContractTests(unittest.TestCase):
             ],
         )
         self.assertEqual(trimui["libraries"]["groups"]["gles"]["candidates"], ["/usr/lib"])
-        self.assertEqual(trimui["libraries"]["resolution"], "first_complete")
         self.assertEqual(
             self.config["platforms"]["miniloong"]["python"]["mode"],
             "runtime_mount",
-        )
-        self.assertEqual(
-            self.config["platforms"]["miniloong"]["python"]["mountpoint"],
-            "/tmp/portmaster-python",
         )
         for platform in ("rocknix", "jelos"):
             self.assertEqual(
@@ -172,6 +164,7 @@ class ConfigContractTests(unittest.TestCase):
             "trash",
             "leftovers",
             "cleanup_appledouble",
+            "scan_script_images",
         }
         for name, platform in self.config["platforms"].items():
             entrypoint_rules = [
@@ -184,7 +177,6 @@ class ConfigContractTests(unittest.TestCase):
                 name,
             )
             self.assertLessEqual(capability_names, set(platform["capabilities"]), name)
-            self.assertEqual(platform["libraries"]["resolution"], "first_complete", name)
             for group in platform["libraries"]["groups"].values():
                 self.assertTrue(group["required_sonames"], name)
                 self.assertTrue(group["candidates"], name)

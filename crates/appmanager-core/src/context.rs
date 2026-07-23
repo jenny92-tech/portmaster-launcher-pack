@@ -305,6 +305,10 @@ impl ResolvedDeviceContext {
                 ContextError::InvalidInstallContract("unsafe executable name".to_owned())
             })?;
         }
+        // Strict-fail is intentional: unknown transform kinds are rejected at
+        // deserialization (tagged enum + deny_unknown_fields), and every known
+        // transform must validate cleanly here. The installer must fail on any
+        // modification it does not understand rather than silently skip it.
         for transform in &self.install.frontend_transforms {
             match transform {
                 FrontendTransform::ExportLibraryGroup {

@@ -13,6 +13,33 @@ use thiserror::Error;
 use crate::context::{CapabilityState, ResolvedDeviceContext};
 use crate::path::ManagedRoot;
 
+/// Script names in the managed scripts root that are always protected from
+/// managed file operations and excluded from inventory/size scans. This is a
+/// security boundary, not device policy, so it is compiled in: remote
+/// configuration must never be able to unprotect these entries.
+pub const PROTECTED_SCRIPT_NAMES: &[&str] = &["APP Manager.sh", "PortMaster.sh", ".port.sh"];
+
+/// Directory names that are always protected from managed file operations.
+/// Like [`PROTECTED_SCRIPT_NAMES`], this is a compiled-in security boundary,
+/// not device policy: remote configuration must never be able to unprotect
+/// these entries.
+pub const PROTECTED_DIR_NAMES: &[&str] = &["PortMaster", "images"];
+
+/// The PortMaster drop directory for user-supplied install archives. It is
+/// not a managed port, so it is excluded from inventory/size scans — but it
+/// is deliberately NOT part of [`PROTECTED_DIR_NAMES`]: managed file
+/// operations may remove it.
+pub const AUTOINSTALL_DIR_NAME: &str = "autoinstall";
+
+/// Directory names excluded from inventory and size scans: every entry of
+/// [`PROTECTED_DIR_NAMES`] plus [`AUTOINSTALL_DIR_NAME`] (pinned by the
+/// `scan_exclusions_are_a_superset_of_protected_dirs` test).
+pub const SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["PortMaster", "autoinstall", "images"];
+
+/// Default launcher script name, used when the launcher path yields no file
+/// name. Always the first entry of [`PROTECTED_SCRIPT_NAMES`].
+pub const DEFAULT_LAUNCHER_SCRIPT_NAME: &str = PROTECTED_SCRIPT_NAMES[0];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileActionKind {
     Trash,
@@ -571,12 +598,9 @@ fn managed_source(request: &FileApplyRequest<'_>, path: &Path) -> Result<Managed
         .ok_or_else(|| "path has no parent".to_owned())?;
     let name = direct_name(path)?;
     if path == request.self_launcher
-        || name == "APP Manager.sh"
-        || name == "PortMaster.sh"
-        || name == ".port.sh"
+        || PROTECTED_SCRIPT_NAMES.contains(&name.as_str())
         || name == request.self_port
-        || name == "PortMaster"
-        || name == "images"
+        || PROTECTED_DIR_NAMES.contains(&name.as_str())
     {
         return Err("protected APP or PortMaster path".to_owned());
     }
@@ -725,7 +749,7 @@ fn collect_managed_size_paths(
         let name = direct_name(&path)?;
         if is_real_directory(&path)
             && name != request.self_port
-            && !matches!(name.as_str(), "PortMaster" | "autoinstall" | "images")
+            && !SCAN_EXCLUDED_DIR_NAMES.contains(&name.as_str())
         {
             paths.insert(path);
         }
@@ -733,10 +757,7 @@ fn collect_managed_size_paths(
     for path in direct_entries(&request.context.roots.scripts)? {
         let name = direct_name(&path)?;
         if path.is_file()
-            && !matches!(
-                name.as_str(),
-                "APP Manager.sh" | "PortMaster.sh" | ".port.sh"
-            )
+            && !PROTECTED_SCRIPT_NAMES.contains(&name.as_str())
             && (extension_is(&path, "sh") || is_image(&path))
         {
             paths.insert(path);
@@ -1056,6 +1077,25 @@ mod tests {
     };
     use crate::inventory::{Inventory, InventoryOptions};
     use tempfile::TempDir;
+
+    #[test]
+    fn scan_exclusions_are_a_superset_of_protected_dirs() {
+        for name in PROTECTED_DIR_NAMES {
+            assert!(
+                SCAN_EXCLUDED_DIR_NAMES.contains(name),
+                "protected dir {name} must also be excluded from scans"
+            );
+        }
+        // Deliberate asymmetry: autoinstall is scan-excluded but may be
+        // removed by managed file operations.
+        assert!(SCAN_EXCLUDED_DIR_NAMES.contains(&AUTOINSTALL_DIR_NAME));
+        assert!(!PROTECTED_DIR_NAMES.contains(&AUTOINSTALL_DIR_NAME));
+    }
+
+    #[test]
+    fn default_launcher_script_name_is_the_first_protected_script() {
+        assert_eq!(DEFAULT_LAUNCHER_SCRIPT_NAME, PROTECTED_SCRIPT_NAMES[0]);
+    }
 
     fn fixture() -> (TempDir, ResolvedDeviceContext) {
         let temp = tempfile::tempdir().unwrap();

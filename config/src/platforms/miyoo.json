@@ -15,8 +15,7 @@
     "path.v1",
     "frontend.v1",
     "library.v1",
-    "python.v1",
-    "lifecycle.v1"
+    "python.v1"
   ],
   "paths": {
     "scripts": {
@@ -62,7 +61,6 @@
     ]
   },
   "libraries": {
-    "resolution": "first_complete",
     "groups": {
       "system_sdl2": {
         "required_sonames": [
@@ -125,24 +123,6 @@
     "logs",
     "cache"
   ],
-  "managed_roots": [
-    {
-      "path": "portmaster_core",
-      "owner": "app",
-      "preserve": "preserved_dirs"
-    },
-    {
-      "path": "frontend",
-      "owner": "app",
-      "names": [
-        "control.txt"
-      ]
-    },
-    {
-      "path": "game_data",
-      "owner": "port-user-data"
-    }
-  ],
   "capabilities": {
     "manage_portmaster": true,
     "install_portmaster": true,
@@ -154,29 +134,18 @@
     "manage_artwork": false,
     "trash": true,
     "leftovers": true,
-    "cleanup_appledouble": true
+    "cleanup_appledouble": true,
+    "scan_script_images": false
   },
   "environment_scopes": [
-    "appmanager",
-    "love_ui",
-    "portmaster",
-    "runtime_tool",
-    "game_launcher"
+    "love_ui"
   ],
-  "lifecycle": {
-    "display_backend": "wayland_then_kms",
-    "input_helper": "gptokeyb",
-    "wait_for_ui": true,
-    "cleanup_input_helper": true
-  },
   "display": {
     "default_width": 640,
-    "default_height": 480,
-    "rotation": "system"
+    "default_height": 480
   },
   "input": {
     "analog_sticks": 0,
-    "controller_database": "bundled",
     "tty": "/dev/tty0"
   }
 }

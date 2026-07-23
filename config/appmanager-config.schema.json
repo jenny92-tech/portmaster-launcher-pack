@@ -58,17 +58,16 @@
     }
   },
   "$defs": {
-    "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+    "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"},
     "platformEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["priority", "recognition", "detail", "sha256"],
+      "required": ["priority", "recognition", "detail"],
       "properties": {
         "priority": {"type": "integer"},
         "recognition": {"$ref": "#/$defs/predicate"},
-        "detail": {"type": "string", "pattern": "^\\./platforms/[a-z][a-z0-9_.-]{0,127}\\.json$"},
-        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "detail": {"type": "string", "pattern": "^\\./platforms/[a-z][a-z0-9_.-]{0,127}\\.json$"}
       }
     },
     "openObject": {"type": "object"},
@@ -125,13 +124,9 @@
         "scopes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"],
+          "required": ["love_ui"],
           "properties": {
-            "appmanager": {"$ref": "#/$defs/environmentScope"},
-            "love_ui": {"$ref": "#/$defs/environmentScope"},
-            "portmaster": {"$ref": "#/$defs/environmentScope"},
-            "runtime_tool": {"$ref": "#/$defs/environmentScope"},
-            "game_launcher": {"$ref": "#/$defs/environmentScope"}
+            "love_ui": {"$ref": "#/$defs/environmentScope"}
           }
         }
       }
@@ -173,13 +168,12 @@
       "type": "object",
       "required": ["kind"],
       "properties": {
-        "kind": {"enum": ["archive_or_nonempty_directory", "executable_file", "file_magic", "one_of_files", "python_imports_or_runtime", "required_file"]},
+        "kind": {"enum": ["archive_or_nonempty_directory", "executable_file", "one_of_files", "python_imports_or_runtime", "required_file"]},
         "path": {"type": "string"},
         "archive": {"type": "string"},
         "directory": {"type": "string"},
         "imports": {"type": "array", "items": {"type": "string"}},
         "runtime": {"type": "string"},
-        "magic": {"type": "string"},
         "paths": {"type": "array", "items": {"type": "string"}}
       },
       "additionalProperties": false
@@ -236,7 +230,7 @@
     "platform": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display_name", "priority", "support", "recognition", "required_adapters", "paths", "source_route", "frontend", "libraries", "python", "health", "preserved_dirs", "managed_roots", "capabilities", "environment_scopes", "lifecycle", "display", "input"],
+      "required": ["display_name", "priority", "support", "recognition", "required_adapters", "paths", "source_route", "frontend", "libraries", "python", "health", "preserved_dirs", "capabilities", "environment_scopes", "display", "input"],
       "properties": {
         "display_name": {"type": "string", "minLength": 1},
         "device_manufacturer": {"type": "string", "minLength": 1},
@@ -251,10 +245,8 @@
         "python": {"$ref": "#/$defs/openObject"},
         "health": {"type": "array", "items": {"$ref": "#/$defs/healthRule"}},
         "preserved_dirs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+$"}},
-        "managed_roots": {"type": "array", "items": {"$ref": "#/$defs/openObject"}},
         "capabilities": {"type": "object", "additionalProperties": {"type": "boolean"}},
-        "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"]}},
-        "lifecycle": {"$ref": "#/$defs/openObject"},
+        "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["love_ui"]}},
         "display": {"$ref": "#/$defs/openObject"},
         "input": {"$ref": "#/$defs/openObject"},
         "models": {

@@ -1,5 +1,6 @@
 {
   "name": "jenny92-appmanager",
+  "app_id": "com.jenny92.portappmanager",
   "title": "APP Manager",
   "engine": "APP Manager LOVE-lite 1.x (Rust + Lua 5.1)",
   "engine_status": "production",

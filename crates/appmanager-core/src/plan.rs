@@ -9,10 +9,6 @@ use crate::context::{
 };
 use crate::path::{ManagedRoot, PathSafetyError};
 
-/// Top-level entries that are user/runtime state, not replaceable core files.
-/// This mirrors `remove_current_managed_core` in launcher.sh.
-pub const REQUIRED_PRESERVED_CORE_DIRS: &[&str] = &["config", "libs", "themes"];
-
 const REQUIRED_FIELDS: &[&str] = &[
     "schema",
     "device",

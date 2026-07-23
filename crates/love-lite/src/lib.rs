@@ -8,7 +8,8 @@ use love_api::LoveRuntime;
 pub use love_api::state::GpuCommand;
 use love_api::state::{LoveEvent, SharedState};
 use mlua::{
-    Function as LuaFunction, IntoLuaMulti, LuaSerdeExt, Table as LuaTable, Value as LuaValue,
+    Function as LuaFunction, IntoLuaMulti, LuaSerdeExt, SerializeOptions, Table as LuaTable,
+    Value as LuaValue,
 };
 
 pub const DEFAULT_WIDTH: u32 = 960;
@@ -201,42 +202,142 @@ impl Engine {
 
 pub fn install_appmanager_api(lua: &mlua::Lua, service: EmbeddedService) -> Result<()> {
     let table = lua.create_table()?;
-    let snapshot = service.clone();
     table.set(
-        "snapshot",
-        lua.create_function(move |lua, ()| {
-            let value = snapshot.snapshot().map_err(mlua::Error::external)?;
-            lua.to_value(&value)
+        "request",
+        lua.create_function(move |lua, (method, payload): (String, Option<LuaValue>)| {
+            appmanager_request(lua, &service, &method, payload)
         })?,
-    )?;
-    let start = service.clone();
-    table.set(
-        "start",
-        lua.create_function(move |lua, (kind, payload): (String, Option<LuaValue>)| {
-            let actions = payload
-                .map(|value| lua.from_value::<Vec<EmbeddedAction>>(value))
-                .transpose()?;
-            start.start(&kind, actions).map_err(mlua::Error::external)
-        })?,
-    )?;
-    let poll = service.clone();
-    table.set(
-        "poll",
-        lua.create_function(move |lua, ()| service_event_to_lua(lua, poll.poll()))?,
-    )?;
-    table.set(
-        "cancel",
-        lua.create_function(move |_, ()| service.cancel().map_err(mlua::Error::external))?,
     )?;
     lua.globals().set("appmanager", table)?;
     Ok(())
 }
 
+fn appmanager_request(
+    lua: &mlua::Lua,
+    service: &EmbeddedService,
+    method: &str,
+    payload: Option<LuaValue>,
+) -> mlua::Result<LuaTable> {
+    match appmanager_request_value(lua, service, method, payload) {
+        Ok(value) => bridge_ok(lua, value),
+        Err(error) => bridge_error(lua, method, error.code, &error.message),
+    }
+}
+
+struct BridgeFailure {
+    code: &'static str,
+    message: String,
+}
+
+impl BridgeFailure {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+fn appmanager_request_value(
+    lua: &mlua::Lua,
+    service: &EmbeddedService,
+    method: &str,
+    payload: Option<LuaValue>,
+) -> std::result::Result<LuaValue, BridgeFailure> {
+    match method {
+        "snapshot" => {
+            let snapshot = service
+                .snapshot()
+                .map_err(|message| BridgeFailure::new("snapshot_failed", message))?;
+            lua.to_value_with(&snapshot, bridge_serialize_options())
+                .map_err(|error| BridgeFailure::new("encode_failed", error.to_string()))
+        }
+        "start" => {
+            let request = match payload {
+                Some(LuaValue::Table(request)) => request,
+                _ => {
+                    return Err(BridgeFailure::new(
+                        "invalid_request",
+                        "start requires a request table",
+                    ));
+                }
+            };
+            let kind = request.get::<String>("kind").map_err(|error| {
+                BridgeFailure::new("invalid_request", format!("invalid start kind: {error}"))
+            })?;
+            if kind.is_empty() {
+                return Err(BridgeFailure::new("invalid_request", "start kind is empty"));
+            }
+            let actions = match request.get::<LuaValue>("actions").map_err(|error| {
+                BridgeFailure::new("invalid_request", format!("invalid start actions: {error}"))
+            })? {
+                LuaValue::Nil => None,
+                value => Some(
+                    lua.from_value::<Vec<EmbeddedAction>>(value)
+                        .map_err(|error| {
+                            BridgeFailure::new(
+                                "invalid_request",
+                                format!("invalid start actions: {error}"),
+                            )
+                        })?,
+                ),
+            };
+            let task_id = service
+                .start(&kind, actions)
+                .map_err(|message| BridgeFailure::new("start_failed", message))?;
+            i64::try_from(task_id).map(LuaValue::Integer).map_err(|_| {
+                BridgeFailure::new("invalid_response", "task id exceeds the Lua integer range")
+            })
+        }
+        "poll" => service_event_to_lua(lua, service.poll())
+            .map_err(|error| BridgeFailure::new("encode_failed", error.to_string())),
+        "cancel" => service
+            .cancel()
+            .map(|()| LuaValue::Boolean(true))
+            .map_err(|message| BridgeFailure::new("cancel_failed", message)),
+        _ => Err(BridgeFailure::new(
+            "unsupported_method",
+            "unsupported APP Manager bridge method",
+        )),
+    }
+}
+
+fn bridge_ok(lua: &mlua::Lua, value: LuaValue) -> mlua::Result<LuaTable> {
+    let response = lua.create_table()?;
+    response.set("ok", true)?;
+    if !matches!(value, LuaValue::Nil) {
+        response.set("value", value)?;
+    }
+    Ok(response)
+}
+
+fn bridge_error(
+    lua: &mlua::Lua,
+    method: &str,
+    code: &str,
+    message: &str,
+) -> mlua::Result<LuaTable> {
+    eprintln!("[PAM bridge] {method}: {code}: {message}");
+    let error = lua.create_table()?;
+    error.set("code", code)?;
+    error.set("message", message)?;
+    let response = lua.create_table()?;
+    response.set("ok", false)?;
+    response.set("error", error)?;
+    Ok(response)
+}
+
 fn service_event_to_lua(lua: &mlua::Lua, event: Option<ServiceEvent>) -> mlua::Result<LuaValue> {
     match event {
-        Some(event) => lua.to_value(&event),
+        Some(event) => lua.to_value_with(&event, bridge_serialize_options()),
         None => Ok(LuaValue::Nil),
     }
+}
+
+fn bridge_serialize_options() -> SerializeOptions {
+    SerializeOptions::new()
+        .serialize_none_to_null(false)
+        .serialize_unit_to_null(false)
 }
 
 #[cfg(test)]
@@ -248,6 +349,41 @@ mod tests {
         let lua = mlua::Lua::new();
         assert!(matches!(
             service_event_to_lua(&lua, None).expect("serialize idle poll"),
+            LuaValue::Nil
+        ));
+    }
+
+    #[test]
+    fn bridge_envelopes_keep_empty_values_and_errors_unambiguous() {
+        let lua = mlua::Lua::new();
+        let idle = bridge_ok(&lua, LuaValue::Nil).expect("encode idle response");
+        assert!(idle.get::<bool>("ok").expect("read response status"));
+        assert!(matches!(
+            idle.get::<LuaValue>("value").expect("read idle value"),
+            LuaValue::Nil
+        ));
+
+        let failed =
+            bridge_error(&lua, "start", "invalid_request", "missing kind").expect("encode error");
+        assert!(!failed.get::<bool>("ok").expect("read failure status"));
+        let error = failed.get::<LuaTable>("error").expect("read failure");
+        assert_eq!(
+            error.get::<String>("code").expect("read failure code"),
+            "invalid_request"
+        );
+    }
+
+    #[test]
+    fn bridge_serialization_never_exposes_null_userdata_to_lua() {
+        let lua = mlua::Lua::new();
+        assert!(matches!(
+            lua.to_value_with(&Option::<String>::None, bridge_serialize_options())
+                .expect("serialize none"),
+            LuaValue::Nil
+        ));
+        assert!(matches!(
+            lua.to_value_with(&(), bridge_serialize_options())
+                .expect("serialize unit"),
             LuaValue::Nil
         ));
     }

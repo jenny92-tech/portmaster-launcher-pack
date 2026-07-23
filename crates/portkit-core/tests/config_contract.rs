@@ -87,7 +87,7 @@ fn trimui_context() -> DetectionContext {
 }
 
 #[test]
-fn detail_digest_identity_and_parser_limits_are_enforced() {
+fn detail_identity_and_parser_limits_are_enforced() {
     let loader = ConfigLoader::default();
     let mut root: serde_json::Value =
         serde_json::from_slice(&std::fs::read(config_dir().join("config.json")).unwrap()).unwrap();
@@ -96,8 +96,6 @@ fn detail_digest_identity_and_parser_limits_are_enforced() {
             .unwrap();
     detail["config_version"] = "0.0.1".into();
     let detail_bytes = serde_json::to_vec(&detail).unwrap();
-    root["platforms"]["trimui"]["sha256"] =
-        portkit_core::config::fragment_sha256(&detail_bytes).into();
     let source = MemorySource(BTreeMap::from([(
         "./platforms/trimui.json".into(),
         detail_bytes,
@@ -118,8 +116,6 @@ fn detail_digest_identity_and_parser_limits_are_enforced() {
     detail["future"] = "x".repeat(101).into();
     root["parser_limits"]["max_string_bytes"] = 100.into();
     let detail_bytes = serde_json::to_vec(&detail).unwrap();
-    root["platforms"]["trimui"]["sha256"] =
-        portkit_core::config::fragment_sha256(&detail_bytes).into();
     let source = MemorySource(BTreeMap::from([(
         "./platforms/trimui.json".into(),
         detail_bytes,
@@ -150,11 +146,147 @@ fn generated_details_keep_detection_in_root_and_parentage_in_containment() {
 }
 
 #[test]
-fn fragment_sha256_matches_the_standard_abc_vector() {
-    assert_eq!(
-        portkit_core::config::fragment_sha256(b"abc"),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+fn model_recognition_predicates_are_strictly_validated() {
+    let loader = ConfigLoader::default();
+    let root: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(config_dir().join("config.json")).unwrap()).unwrap();
+    let mut detail: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(config_dir().join("platforms/trimui.json")).unwrap())
+            .unwrap();
+    detail["models"]["smart_pro"]["recognition"] = serde_json::json!({"kind": "run_shell"});
+    let detail_bytes = serde_json::to_vec(&detail).unwrap();
+    let source = MemorySource(BTreeMap::from([(
+        "./platforms/trimui.json".into(),
+        detail_bytes,
+    )]));
+    let config = loader
+        .load_for_context(
+            &serde_json::to_vec(&root).unwrap(),
+            &source,
+            &trimui_context(),
+        )
+        .unwrap();
+    let error = loader
+        .validate_resolved_closure(&config, "trimui")
+        .unwrap_err();
+    assert!(
+        matches!(error, portkit_core::Error::InvalidConfig(_)),
+        "{error}"
     );
+    assert!(error.to_string().contains("smart_pro"), "{error}");
+}
+
+#[test]
+fn health_rule_kinds_match_the_schema_enum() {
+    let schema: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(config_dir().join("appmanager-config.schema.json")).unwrap(),
+    )
+    .unwrap();
+    let schema_kinds: std::collections::BTreeSet<&str> =
+        schema["$defs"]["healthRule"]["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|kind| kind.as_str().unwrap())
+            .collect();
+    // Rust implements the required file-based kinds (HEALTH_REQUIRED_KINDS)
+    // plus the deliberate python_imports_or_runtime special path.
+    let rust_kinds: std::collections::BTreeSet<&str> = portkit_core::health::HEALTH_REQUIRED_KINDS
+        .split(',')
+        .chain(["python_imports_or_runtime"])
+        .collect();
+    assert_eq!(schema_kinds, rust_kinds);
+}
+
+fn schema_enum(path: &[&str]) -> std::collections::BTreeSet<String> {
+    let schema: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(config_dir().join("appmanager-config.schema.json")).unwrap(),
+    )
+    .unwrap();
+    let mut node = &schema;
+    for segment in path {
+        node = &node[*segment];
+    }
+    node.as_array()
+        .unwrap_or_else(|| panic!("schema has no enum at {path:?}"))
+        .iter()
+        .map(|kind| kind.as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn predicate_kinds_match_the_schema_enum() {
+    // Keep in sync with the match arms in `Predicate::validate`
+    // (crates/portkit-core/src/predicate.rs).
+    let rust_kinds: std::collections::BTreeSet<String> = [
+        "always",
+        "all",
+        "any",
+        "directory_exists",
+        "file_exists",
+        "launcher_path_prefix",
+        "env_equals",
+        "os_release_equals",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let schema_kinds = schema_enum(&["$defs", "predicate", "properties", "kind", "enum"]);
+    assert_eq!(schema_kinds, rust_kinds);
+}
+
+#[test]
+fn path_strategy_kinds_match_the_schema_enum() {
+    // Keep in sync with the match arms in `PathStrategy::validate`
+    // (crates/portkit-core/src/platform.rs).
+    let rust_kinds: std::collections::BTreeSet<String> = [
+        "literal",
+        "first_existing",
+        "launcher_dir",
+        "platform_core",
+        "rom_root_from_launcher",
+        "xdg_data_home",
+        "literal_by_launcher_prefix",
+        "parent",
+        "relative_to",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let schema_kinds = schema_enum(&["$defs", "pathStrategy", "properties", "strategy", "enum"]);
+    assert_eq!(schema_kinds, rust_kinds);
+}
+
+#[test]
+fn environment_operation_kinds_match_the_schema_enum() {
+    // Keep in sync with the `EnvironmentOperation` variants (snake_case tag)
+    // in crates/portkit-core/src/environment.rs. The `prepend_path`/`append_path`
+    // serde aliases are backward-compat input spellings, not vocabulary.
+    let rust_kinds: std::collections::BTreeSet<String> = ["set", "prepend", "append", "unset"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let schema_kinds = schema_enum(&[
+        "$defs",
+        "environmentOperation",
+        "properties",
+        "operation",
+        "enum",
+    ]);
+    assert_eq!(schema_kinds, rust_kinds);
+}
+
+#[test]
+fn device_classes_match_the_schema_enum() {
+    // Keep in sync with the `device_class` validation in `Platform::validate`
+    // (crates/portkit-core/src/platform.rs).
+    let rust_kinds: std::collections::BTreeSet<String> =
+        ["tested", "official-untested", "unsupported-known"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+    let schema_kinds = schema_enum(&["$defs", "support", "properties", "device_class", "enum"]);
+    assert_eq!(schema_kinds, rust_kinds);
 }
 
 fn versioned_remote_fixture(version: &str) -> (Vec<u8>, MemorySource) {
@@ -166,8 +298,6 @@ fn versioned_remote_fixture(version: &str) -> (Vec<u8>, MemorySource) {
     root["config_version"] = version.into();
     detail["config_version"] = version.into();
     let detail_bytes = serde_json::to_vec(&detail).unwrap();
-    root["platforms"]["trimui"]["sha256"] =
-        portkit_core::config::fragment_sha256(&detail_bytes).into();
     (
         serde_json::to_vec(&root).unwrap(),
         MemorySource(BTreeMap::from([(
@@ -227,7 +357,7 @@ fn remote_root_allows_safe_environment_and_ignores_unselected_future_data() {
     };
     let (remote, details) = versioned_remote_fixture("9.0.0");
     let mut remote: serde_json::Value = serde_json::from_slice(&remote).unwrap();
-    remote["environment"]["scopes"]["appmanager"]["operations"]
+    remote["environment"]["scopes"]["love_ui"]["operations"]
         .as_array_mut()
         .unwrap()
         .push(serde_json::json!({
@@ -238,8 +368,7 @@ fn remote_root_allows_safe_environment_and_ignores_unselected_future_data() {
     remote["platforms"]["future-device"] = serde_json::json!({
         "priority": 2000,
         "recognition": {"kind":"env_equals","name":"FUTURE_DEVICE","value":"1"},
-        "detail": "./platforms/future-device.json",
-        "sha256": "0".repeat(64)
+        "detail": "./platforms/future-device.json"
     });
     let selection = selector
         .select_root_for_context(
@@ -394,8 +523,6 @@ fn newer_remote_config_can_update_known_platform_capabilities_and_paths() {
     detail["paths"]["portmaster_core"] =
         serde_json::json!({"strategy":"literal","value":"/updated/PortMaster"});
     let detail_bytes = serde_json::to_vec(&detail).unwrap();
-    remote["platforms"]["rocknix"]["sha256"] =
-        portkit_core::config::fragment_sha256(&detail_bytes).into();
     let remote_details = MemorySource(BTreeMap::from([(
         "./platforms/rocknix.json".into(),
         detail_bytes,

@@ -14,6 +14,8 @@ root = Path(sys.argv[1])
 manifest = json.loads((root / "ports/appmanager/manifest.json").read_text())
 assert manifest["engine_status"] == "production"
 assert manifest["engine_scope"] == "appmanager-only"
+assert manifest["app_id"] == "com.jenny92.portappmanager"
+assert manifest["app_id"] == manifest["trimui_app"]["package"]
 
 crate = tomllib.loads((root / "crates/love-lite/Cargo.toml").read_text())
 assert crate["package"]["version"].startswith("1.")
@@ -43,6 +45,7 @@ assert "mlua" not in native
 PY
 
 grep -Fq 'Engine::load_appmanager' "$ROOT/crates/love-lite/src/main.rs"
+! grep -Fq 'AppInstanceLock' "$ROOT/crates/love-lite/src/main.rs"
 grep -Fq 'runtime/love.aarch64' "$ROOT/ports/appmanager/src/launcher.sh"
 ! grep -Fq 'launcher-session' "$ROOT/ports/appmanager/src/launcher.sh"
 ! grep -Fiq 'this experiment' "$ROOT/crates/love-lite/UPSTREAM.md"

@@ -5,13 +5,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use appmanager_core::DEFAULT_LAUNCHER_SCRIPT_NAME;
 use appmanager_service::{EmbeddedRequest, EmbeddedService};
 use love_lite::{DEFAULT_HEIGHT, DEFAULT_WIDTH, Engine};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
+use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::render::Canvas;
-use sdl2::video::{Window, WindowBuilder};
+use sdl2::video::{FullscreenType, Window, WindowBuilder};
 
 mod gpu;
 use gpu::GpuRenderer;
@@ -49,24 +50,32 @@ fn run() -> Result<i32> {
         .map(std::path::PathBuf::from)
         .or_else(|| source_path.parent().map(std::path::Path::to_path_buf))
         .context("resolve APP Manager root")?;
+    eprintln!(
+        "[PAM] runtime=LOVE-lite version={} revision={BUILD_REVISION}",
+        env!("CARGO_PKG_VERSION")
+    );
     let source_dir = env::var_os("PAM_SOURCE_DIR")
         .map(std::path::PathBuf::from)
         .or_else(|| app_root.parent().map(std::path::Path::to_path_buf))
         .context("resolve APP Manager launcher directory")?;
     let launcher = env::var_os("PAM_LAUNCHER")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| source_dir.join("APP Manager.sh"));
-    let service = EmbeddedService::new(EmbeddedRequest {
+        .unwrap_or_else(|| source_dir.join(DEFAULT_LAUNCHER_SCRIPT_NAME));
+    let service_request = EmbeddedRequest {
         source_dir,
         launcher,
         config_dir: Some(app_root.join("config")),
         remote_config_dir: Some(app_root.join("state/device-config")),
         app_root,
-    })
-    .map_err(anyhow::Error::msg)
-    .context("initialize APP Manager service")?;
-    apply_process_environment(service.process_environment().map_err(anyhow::Error::msg)?);
+    };
+    apply_process_environment(
+        EmbeddedService::bootstrap_environment(&service_request).map_err(anyhow::Error::msg)?,
+    );
+    log_display_environment();
 
+    // Establish the display before starting inventory, artwork, health or
+    // update work. Some handheld frontends only keep the launch transition
+    // alive when the application presents its first surface promptly.
     let sdl = sdl2::init().map_err(anyhow::Error::msg)?;
     let video = sdl.video().map_err(anyhow::Error::msg)?;
     let native_enabled = env::var("LOVE_LITE_NATIVE_RESOLUTION").as_deref() != Ok("0");
@@ -88,10 +97,23 @@ fn run() -> Result<i32> {
         window_height,
         preference,
     )?;
+    // Match LÖVE's SDL lifecycle: create the renderer first, then request
+    // desktop fullscreen.
+    canvas
+        .window_mut()
+        .set_fullscreen(FullscreenType::Desktop)
+        .map_err(anyhow::Error::msg)
+        .context("set SDL2 desktop fullscreen")?;
+    canvas.set_draw_color(Color::BLACK);
+    canvas.clear();
+    canvas.present();
     let (render_width, render_height) = canvas
         .output_size()
         .map_err(anyhow::Error::msg)
         .context("read SDL2 renderer output size")?;
+    let service = EmbeddedService::new(service_request)
+        .map_err(anyhow::Error::msg)
+        .context("initialize APP Manager service")?;
     let engine = Engine::load_appmanager(&source, render_width, render_height, service.clone())?;
     let title = engine.runtime.state.window_title.lock().clone();
     canvas
@@ -238,6 +260,21 @@ fn apply_process_environment(resolved: BTreeMap<String, String>) {
     }
 }
 
+fn log_display_environment() {
+    const NAMES: &[&str] = &[
+        "DISPLAY_WIDTH",
+        "DISPLAY_HEIGHT",
+        "SDL_VIDEODRIVER",
+        "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
+        "LIBGL_FB",
+        "SDL_GAMECONTROLLERCONFIG_FILE",
+    ];
+    for name in NAMES {
+        eprintln!("[PAM] env.{name}={}", env::var(name).unwrap_or_default());
+    }
+}
+
 fn positive_dimensions(width: i32, height: i32) -> Option<(u32, u32)> {
     (width > 0 && height > 0).then_some((width as u32, height as u32))
 }
@@ -288,7 +325,7 @@ fn window_builder(
     height: u32,
 ) -> WindowBuilder {
     let mut builder = video.window(title, width, height);
-    builder.position_centered().resizable();
+    builder.position_centered();
     builder
 }
 

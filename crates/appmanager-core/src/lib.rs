@@ -33,21 +33,22 @@ pub use device::{
     DeviceResolutionRequest, resolve_device,
 };
 pub use installer::{
-    InstallError, InstallMode, InstallOutcome, InstallRequest, PendingValidationError,
-    PendingValidationOutcome, PendingValidationRequest, PendingValidationStatus,
-    install_portmaster, validate_pending_install,
+    InstallError, InstallMode, InstallOutcome, InstallRequest, PORTMASTER_STATE_PRESERVED,
+    PendingValidationError, PendingValidationOutcome, PendingValidationRequest,
+    PendingValidationStatus, install_portmaster, validate_pending_install,
 };
 pub use inventory::{
     DeadScriptFact, ImageFact, Inventory, InventoryEntry, InventoryKind, InventoryOptions,
     PortFact, RuntimeFact, RuntimeHealth, RuntimeInventory, TrashFact,
 };
 pub use operations::{
-    FileAction, FileActionKind, FileApplyOutcome, FileApplyRequest, FileOperationError,
-    SizeScanOutcome, SizeScanRequest, apply_file_plan, plan_contains_only_file_actions,
-    scan_size_cache,
+    AUTOINSTALL_DIR_NAME, DEFAULT_LAUNCHER_SCRIPT_NAME, FileAction, FileActionKind,
+    FileApplyOutcome, FileApplyRequest, FileOperationError, PROTECTED_DIR_NAMES,
+    PROTECTED_SCRIPT_NAMES, SCAN_EXCLUDED_DIR_NAMES, SizeScanOutcome, SizeScanRequest,
+    apply_file_plan, plan_contains_only_file_actions, scan_size_cache,
 };
 pub use path::{ManagedRoot, PathSafetyError};
-pub use plan::{InstallPlan, PlanError, REQUIRED_PRESERVED_CORE_DIRS, ValidatedInstallPlan};
+pub use plan::{InstallPlan, PlanError, ValidatedInstallPlan};
 pub use resolution::{
     AppOwnedPaths, ResolutionConversionError, ResolvedContextInput, ResolvedPlatformContext,
 };

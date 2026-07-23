@@ -8,6 +8,9 @@ use std::process::ExitCode;
 
 pub use launcher::{EmbeddedAction, EmbeddedRequest, EmbeddedService, ServiceEvent};
 
+/// Stable identity shared by every APP Manager package format.
+pub const APP_ID: &str = "com.jenny92.portappmanager";
+
 pub fn run_diagnostic(
     source_dir: PathBuf,
     launcher: PathBuf,

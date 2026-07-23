@@ -21,14 +21,13 @@ mkdir -p "$TMP/source" "$TMP/app/bin" "$TMP/state" "$TMP/served/platforms"
 cp -R "$ROOT/config" "$TMP/app/config"
 make_config_version() {
   python3 - "$ROOT/config/config.json" "$ROOT/config/platforms/trimui.json" "$1" "$2" "$3" <<'PY'
-import hashlib, json, sys
+import json, sys
 root_path, detail_path, version, root_out, detail_out = sys.argv[1:]
 root = json.load(open(root_path, encoding="utf-8"))
 detail = json.load(open(detail_path, encoding="utf-8"))
 root["config_version"] = version
 detail["config_version"] = version
 detail_bytes = (json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
-root["platforms"]["trimui"]["sha256"] = hashlib.sha256(detail_bytes).hexdigest()
 open(detail_out, "wb").write(detail_bytes)
 open(root_out, "w", encoding="utf-8").write(json.dumps(root, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
 PY

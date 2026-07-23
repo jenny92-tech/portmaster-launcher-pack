@@ -515,49 +515,53 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
         let engine = Engine::load_with_lua_setup(directory.path(), width, height, |lua| {
             let api = lua.create_table()?;
             api.set(
-                "snapshot",
-                lua.create_function(|lua, ()| {
-                    lua.load(
-                        r#"return {
-                            env={
-                                portmaster_health="missing",
-                                portmaster_management="app",
-                                device_class="unknown-path",
-                                target_confirmed="0",
-                                capability_install_portmaster=false,
-                                capability_update_portmaster=false,
-                                capability_repair_runtimes=false,
-                                pending_install_exists=false,
-                                install_transaction_exists=false,
-                                portmaster_active_exists=false,
-                                operation_active_exists=false,
-                                size_cache_ready=false
-                            },
-                            inventory=nil,
-                            sizes={},
-                            runtime_metadata={}
-                        }"#,
-                    )
-                    .eval::<mlua::Table>()
+                "request",
+                lua.create_function(|lua, (method, payload): (String, Option<mlua::Value>)| {
+                    let response = lua.create_table()?;
+                    response.set("ok", true)?;
+                    match method.as_str() {
+                        "snapshot" => {
+                            let value = lua
+                                .load(
+                                    r#"return {
+                                        env={
+                                            portmaster_health="missing",
+                                            portmaster_management="app",
+                                            device_class="unknown-path",
+                                            target_confirmed="0",
+                                            capability_install_portmaster=false,
+                                            capability_update_portmaster=false,
+                                            capability_repair_runtimes=false,
+                                            pending_install_exists=false,
+                                            install_transaction_exists=false,
+                                            portmaster_active_exists=false,
+                                            operation_active_exists=false,
+                                            size_cache_ready=false
+                                        },
+                                        inventory=nil,
+                                        sizes={},
+                                        runtime_metadata={}
+                                    }"#,
+                                )
+                                .eval::<mlua::Table>()?;
+                            response.set("value", value)?;
+                        }
+                        "start" => {
+                            assert!(matches!(payload, Some(mlua::Value::Table(_))));
+                            response.set("value", 1u64)?;
+                        }
+                        // A malformed native value must be caught by app_native
+                        // and converted into a task error by main.lua.
+                        "poll" => response.set(
+                            "value",
+                            mlua::Value::LightUserData(mlua::LightUserData(std::ptr::null_mut())),
+                        )?,
+                        "cancel" => response.set("value", true)?,
+                        _ => panic!("unexpected bridge method {method}"),
+                    }
+                    Ok(response)
                 })?,
             )?;
-            api.set(
-                "start",
-                lua.create_function(|_, (_kind, _payload): (String, Option<mlua::Value>)| {
-                    Ok(1u64)
-                })?,
-            )?;
-            // mlua serializes a Rust Option::None as a null light userdata.
-            // The Lua frontend must treat that bridge value as "no event".
-            api.set(
-                "poll",
-                lua.create_function(|_, ()| {
-                    Ok(mlua::Value::LightUserData(mlua::LightUserData(
-                        std::ptr::null_mut(),
-                    )))
-                })?,
-            )?;
-            api.set("cancel", lua.create_function(|_, ()| Ok(()))?)?;
             lua.globals().set("appmanager", api)?;
             Ok(())
         })

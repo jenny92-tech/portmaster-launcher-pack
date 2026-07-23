@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use appmanager_core::{
-    FileApplyRequest, Inventory, InventoryOptions, ManagementMode, PendingValidationRequest,
-    PendingValidationStatus, RuntimeMetadata, RuntimeRepairRequest, SizeScanRequest,
-    apply_file_plan, plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
-    validate_pending_install,
+    DEFAULT_LAUNCHER_SCRIPT_NAME, FileApplyRequest, Inventory, InventoryOptions, ManagementMode,
+    PROTECTED_SCRIPT_NAMES, PendingValidationRequest, PendingValidationStatus, RuntimeMetadata,
+    RuntimeRepairRequest, SCAN_EXCLUDED_DIR_NAMES, SizeScanRequest, apply_file_plan,
+    plan_contains_only_file_actions, repair_runtimes, scan_size_cache, validate_pending_install,
 };
 use portkit_core::github::{Capability, GitHubTransport, Progress};
 use portkit_core::{
@@ -216,6 +216,28 @@ pub(crate) fn run(request: Request) -> ExitCode {
 }
 
 impl EmbeddedService {
+    /// Resolves only the process environment required to create the UI.
+    ///
+    /// This intentionally skips cleanup, artwork synchronization, diagnostics,
+    /// inventory and PortMaster health work so SDL can present a window first.
+    pub fn bootstrap_environment(
+        request: &EmbeddedRequest,
+    ) -> Result<BTreeMap<String, String>, String> {
+        let session = Session::new(Request {
+            source_dir: request.source_dir.clone(),
+            launcher: request.launcher.clone(),
+            app_root: request.app_root.clone(),
+            entry_arguments: Vec::new(),
+            config_directories: ConfigDirectories {
+                embedded: request.config_dir.clone(),
+                remote: request.remote_config_dir.clone(),
+            },
+            cancel_token: None,
+            progress_channel: None,
+        })?;
+        session.love_environment()
+    }
+
     pub fn new(request: EmbeddedRequest) -> Result<Self, String> {
         let cancel_token = appmanager_core::CancellationToken::default();
         let progress_channel = appmanager_core::ProgressChannel::default();
@@ -235,6 +257,7 @@ impl EmbeddedService {
         let session = Session::new(request.clone())?;
         session.cleanup_stale_activity();
         session.sync_artwork();
+        session.write_startup_diagnostics();
         Ok(Self {
             request,
             events: Arc::new(Mutex::new(VecDeque::new())),
@@ -248,11 +271,6 @@ impl EmbeddedService {
             cancel_token,
             progress_channel,
         })
-    }
-
-    pub fn process_environment(&self) -> Result<BTreeMap<String, String>, String> {
-        let session = Session::new(self.request.clone())?;
-        session.love_environment()
     }
 
     pub fn start_input_helper(&self, process_name: &str) {
@@ -310,6 +328,7 @@ impl EmbeddedService {
         }
         let session = Session::new(self.request.clone())?;
         let snapshot = session.embedded_snapshot(None)?;
+        session.write_snapshot_diagnostics(&snapshot);
         *self
             .snapshot
             .lock()
@@ -350,6 +369,7 @@ impl EmbeddedService {
                 | "validate-pending"
                 | "runtime-metadata"
                 | "scan-sizes"
+                | "inventory-refresh"
         );
         if !supported {
             self.busy.store(false, Ordering::Release);
@@ -470,6 +490,10 @@ fn run_embedded_task(
         "validate-pending" => session.validate_pending()?,
         "runtime-metadata" => session.refresh_runtime_metadata(true)?,
         "scan-sizes" => session.scan_sizes()?,
+        "inventory-refresh" => {
+            session.refresh_inventory_state()?;
+            session.scan_sizes()?
+        }
         _ => return Err(format!("unsupported APP Manager task {kind:?}")),
     };
     session.reload()?;
@@ -481,7 +505,7 @@ fn run_embedded_task(
     let config_refresh = parse_config_refresh_result(
         &fs::read_to_string(&session.paths.config_refresh_result).unwrap_or_default(),
     );
-    let reuse_inventory = if matches!(kind, "apply" | "config-refresh") {
+    let reuse_inventory = if matches!(kind, "apply" | "config-refresh" | "inventory-refresh") {
         session.persisted_inventory()
     } else if matches!(
         kind,
@@ -696,6 +720,161 @@ impl Session {
         }
     }
 
+    fn write_startup_diagnostics(&self) {
+        let management = match self.resolved.context.management {
+            ManagementMode::App => "app",
+            ManagementMode::System => "system",
+        };
+        let identity = &self.resolved.identity;
+        let resolution = &self.resolved.resolution;
+        let mut lines = vec![
+            "----- startup diagnostics -----".to_owned(),
+            format!("app.id={}", crate::APP_ID),
+            format!("app.version={}", env!("CARGO_PKG_VERSION")),
+            format!("config.origin={:?}", self.resolved.config_origin),
+            format!("platform.id={}", resolution.platform_id),
+            format!("platform.name={}", resolution.platform_display_name),
+            format!("platform.class={}", resolution.device_class),
+            format!(
+                "model.id={}",
+                self.resolved.model_id.as_deref().unwrap_or("")
+            ),
+            format!(
+                "device.name={}",
+                resolution
+                    .model_display_name
+                    .as_deref()
+                    .unwrap_or(&resolution.platform_display_name)
+            ),
+            format!(
+                "device.manufacturer={}",
+                resolution
+                    .device_manufacturer
+                    .as_deref()
+                    .or(identity.manufacturer.as_deref())
+                    .unwrap_or("")
+            ),
+            format!(
+                "device.submodel={}",
+                identity.submodel.as_deref().unwrap_or("")
+            ),
+            format!(
+                "system.name={}",
+                identity.system_name.as_deref().unwrap_or("")
+            ),
+            format!(
+                "system.version={}",
+                identity.system_version.as_deref().unwrap_or("")
+            ),
+            format!("runtime.arch={}", device_arch()),
+            format!("portmaster.management={management}"),
+            "portmaster.health=checking".to_owned(),
+            format!("portmaster.source_route={}", resolution.source_route),
+            format!("portmaster.root={}", path_string(self.portmaster_root())),
+            format!("path.launcher={}", self.paths.launcher.display()),
+            format!("path.app_root={}", self.paths.app_root.display()),
+            format!("path.state={}", self.paths.state.display()),
+            format!(
+                "path.scripts={}",
+                self.resolved.context.roots.scripts.display()
+            ),
+            format!(
+                "path.game_data={}",
+                self.resolved.context.roots.game_dirs.display()
+            ),
+            format!(
+                "path.libs={}",
+                path_string(self.resolved.context.roots.libs.as_deref())
+            ),
+            format!(
+                "path.images={}",
+                path_string(self.resolved.context.roots.images.as_deref())
+            ),
+            format!("frontend.kind={}", self.resolved.context.frontend.kind),
+            format!(
+                "frontend.directory={}",
+                self.resolved.context.frontend.directory.display()
+            ),
+            format!(
+                "frontend.launcher={}",
+                self.resolved.context.frontend.launcher.display()
+            ),
+            format!(
+                "display.detected={}x{}",
+                env::var("DISPLAY_WIDTH").unwrap_or_default(),
+                env::var("DISPLAY_HEIGHT").unwrap_or_default()
+            ),
+            format!(
+                "display.default={}x{}",
+                resolution
+                    .display
+                    .get("default_width")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                resolution
+                    .display
+                    .get("default_height")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            ),
+            format!(
+                "display.driver={}",
+                env::var("SDL_VIDEODRIVER").unwrap_or_default()
+            ),
+            format!(
+                "display.wayland={}/{}",
+                env::var("XDG_RUNTIME_DIR").unwrap_or_default(),
+                env::var("WAYLAND_DISPLAY").unwrap_or_default()
+            ),
+            format!(
+                "state.pending_install={}",
+                self.paths.state.join("pending-install.tsv").is_file()
+            ),
+            format!(
+                "state.install_transaction={}",
+                self.paths.state.join("install-transaction.tsv").is_file()
+            ),
+        ];
+        let enabled = resolution
+            .capabilities
+            .iter()
+            .filter_map(|(name, enabled)| enabled.then_some(name.as_str()))
+            .collect::<Vec<_>>()
+            .join(",");
+        lines.push(format!("capabilities.enabled={enabled}"));
+        lines.push("-------------------------------".to_owned());
+        self.log(&lines.join("\n[PAM] "));
+    }
+
+    fn write_snapshot_diagnostics(&self, snapshot: &Value) {
+        let environment = snapshot.get("env").unwrap_or(&Value::Null);
+        let text = |name: &str| environment.get(name).and_then(Value::as_str).unwrap_or("");
+        let flag = |name: &str| {
+            environment
+                .get(name)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        };
+        let runtime_count = snapshot
+            .get("runtime_metadata")
+            .and_then(Value::as_object)
+            .map_or(0, serde_json::Map::len);
+        self.log(&format!(
+            "portmaster.health={}\n[PAM] portmaster.version={}\n[PAM] \
+             portmaster.target={}\n[PAM] update.status={}\n[PAM] \
+             update.latest={}\n[PAM] runtime.catalog_entries={runtime_count}\n[PAM] \
+             state.pending_install={}\n[PAM] state.install_transaction={}\n[PAM] \
+             initialization=ready",
+            text("portmaster_health"),
+            text("portmaster_version"),
+            text("portmaster_target"),
+            text("update_status"),
+            text("portmaster_latest"),
+            flag("pending_install_exists"),
+            flag("install_transaction_exists"),
+        ));
+    }
+
     fn portmaster_root(&self) -> Option<&Path> {
         self.resolved.context.roots.portmaster.as_deref()
     }
@@ -807,15 +986,18 @@ impl Session {
 
     fn inventory_options(&self) -> InventoryOptions {
         InventoryOptions {
-            scan_script_images: self.resolved.resolution.platform_id == "miniloong",
-            ignore_dirs: ["PortMaster", "autoinstall", "images", PORT_NAME]
-                .into_iter()
+            scan_script_images: self.capability("scan_script_images"),
+            ignore_dirs: SCAN_EXCLUDED_DIR_NAMES
+                .iter()
+                .copied()
+                .chain([PORT_NAME])
                 .map(str::to_owned)
                 .collect(),
+            // Order is part of the contract: PortMaster.sh, launcher, .port.sh.
             ignore_scripts: [
-                "PortMaster.sh",
+                PROTECTED_SCRIPT_NAMES[1],
                 launcher_name(&self.paths.launcher),
-                ".port.sh",
+                PROTECTED_SCRIPT_NAMES[2],
             ]
             .into_iter()
             .map(str::to_owned)
@@ -878,7 +1060,7 @@ impl Session {
             "scripts_dir": scripts,
             "gamedirs_dir": game_data,
             "images_dir": path_string(images),
-            "scan_script_images": self.resolved.resolution.platform_id == "miniloong",
+            "scan_script_images": self.capability("scan_script_images"),
             "libs_dir": path_string(libs),
             "gamedir": self.paths.app_root,
             "directory": self.launcher_directory(),
@@ -948,8 +1130,8 @@ impl Session {
             "update_checked": update_checked,
             "update_status": update_status,
             "portmaster_latest": latest,
-            "ignore_dirs": ["PortMaster", "autoinstall", "images", PORT_NAME],
-            "ignore_scripts": ["PortMaster.sh", launcher_name(&self.paths.launcher), ".port.sh"],
+            "ignore_dirs": SCAN_EXCLUDED_DIR_NAMES.iter().copied().chain([PORT_NAME]).collect::<Vec<_>>(),
+            "ignore_scripts": [PROTECTED_SCRIPT_NAMES[1], launcher_name(&self.paths.launcher), PROTECTED_SCRIPT_NAMES[2]],
             "self_port": PORT_NAME
         });
         values
@@ -1582,13 +1764,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     .map_err(display_error)?;
     let (version, url, expected_md5) = read_release_row(&release)?;
     let archive = cache.join(&source.archive_name);
-    let valid = || {
-        archive.is_file()
-            && digest_file(&archive, DigestAlgorithm::Md5)
-                .is_ok_and(|digest| digest.eq_ignore_ascii_case(&expected_md5))
-            && zip_readable(&archive).unwrap_or(false)
-    };
-    if !valid() {
+    if !stable_archive_valid(&archive, &expected_md5) {
         let _ = fs::remove_file(&archive);
         let progress = DownloadProgress::new(
             session.paths.progress.clone(),
@@ -1600,13 +1776,13 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
                 Capability::Release,
                 &url,
                 &archive,
-                |_| valid(),
+                |candidate| stable_archive_valid(candidate, &expected_md5),
                 Some(&progress),
                 None,
             )
             .map_err(display_error)?;
     }
-    if !valid() {
+    if !stable_archive_valid(&archive, &expected_md5) {
         let _ = fs::remove_file(&archive);
         return Err("downloaded PortMaster archive failed verification".into());
     }
@@ -1642,6 +1818,13 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         &format!("PortMaster {version} installed; reopen required"),
     )?;
     Ok(())
+}
+
+fn stable_archive_valid(path: &Path, expected_md5: &str) -> bool {
+    path.is_file()
+        && digest_file(path, DigestAlgorithm::Md5)
+            .is_ok_and(|digest| digest.eq_ignore_ascii_case(expected_md5))
+        && zip_readable(path).unwrap_or(false)
 }
 
 fn install_archive(session: &Session, archive: PathBuf) -> Result<(), String> {
@@ -1939,7 +2122,7 @@ fn normalized_target_override(root: Option<&Path>) -> Option<PathBuf> {
 fn launcher_name(path: &Path) -> &str {
     path.file_name()
         .and_then(|value| value.to_str())
-        .unwrap_or("APP Manager.sh")
+        .unwrap_or(DEFAULT_LAUNCHER_SCRIPT_NAME)
 }
 
 fn path_string(path: Option<&Path>) -> String {
@@ -2102,5 +2285,25 @@ mod tests {
                 ("/ports/Alpha.sh".to_owned(), 12),
             ])
         );
+    }
+
+    #[test]
+    fn stable_archive_validation_uses_the_download_candidate() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut archive = zip::ZipWriter::new(fs::File::create(temp.path()).unwrap());
+        archive
+            .start_file(
+                "PortMaster/README",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        std::io::Write::write_all(&mut archive, b"fixture").unwrap();
+        archive.finish().unwrap();
+        let digest = digest_file(temp.path(), DigestAlgorithm::Md5).unwrap();
+        assert!(stable_archive_valid(temp.path(), &digest));
+        assert!(!stable_archive_valid(
+            temp.path(),
+            "00000000000000000000000000000000"
+        ));
     }
 }

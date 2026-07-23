@@ -144,12 +144,9 @@ function Environment.new(model,operations,pages_ui)
             kit.textview(managed and L("PortMaster updates","PortMaster 更新") or L("Latest stable","最新稳定版"),latest,
                 {id="manage:latest",label_px=18,value_px=20}),
             kit.textview(L("Status","状态"),health_label(),{id="manage:health",label_px=18,value_px=20,expandable=false}),
-            kit.textview(L("Device","设备"),model.provided(env.device_name or env.param_device),{id="manage:device",label_px=18,value_px=20}),
-            kit.textview(L("Manufacturer","设备厂商"),model.provided(env.device_manufacturer),{id="manage:manufacturer",label_px=18,value_px=20}),
-            kit.textview(L("Submodel","具体型号"),model.provided(env.device_submodel),{id="manage:submodel",label_px=18,value_px=20}),
-            kit.textview(L("System","系统"),model.provided(env.system_name),{id="manage:system-name",label_px=18,value_px=20}),
-            kit.textview(L("System version","系统版本"),model.provided(env.system_version),{id="manage:system-version",label_px=18,value_px=20}),
             kit.textview(L("PortMaster path","PortMaster 路径"),model.provided(env.portmaster_target or env.controlfolder),{id="manage:path",label_px=18,value_px=20}),
+            kit.textview(L("SH directory","SH 目录"),model.provided(env.scripts_dir),{id="manage:sh-dir",label_px=18,value_px=20}),
+            kit.textview(L("Data directory","Data 目录"),model.provided(env.gamedirs_dir),{id="manage:data-dir",label_px=18,value_px=20}),
         }
         if managed then
             rows[#rows+1]=note(L("Maintenance","维护方式"),

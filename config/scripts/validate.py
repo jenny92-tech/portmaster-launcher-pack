@@ -44,11 +44,10 @@ PATH_STRATEGIES = {
     "rom_root_from_launcher",
     "xdg_data_home",
 }
-SUPPORTED_ADAPTER_KINDS = {"predicate", "path", "frontend", "library", "python", "lifecycle"}
+SUPPORTED_ADAPTER_KINDS = {"predicate", "path", "frontend", "library", "python"}
 HEALTH_RULES = {
     "archive_or_nonempty_directory",
     "executable_file",
-    "file_magic",
     "one_of_files",
     "python_imports_or_runtime",
     "required_file",
@@ -56,7 +55,7 @@ HEALTH_RULES = {
 FORBIDDEN_KEYS = {"run_shell", "eval", "exec", "command", "shell"}
 SAFE_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 SAFE_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
+SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Top-level keys that live in the root config.json; per-platform detail is split
 # into platforms/<id>.json.
@@ -195,7 +194,7 @@ def validate_path_strategy(value: Any, path: str) -> None:
 def validate_environment(environment: dict) -> None:
     scopes = environment.get("scopes")
     require_type(scopes, dict, "$.environment.scopes")
-    expected_scopes = {"appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"}
+    expected_scopes = {"love_ui"}
     if set(scopes) != expected_scopes:
         fail("$.environment.scopes", f"must contain exactly {sorted(expected_scopes)}")
     profiles = environment.get("profiles")
@@ -255,10 +254,8 @@ def validate_platform(platform: Any, path: str) -> None:
             "python",
             "health",
             "preserved_dirs",
-            "managed_roots",
             "capabilities",
             "environment_scopes",
-            "lifecycle",
             "display",
             "input",
         },
@@ -295,9 +292,9 @@ def validate_platform(platform: Any, path: str) -> None:
     expected_entrypoints = ["{portmaster_core}/pugwash", "{portmaster_core}/harbourmaster"]
     if len(entrypoint_rules) != 1 or entrypoint_rules[0].get("paths") != expected_entrypoints:
         fail(f"{path}.health", "must require pugwash or harbourmaster")
-    for key in ("preserved_dirs", "managed_roots", "environment_scopes"):
+    for key in ("preserved_dirs", "environment_scopes"):
         require_type(platform[key], list, f"{path}.{key}")
-    for key in ("frontend", "libraries", "python", "capabilities", "lifecycle", "display", "input"):
+    for key in ("frontend", "libraries", "python", "capabilities", "display", "input"):
         require_type(platform[key], dict, f"{path}.{key}")
     frontend = platform["frontend"]
     frontend_keys = {
@@ -344,13 +341,12 @@ def validate_platform(platform: Any, path: str) -> None:
         "trash",
         "leftovers",
         "cleanup_appledouble",
+        "scan_script_images",
     }
     missing_capabilities = capability_names.difference(platform["capabilities"])
     if missing_capabilities:
         fail(f"{path}.capabilities", f"missing explicit capabilities {sorted(missing_capabilities)}")
     libraries = platform["libraries"]
-    if libraries.get("resolution") != "first_complete":
-        fail(f"{path}.libraries.resolution", "must select the first complete candidate")
     groups = libraries.get("groups")
     require_type(groups, dict, f"{path}.libraries.groups")
     if not groups:
@@ -365,13 +361,8 @@ def validate_platform(platform: Any, path: str) -> None:
     for index, transform in enumerate(transforms):
         if transform["library_group"] not in groups:
             fail(f"{path}.frontend.transforms[{index}].library_group", "undefined library group")
-    if set(platform["environment_scopes"]) != {"appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"}:
+    if set(platform["environment_scopes"]) != {"love_ui"}:
         fail(f"{path}.environment_scopes", "must name every concrete execution scope")
-    known_paths = set(platform["paths"])
-    for index, root in enumerate(platform["managed_roots"]):
-        require_type(root, dict, f"{path}.managed_roots[{index}]")
-        if root.get("path") not in known_paths:
-            fail(f"{path}.managed_roots[{index}].path", "must reference a resolved path")
 
 
 def validate(config: Any) -> None:
@@ -508,8 +499,8 @@ def validate(config: Any) -> None:
     for name, expected in expected_launcher_directories.items():
         if platforms[name]["paths"]["launcher_directory"] != expected:
             fail(f"$.platforms.{name}.paths.launcher_directory", "does not match PortMaster $directory")
-    if platforms["miniloong"]["python"].get("mode") != "runtime_mount" or platforms["miniloong"]["python"].get("mountpoint") != "/tmp/portmaster-python":
-        fail("$.platforms.miniloong.python", "must mount the Python runtime at /tmp/portmaster-python")
+    if platforms["miniloong"]["python"].get("mode") != "runtime_mount":
+        fail("$.platforms.miniloong.python", "must use the runtime_mount Python mode")
     for name in ("rocknix", "jelos"):
         if platforms[name]["frontend"].get("management") != "system" or platforms[name]["capabilities"].get("install_portmaster") is not False or platforms[name]["capabilities"].get("update_portmaster") is not False:
             fail(f"$.platforms.{name}", "must remain system-managed")
@@ -560,16 +551,13 @@ def validate_root(config: dict) -> None:
     for name, entry in platforms.items():
         path = f"$.platforms.{name}"
         require_type(entry, dict, path)
-        require_keys(entry, {"priority", "recognition", "detail", "sha256"}, path)
-        allow_keys(entry, {"priority", "recognition", "detail", "sha256"}, path)
+        require_keys(entry, {"priority", "recognition", "detail"}, path)
+        allow_keys(entry, {"priority", "recognition", "detail"}, path)
         if not isinstance(entry["priority"], int):
             fail(f"{path}.priority", "must be an integer")
         detail = entry["detail"]
         if not isinstance(detail, str) or not detail:
             fail(f"{path}.detail", "must be a non-empty string")
-        digest = entry["sha256"]
-        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            fail(f"{path}.sha256", "must be a lowercase SHA-256 digest")
         validate_predicate(entry["recognition"], f"{path}.recognition")
     if "models" in config:
         fail("$.models", "must not appear in the root config (models live in platform detail)")

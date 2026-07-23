@@ -7,8 +7,8 @@
   "required": [
     "format", "schema_version", "config_version", "platform_id", "display_name",
     "support", "required_adapters", "paths", "source_route", "frontend", "libraries",
-    "python", "health", "preserved_dirs", "managed_roots", "capabilities",
-    "environment_scopes", "lifecycle", "display", "input"
+    "python", "health", "preserved_dirs", "capabilities",
+    "environment_scopes", "display", "input"
   ],
   "properties": {
     "format": {"const": "jenny92.appmanager-config"},
@@ -25,10 +25,8 @@
     "python": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
     "health": {"type": "array", "items": {"$ref": "appmanager-config.schema.json#/$defs/healthRule"}},
     "preserved_dirs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+$"}},
-    "managed_roots": {"type": "array", "items": {"$ref": "appmanager-config.schema.json#/$defs/openObject"}},
     "capabilities": {"type": "object", "additionalProperties": {"type": "boolean"}},
-    "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["appmanager", "love_ui", "portmaster", "runtime_tool", "game_launcher"]}},
-    "lifecycle": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["love_ui"]}},
     "display": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
     "input": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
     "models": {
