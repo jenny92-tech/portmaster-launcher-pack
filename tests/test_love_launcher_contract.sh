@@ -19,6 +19,8 @@ for file in kit.lua launcher.lua conf.lua ui.gptk; do
     exit 1
   }
 done
+[ -x "$ROOT/ports/hk/dist/bin/portkit" ]
+! grep -Eq 'unzip|xz -dc|tar xf|grep -oE' "$ROOT/ports/hk/dist/[中]空洞骑士.sh"
 
 # Every migrated launcher declares its legacy Godot env so existing choices survive
 # the first LÖVE launch.
@@ -62,6 +64,7 @@ for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):
     manifest = json.loads((root / "ports" / port / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["launcher"].startswith("LÖVE 11.5"), port
     assert manifest["gptk"] == "love/ui.gptk", port
+    assert manifest["portkit_tools"] == ["font-provision"], port
     assert "godot_launcher" not in manifest, port
 PY
 
@@ -78,5 +81,6 @@ for file in 'Slay the Spire 2.sh' love_ui/kit.lua love_ui/launcher.lua love_ui/m
     exit 1
   }
 done
+[ -x "$ROOT/ports/sts2/dist/bin/portkit" ]
 ! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
 ! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"

@@ -21,7 +21,6 @@ def main() -> int:
         root / "crates" / "appmanager-cli" / "Cargo.toml",
         root / "crates" / "appmanager-core" / "Cargo.toml",
         root / "crates" / "portkit-core" / "Cargo.toml",
-        root / "crates" / "portkit-cli" / "Cargo.toml",
     ]
     for source_dir in (
         crate / "src",
@@ -29,7 +28,6 @@ def main() -> int:
         root / "crates" / "appmanager-cli" / "src",
         root / "crates" / "appmanager-core" / "src",
         root / "crates" / "portkit-core" / "src",
-        root / "crates" / "portkit-cli" / "src",
         root / "config",
     ):
         files.extend(sorted(path for path in source_dir.rglob("*") if path.is_file()))

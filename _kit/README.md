@@ -19,6 +19,8 @@ launcher fail to start.
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
 | `build_appmanager_love_lite.sh` | Build App Manager's production aarch64 LOVE-lite runtime; never used by game launchers. |
+| `build_portkit.sh` | Build the static aarch64 PortKit toolbox carried only by game launchers that declare advanced compatibility tools. |
+| `stage_portkit.sh` | Validate and copy that PortKit binary into a generated game-data directory. |
 | `dist_trimui_app.sh` | Wrap a built launcher as a TrimUI MainUI APP ZIP prefixed with `[TrimUI App]`; the archive extracts directly under `Apps/`. |
 
 ## TrimUI system APP packages
@@ -53,8 +55,10 @@ capability, probes at most five routes at once, validates content before atomic
 promotion, and resumes only from the same formatted endpoint. Route hints live
 only for the Rust process lifetime. APP-specific Runtime, release-manifest,
 MD5/SHA-256 and ZIP validation are linked into APP Manager's single Rust process,
-so its launcher carries no curl or archive/hash shell wrappers. The workspace CLI
-targets remain available for diagnostics and tests, but are not packaged.
+so its launcher carries no curl or archive/hash shell wrappers. Selected ordinary
+game launchers may package the same CLI as `bin/portkit`, but only for advanced
+operations that are unreliable across BusyBox versions. Their simple Shell flow,
+PortMaster environment sourcing and game launch remain in Shell.
 
 Git LFS, GitHub Packages, and GHCR are intentionally not modeled as file
 downloads: they have separate authenticated protocols. Add them as distinct
@@ -124,6 +128,10 @@ exactly matches the selected launcher, without overwriting an existing file, to
 the verified frontend path on first launch:
 MiniLoong uses `Roms/PORTS/images`; TrimUI uses the TF-card `Imgs/PORTS` path
 declared by its PORTS emulator config. Unknown devices are left untouched.
+
+Launchers declaring `portkit_tools` in their manifest also receive a static
+`bin/portkit`. Currently this replaces only the fragile NotoSans extraction chain
+(`unzip` + XZ + tar); it is not a generic launcher framework.
 
 **One assembled script serves both devices** — `audio_setup` branches on
 `CFW_NAME`: on **MiniLoong (`Loong`, wayland/weston)** it leaves system audio +

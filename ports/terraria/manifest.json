@@ -6,6 +6,7 @@
   "engine": "Unity 2021.3 IL2CPP / Bogodroid UnityLoader",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "gptk": "love/ui.gptk",
+  "portkit_tools": ["font-provision"],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png"

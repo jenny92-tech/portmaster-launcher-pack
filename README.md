@@ -75,6 +75,9 @@ See [`_kit/README.md`](_kit/README.md) for the helpers each port can pull in:
 - `build_appmanager_love_lite.sh` — builds APP Manager's small aarch64
   Rust/Lua main process with the PortKit and APP Manager cores linked into it;
   other launchers remain on LÖVE 11.5.
+- `build_portkit.sh` — builds the static PortKit toolbox used by selected game
+  launchers for archive and other cross-BusyBox compatibility operations; their
+  ordinary launch flow remains in Shell.
 
 ## License
 

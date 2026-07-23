@@ -10,6 +10,7 @@
   "port_dir": "sts2",
   "script": "Slay the Spire 2.sh",
   "gptk": "love/ui.gptk",
+  "portkit_tools": ["font-provision"],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

@@ -13,7 +13,13 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod font;
+
 const EMBEDDED_ROOT: &[u8] = include_bytes!("../../../config/config.json");
+const SOURCE_REVISION: &str = match option_env!("PORTKIT_SOURCE_REVISION") {
+    Some(value) => value,
+    None => "development",
+};
 
 pub fn cli_main() {
     match run(std::env::args().skip(1).collect()) {
@@ -64,6 +70,13 @@ fn run(arguments: Vec<String>) -> Result<i32> {
         "file" if arguments.get(1).map(String::as_str) == Some("zip-readable") => {
             file_zip_readable(&arguments[2..]).map(|_| 0)
         }
+        "font" if arguments.get(1).map(String::as_str) == Some("provision") => {
+            font_provision(&arguments[2..]).map(|_| 0)
+        }
+        "version" | "--version" | "-V" => {
+            println!("portkit {} {SOURCE_REVISION}", env!("CARGO_PKG_VERSION"));
+            Ok(0)
+        }
         "help" | "--help" | "-h" => {
             println!("{}", usage_text());
             Ok(0)
@@ -96,6 +109,31 @@ fn file_zip_readable(arguments: &[String]) -> Result<()> {
         return Err(Error::InvalidConfig("ZIP archive is empty".to_owned()));
     }
     print_json(&json!({"ok": true, "readable": true}))
+}
+
+fn font_provision(arguments: &[String]) -> Result<()> {
+    let options = Options::parse(arguments)?;
+    let request = font::ProvisionRequest {
+        candidates: options.many("candidate").map(PathBuf::from).collect(),
+        tar_xz_sources: options.many("tar-xz").map(PathBuf::from).collect(),
+        zip_sources: options.many("zip").map(PathBuf::from).collect(),
+        outputs: options.many("output").map(PathBuf::from).collect(),
+        member: options
+            .one("member")
+            .unwrap_or("NotoSansSC-Regular.ttf")
+            .to_owned(),
+    };
+    let outcome = font::provision(&request)?;
+    match options.one("format").unwrap_or("raw") {
+        "raw" => println!("{}", outcome.path.display()),
+        "json" => print_json(&outcome)?,
+        _ => {
+            return Err(Error::InvalidConfig(
+                "--format must be raw or json".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn build_registry() -> GitHubRegistry {
@@ -1358,7 +1396,7 @@ fn usage() -> Error {
     Error::InvalidConfig(usage_text().into())
 }
 fn usage_text() -> &'static str {
-    "usage: portkit config validate [--config FILE] [--config-dir DIR] [--remote-config FILE] [--remote-config-dir DIR] [--platform ID]\n       portkit config select-detail --config ROOT [--root DIR] [--launcher FILE] [--env NAME=VALUE] [--format json|tsv]\n       portkit config refresh --source URL --config FILE --config-dir DIR --cache FILE --cache-dir DIR --result FILE --launcher FILE [--root DIR] [--timeout-seconds 1..44]\n       portkit detect|resolve [--config FILE] [--config-dir DIR] [--remote-config FILE] [--remote-config-dir DIR] [--root DIR] [--launcher FILE] [--target-override DIR] [--env NAME=VALUE] [--format json|tsv]\n       portkit health [detection options] [--python-executable FILE] [--format json|tsv]\n       portkit env resolve [--scope NAME] [--var NAME=VALUE] [--set NAME=VALUE] [--unset NAME] [--clean]\n       portkit github candidates --capability NAME --source URL\n       portkit github fetch --capability NAME --source URL --output FILE [--batch-size 1..10] [--max-bytes N] [--validator nonempty|json|config-root] [--expected-sha256 HEX|--expected-md5 HEX] [--progress FILE] [--cancel-file FILE]\n       portkit file digest --algorithm md5|sha256 --input FILE [--format raw|json]\n       portkit file zip-readable --input FILE"
+    "usage: portkit config validate [--config FILE] [--config-dir DIR] [--remote-config FILE] [--remote-config-dir DIR] [--platform ID]\n       portkit config select-detail --config ROOT [--root DIR] [--launcher FILE] [--env NAME=VALUE] [--format json|tsv]\n       portkit config refresh --source URL --config FILE --config-dir DIR --cache FILE --cache-dir DIR --result FILE --launcher FILE [--root DIR] [--timeout-seconds 1..44]\n       portkit detect|resolve [--config FILE] [--config-dir DIR] [--remote-config FILE] [--remote-config-dir DIR] [--root DIR] [--launcher FILE] [--target-override DIR] [--env NAME=VALUE] [--format json|tsv]\n       portkit health [detection options] [--python-executable FILE] [--format json|tsv]\n       portkit env resolve [--scope NAME] [--var NAME=VALUE] [--set NAME=VALUE] [--unset NAME] [--clean]\n       portkit github candidates --capability NAME --source URL\n       portkit github fetch --capability NAME --source URL --output FILE [--batch-size 1..10] [--max-bytes N] [--validator nonempty|json|config-root] [--expected-sha256 HEX|--expected-md5 HEX] [--progress FILE] [--cancel-file FILE]\n       portkit file digest --algorithm md5|sha256 --input FILE [--format raw|json]\n       portkit file zip-readable --input FILE\n       portkit font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE] [--format raw|json]"
 }
 
 #[cfg(test)]

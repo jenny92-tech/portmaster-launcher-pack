@@ -84,63 +84,26 @@ install_exit_trap() {
 # passed to LÖVE by its validated real path (see _kit/love/README.md).
 # Exit codes: 0 = back to menu, 42 = start game.
 
-_love_valid_font() { [ -f "$1" ] && [ "$(wc -c < "$1" 2>/dev/null || echo 0)" -gt 1000000 ]; }
-_love_noto_src() {
-  local t z inner
-  t=$(ls "$controlfolder"/pylibs/pylibs/resources/NotoSans.tar.xz \
-         "$controlfolder"/pylibs/resources/NotoSans.tar.xz 2>/dev/null | head -1)
-  [ -n "$t" ] && { echo "$t"; return; }
-  z="$controlfolder/pylibs.zip"; [ -f "$z" ] || return
-  inner=$(unzip -l "$z" 2>/dev/null | grep -oE '[^ ]*NotoSans\.tar\.xz' | head -1)
-  [ -n "$inner" ] && echo "zip:$z:$inner"
-}
-_love_unpack_noto() {
-  local src="$1" dst="$2" member="${3:-}" pipe rest
-  $ESUDO mkdir -p "$dst" 2>/dev/null || return 1
-  case "$src" in
-    zip:*) rest="${src#zip:}"; pipe="unzip -p '${rest%%:*}' '${rest#*:}' | xz -dc" ;;
-    *)     pipe="xz -dc '$src'" ;;
-  esac
-  $ESUDO sh -c "$pipe | tar xf - -C '$dst' $member" 2>/dev/null
-  _love_valid_font "$dst/NotoSansSC-Regular.ttf"
-}
 _love_provide_font() {
-  local ui_dir="$1" out="$1/font.ttf" std="${PM_RESOURCE_DIR:-$controlfolder/resources}" f src
+  local ui_dir="$1" out="$1/font.ttf" std="${PM_RESOURCE_DIR:-$controlfolder/resources}"
+  local tool="${PORTKIT_BIN_OVERRIDE:-$GAMEDIR/bin/portkit}"
   unset LOVE_FONT_PATH
-
-  # Prefer a validated shared file and pass its real path through unchanged.
-  # Kit removes a stale per-launcher copy only after it has successfully read
-  # this shared source into FileData, preserving a safe upgrade fallback.
-  for f in "$std/NotoSansSC-Regular.ttf" "$controlfolder/pylibs/resources/NotoSansSC-Regular.ttf"; do
-    if _love_valid_font "$f"; then
-      LOVE_FONT_PATH="$f"
-      echo "$LOG_PREFIX font -> $LOVE_FONT_PATH"; return 0
-    fi
-  done
-
-  src="$(_love_noto_src || true)"
-  if [ -n "$src" ]; then
-    # Unpack into PortMaster's standard resource dir so its own GUI benefits too.
-    if _love_unpack_noto "$src" "$std"; then
-      LOVE_FONT_PATH="$std/NotoSansSC-Regular.ttf"
-      echo "$LOG_PREFIX font -> $LOVE_FONT_PATH (repaired from $src)"; return 0
-    fi
-  fi
-
-  # Compatibility fallback for a device whose shared resource location cannot
-  # be repaired. Existing old caches stay usable; otherwise extract only SC.
-  if _love_valid_font "$out"; then
-    LOVE_FONT_PATH="$out"
-    echo "$LOG_PREFIX font -> $LOVE_FONT_PATH (local fallback)"; return 0
-  fi
-  if [ -n "$src" ]; then
-    if _love_unpack_noto "$src" "$ui_dir" NotoSansSC-Regular.ttf && mv -f "$ui_dir/NotoSansSC-Regular.ttf" "$out" && _love_valid_font "$out"; then
-      LOVE_FONT_PATH="$out"
-      echo "$LOG_PREFIX font -> $LOVE_FONT_PATH (extracted fallback from $src)"; return 0
-    fi
+  if [ -x "$tool" ] && LOVE_FONT_PATH=$("$tool" font provision \
+      --candidate "$std/NotoSansSC-Regular.ttf" \
+      --candidate "$controlfolder/pylibs/resources/NotoSansSC-Regular.ttf" \
+      --candidate "$out" \
+      --tar-xz "$controlfolder/pylibs/pylibs/resources/NotoSans.tar.xz" \
+      --tar-xz "$controlfolder/pylibs/resources/NotoSans.tar.xz" \
+      --zip "$controlfolder/pylibs.zip" \
+      --output "$std/NotoSansSC-Regular.ttf" \
+      --output "$out"); then
+    export LOVE_FONT_PATH
+    echo "$LOG_PREFIX font -> $LOVE_FONT_PATH"
+    return 0
   fi
   unset LOVE_FONT_PATH
-  echo "$LOG_PREFIX WARN: no CJK font — love falls back to its built-in (latin only)"; return 1
+  echo "$LOG_PREFIX WARN: PortKit could not provide a CJK font"
+  return 1
 }
 
 # run_love_launcher_ui [ui_dir]   (default $GAMEDIR/love_ui)

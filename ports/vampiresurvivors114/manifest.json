@@ -10,6 +10,7 @@
   "port_dir": "vampiresurvivors114",
   "script": "V_吸血鬼幸存者_114.sh",
   "gptk": "love/ui.gptk",
+  "portkit_tools": ["font-provision"],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

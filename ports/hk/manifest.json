@@ -10,6 +10,7 @@
   "port_dir": "hollowknight",
   "script": "[中]空洞骑士.sh",
   "gptk": "love/ui.gptk",
+  "portkit_tools": ["font-provision"],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",
