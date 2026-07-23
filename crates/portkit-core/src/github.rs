@@ -201,6 +201,38 @@ impl GitHubRegistry {
         Ok(Self { routes })
     }
 
+    /// Uses an operator/test route override when present, otherwise the
+    /// bundled registry. Invalid override rows are ignored and an unusable
+    /// override falls back to the bundled routes.
+    pub fn configured() -> Self {
+        let Ok(raw) = std::env::var("PORTKIT_GITHUB_ROUTES") else {
+            return Self::bundled();
+        };
+        let mut routes = Vec::new();
+        for (index, base) in raw
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .enumerate()
+        {
+            if let Ok(route) = Route::new(
+                format!("r{}", index + 1),
+                RouteFormatter::Full,
+                [
+                    Capability::Release,
+                    Capability::Raw,
+                    Capability::Archive,
+                    Capability::Clone,
+                    Capability::Gist,
+                ],
+                base,
+            ) {
+                routes.push(route);
+            }
+        }
+        Self::new(routes).unwrap_or_else(|_| Self::bundled())
+    }
+
     pub fn candidate_route_ids(
         &self,
         capability: Capability,
@@ -268,7 +300,7 @@ impl Default for GitHubTransport {
 
 impl GitHubTransport {
     pub fn new() -> Self {
-        Self::with_registry(GitHubRegistry::bundled())
+        Self::with_registry(GitHubRegistry::configured())
     }
 
     pub fn with_registry(registry: GitHubRegistry) -> Self {

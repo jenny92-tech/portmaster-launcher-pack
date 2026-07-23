@@ -1,0 +1,26 @@
+[package]
+name = "portkit-launcher"
+autobins = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Small device-side helpers for portable game launchers"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "portkit-launcher"
+path = "src/bin.rs"
+
+[dependencies]
+lzma-rust2 = { version = "0.17", default-features = false, features = ["std", "xz"] }
+serde.workspace = true
+serde_json.workspace = true
+tar = { version = "0.4", default-features = false }
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+lzma-rust2 = { version = "0.17", default-features = false, features = ["std", "xz", "encoder"] }
+tempfile = "3"

@@ -16,8 +16,8 @@ mkdir -p "$PM_RESOURCE_DIR" "$controlfolder/pylibs/resources" "$UI_DIR" "$GAMEDI
 # Rust unit tests cover real tar.xz/ZIP extraction. This host-side Shell test
 # uses a tiny PortKit stand-in to verify candidate ordering and handoff without
 # trying to execute the packaged Linux aarch64 binary on macOS.
-PORTKIT_BIN_OVERRIDE="$GAMEDIR/bin/portkit"
-cat > "$PORTKIT_BIN_OVERRIDE" <<'SH'
+PORTKIT_LAUNCHER_BIN_OVERRIDE="$GAMEDIR/bin/portkit-launcher"
+cat > "$PORTKIT_LAUNCHER_BIN_OVERRIDE" <<'SH'
 #!/bin/sh
 [ "$1:$2" = "font:provision" ] || exit 2
 shift 2
@@ -31,7 +31,7 @@ while [ "$#" -gt 0 ]; do
 done
 exit 1
 SH
-chmod +x "$PORTKIT_BIN_OVERRIDE"
+chmod +x "$PORTKIT_LAUNCHER_BIN_OVERRIDE"
 
 source "$ROOT/_kit/portmaster_common.sh"
 

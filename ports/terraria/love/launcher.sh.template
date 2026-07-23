@@ -105,24 +105,12 @@ apply_terraria_language() {
 
   local cfg="$CONFDIR/config.json"
   mkdir -p "${cfg%/*}" 2>/dev/null || true
-  if [ ! -f "$cfg" ]; then
-    printf '{\n  "Language": %s\n}\n' "$lang" > "$cfg" 2>/dev/null || true
-    echo "$LOG_PREFIX language config created: Language=$lang"
-    return 0
-  fi
-
-  if grep -q '"Language"' "$cfg"; then
-    sed -E 's/"Language"[[:space:]]*:[[:space:]]*[0-9]+/"Language": '"$lang"'/g' "$cfg" > "$cfg.tmp" &&
-      mv "$cfg.tmp" "$cfg"
+  if portkit_launcher json merge --file "$cfg" --patch "{\"Language\":$lang}"; then
+    echo "$LOG_PREFIX language config updated: Language=$lang"
   else
-    awk -v lang="$lang" '
-      BEGIN { done=0 }
-      !done && /\{/ { sub(/\{/, "{\n  \"Language\": " lang ","); done=1 }
-      { print }
-      END { if (NR == 0) printf "{\n  \"Language\": %s\n}\n", lang }
-    ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+    echo "$LOG_PREFIX invalid language config; left untouched"
+    return 1
   fi
-  echo "$LOG_PREFIX language config updated: Language=$lang"
 }
 
 # ═══════════════ STAGE 2: patch config.toml from launcher choices ══════════

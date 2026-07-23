@@ -15,7 +15,7 @@ public static class ModEntry
     private static Harmony _harmony;
 
     /// Called by the godot fork before sts2.dll loads. Installs a gamedata
-    /// assembly resolver as a fallback (primary path is launcher.sh cp -fu).
+    /// assembly resolver as a fallback (the launcher helper performs the primary incremental sync).
     [UnmanagedCallersOnly]
     public static int InitializeGodotSharp(
         IntPtr godotDllHandle,

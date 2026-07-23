@@ -60,32 +60,16 @@ resolve_display_resolution() {
 # Write the resolved size into the loader's toml. Arg: $1 = toml file.
 apply_display_resolution() {
   local toml="$1"
-  sed -i "s/^displayWidth=.*/displayWidth=${RES_W}/" "$toml"
-  sed -i "s/^displayHeight=.*/displayHeight=${RES_H}/" "$toml"
+  portkit_launcher unity configure \
+    --file "$toml" --width "$RES_W" --height "$RES_H"
 }
 
-# ── [input.remap] upsert a/b/x/y into the section (replace if present, append
-# if missing). sed can't add lines that don't exist, and a toml missing x/y
-# lines makes the swap silently dead; awk self-heals, other lines/sections
-# pass through verbatim. Args: $1=toml file, $2=a $3=b $4=x $5=y values. ───
+# ── [input.remap] upsert a/b/x/y without depending on device awk/sed.
+# Args: $1=toml file, $2=a $3=b $4=x $5=y values. ───────────────────────
 apply_button_remap() {
   local toml="$1" a="$2" b="$3" x="$4" y="$5"
-  awk -v a="$a" -v b="$b" -v x="$x" -v y="$y" '
-    /^\[input\.remap\]/ { print; inblk=1; da=db=dx=dy=0; next }
-    inblk && /^\[/ {
-      if(!da) printf "a       = \"%s\"\n", a
-      if(!db) printf "b       = \"%s\"\n", b
-      if(!dx) printf "x       = \"%s\"\n", x
-      if(!dy) printf "y       = \"%s\"\n", y
-      inblk=0
-    }
-    inblk && /^a *=/ { printf "a       = \"%s\"\n", a; da=1; next }
-    inblk && /^b *=/ { printf "b       = \"%s\"\n", b; db=1; next }
-    inblk && /^x *=/ { printf "x       = \"%s\"\n", x; dx=1; next }
-    inblk && /^y *=/ { printf "y       = \"%s\"\n", y; dy=1; next }
-    { print }
-    END { if(inblk){ if(!da)printf"a       = \"%s\"\n",a; if(!db)printf"b       = \"%s\"\n",b; if(!dx)printf"x       = \"%s\"\n",x; if(!dy)printf"y       = \"%s\"\n",y } }
-  ' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
+  portkit_launcher unity configure \
+    --file "$toml" --a "$a" --b "$b" --x "$x" --y "$y"
 }
 
 # ── Stage-2: run a unityloader game with all the handheld defenses. Identical

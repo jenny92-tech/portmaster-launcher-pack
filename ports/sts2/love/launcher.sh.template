@@ -88,26 +88,14 @@ if [ $((DISPLAY_WIDTH * 2)) -ge $((DISPLAY_HEIGHT * 3)) ]; then GAME_ASPECT=sixt
   if [ "$SLL_SWAP_XY" = "on" ]; then echo "x = BUTTON_Y"; echo "y = BUTTON_X"; else echo "x = BUTTON_X"; echo "y = BUTTON_Y"; fi
 } > "$GAMEDIR/input_remap.cfg"
 
-# Touch only the language and aspect_ratio keys in settings.save, nothing else
-# (settings are separate from progress saves, which live in profile*/saves/ and
-# are never touched here). Safeguard: the edit goes to a temp file and is only
-# atomically mv'd back once validation passes (non-empty + at least half the
-# original size + ends with } after whitespace is stripped); if any check fails
-# the temp file is discarded and the original is left untouched. An in-place
-# edit could truncate the save to 0 bytes — better to skip this run than to
-# corrupt it. Pure sed: the device has no python3.
+# Touch only language and aspect_ratio. The launcher helper parses JSON and
+# atomically replaces the file, so invalid content is left untouched.
 sts2_patch_save() {
-  local SF="$1" tmp="$1.new.$$" osz nsz
-  sed -e 's/"language": "[a-z]*"/"language": "'"$GAME_LANG"'"/' \
-      -e 's/"aspect_ratio": "[a-z_]*"/"aspect_ratio": "'"$GAME_ASPECT"'"/' \
-      "$SF" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return; }
-  osz=$(wc -c < "$SF" 2>/dev/null || echo 0)
-  nsz=$(wc -c < "$tmp" 2>/dev/null || echo 0)
-  if [ "${nsz:-0}" -gt 0 ] && [ "${nsz:-0}" -ge $(( ${osz:-0} / 2 )) ] && \
-     tail -c 8 "$tmp" | tr -d '[:space:]' | grep -q '}$'; then
-    mv -f "$tmp" "$SF" && echo "$LOG_PREFIX settings.save: language=$GAME_LANG aspect=$GAME_ASPECT (safe write)"
+  local SF="$1" patch
+  patch=$(printf '{"language":"%s","aspect_ratio":"%s"}' "$GAME_LANG" "$GAME_ASPECT")
+  if portkit_launcher json merge --file "$SF" --patch "$patch"; then
+    echo "$LOG_PREFIX settings.save: language=$GAME_LANG aspect=$GAME_ASPECT (safe write)"
   else
-    rm -f "$tmp" 2>/dev/null
     echo "$LOG_PREFIX settings.save validation failed — left untouched, not risking it"
   fi
 }
@@ -141,8 +129,11 @@ done
 # Incremental gamedata sync — the channel for players to update game files.
 GAMEDATA="$GAMEDIR/gamedata"
 if [ -d "$GAMEDATA/data_sts2_linuxbsd_arm64" ]; then
-  cp -fu "$GAMEDATA/data_sts2_linuxbsd_arm64/"*.dll  "$GAMEDIR/data_sts2_linuxbsd_arm64/" 2>/dev/null
-  cp -fu "$GAMEDATA/data_sts2_linuxbsd_arm64/"*.json "$GAMEDIR/data_sts2_linuxbsd_arm64/" 2>/dev/null
+  portkit_launcher file sync-newer \
+    --source "$GAMEDATA/data_sts2_linuxbsd_arm64" \
+    --destination "$GAMEDIR/data_sts2_linuxbsd_arm64" \
+    --extension dll --extension json >/dev/null 2>&1 || \
+    echo "$LOG_PREFIX gamedata incremental sync failed"
 fi
 
 cat > "$GAMEDIR/override.cfg" << 'EOG'

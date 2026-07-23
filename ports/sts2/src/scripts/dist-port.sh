@@ -34,7 +34,7 @@ stage_love_ui() {
   for f in main.lua conf.lua ui.gptk launcher_bg.png; do
     [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
   done
-  "$KIT_ROOT/stage_portkit.sh" "$DIST"
+  "$KIT_ROOT/stage_portkit_launcher.sh" "$DIST"
   bash -n "$DIST/Slay the Spire 2.sh"
 }
 

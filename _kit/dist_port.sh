@@ -54,13 +54,13 @@ print(value if isinstance(value, str) else "")
 PY
 )"
 
-PORTKIT_REQUIRED="$(python3 - "$MANIFEST" <<'PY'
+LAUNCHER_KIT_REQUIRED="$(python3 - "$MANIFEST" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as fh:
     manifest = json.load(fh)
-tools = manifest.get("portkit_tools", [])
+tools = manifest.get("launcher_tools", [])
 print("1" if isinstance(tools, list) and len(tools) > 0 else "")
 PY
 )"
@@ -123,8 +123,8 @@ if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
   cp -R "$PORT_DIR/portable/." "$APP_DIST_ROOT/"
 fi
 
-if [ -n "$PORTKIT_REQUIRED" ]; then
-  "$ROOT/_kit/stage_portkit.sh" "$APP_DIST_ROOT"
+if [ -n "$LAUNCHER_KIT_REQUIRED" ]; then
+  "$ROOT/_kit/stage_portkit_launcher.sh" "$APP_DIST_ROOT"
 fi
 
 if [ "$PORT" = "appmanager" ]; then

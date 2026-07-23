@@ -10,7 +10,7 @@
   "port_dir": "heishenhua",
   "script": "[中]黑神话悟空-像素版.sh",
   "gptk": "love/ui.gptk",
-  "portkit_tools": ["font-provision"],
+  "launcher_tools": ["font-provision", "runtime-discovery", "unity-config"],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

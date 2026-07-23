@@ -781,13 +781,10 @@ dependencies = [
 name = "portkit-cli"
 version = "0.1.0"
 dependencies = [
- "lzma-rust2",
  "portkit-core",
+ "portkit-launcher",
  "serde",
  "serde_json",
- "tar",
- "tempfile",
- "zip",
 ]
 
 [[package]]
@@ -801,6 +798,18 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "ureq",
+ "zip",
+]
+
+[[package]]
+name = "portkit-launcher"
+version = "0.1.0"
+dependencies = [
+ "lzma-rust2",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
  "zip",
 ]
 

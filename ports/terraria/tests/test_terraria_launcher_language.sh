@@ -14,10 +14,12 @@ grep -Fq 'launcher.resolution {env = {"TER_WIDTH", "TER_HEIGHT"}}' "$ui"
 grep -Fq '泰拉瑞亚启动器/launch_config.env' "$ui"
 
 grep -Fq 'apply_terraria_language' "$shfile"
+grep -Fq 'portkit_launcher json merge' "$shfile"
+! sed -n '/^apply_terraria_language()/,/^}/p' "$shfile" | grep -Eq 'sed |awk '
 grep -Fq 'local lang="${TER_LANGUAGE:-7}"' "$shfile"
 grep -Fq 'local cfg="$CONFDIR/config.json"' "$shfile"
 ! grep -Fq '/storage/emulated/0/Android/data/com.and.games505.TerrariaPaid/config.json' "$shfile"
-grep -Fq '"Language": %s' "$shfile"
+grep -Fq '{\"Language\":$lang}' "$shfile"
 grep -Fq '#@KIT-BEGIN' "$shfile"
 grep -Fq 'source "$KIT/portmaster_bootstrap.sh"' "$shfile"
 grep -Fq 'source "$KIT/portmaster_common.sh"' "$shfile"

@@ -86,9 +86,8 @@ install_exit_trap() {
 
 _love_provide_font() {
   local ui_dir="$1" out="$1/font.ttf" std="${PM_RESOURCE_DIR:-$controlfolder/resources}"
-  local tool="${PORTKIT_BIN_OVERRIDE:-$GAMEDIR/bin/portkit}"
   unset LOVE_FONT_PATH
-  if [ -x "$tool" ] && LOVE_FONT_PATH=$("$tool" font provision \
+  if LOVE_FONT_PATH=$(portkit_launcher font provision \
       --candidate "$std/NotoSansSC-Regular.ttf" \
       --candidate "$controlfolder/pylibs/resources/NotoSansSC-Regular.ttf" \
       --candidate "$out" \
@@ -106,12 +105,16 @@ _love_provide_font() {
   return 1
 }
 
+portkit_launcher() {
+  "${PORTKIT_LAUNCHER_BIN_OVERRIDE:-$GAMEDIR/bin/portkit-launcher}" "$@"
+}
+
 # run_love_launcher_ui [ui_dir]   (default $GAMEDIR/love_ui)
 # Sets launcher_exit and LAUNCH_ENV.
 run_love_launcher_ui() {
   local ui_dir="${1:-$GAMEDIR/love_ui}" love_txt
   LAUNCH_ENV="$ui_dir/launch_config.env"
-  love_txt=$(ls "$controlfolder"/runtimes/love_*/love.txt 2>/dev/null | sort -V | tail -1)
+  love_txt=$(portkit_launcher runtime latest-love --root "$controlfolder/runtimes" 2>/dev/null || true)
   if [ -z "$love_txt" ] || [ ! -f "$ui_dir/main.lua" ]; then
     echo "$LOG_PREFIX no love runtime / main.lua — skipping settings UI, using current config"
     launcher_exit=1

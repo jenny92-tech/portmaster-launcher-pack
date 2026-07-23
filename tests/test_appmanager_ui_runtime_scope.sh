@@ -50,7 +50,8 @@ grep -Fq 'runtime/love.aarch64' "$ROOT/ports/appmanager/src/launcher.sh"
 # Ordinary game launchers keep using PortMaster's installed LÖVE runtime. The
 # APP-specific executable and tuning variables must not leak into shared code
 # or any other built launcher.
-grep -Fq 'runtimes/love_*/love.txt' "$ROOT/_kit/portmaster_common.sh"
+grep -Fq 'runtime latest-love' "$ROOT/_kit/portmaster_common.sh"
+! grep -Fq 'sort -V' "$ROOT/_kit/portmaster_common.sh"
 ! grep -Fq 'love.aarch64' "$ROOT/_kit/portmaster_common.sh"
 for launcher in "$ROOT"/ports/*/dist/*.sh; do
   case "$launcher" in */appmanager/*) continue ;; esac

@@ -1,4 +1,4 @@
-use portkit_core::github::{Capability, GitHubRegistry, GitHubTransport, Route, RouteFormatter};
+use portkit_core::github::{Capability, GitHubRegistry, GitHubTransport};
 use portkit_core::{
     CandidateSelector, CommandEnvironment, Config, ConfigCandidate, ConfigLoader, ConfigOrigin,
     ConfigRefreshStatus, DetectionContext, DigestAlgorithm, EnvironmentOperation,
@@ -12,8 +12,6 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
-mod font;
 
 const EMBEDDED_ROOT: &[u8] = include_bytes!("../../../config/config.json");
 const SOURCE_REVISION: &str = match option_env!("PORTKIT_SOURCE_REVISION") {
@@ -113,7 +111,7 @@ fn file_zip_readable(arguments: &[String]) -> Result<()> {
 
 fn font_provision(arguments: &[String]) -> Result<()> {
     let options = Options::parse(arguments)?;
-    let request = font::ProvisionRequest {
+    let request = portkit_launcher::font::ProvisionRequest {
         candidates: options.many("candidate").map(PathBuf::from).collect(),
         tar_xz_sources: options.many("tar-xz").map(PathBuf::from).collect(),
         zip_sources: options.many("zip").map(PathBuf::from).collect(),
@@ -123,7 +121,7 @@ fn font_provision(arguments: &[String]) -> Result<()> {
             .unwrap_or("NotoSansSC-Regular.ttf")
             .to_owned(),
     };
-    let outcome = font::provision(&request)?;
+    let outcome = portkit_launcher::font::provision(&request)?;
     match options.one("format").unwrap_or("raw") {
         "raw" => println!("{}", outcome.path.display()),
         "json" => print_json(&outcome)?,
@@ -137,45 +135,7 @@ fn font_provision(arguments: &[String]) -> Result<()> {
 }
 
 fn build_registry() -> GitHubRegistry {
-    // PORTKIT_GITHUB_ROUTES lets an operator or test inject mirror bases
-    // (one per line) instead of the bundled registry. Each line becomes a Full
-    // route; the origin direct route is always appended.
-    if let Ok(raw) = std::env::var("PORTKIT_GITHUB_ROUTES") {
-        let mut routes = Vec::new();
-        for (index, base) in raw
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .enumerate()
-        {
-            if let Ok(route) = Route::new(
-                format!("r{}", index + 1),
-                RouteFormatter::Full,
-                [
-                    Capability::Release,
-                    Capability::Raw,
-                    Capability::Archive,
-                    Capability::Clone,
-                    Capability::Gist,
-                ],
-                base,
-            ) {
-                routes.push(route);
-            }
-        }
-        if let Ok(origin) = Route::new(
-            "origin",
-            RouteFormatter::Direct,
-            Capability::ALL.to_vec(),
-            "",
-        ) {
-            routes.push(origin);
-        }
-        if let Ok(registry) = GitHubRegistry::new(routes) {
-            return registry;
-        }
-    }
-    GitHubRegistry::bundled()
+    GitHubRegistry::configured()
 }
 
 fn github_candidates(arguments: &[String]) -> Result<()> {

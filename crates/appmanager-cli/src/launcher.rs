@@ -1110,7 +1110,7 @@ impl Session {
         let mut detection = portkit_core::DetectionContext::current(self.paths.launcher.clone());
         detection.root = self.root.clone();
         detection.target_override = self.target_override.clone();
-        let status = portkit_core::refresh_config(&portkit_core::ConfigRefreshRequest {
+        let status = match portkit_core::refresh_config(&portkit_core::ConfigRefreshRequest {
             source,
             packaged_root: self.paths.config_dir.join("config.json"),
             packaged_dir: self.paths.config_dir.clone(),
@@ -1118,8 +1118,13 @@ impl Session {
             cache_dir: self.paths.remote_config_dir.clone(),
             timeout: std::time::Duration::from_secs(timeout),
             detection,
-        })
-        .map_err(display_error)?;
+        }) {
+            Ok(status) => status,
+            Err(error) => {
+                write_text(&self.paths.config_refresh_result, "1\terror\n")?;
+                return Err(display_error(error));
+            }
+        };
         write_text(
             &self.paths.config_refresh_result,
             &format!("1\t{}\n", status.as_str()),

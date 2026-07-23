@@ -108,92 +108,20 @@ hk_sync_graphics_resolution "$HK_RUNTIME_HEIGHT"
 # Language, audio, quality, input, and other user/game preferences are left to
 # the game and must never be reset by the launcher.
 HK_PREFS="$CONFDIR/shared_prefs/com.TeamCherry.HollowKnight.v2.playerprefs.json"
-hk_write_default_playerprefs() {
-  mkdir -p "$CONFDIR/shared_prefs"
-  cat > "$HK_PREFS" <<EOF
-{
-  "bools": {},
-  "floats": {
-    "VidBrightValue": 20.0,
-    "VidOSValue": 0.0
-  },
-  "ints": {
-    "VidBrightSet": 1,
-    "VidOSSet": 1,
-    "Screenmanager Resolution Height": ${HK_RUNTIME_HEIGHT},
-    "Screenmanager Resolution Width": ${HK_RUNTIME_WIDTH},
-    "__UNITY_PLAYERPREFS_VERSION__": 1
-  },
-  "longs": {},
-  "strings": {},
-  "version": 1
-}
-EOF
-}
-
 hk_merge_playerprefs() {
   mkdir -p "$CONFDIR/shared_prefs"
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - "$HK_PREFS" "$HK_RUNTIME_WIDTH" "$HK_RUNTIME_HEIGHT" <<'PY'
-import json
-import os
-import sys
-import tempfile
-
-path, width, height = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-try:
-    with open(path, "r", encoding="utf-8") as fh:
-        prefs = json.load(fh)
-    if not isinstance(prefs, dict):
-        prefs = {}
-except Exception:
-    prefs = {}
-
-for section in ("bools", "floats", "ints", "longs", "strings"):
-    if not isinstance(prefs.get(section), dict):
-        prefs[section] = {}
-
-prefs["floats"].update({
-    "VidBrightValue": 20.0,
-    "VidOSValue": 0.0,
-})
-prefs["ints"].update({
-    "VidBrightSet": 1,
-    "VidOSSet": 1,
-    "Screenmanager Resolution Height": height,
-    "Screenmanager Resolution Width": width,
-    "__UNITY_PLAYERPREFS_VERSION__": 1,
-})
-prefs["version"] = int(prefs.get("version") or 1)
-
-directory = os.path.dirname(path) or "."
-fd, tmp = tempfile.mkstemp(prefix=".playerprefs.", dir=directory, text=True)
-try:
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(prefs, fh, ensure_ascii=False, indent=2)
-        fh.write("\n")
-    os.replace(tmp, path)
-finally:
-    try:
-        os.unlink(tmp)
-    except FileNotFoundError:
-        pass
-PY
+  local patch
+  patch=$(printf '{"bools":{},"floats":{"VidBrightValue":20.0,"VidOSValue":0.0},"ints":{"VidBrightSet":1,"VidOSSet":1,"Screenmanager Resolution Height":%s,"Screenmanager Resolution Width":%s,"__UNITY_PLAYERPREFS_VERSION__":1},"longs":{},"strings":{},"version":1}' \
+    "$HK_RUNTIME_HEIGHT" "$HK_RUNTIME_WIDTH")
+  if portkit_launcher json merge --file "$HK_PREFS" --patch "$patch"; then
     echo "$LOG_PREFIX merged PlayerPrefs onboarding gates (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
-  elif [ ! -f "$HK_PREFS" ]; then
-    hk_write_default_playerprefs
-    echo "$LOG_PREFIX seeded PlayerPrefs defaults without python3"
   else
-    echo "$LOG_PREFIX python3 missing; keeping existing PlayerPrefs"
+    echo "$LOG_PREFIX PlayerPrefs invalid or unwritable; left untouched"
+    return 1
   fi
 }
 
-if [ -f "$HK_PREFS" ]; then
-  hk_merge_playerprefs
-else
-  hk_write_default_playerprefs
-  echo "$LOG_PREFIX seeded PlayerPrefs to skip onboarding (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
-fi
+hk_merge_playerprefs
 
 # ═══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game "$PORT_TOML"
