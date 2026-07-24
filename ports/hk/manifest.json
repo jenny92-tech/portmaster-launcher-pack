@@ -4,13 +4,25 @@
   "engine": "Unity 2020 (Mono)",
   "runtime": "Bogodroid unityloader",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
-  "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One"],
-  "language": ["en", "zh-CN"],
+  "devices": [
+    "TrimUI Smart Pro/Brick",
+    "MiniLoong Pocket One"
+  ],
+  "language": [
+    "en",
+    "zh-CN"
+  ],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "hollowknight",
   "script": "[中]空洞骑士.sh",
   "gptk": "love/ui.gptk",
-  "launcher_tools": ["font-provision", "json-merge", "runtime-discovery", "unity-config"],
+  "launcher_tools": [
+    "font-provision",
+    "json-merge",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

@@ -30,6 +30,8 @@ bash -n "$DIST/Batomon Showdown.sh"
 [ -f "$PORT_ROOT/README.md" ] && cp "$PORT_ROOT/README.md" "$DIST/"
 cp "$SRC_ROOT/gamedata-README.md" "$GAMEDATA/README.md"
 python3 "$REPO_ROOT/_kit/port_json.py" "$PORT_ROOT/manifest.json" "$DIST" "batomon"
+# The artwork adapter runs from the packaged PortKit helper.
+"$REPO_ROOT/_kit/stage_portkit_launcher.sh" "$DIST"
 
 blue "=== Batomon dist: Godot runtime (4.3-arm64-sdl2-batomon) ==="
 GODOT_BIN="${GODOT_BIN:-$REPO_ROOT/external/godot/godot.linuxbsd.template_release.arm64.mono}"

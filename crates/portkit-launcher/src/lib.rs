@@ -1,3 +1,4 @@
+pub mod artwork;
 pub mod atomic;
 pub mod font;
 pub mod json;

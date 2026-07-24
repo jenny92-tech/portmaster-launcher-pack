@@ -25,7 +25,9 @@ cd "$GAMEDIR" || exit 1
 
 ERRLOG="$GAMEDIR/log.txt"
 if [ -f "$GAMEDIR/.debug" ]; then
-  > "$ERRLOG" && exec > >(tee "$ERRLOG") 2>&1
+  # Plain redirect: process substitution is a bashism that breaks minimal
+  # /bin/sh parsers, and no console reads stdout on-device anyway.
+  : > "$ERRLOG" && exec >> "$ERRLOG" 2>&1
 else
   RUNLOG="/tmp/batomon_run.log"
   > "$RUNLOG" && exec >> "$RUNLOG" 2>&1
@@ -87,19 +89,21 @@ pm_platform_helper "godot.mono"
 VERBOSE_ARG=""
 [ -f "$GAMEDIR/.debug" ] && VERBOSE_ARG="--verbose"
 
-SCENE_ARG=()
+# Optional single scene argument. A plain string plus ${VAR:+"$VAR"} keeps
+# this parseable by minimal /bin/sh implementations (no bash arrays).
+SCENE_ARG=""
 if [ -n "${BATOMON_SCENE:-}" ]; then
-  SCENE_ARG=("$BATOMON_SCENE")
+  SCENE_ARG="$BATOMON_SCENE"
 elif [ -f "$GAMEDIR/.scene" ]; then
   read -r scene_from_file < "$GAMEDIR/.scene" || scene_from_file=""
-  [ -n "$scene_from_file" ] && SCENE_ARG=("$scene_from_file")
+  [ -n "$scene_from_file" ] && SCENE_ARG="$scene_from_file"
 fi
 
-echo "[Batomon] launching $GAME_PCK ${SCENE_ARG[*]:-}"
+echo "[Batomon] launching $GAME_PCK ${SCENE_ARG}"
 ( XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
   $GODOT_LAUNCH $VERBOSE_ARG --display-driver sdl2 --rendering-driver opengl3 \
   --resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} \
-  --main-pack "$GAME_PCK" "${SCENE_ARG[@]}" )
+  --main-pack "$GAME_PCK" ${SCENE_ARG:+"$SCENE_ARG"} )
 code=$?
 echo "[Batomon] exit code: $code"
 

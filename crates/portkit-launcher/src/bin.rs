@@ -29,6 +29,42 @@ fn run(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             );
             Ok(())
         }
+        [group, command, rest @ ..] if group == "artwork" && command == "probe" => {
+            let options = Options::parse(rest)?;
+            let script_dir = required(&options, "script-dir")?;
+            match portkit_launcher::artwork::probe_image_dir(
+                script_dir.as_ref(),
+                &portkit_launcher::artwork::ProbeMarkers::default(),
+            ) {
+                Some(dir) => println!("{}", dir.display()),
+                None => println!(),
+            }
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "artwork" && command == "sync" => {
+            let options = Options::parse(rest)?;
+            let script_dir = required(&options, "script-dir")?;
+            let launcher = required(&options, "launcher")?;
+            let source_dir = required(&options, "source-dir")?;
+            let outcome = portkit_launcher::artwork::sync_launcher_artwork(
+                script_dir.as_ref(),
+                launcher.as_ref(),
+                source_dir.as_ref(),
+                &portkit_launcher::artwork::ProbeMarkers::default(),
+            )?;
+            match outcome {
+                portkit_launcher::artwork::SyncOutcome::Copied(path) => {
+                    println!("copied	{}", path.display());
+                }
+                portkit_launcher::artwork::SyncOutcome::Existing(path) => {
+                    println!("existing	{}", path.display());
+                }
+                portkit_launcher::artwork::SyncOutcome::Skipped(reason) => {
+                    println!("skipped	{reason}");
+                }
+            }
+            Ok(())
+        }
         [group, command, rest @ ..] if group == "font" && command == "provision" => {
             let options = Options::parse(rest)?;
             let outcome = provision(&ProvisionRequest {
@@ -164,5 +200,7 @@ fn safe_button(value: &str) -> bool {
 }
 
 fn usage() -> String {
-    "usage: portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--width N --height N] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
+    "usage: portkit-launcher artwork sync --script-dir DIR --launcher FILE --source-dir DIR
+       portkit-launcher artwork probe --script-dir DIR
+       portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--width N --height N] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
 }

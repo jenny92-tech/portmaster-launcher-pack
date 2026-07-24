@@ -152,6 +152,4 @@ background, then overlays the port's Lua modules and optional asset overrides in
 See [`love/README.md`](love/README.md) for the component and device details.
 
 Port App Manager is packaged differently: it includes a private Rust bootstrap/runtime,
-font and input helper next to its UI. See
-[`../docs/architecture.md`](../docs/architecture.md) for the repository boundary and
-publication routing.
+font and input helper next to its UI.

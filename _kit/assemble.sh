@@ -100,4 +100,14 @@ if grep -qE '#@KIT|source "\$(KIT|PORT_SRC)/' "$OUT"; then
   exit 1
 fi
 bash -n "$OUT" || { echo "!! assembled script has syntax errors: $OUT" >&2; exit 1; }
+# Frontends on some firmwares invoke launchers through a minimal /bin/sh, so
+# every assembled script must PARSE under a strict POSIX shell even when it
+# runs as bash. dash is the strictest sh commonly available; busybox ash on
+# devices accepts a superset of what dash accepts.
+if command -v dash >/dev/null 2>&1; then
+  dash -n "$OUT" || {
+    echo "!! assembled script is not POSIX-sh parseable (bashism?): $OUT" >&2
+    exit 1
+  }
+fi
 echo ">>> assembled $PORT -> $OUT ($(wc -l < "$OUT") lines, syntax OK)"

@@ -4,13 +4,22 @@
   "engine": "Unity 2021.3 (IL2CPP)",
   "runtime": "Bogodroid unityloader",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
-  "devices": ["TrimUI Smart Pro/Brick"],
-  "language": ["zh-CN"],
+  "devices": [
+    "TrimUI Smart Pro/Brick"
+  ],
+  "language": [
+    "zh-CN"
+  ],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "heishenhua",
   "script": "[中]黑神话悟空-像素版.sh",
   "gptk": "love/ui.gptk",
-  "launcher_tools": ["font-provision", "runtime-discovery", "unity-config"],
+  "launcher_tools": [
+    "font-provision",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png",

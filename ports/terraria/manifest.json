@@ -6,11 +6,19 @@
   "engine": "Unity 2021.3 IL2CPP / Bogodroid UnityLoader",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "gptk": "love/ui.gptk",
-  "launcher_tools": ["font-provision", "json-merge", "runtime-discovery", "unity-config"],
+  "launcher_tools": [
+    "font-provision",
+    "json-merge",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
   "portmaster": {
     "image": {
       "screenshot": "screenshot.png"
     }
   },
-  "depends_on": ["PortMaster runtimes/love_11.5"]
+  "depends_on": [
+    "PortMaster runtimes/love_11.5"
+  ]
 }
