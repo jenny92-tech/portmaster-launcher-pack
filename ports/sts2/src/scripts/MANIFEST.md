@@ -5,6 +5,8 @@ This is the file inventory shipped in a stock launcher pack
 license posture so anyone can verify what's distributable.
 
 The pack assembles via `src/scripts/assemble-launcher-pack.sh`.
+The bundled KMSDRM SDL2 in `gamedata/libs/` builds via
+`src/scripts/build_bundled_sdl.sh` (zlib license, see SDL upstream).
 
 ## Layout
 

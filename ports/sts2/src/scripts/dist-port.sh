@@ -83,6 +83,15 @@ blue "=== STS2 dist: collect deploy files ==="
 stage_love_ui
 cp "$SRC_ROOT/linux/data-template/sts2.runtimeconfig.json" "$DATA/"
 cp "$SRC_ROOT/linux/gamedata-README.md" "$DIST/gamedata/README.md"
+
+# Bundled SDL2 (KMSDRM) for Longan-class firmware whose system SDL2 has no
+# real video driver. Built by scripts/build_bundled_sdl.sh, committed via LFS;
+# the launcher probes gamedata/libs at runtime and loads it for stage-2 only.
+BUNDLED_SDL="$SRC_ROOT/runtime/sdl2-kmsdrm/libSDL2-2.0.so.0"
+[ -f "$BUNDLED_SDL" ] || { red "missing bundled SDL2; run src/scripts/build_bundled_sdl.sh"; exit 1; }
+grep -aqi kmsdrm "$BUNDLED_SDL" || { red "bundled SDL2 lacks the KMSDRM driver"; exit 1; }
+mkdir -p "$DIST/gamedata/libs"
+cp "$BUNDLED_SDL" "$DIST/gamedata/libs/libSDL2-2.0.so.0"
 [ -f "$PORT_ROOT/LICENSE" ] && cp "$PORT_ROOT/LICENSE" "$DIST/"
 [ -f "$PORT_ROOT/README.md" ] && cp "$PORT_ROOT/README.md" "$DIST/"
 [ -f "$PORT_ROOT/README.zh-CN.md" ] && cp "$PORT_ROOT/README.zh-CN.md" "$DIST/"

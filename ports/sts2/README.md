@@ -66,6 +66,24 @@ The normal one-command path is:
 _kit/dist_port.sh sts2
 ```
 
+### Bundled SDL2 (Longan-class TrimUI)
+
+Longan-class firmware ships a system SDL2 with no real video driver, and the
+godot-sdl2 fork renders only through SDL-delegated GL. The port therefore
+bundles a KMSDRM-enabled SDL2 at `src/runtime/sdl2-kmsdrm/libSDL2-2.0.so.0`
+(committed via LFS, staged into `dist/gamedata/libs/`); the launcher probes it
+at runtime and loads it for stage-2 only. Rebuild only to change the SDL
+version or driver set:
+
+```sh
+ports/sts2/src/scripts/build_bundled_sdl.sh
+```
+
+The script pins debian:bullseye (device glibc is older than 2.34), enables
+KMSDRM+ALSA only, and fails the build if the KMSDRM driver or the glibc
+ceiling check does not pass. Note the SDL driver-name string is uppercase
+"KMSDRM" — probes must grep case-insensitively.
+
 ## Distribute
 
 `src/scripts/assemble-launcher-pack.sh` produces a redistributable launcher
