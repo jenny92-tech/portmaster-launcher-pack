@@ -10,7 +10,7 @@ The pack assembles via `src/scripts/assemble-launcher-pack.sh`.
 
 ```
 dist/
-├── Slay the Spire 2.sh                         [our] launcher.sh
+├── <manifest script>.sh                        [our] launcher.sh (named by manifest.json "script")
 ├── godot.mono                                  [our fork CI]
 ├── love_ui/                                    [our build]
 │   ├── kit.lua                                 [our shared UI]

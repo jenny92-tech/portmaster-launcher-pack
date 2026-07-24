@@ -51,7 +51,28 @@ if [ -S "/run/wayland-0" ] || [ -S "${XDG_RUNTIME_DIR:-/run}/wayland-0" ]; then
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run}"
   export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 else
-  export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-mali}"
+  # No compositor: pick a driver the loaded SDL actually contains, in order:
+  #   1. firmware SDL2's "mali" driver (Brick-class firmware);
+  #   2. the port-bundled kmsdrm SDL2 in gamedata/libs (Longan-class firmware,
+  #      whose system SDL2 has no real video driver at all) — that library is
+  #      loaded for STAGE-2 ONLY via STS2_SDL_DIR at the exec below, so the
+  #      stage-1 LÖVE UI keeps its own gl4es/framebuffer path untouched;
+  #   3. "dummy" as a last resort (current godot builds need SDL-side GL and
+  #      will refuse it, but it keeps the error readable in the run log).
+  STS2_SDL_DIR=""
+  if [ -z "${SDL_VIDEODRIVER:-}" ]; then
+    SDL_LIB=$(ls /usr/lib/libSDL2-2.0.so.0* /usr/lib64/libSDL2-2.0.so.0* 2>/dev/null | head -1)
+    BUNDLED_SDL="$GAMEDIR/gamedata/libs/libSDL2-2.0.so.0"
+    if [ -n "$SDL_LIB" ] && grep -aq mali "$SDL_LIB"; then
+      SDL_VIDEODRIVER=mali
+    elif [ -f "$BUNDLED_SDL" ] && grep -aqi kmsdrm "$BUNDLED_SDL"; then
+      SDL_VIDEODRIVER=kmsdrm
+      STS2_SDL_DIR="$GAMEDIR/gamedata/libs"
+    else
+      SDL_VIDEODRIVER=dummy
+    fi
+  fi
+  export SDL_VIDEODRIVER
   export SDL_AUDIODRIVER=alsa
 fi
 
@@ -134,13 +155,18 @@ sts2_patch_save() {
 _have_save=0
 for SF in "$CONFDIR"/SlayTheSpire2/*/*/settings.save; do [ -f "$SF" ] && { _have_save=1; break; }; done
 if [ "$_have_save" = "0" ]; then
-  mkdir -p "$CONFDIR/SlayTheSpire2/default/1/profile1/saves"
-  printf '{\n  "language": "%s",\n  "aspect_ratio": "%s",\n  "msaa": 0,\n  "volume_master": 0.8,\n  "volume_bgm": 0.8,\n  "volume_sfx": 0.8,\n  "volume_ambience": 0.8\n}\n' \
-    "$GAME_LANG" "$GAME_ASPECT" > "$CONFDIR/SlayTheSpire2/default/1/settings.save" &&
-    echo "$LOG_PREFIX first launch: seeded settings.save (language/aspect + MSAA off/volume 0.8)"
-  printf '{\n  "text_effects_enabled": false\n}\n' \
-    > "$CONFDIR/SlayTheSpire2/default/1/profile1/saves/prefs.save" &&
-    echo "$LOG_PREFIX first launch: seeded prefs.save (text effects off)"
+  # Seed BOTH save bases: the GodotSteam build reads/writes steam/0 (the live
+  # one), older builds used default/1. Seeding only default/1 makes the very
+  # first boot English — the game creates steam/0 itself with factory "eng".
+  for SEED_BASE in "$CONFDIR/SlayTheSpire2/default/1" "$CONFDIR/SlayTheSpire2/steam/0"; do
+    mkdir -p "$SEED_BASE/profile1/saves"
+    printf '{\n  "language": "%s",\n  "aspect_ratio": "%s",\n  "msaa": 0,\n  "volume_master": 0.8,\n  "volume_bgm": 0.8,\n  "volume_sfx": 0.8,\n  "volume_ambience": 0.8\n}\n' \
+      "$GAME_LANG" "$GAME_ASPECT" > "$SEED_BASE/settings.save" &&
+      echo "$LOG_PREFIX first launch: seeded ${SEED_BASE##*SlayTheSpire2/}/settings.save (language/aspect + MSAA off/volume 0.8)"
+    printf '{\n  "text_effects_enabled": false\n}\n' \
+      > "$SEED_BASE/profile1/saves/prefs.save" &&
+      echo "$LOG_PREFIX first launch: seeded ${SEED_BASE##*SlayTheSpire2/}/prefs.save (text effects off)"
+  done
 fi
 
 for SF in "$CONFDIR"/SlayTheSpire2/*/*/settings.save; do
@@ -171,7 +197,8 @@ audio_setup > /dev/null 2>&1
 [ -f "$GAMEDIR/.debug" ] && install_exit_trap
 pm_platform_helper "godot.mono"
 
-( LANG="${SLL_LANGUAGE}.UTF-8" XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
+( [ -n "${STS2_SDL_DIR:-}" ] && export LD_LIBRARY_PATH="$STS2_SDL_DIR:$LD_LIBRARY_PATH"
+  LANG="${SLL_LANGUAGE}.UTF-8" XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
   exec -a unityloader ./godot.mono --display-driver sdl2 --rendering-driver opengl3 \
   --resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} \
   --main-pack "$GAMEDIR/gamedata/pcks/SlayTheSpire2.pck" ) > "$RUNLOG" 2>&1

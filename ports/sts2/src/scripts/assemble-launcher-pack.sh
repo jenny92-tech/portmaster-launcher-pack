@@ -18,6 +18,18 @@ PORT_ROOT="$(cd "$SRC_ROOT/.." && pwd)"
 DIST="$PORT_ROOT/dist"
 DATA="$DIST/data_sts2_linuxbsd_arm64"
 
+# Launcher script name is single-sourced from the manifest (same rule as
+# _kit/dist_port.sh); never hardcode it here.
+SCRIPT_NAME="$(python3 - "$PORT_ROOT/manifest.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+print(manifest.get("script") or "sts2.sh")
+PY
+)"
+
 DOTNET_VERSION="${DOTNET_VERSION:-9.0.7}"
 DOTNET_ARCH="${DOTNET_ARCH:-arm64}"
 DOTNET_CACHE="${DOTNET_CACHE:-$PORT_ROOT/.cache/dotnet-runtime-$DOTNET_VERSION-linux-$DOTNET_ARCH}"
@@ -77,7 +89,7 @@ cp "$SRC_ROOT/external/spine-runtimes/libspine_godot.linux.template_release.arm6
 
 blue "=== 5. verify ==="
 verify_files=(
-  "$DIST/Slay the Spire 2.sh"
+  "$DIST/$SCRIPT_NAME"
   "$DIST/godot.mono"
   "$DIST/love_ui/main.lua"
   "$DIST/love_ui/kit.lua"

@@ -18,6 +18,18 @@ UI_ONLY="${UI_ONLY:-0}"
 KIT_ROOT="$(cd "$PORT_ROOT/../../_kit" && pwd)"
 LOVE_DIR="$PORT_ROOT/love"
 
+# Launcher script name is single-sourced from the manifest (same rule as
+# _kit/dist_port.sh); never hardcode it here.
+SCRIPT_NAME="$(python3 - "$PORT_ROOT/manifest.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+print(manifest.get("script") or "sts2.sh")
+PY
+)"
+
 red()   { printf "\033[31m%s\033[0m\n" "$*"; }
 green() { printf "\033[32m%s\033[0m\n" "$*"; }
 blue()  { printf "\033[34m%s\033[0m\n" "$*"; }
@@ -25,7 +37,7 @@ blue()  { printf "\033[34m%s\033[0m\n" "$*"; }
 stage_love_ui() {
   [ -f "$LOVE_DIR/launcher.sh.template" ] || { red "missing love launcher: $LOVE_DIR/launcher.sh.template"; exit 1; }
   mkdir -p "$DIST"
-  "$KIT_ROOT/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/Slay the Spire 2.sh"
+  "$KIT_ROOT/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/$SCRIPT_NAME"
   rm -rf "$DIST/love_ui"
   mkdir -p "$DIST/love_ui"
   cp "$KIT_ROOT/love/"*.lua "$DIST/love_ui/"
@@ -35,7 +47,7 @@ stage_love_ui() {
     [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$DIST/love_ui/"
   done
   "$KIT_ROOT/stage_portkit_launcher.sh" "$DIST"
-  bash -n "$DIST/Slay the Spire 2.sh"
+  bash -n "$DIST/$SCRIPT_NAME"
 }
 
 if [ "$UI_ONLY" = "1" ]; then
@@ -76,7 +88,7 @@ cp "$SRC_ROOT/linux/gamedata-README.md" "$DIST/gamedata/README.md"
 [ -f "$PORT_ROOT/README.zh-CN.md" ] && cp "$PORT_ROOT/README.zh-CN.md" "$DIST/"
 if [ -f "$PORT_ROOT/screenshot.png" ]; then
   cp "$PORT_ROOT/screenshot.png" "$DIST/screenshot.png"
-  cp "$PORT_ROOT/screenshot.png" "$DIST/Slay the Spire 2.png"
+  cp "$PORT_ROOT/screenshot.png" "$DIST/${SCRIPT_NAME%.sh}.png"
   python3 - "$PORT_ROOT/manifest.json" "$PORT_ROOT/screenshot.png" "$DIST" <<'PY'
 import json
 import os
@@ -122,7 +134,7 @@ extends Node
 # Stub for missing Sentry GDExtension on arm64 Linux.
 EOF
 
-bash -n "$DIST/Slay the Spire 2.sh"
+bash -n "$DIST/$SCRIPT_NAME"
 
 green ">>> packaged sts2 -> $DIST"
 find "$DIST" -maxdepth 3 -type f | sort | sed "s#^$DIST/##"
