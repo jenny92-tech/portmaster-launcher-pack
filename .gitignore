@@ -28,3 +28,6 @@ __pycache__/
 
 # Bundled runtimes are fetched, not committed (ports/*/src/scripts/fetch_runtime.sh)
 ports/*/src/runtime/*.squashfs
+
+# Internal architecture notes and specs stay local-only
+/docs/

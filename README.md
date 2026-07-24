@@ -38,8 +38,6 @@ game-runtime tooling stays inside the relevant port.
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — current cross-repository ownership,
-  download routing, installation safety and PortMaster Fork release flow.
 - [`_kit/README.md`](_kit/README.md) — build system and shared Shell modules.
 - [`_kit/love/README.md`](_kit/love/README.md) — public UIKit and launcher contract.
 - [`ports/appmanager/README.md`](ports/appmanager/README.md) — Port App Manager behavior,
