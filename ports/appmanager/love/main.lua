@@ -62,6 +62,7 @@ local function poll_task(dt)
         elseif task.kind=="update-check" or task.kind=="update-check-background" then
             operations.task=nil; kit.set_busy(false)
             if event.status=="error" then env.update_status="error" end
+            operations.refresh_home()
             if task.kind=="update-check" then environment.build_manage(true); kit.goto_page(page.MANAGE) end
             if event.status=="error" then
                 kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
@@ -78,6 +79,7 @@ local function poll_task(dt)
             environment.finish_validation(status,detail)
         elseif task.kind=="scan-sizes" then
             operations.task=nil
+            operations.refresh_home()
         else operations.finish_task(event) end
         return
     end
@@ -93,7 +95,8 @@ local function poll_task(dt)
         elseif task.kind=="config-refresh" then
             operations.task=nil; finish_initial_load(true)
         elseif task.kind=="update-check" then
-            operations.task=nil; environment.build_manage(true); kit.goto_page(page.MANAGE)
+            operations.task=nil; env.update_status="error"; operations.refresh_home()
+            environment.build_manage(true); kit.goto_page(page.MANAGE)
             kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
         elseif task.kind=="inventory-refresh" then
             operations.task=nil; pages.build_junk(); kit.goto_page(page.JUNK)

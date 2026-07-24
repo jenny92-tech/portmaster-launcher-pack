@@ -128,7 +128,7 @@ function Pages.new(model,operations)
                     (model.update_state()=="update" and kit.badge(L("Update","可升级"),{0.62,0.64,0.69}) or nil)}),
             sidebar=sidebar})
         local state=kit.get_state()
-        if state.onboarding_seen~="1" then
+        if state.onboarding_seen~="1" and not preserve_focus then
             kit.guide({
                 title=L("Welcome to Port App Manager","欢迎使用 Port App Manager"),
                 message=L(

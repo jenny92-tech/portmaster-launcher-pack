@@ -10,6 +10,18 @@ function Operations.new(model)
         page_builders,environment=builders,environment_pages
     end
 
+    function self.refresh_home()
+        page_builders.build_home(true)
+    end
+
+    local function rebuild_return_page(return_page)
+        self.refresh_home()
+        if return_page==pages.RUNTIME then page_builders.build_runtime(true)
+        elseif return_page==pages.TRASH then page_builders.build_trash(true)
+        elseif return_page==pages.JUNK then page_builders.build_junk(true) end
+        kit.goto_page(return_page or pages.HOME)
+    end
+
     function self.show_exit_dialog()
         kit.dialog({
             title=L("Exit Port App Manager?","退出 Port App Manager？"),
@@ -23,10 +35,13 @@ function Operations.new(model)
         local completed_task=self.task
         self.task=nil
         local data=event and event.data or {}
-        model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
-        if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
         local result=type(data.operation)=="table" and data.operation or {}
         local failed=event and event.status=="error" or result.failed==true
+        if type(data.snapshot)=="table" then
+            model.apply_snapshot(data.snapshot)
+        elseif not failed then
+            model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
+        end
         if completed_task and completed_task.kind=="portmaster" then
             -- The blocking result dialog below already gives the next step.
         elseif failed then
@@ -56,13 +71,7 @@ function Operations.new(model)
             end
             return
         end
-        if self.confirm_return==pages.RUNTIME then page_builders.build_runtime(); kit.goto_page(pages.RUNTIME)
-        else
-            page_builders.build_home()
-            if self.confirm_return==pages.TRASH then page_builders.build_trash(); kit.goto_page(pages.TRASH)
-            elseif self.confirm_return==pages.JUNK then page_builders.build_junk(); kit.goto_page(pages.JUNK)
-            else kit.goto_page(pages.HOME) end
-        end
+        rebuild_return_page(self.confirm_return)
     end
 
     function self.request_portmaster_cancel()

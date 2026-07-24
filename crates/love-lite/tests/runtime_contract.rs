@@ -593,3 +593,73 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
         );
     }
 }
+
+#[test]
+fn runtime_repair_completion_rebuilds_the_home_and_runtime_pages() {
+    let lua = mlua::Lua::new();
+    let app_lua =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/love");
+    lua.globals()
+        .set("APP_LUA", app_lua.to_string_lossy().as_ref())
+        .expect("publish App Manager Lua directory");
+    lua.load(
+        r#"
+        package.path=APP_LUA.."/?.lua;"..package.path
+        local calls={home=0,runtime=0,goto_page=0}
+        local kit={
+            set_busy=function() end,
+            toast=function() end,
+            goto_page=function(page) calls.goto_page=page end,
+        }
+        local native={}
+        local model=require("app_model").new(kit,native)
+        local function snapshot(health)
+            return {
+                env={libs_dir="/libs"},
+                inventory={
+                    ports={{script="Game.sh",dir="Game",images={}}},
+                    refcount={Game=1},orphan_dirs={},orphan_images={},dead_scripts={},trash={},
+                    runtimes={
+                        need={godot_4_6_3={"Game.sh"}},
+                        facts={{name="godot_4_6_3",health=health,bytes=health=="healthy" and 4096 or 0}},
+                    },
+                },
+                sizes={},runtime_metadata={},
+            }
+        end
+        assert(model.apply_snapshot(snapshot("missing")))
+        assert(model.missing_runtime("Game.sh")=="godot_4_6_3")
+
+        local operations=require("app_operations").new(model)
+        operations.bind({
+            reset_selection=function() end,
+            build_home=function() calls.home=calls.home+1 end,
+            build_runtime=function() calls.runtime=calls.runtime+1 end,
+        },{})
+        operations.confirm_return=model.pages.RUNTIME
+        operations.task={
+            kind="operation",
+            plan={{kind="INSTALL_RUNTIME",arg="godot_4_6_3"}},
+        }
+        operations.finish_task({
+            status="complete",
+            data={snapshot=snapshot("healthy"),operation={failed=false}},
+        })
+
+        assert(model.missing_runtime("Game.sh")=="")
+        assert(calls.home==1,"Runtime repair must rebuild the cached Home page")
+        assert(calls.runtime==1,"Runtime repair must rebuild its current page")
+        assert(calls.goto_page==model.pages.RUNTIME)
+
+        operations.task={
+            kind="operation",
+            plan={{kind="INSTALL_RUNTIME",arg="godot_4_6_3"}},
+        }
+        operations.finish_task({status="error",data={}})
+        assert(#model.ensure_report().ports==1,
+            "A failed task without a replacement snapshot must keep the last usable inventory")
+        "#,
+    )
+    .exec()
+    .expect("exercise Runtime completion page refresh");
+}
