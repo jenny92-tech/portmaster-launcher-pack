@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use appmanager_core::{
-    CacheGenerations, FileApplyRequest, InstallPlan, InstallRequest, Inventory, InventoryOptions,
-    OperationKind, PendingValidationRequest, ResolvedContextInput, ResolvedDeviceContext,
+    FileApplyRequest, InstallPlan, InstallRequest, Inventory, InventoryOptions,
+    ResolvedContextInput, ResolvedDeviceContext,
     RuntimeMetadata, RuntimeRepairRequest, SizeScanRequest, apply_file_plan, install_portmaster,
-    plan_contains_only_file_actions, repair_runtimes, scan_size_cache, validate_pending_install,
+    plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use portkit_core::{DigestAlgorithm, digest_file};
@@ -106,9 +106,6 @@ enum Command {
         /// PortKit resolution plus app-owned paths JSON, or `-` for stdin.
         #[arg(long)]
         context: PathBuf,
-        /// Optional cache generation JSON file.
-        #[arg(long)]
-        cache_state: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
         #[arg(long)]
@@ -142,8 +139,6 @@ enum Command {
         root: Option<PathBuf>,
         #[arg(long = "env")]
         environment: Vec<String>,
-        #[arg(long)]
-        cache_state: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
         #[arg(long)]
@@ -230,26 +225,6 @@ enum Command {
         #[arg(long)]
         cancel_file: Option<PathBuf>,
     },
-    /// Validate or roll back the PortMaster transaction left by installation.
-    ValidatePendingInstall {
-        #[arg(long)]
-        launcher: PathBuf,
-        #[arg(long)]
-        app_state: PathBuf,
-        #[arg(long)]
-        trash: PathBuf,
-        #[arg(long)]
-        remote_config: Option<PathBuf>,
-        #[arg(long)]
-        target_override: Option<PathBuf>,
-        #[arg(long)]
-        root: Option<PathBuf>,
-        #[arg(long = "env")]
-        environment: Vec<String>,
-        /// Config-derived health status: healthy, damaged, or missing.
-        #[arg(long)]
-        core_health: String,
-    },
     /// Repair official PortMaster Runtime images with strict validation.
     RepairRuntimes {
         /// Official PortMaster `ports.json` metadata file.
@@ -326,18 +301,6 @@ enum Command {
         root: Option<PathBuf>,
         #[arg(long = "env")]
         environment: Vec<String>,
-    },
-    /// Calculate the next cache generations; does not modify any file.
-    CacheInvalidate {
-        /// PortKit resolution plus app-owned paths JSON, or `-` for stdin.
-        #[arg(long)]
-        context: PathBuf,
-        /// Operation plan JSON file containing `["TRASH", ...]`.
-        #[arg(long)]
-        operations: PathBuf,
-        /// Optional current cache generation JSON file.
-        #[arg(long)]
-        cache_state: Option<PathBuf>,
     },
 }
 
@@ -483,7 +446,6 @@ fn run(
         } => refresh_stable_cache(source, cache, force),
         Command::Inventory {
             context,
-            cache_state,
             format,
             scan_script_images,
             ignore_dirs,
@@ -494,18 +456,7 @@ fn run(
             home,
         } => {
             let name = "inventory";
-            if cache_state.as_deref() == Some(Path::new("-")) && context == Path::new("-") {
-                return Err(CliError {
-                    command: name,
-                    code: "ambiguous-stdin",
-                    message: "stdin can supply only one input".to_owned(),
-                });
-            }
             let context = read_context(name, &context)?;
-            let generations = match cache_state {
-                Some(path) => read_json(name, &path, "invalid-cache-state")?,
-                None => CacheGenerations::default(),
-            };
             let options = inventory_options(
                 scan_script_images,
                 ignore_dirs,
@@ -515,7 +466,7 @@ fn run(
                 controlfolder,
                 home,
             );
-            let inventory = Inventory::scan_with_options(&context, generations, &options)
+            let inventory = Inventory::scan_with_options(&context, &options)
                 .map_err(|error| domain_error(name, "inventory-rejected", error))?;
             match format {
                 OutputFormat::Json => Ok((name, json!(inventory))),
@@ -542,7 +493,6 @@ fn run(
             target_override,
             root,
             environment,
-            cache_state,
             format,
             scan_script_images,
             ignore_dirs,
@@ -559,7 +509,6 @@ fn run(
             target_override,
             root,
             environment,
-            cache_state,
             format,
             inventory_options(
                 scan_script_images,
@@ -631,26 +580,6 @@ fn run(
             root,
             environment,
             cancel_file,
-            config_directories,
-        ),
-        Command::ValidatePendingInstall {
-            launcher,
-            app_state,
-            trash,
-            remote_config,
-            target_override,
-            root,
-            environment,
-            core_health,
-        } => validate_device_pending_install(
-            launcher,
-            app_state,
-            trash,
-            remote_config,
-            target_override,
-            root,
-            environment,
-            core_health,
             config_directories,
         ),
         Command::RepairRuntimes {
@@ -774,39 +703,6 @@ fn run(
                     "scan": outcome,
                 }),
             ))
-        }
-        Command::CacheInvalidate {
-            context,
-            operations,
-            cache_state,
-        } => {
-            let name = "cache-invalidate";
-            reject_double_stdin(name, &context, &operations)?;
-            if cache_state.as_deref() == Some(Path::new("-"))
-                && (context == Path::new("-") || operations == Path::new("-"))
-            {
-                return Err(CliError {
-                    command: name,
-                    code: "ambiguous-stdin",
-                    message: "stdin can supply only one input".to_owned(),
-                });
-            }
-            let context = read_context(name, &context)?;
-            let operation_names: Vec<String> = read_json(name, &operations, "invalid-operations")?;
-            let operations: Vec<_> = operation_names
-                .iter()
-                .map(|value| OperationKind::parse(value))
-                .collect();
-            let generations = match cache_state {
-                Some(path) => read_json(name, &path, "invalid-cache-state")?,
-                None => CacheGenerations::default(),
-            };
-            generations
-                .validate()
-                .map_err(|error| domain_error(name, "invalid-cache-state", error))?;
-            let result =
-                generations.invalidate(context.capabilities.cache_invalidation, &operations);
-            Ok((name, json!(result)))
         }
     }
 }
@@ -1006,7 +902,6 @@ fn device_inventory(
     target_override: Option<PathBuf>,
     root: Option<PathBuf>,
     environment: Vec<String>,
-    cache_state: Option<PathBuf>,
     format: OutputFormat,
     options: InventoryOptions,
     config_directories: &ConfigDirectories,
@@ -1023,11 +918,7 @@ fn device_inventory(
         environment,
         config_directories,
     )?;
-    let generations = match cache_state {
-        Some(path) => read_json(name, &path, "invalid-cache-state")?,
-        None => CacheGenerations::default(),
-    };
-    let inventory = Inventory::scan_with_options(&resolved.context, generations, &options)
+    let inventory = Inventory::scan_with_options(&resolved.context, &options)
         .map_err(|error| domain_error(name, "inventory-rejected", error))?;
     match format {
         OutputFormat::Json => Ok((name, json!(inventory))),
@@ -1075,8 +966,6 @@ fn install_device_portmaster(
         progress_channel: None,
         probe_root: root,
         plan,
-        fail_after_backup: false,
-        fail_restore_after: None,
     })
     .map_err(|error| domain_error(name, "install-failed", error))?;
     Ok((
@@ -1088,60 +977,6 @@ fn install_device_portmaster(
             "device_class": resolved.context.device_class,
             "target_confirmed": resolved.context.target_confirmed,
             "installation": outcome,
-        }),
-    ))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn validate_device_pending_install(
-    launcher: PathBuf,
-    app_state: PathBuf,
-    trash: PathBuf,
-    remote_config: Option<PathBuf>,
-    target_override: Option<PathBuf>,
-    root: Option<PathBuf>,
-    environment: Vec<String>,
-    core_health: String,
-    config_directories: &ConfigDirectories,
-) -> Result<(&'static str, Value), CliError> {
-    let name = "validate-pending-install";
-    if !matches!(core_health.as_str(), "healthy" | "damaged" | "missing") {
-        return Err(CliError {
-            command: name,
-            code: "invalid-core-health",
-            message: "core health must be healthy, damaged, or missing".to_owned(),
-        });
-    }
-    let resolved = resolve_device_context(
-        name,
-        launcher,
-        app_state.clone(),
-        trash,
-        remote_config,
-        target_override,
-        root,
-        environment,
-        config_directories,
-    )?;
-    let plan = InstallPlan::from_context(&resolved.context)
-        .map_err(|error| domain_error(name, "validation-rejected", error))?
-        .validate(&resolved.context)
-        .map_err(|error| domain_error(name, "validation-rejected", error))?;
-    let outcome = validate_pending_install(&PendingValidationRequest {
-        state_dir: app_state,
-        plan,
-        core_health_healthy: core_health == "healthy",
-        interrupt_before_mutation: false,
-        fail_restore_after: None,
-    })
-    .map_err(|error| domain_error(name, "validation-failed", error))?;
-    Ok((
-        name,
-        json!({
-            "config_origin": resolved.config_origin,
-            "platform_id": resolved.context.profile,
-            "model_id": resolved.model_id,
-            "validation": outcome,
         }),
     ))
 }
@@ -1523,24 +1358,6 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command, Command::InstallPortmaster { .. }));
-
-        let cli = Cli::try_parse_from([
-            "appmanager-cli",
-            "validate-pending-install",
-            "--launcher",
-            "/ports/App.sh",
-            "--app-state",
-            "/tmp/state",
-            "--trash",
-            "/tmp/trash",
-            "--core-health",
-            "healthy",
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::ValidatePendingInstall { .. }
-        ));
 
         let cli = Cli::try_parse_from([
             "appmanager-cli",
@@ -2054,7 +1871,7 @@ mod tests {
         let launcher = temp.path().join("mnt/SDCARD/Roms/PORTS/APP Manager.sh");
         let scripts = launcher.parent().unwrap();
         let games = temp.path().join("mnt/SDCARD/Data/ports");
-        let images = temp.path().join("mnt/SDCARD/Roms/Imgs/PORTS");
+        let images = temp.path().join("mnt/SDCARD/Imgs/PORTS");
         let libs = temp
             .path()
             .join("mnt/SDCARD/Apps/PortMaster/PortMaster/libs");
@@ -2087,7 +1904,6 @@ mod tests {
             None,
             Some(temp.path().to_path_buf()),
             vec!["CFW_NAME=TrimUI".to_owned()],
-            None,
             OutputFormat::Json,
             options.clone(),
             &test_config_directories(),
@@ -2107,7 +1923,6 @@ mod tests {
             None,
             Some(temp.path().to_path_buf()),
             vec!["CFW_NAME=TrimUI".to_owned()],
-            None,
             OutputFormat::Tsv,
             options,
             &test_config_directories(),

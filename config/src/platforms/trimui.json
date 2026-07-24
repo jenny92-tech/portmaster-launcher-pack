@@ -53,6 +53,7 @@
     },
     "images": {
       "strategy": "rom_root_from_launcher",
+      "levels": 2,
       "suffix": "Imgs/PORTS"
     }
   },

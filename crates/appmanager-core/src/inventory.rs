@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::cache::{CacheDomain, CacheGenerations};
 use crate::context::{CapabilityState, ResolvedDeviceContext};
 use crate::path::{ManagedRoot, PathSafetyError};
 
@@ -36,7 +35,6 @@ pub struct InventoryEntry {
 #[serde(deny_unknown_fields)]
 pub struct Inventory {
     pub schema: u32,
-    pub cache_generations: CacheGenerations,
     pub entries: Vec<InventoryEntry>,
     pub ports: Vec<PortFact>,
     pub refcount: BTreeMap<String, usize>,
@@ -173,16 +171,12 @@ pub enum InventoryError {
 }
 
 impl Inventory {
-    pub fn scan(
-        context: &ResolvedDeviceContext,
-        cache_generations: CacheGenerations,
-    ) -> Result<Self, InventoryError> {
-        Self::scan_with_options(context, cache_generations, &InventoryOptions::default())
+    pub fn scan(context: &ResolvedDeviceContext) -> Result<Self, InventoryError> {
+        Self::scan_with_options(context, &InventoryOptions::default())
     }
 
     pub fn scan_with_options(
         context: &ResolvedDeviceContext,
-        cache_generations: CacheGenerations,
         options: &InventoryOptions,
     ) -> Result<Self, InventoryError> {
         context
@@ -191,9 +185,6 @@ impl Inventory {
         if context.capabilities.inventory != CapabilityState::Current {
             return Err(InventoryError::CapabilityUnknown);
         }
-        cache_generations
-            .validate()
-            .map_err(|error| InventoryError::CacheState(error.to_string()))?;
 
         let mut roots = vec![
             ("scripts", context.roots.scripts.as_path()),
@@ -217,7 +208,6 @@ impl Inventory {
         let facts = scan_facts(context, options, &entries, &mut directories)?;
         Ok(Self {
             schema: INVENTORY_SCHEMA,
-            cache_generations,
             entries,
             ports: facts.ports,
             refcount: facts.refcount,
@@ -234,13 +224,6 @@ impl Inventory {
 
     pub fn to_tsv(&self) -> String {
         let mut rows = vec![format!("schema\t{}", self.schema)];
-        rows.push(format!("cache\tglobal\t{}", self.cache_generations.global));
-        for (domain, generation) in &self.cache_generations.domains {
-            rows.push(format!(
-                "cache\t{}\t{generation}",
-                cache_domain_name(*domain)
-            ));
-        }
         for entry in &self.entries {
             rows.push(format!(
                 "entry\t{}\t{}\t{}\t{}\t{}",
@@ -1180,17 +1163,6 @@ fn runtime_health_name(health: RuntimeHealth) -> &'static str {
     }
 }
 
-fn cache_domain_name(domain: CacheDomain) -> &'static str {
-    match domain {
-        CacheDomain::Ports => "ports",
-        CacheDomain::Trash => "trash",
-        CacheDomain::RequiredRuntimes => "required-runtimes",
-        CacheDomain::InstalledRuntimes => "installed-runtimes",
-        CacheDomain::RuntimeMetadata => "runtime-metadata",
-        CacheDomain::Sizes => "sizes",
-    }
-}
-
 fn scan_root(
     root_name: &'static str,
     path: &Path,
@@ -1366,8 +1338,8 @@ mod tests {
         )
         .unwrap();
 
-        let first = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
-        let second = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let first = Inventory::scan(&fixture.context).unwrap();
+        let second = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(first, second);
         let script_entries: Vec<_> = first
             .entries
@@ -1451,10 +1423,10 @@ mod tests {
             ..InventoryOptions::default()
         };
         let snapshot =
-            Inventory::scan_with_options(&fixture.context, CacheGenerations::default(), &options)
+            Inventory::scan_with_options(&fixture.context, &options)
                 .unwrap();
         let repeated =
-            Inventory::scan_with_options(&fixture.context, CacheGenerations::default(), &options)
+            Inventory::scan_with_options(&fixture.context, &options)
                 .unwrap();
         assert_eq!(snapshot, repeated);
         assert_eq!(snapshot.to_tsv(), repeated.to_tsv());
@@ -1510,7 +1482,7 @@ mod tests {
                 .join("evil.squashfs"),
         )
         .unwrap();
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert!(snapshot.ports.is_empty());
         assert!(snapshot.runtimes.need.is_empty());
         assert_eq!(snapshot.trash.len(), 1);
@@ -1523,7 +1495,7 @@ mod tests {
         let mut fixture = fixture();
         fixture.context.capabilities.inventory = CapabilityState::Unknown;
         assert!(matches!(
-            Inventory::scan(&fixture.context, CacheGenerations::default()),
+            Inventory::scan(&fixture.context),
             Err(InventoryError::CapabilityUnknown)
         ));
     }
@@ -1537,7 +1509,7 @@ mod tests {
             b"echo MentionedOnly\n",
         )
         .unwrap();
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(snapshot.orphan_dirs, ["MentionedOnly"]);
     }
 
@@ -1550,7 +1522,7 @@ mod tests {
             b"GAMEDIR=/ports/$GAME\n",
         )
         .unwrap();
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert!(snapshot.orphan_dirs.is_empty());
         assert!(snapshot.diagnostics[0].contains("orphan classification uncertain"));
     }
@@ -1570,7 +1542,7 @@ mod tests {
             .set_len(MAX_SCRIPT_BYTES + 1)
             .unwrap();
 
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(snapshot.ports.len(), 1);
         assert!(snapshot.orphan_dirs.is_empty());
         assert_eq!(snapshot.diagnostics.len(), 1);
@@ -1602,7 +1574,7 @@ mod tests {
         )
         .unwrap();
 
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(
             snapshot.ports[0].runtimes,
             ["dotnet-8.0.12", "gmtoolkit", "weston_pkg_0.2"]
@@ -1635,7 +1607,7 @@ mod tests {
             .unwrap();
         }
 
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(snapshot.ports[0].script, "EmptyRuntime.sh");
         assert!(snapshot.ports[0].runtimes.is_empty());
         assert_eq!(snapshot.ports[1].script, "StringRuntime.sh");
@@ -1655,7 +1627,7 @@ mod tests {
         )
         .unwrap();
 
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(snapshot.ports[0].runtimes, ["ags_3.6"]);
         assert_eq!(snapshot.diagnostics.len(), 1);
         assert!(snapshot.diagnostics[0].contains("invalid port.json"));
@@ -1677,7 +1649,7 @@ DOTNETFILE="$controlfolder/libs/dotnet-8.0.12.squashfs"
         )
         .unwrap();
 
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(
             snapshot.ports[0].runtimes,
             [
@@ -1714,7 +1686,7 @@ DOTNETFILE="$controlfolder/libs/dotnet-8.0.12.squashfs"
         )
         .unwrap();
 
-        let snapshot = Inventory::scan(&fixture.context, CacheGenerations::default()).unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
 
         assert!(snapshot.ports.is_empty());
         assert!(snapshot.images.is_empty());

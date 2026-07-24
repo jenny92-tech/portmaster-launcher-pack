@@ -33,7 +33,10 @@ if ! swapon -s 2>/dev/null | grep -q "$SWAP_FILE"; then
 fi
 echo "[STS2-SDL2] swap: $(swapon -s | tail -1)"
 
-export SDL_VIDEODRIVER=dummy
+# SDL-only godot build: a real SDL2 video driver is required (dummy has no GL
+# and fails at startup). mali is the TrimUI firmware SDL2 driver; pre-set
+# SDL_VIDEODRIVER wins, unset it to let the system SDL2 auto-select.
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-mali}"
 export SDL_AUDIODRIVER=alsa
 
 export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1

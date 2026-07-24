@@ -1,11 +1,10 @@
 //! App-specific business and transaction building blocks for Port App Manager.
 //!
 //! Inventory/config logic, ordinary file mutations, Runtime repair, and the
-//! rollback-safe PortMaster installer live here. The launcher only orchestrates
-//! these native operations; no config text is executed as shell code.
+//! PortMaster installer live here. The launcher only orchestrates these native
+//! operations; no config text is executed as shell code.
 
 pub mod artifact;
-pub mod cache;
 pub mod context;
 pub mod device;
 pub mod installer;
@@ -23,7 +22,6 @@ pub use artifact::{
     StableReleaseRequest, fetch_stable_release, parse_stable_manifest, refresh_runtime_metadata,
     refresh_stable_cache, stable_cache_row_valid, validate_stable_release_route,
 };
-pub use cache::{CacheDomain, CacheGenerations, CacheInvalidation, OperationKind};
 pub use context::{
     CapabilityState, ContextCapabilities, ExpectedInstallContract, FrontendContext,
     FrontendMapEntry, FrontendTransform, ManagedRoots, ManagementMode, ResolvedDeviceContext,
@@ -34,8 +32,7 @@ pub use device::{
 };
 pub use installer::{
     InstallError, InstallMode, InstallOutcome, InstallRequest, PORTMASTER_STATE_PRESERVED,
-    PendingValidationError, PendingValidationOutcome, PendingValidationRequest,
-    PendingValidationStatus, install_portmaster, validate_pending_install,
+    install_portmaster,
 };
 pub use inventory::{
     DeadScriptFact, ImageFact, Inventory, InventoryEntry, InventoryKind, InventoryOptions,

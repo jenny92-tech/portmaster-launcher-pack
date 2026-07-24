@@ -37,9 +37,13 @@ source "$KIT/portmaster_common.sh"
 #@KIT-END
 
 export LD_LIBRARY_PATH="/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"
-# Display (for the stage-2 game): use wayland when a wayland socket exists
-# (MiniLoong/weston); otherwise (bare KMS devices) use dummy and let SDL2's own
-# KMS+GBM+EGL drive the panel directly.
+# Display (for the stage-2 game): the godot.mono build is SDL-only — SDL2's
+# own video driver owns the display/EGL, so SDL_VIDEODRIVER must be a real
+# driver (dummy has no GL and now fails at startup).
+#   MiniLoong (system weston): wayland, when a wayland socket exists.
+#   TrimUI Brick/Brick Pro (no compositor): mali (the firmware SDL2's driver);
+#   pre-set SDL_VIDEODRIVER (e.g. from control.txt) wins, or unset it entirely
+#   to let the system SDL2 auto-select.
 # (love stage-1's display env is decided independently by run_love_launcher_ui
 #  inside its own subshell — unaffected by this, and it does not leak out.)
 if [ -S "/run/wayland-0" ] || [ -S "${XDG_RUNTIME_DIR:-/run}/wayland-0" ]; then
@@ -47,9 +51,27 @@ if [ -S "/run/wayland-0" ] || [ -S "${XDG_RUNTIME_DIR:-/run}/wayland-0" ]; then
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run}"
   export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 else
-  export SDL_VIDEODRIVER=dummy
+  export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-mali}"
   export SDL_AUDIODRIVER=alsa
 fi
+
+# Resolution fallback: control.txt/device_info.txt normally provides
+# DISPLAY_WIDTH/DISPLAY_HEIGHT, but some frontends (MiniLoong loong) launch
+# port scripts without that env, leaving "--resolution x" and an instant
+# godot exit. Probe the panel ourselves in that case: fb0 reports the native
+# (portrait) size, and on the wayland path weston rotates it 90°, so swap.
+if [ -z "${DISPLAY_WIDTH:-}" ] || [ -z "${DISPLAY_HEIGHT:-}" ]; then
+  FB_SIZE=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null)   # "720,960"
+  FB_W="${FB_SIZE%,*}"; FB_H="${FB_SIZE#*,}"
+  case "$FB_W:$FB_H" in ''*|*[!0-9]*) FB_W=1280; FB_H=720 ;; esac
+  if [ "$SDL_VIDEODRIVER" = "wayland" ] && [ "$FB_H" -gt "$FB_W" ]; then
+    DISPLAY_WIDTH=$FB_H; DISPLAY_HEIGHT=$FB_W
+  else
+    DISPLAY_WIDTH=$FB_W; DISPLAY_HEIGHT=$FB_H
+  fi
+  echo "$LOG_PREFIX DISPLAY_WIDTH/HEIGHT unset — probed panel ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}"
+fi
+
 export GODOT_DISABLE_PARTICLES=1
 export GODOT_DEFSHADER_TYPES="mesh,multimesh"
 

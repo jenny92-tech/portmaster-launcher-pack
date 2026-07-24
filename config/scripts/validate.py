@@ -162,7 +162,7 @@ def validate_path_strategy(value: Any, path: str) -> None:
         "parent": {"strategy", "of"},
         "platform_core": {"strategy"},
         "relative_to": {"strategy", "base", "suffix"},
-        "rom_root_from_launcher": {"strategy", "suffix"},
+        "rom_root_from_launcher": {"strategy", "levels", "suffix"},
         "xdg_data_home": {"strategy", "suffix"},
     }[strategy]
     allow_keys(value, allowed, path)

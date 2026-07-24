@@ -8,13 +8,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use appmanager_core::{
     DEFAULT_LAUNCHER_SCRIPT_NAME, FileApplyRequest, Inventory, InventoryOptions, ManagementMode,
-    PROTECTED_SCRIPT_NAMES, PendingValidationRequest, PendingValidationStatus, RuntimeMetadata,
+    PROTECTED_SCRIPT_NAMES, RuntimeMetadata,
     RuntimeRepairRequest, SCAN_EXCLUDED_DIR_NAMES, SizeScanRequest, apply_file_plan,
-    plan_contains_only_file_actions, repair_runtimes, scan_size_cache, validate_pending_install,
+    plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
 };
 use portkit_core::github::{Capability, GitHubTransport, Progress};
 use portkit_core::{
@@ -86,7 +86,6 @@ enum Mode {
     HealthCheck,
     CheckUpdate,
     ForceCheckUpdate,
-    ValidatePending,
     RefreshRuntimeMetadata,
     WriteInstallPlan,
     RefreshDeviceConfig,
@@ -106,7 +105,6 @@ impl Mode {
             "--health-check" => Ok(Self::HealthCheck),
             "--check-pm-update" => Ok(Self::CheckUpdate),
             "--check-pm-update-force" => Ok(Self::ForceCheckUpdate),
-            "--validate-pending" => Ok(Self::ValidatePending),
             "--refresh-runtime-metadata" => Ok(Self::RefreshRuntimeMetadata),
             "--write-install-plan" => Ok(Self::WriteInstallPlan),
             "--refresh-device-config" => Ok(Self::RefreshDeviceConfig),
@@ -132,16 +130,12 @@ struct Paths {
     progress: PathBuf,
     cancel: PathBuf,
     update_cache: PathBuf,
-    validation_result: PathBuf,
-    portmaster_active: PathBuf,
     portmaster_lock: PathBuf,
-    operation_active: PathBuf,
     operation_lock: PathBuf,
     size_cache: PathBuf,
     runtime_metadata_json: PathBuf,
     remote_config_dir: PathBuf,
     remote_config: PathBuf,
-    config_refresh_result: PathBuf,
     inventory: PathBuf,
 }
 
@@ -159,20 +153,16 @@ impl Paths {
             share_dir: request.app_root.join("share"),
             config_dir: request.app_root.join("config"),
             trash: request.app_root.join("trash"),
-            plan: state.join("plan.txt"),
-            result: state.join("result.txt"),
+            plan: std::env::temp_dir().join(format!("appmanager-plan-{}.tsv", std::process::id())),
+            result: std::env::temp_dir().join(format!("appmanager-result-{}.tsv", std::process::id())),
             progress: state.join("progress.tsv"),
             cancel: state.join("cancel.request"),
             update_cache: state.join("portmaster-update.tsv"),
-            validation_result: state.join("validation-result.tsv"),
-            portmaster_active: state.join("portmaster-active.tsv"),
             portmaster_lock: state.join("portmaster-active.lock"),
-            operation_active: state.join("operation-active.tsv"),
             operation_lock: state.join("operation-active.lock"),
             size_cache: state.join("sizes.tsv"),
             runtime_metadata_json: state.join("ports.json"),
             remote_config: remote_config_dir.join("config.json"),
-            config_refresh_result: state.join("config-refresh.tsv"),
             inventory: state.join("inventory.json"),
             remote_config_dir,
             state,
@@ -195,6 +185,7 @@ struct Session {
     target_override: Option<PathBuf>,
     cancel_token: Option<appmanager_core::CancellationToken>,
     progress_channel: Option<appmanager_core::ProgressChannel>,
+    config_refresh_status: Mutex<Option<String>>,
 }
 
 pub(crate) fn run(request: Request) -> ExitCode {
@@ -256,6 +247,20 @@ impl EmbeddedService {
         let paths = Paths::new(&request);
         let session = Session::new(request.clone())?;
         session.cleanup_stale_activity();
+        // Files of the retired disk-journal and pending-validation protocols.
+        // Swept only at the UI entry: `--apply-plan` stages plan.txt on purpose.
+        for name in [
+            "plan.txt",
+            "result.txt",
+            "config-refresh.tsv",
+            "validation-result.tsv",
+            "pending-install.tsv",
+            "pending-manifest.tsv",
+            "pending-frontend-manifest.tsv",
+            "install-transaction.tsv",
+        ] {
+            let _ = fs::remove_file(session.paths.state.join(name));
+        }
         session.sync_artwork();
         session.write_startup_diagnostics();
         Ok(Self {
@@ -366,7 +371,6 @@ impl EmbeddedService {
                 | "config-refresh"
                 | "update-check"
                 | "update-check-if-stale"
-                | "validate-pending"
                 | "runtime-metadata"
                 | "scan-sizes"
                 | "inventory-refresh"
@@ -403,12 +407,34 @@ impl EmbeddedService {
                         status: "complete".into(),
                         data,
                     },
-                    Err(message) => ServiceEvent {
-                        task_id,
-                        kind,
-                        status: "error".into(),
-                        data: json!({"message": message}),
-                    },
+                    Err(message) => {
+                        // Durable failure record: the launch log is rotated
+                        // away, but this file survives for diagnosis.
+                        if let Some(state) = progress.parent() {
+                            let stamp = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let _ = fs::write(
+                                state.join("last-error.txt"),
+                                format!("{stamp}\t{kind}\t{message}\n"),
+                            );
+                        }
+                        // A failed task may have already changed the disk;
+                        // run_embedded_task refreshed the shared snapshot, so
+                        // the UI can re-render reality instead of a stale view.
+                        let current = snapshot
+                            .lock()
+                            .unwrap_or_else(|value| value.into_inner())
+                            .clone()
+                            .unwrap_or(Value::Null);
+                        ServiceEvent {
+                            task_id,
+                            kind,
+                            status: "error".into(),
+                            data: json!({"message": message, "snapshot": current}),
+                        }
+                    }
                 };
                 let _ = fs::remove_file(&progress);
                 let _ = fs::remove_file(&cancel);
@@ -479,32 +505,61 @@ fn run_embedded_task(
 ) -> Result<Value, String> {
     let mut session = Session::new(request.clone())?;
     session.cleanup_stale_activity();
-    let code = match kind {
-        "apply" => {
-            write_embedded_plan(&session.paths.plan, actions.unwrap_or_default())?;
-            session.apply_plan()?
+    // The plan/result exchange files are per-task scratch: removed on every
+    // exit path so no later task can read another task's outcome.
+    struct ScratchGuard(PathBuf, PathBuf);
+    impl Drop for ScratchGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+            let _ = fs::remove_file(&self.1);
         }
-        "config-refresh" => session.refresh_device_config()?,
-        "update-check" => session.check_update(true)?,
-        "update-check-if-stale" => session.check_update(false)?,
-        "validate-pending" => session.validate_pending()?,
-        "runtime-metadata" => session.refresh_runtime_metadata(true)?,
-        "scan-sizes" => session.scan_sizes()?,
-        "inventory-refresh" => {
-            session.refresh_inventory_state()?;
-            session.scan_sizes()?
+    }
+    let _scratch = ScratchGuard(session.paths.plan.clone(), session.paths.result.clone());
+    let outcome = (|| -> Result<u8, String> {
+        match kind {
+            "apply" => {
+                write_embedded_plan(&session.paths.plan, actions.unwrap_or_default())?;
+                let code = session.apply_plan()?;
+                // File mutations invalidate the size cache; rescanning here
+                // keeps the sizes the UI shows in step with the disk.
+                session.scan_sizes()?;
+                Ok(code)
+            }
+            "config-refresh" => session.refresh_device_config(),
+            "update-check" => session.check_update(true),
+            "update-check-if-stale" => session.check_update(false),
+            "runtime-metadata" => session.refresh_runtime_metadata(true),
+            "scan-sizes" => session.scan_sizes(),
+            "inventory-refresh" => {
+                session.refresh_inventory_state()?;
+                session.scan_sizes()
+            }
+            _ => Err(format!("unsupported APP Manager task {kind:?}")),
         }
-        _ => return Err(format!("unsupported APP Manager task {kind:?}")),
-    };
+    })();
+    // Refresh the shared snapshot even when the task failed: mutations may
+    // already be on disk, and a stale snapshot invites operating on a world
+    // that no longer exists.
+    if let Err(task_error) = outcome {
+        if session.reload().is_ok() {
+            if let Ok(current) = session.embedded_snapshot(session.persisted_inventory()) {
+                *cached_snapshot
+                    .lock()
+                    .unwrap_or_else(|value| value.into_inner()) = Some(current);
+            }
+        }
+        return Err(task_error);
+    }
+    let code = outcome.expect("checked above");
     session.reload()?;
     let operation =
         parse_operation_result(&fs::read_to_string(&session.paths.result).unwrap_or_default());
-    let validation = parse_validation_result(
-        &fs::read_to_string(&session.paths.validation_result).unwrap_or_default(),
-    );
-    let config_refresh = parse_config_refresh_result(
-        &fs::read_to_string(&session.paths.config_refresh_result).unwrap_or_default(),
-    );
+    let config_refresh = session
+        .config_refresh_status
+        .lock()
+        .unwrap_or_else(|value| value.into_inner())
+        .take()
+        .map_or(Value::Null, |status| json!({"status": status}));
     let reuse_inventory = if matches!(kind, "apply" | "config-refresh" | "inventory-refresh") {
         session.persisted_inventory()
     } else if matches!(
@@ -524,13 +579,9 @@ fn run_embedded_task(
     *cached_snapshot
         .lock()
         .unwrap_or_else(|value| value.into_inner()) = Some(snapshot.clone());
-    let _ = fs::remove_file(&session.paths.result);
-    let _ = fs::remove_file(&session.paths.validation_result);
-    let _ = fs::remove_file(&session.paths.config_refresh_result);
     Ok(json!({
         "code": code,
         "operation": operation,
-        "validation": validation,
         "config_refresh": config_refresh,
         "snapshot": snapshot,
     }))
@@ -560,25 +611,6 @@ fn parse_operation_result(text: &str) -> Value {
         "handled": handled,
         "appledouble_removed": appledouble_removed,
     })
-}
-
-fn parse_validation_result(text: &str) -> Value {
-    let fields = text.trim_end().splitn(3, '\t').collect::<Vec<_>>();
-    if fields.len() < 2 || fields[0] != "1" {
-        return Value::Null;
-    }
-    json!({
-        "status": fields[1],
-        "detail": fields.get(2).copied().unwrap_or(""),
-    })
-}
-
-fn parse_config_refresh_result(text: &str) -> Value {
-    let fields = text.trim_end().splitn(3, '\t').collect::<Vec<_>>();
-    if fields.len() < 2 || fields[0] != "1" {
-        return Value::Null;
-    }
-    json!({"status": fields[1]})
 }
 
 fn write_embedded_plan(path: &Path, actions: &[EmbeddedAction]) -> Result<(), String> {
@@ -666,13 +698,24 @@ impl Session {
             target_override,
             cancel_token: request.cancel_token,
             progress_channel: request.progress_channel,
+            config_refresh_status: Mutex::new(None),
         })
     }
 
     fn execute(&mut self, mode: Mode) -> Result<u8, String> {
         self.cleanup_stale_activity();
         match mode {
-            Mode::ApplyPlan => self.apply_plan(),
+            Mode::ApplyPlan => {
+                // Compatibility entry: the caller stages an explicit plan at
+                // state/plan.txt; it is consumed exactly once.
+                let staged = self.paths.state.join("plan.txt");
+                fs::copy(&staged, &self.paths.plan).map_err(display_error)?;
+                let code = self.apply_plan();
+                let _ = fs::remove_file(&self.paths.plan);
+                let _ = fs::remove_file(&self.paths.result);
+                fs::remove_file(&staged).map_err(display_error)?;
+                code
+            }
             Mode::ScanSizes => self.scan_sizes(),
             Mode::HealthCheck => {
                 let health = self.health_status()?;
@@ -688,10 +731,20 @@ impl Session {
             }
             Mode::CheckUpdate => self.check_update(false),
             Mode::ForceCheckUpdate => self.check_update(true),
-            Mode::ValidatePending => self.validate_pending(),
             Mode::RefreshRuntimeMetadata => self.refresh_runtime_metadata(false),
             Mode::WriteInstallPlan => self.write_install_plan(),
-            Mode::RefreshDeviceConfig => self.refresh_device_config(),
+            Mode::RefreshDeviceConfig => {
+                let code = self.refresh_device_config()?;
+                let status = self
+                    .config_refresh_status
+                    .lock()
+                    .unwrap_or_else(|value| value.into_inner())
+                    .take();
+                if let Some(status) = status {
+                    println!("{status}");
+                }
+                Ok(code)
+            }
             Mode::WriteEnv => {
                 self.write_env()?;
                 Ok(0)
@@ -826,14 +879,6 @@ impl Session {
                 env::var("XDG_RUNTIME_DIR").unwrap_or_default(),
                 env::var("WAYLAND_DISPLAY").unwrap_or_default()
             ),
-            format!(
-                "state.pending_install={}",
-                self.paths.state.join("pending-install.tsv").is_file()
-            ),
-            format!(
-                "state.install_transaction={}",
-                self.paths.state.join("install-transaction.tsv").is_file()
-            ),
         ];
         let enabled = resolution
             .capabilities
@@ -849,12 +894,6 @@ impl Session {
     fn write_snapshot_diagnostics(&self, snapshot: &Value) {
         let environment = snapshot.get("env").unwrap_or(&Value::Null);
         let text = |name: &str| environment.get(name).and_then(Value::as_str).unwrap_or("");
-        let flag = |name: &str| {
-            environment
-                .get(name)
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        };
         let runtime_count = snapshot
             .get("runtime_metadata")
             .and_then(Value::as_object)
@@ -863,15 +902,12 @@ impl Session {
             "portmaster.health={}\n[PAM] portmaster.version={}\n[PAM] \
              portmaster.target={}\n[PAM] update.status={}\n[PAM] \
              update.latest={}\n[PAM] runtime.catalog_entries={runtime_count}\n[PAM] \
-             state.pending_install={}\n[PAM] state.install_transaction={}\n[PAM] \
              initialization=ready",
             text("portmaster_health"),
             text("portmaster_version"),
             text("portmaster_target"),
             text("update_status"),
             text("portmaster_latest"),
-            flag("pending_install_exists"),
-            flag("install_transaction_exists"),
         ));
     }
 
@@ -1028,7 +1064,6 @@ impl Session {
         }
         let inventory = Inventory::scan_with_options(
             &self.resolved.context,
-            Default::default(),
             &self.inventory_options(),
         )
         .map_err(display_error)?;
@@ -1118,14 +1153,6 @@ impl Session {
             "system_version": self.resolved.identity.system_version.as_deref().unwrap_or(""),
             "device_class": self.resolved.resolution.device_class,
             "target_confirmed": if self.resolved.resolution.target_confirmed { "1" } else { "0" },
-            "pending_install": self.paths.state.join("pending-install.tsv"),
-            "install_transaction": self.paths.state.join("install-transaction.tsv"),
-            "portmaster_active": self.paths.portmaster_active,
-            "operation_active": self.paths.operation_active,
-            "pending_install_exists": self.paths.state.join("pending-install.tsv").is_file(),
-            "install_transaction_exists": self.paths.state.join("install-transaction.tsv").is_file(),
-            "portmaster_active_exists": self.paths.portmaster_active.is_file(),
-            "operation_active_exists": self.paths.operation_active.is_file(),
             "update_cache_file": self.paths.update_cache,
             "update_checked": update_checked,
             "update_status": update_status,
@@ -1150,7 +1177,6 @@ impl Session {
         }
         Inventory::scan_with_options(
             &self.resolved.context,
-            Default::default(),
             &self.inventory_options(),
         )
         .map(Some)
@@ -1215,8 +1241,33 @@ impl Session {
     }
 
     fn cleanup_stale_activity(&self) {
-        cleanup_marker(&self.paths.operation_lock, &self.paths.operation_active);
-        cleanup_marker(&self.paths.portmaster_lock, &self.paths.portmaster_active);
+        // Markers and directory-form locks of retired activity protocols; the
+        // flock files themselves are kept (they are the lock).
+        let _ = fs::remove_file(self.paths.state.join("operation-active.tsv"));
+        let _ = fs::remove_file(self.paths.state.join("portmaster-active.tsv"));
+        for lock in [&self.paths.operation_lock, &self.paths.portmaster_lock] {
+            if lock.is_dir() {
+                let _ = fs::remove_dir_all(lock);
+            }
+        }
+        // PID-keyed scratch of processes that no longer exist: size-scan and
+        // download temporaries never survive their writer usefully.
+        let own = std::process::id().to_string();
+        if let Ok(entries) = fs::read_dir(&self.paths.state) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let stale = (name.starts_with("sizes.tmp.")
+                    || name.starts_with("progress.tsv.tmp.")
+                    || name.starts_with(".stable-manifest-")
+                    || name.starts_with(".stable-release-manifest-")
+                    || name.starts_with(".runtime-metadata-"))
+                    && !name.contains(&own)
+                    && !name.ends_with(".lock");
+                if stale {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 
     fn love_environment(&self) -> Result<BTreeMap<String, String>, String> {
@@ -1394,39 +1445,20 @@ impl Session {
         }) {
             Ok(status) => status,
             Err(error) => {
-                write_text(&self.paths.config_refresh_result, "1\terror\n")?;
+                *self
+                    .config_refresh_status
+                    .lock()
+                    .unwrap_or_else(|value| value.into_inner()) = Some("error".to_owned());
                 return Err(display_error(error));
             }
         };
-        write_text(
-            &self.paths.config_refresh_result,
-            &format!("1\t{}\n", status.as_str()),
-        )?;
+        *self
+            .config_refresh_status
+            .lock()
+            .unwrap_or_else(|value| value.into_inner()) = Some(status.as_str().to_owned());
         self.reload()?;
         self.refresh_inventory_state()?;
         Ok(0)
-    }
-
-    fn validate_pending(&self) -> Result<u8, String> {
-        let health = self.health_status()?;
-        let plan = appmanager_core::InstallPlan::from_context(&self.resolved.context)
-            .map_err(display_error)?
-            .validate(&self.resolved.context)
-            .map_err(display_error)?;
-        let outcome = validate_pending_install(&PendingValidationRequest {
-            state_dir: self.paths.state.clone(),
-            plan,
-            core_health_healthy: health == "healthy" && self.core_version().is_some(),
-            interrupt_before_mutation: false,
-            fail_restore_after: None,
-        })
-        .map_err(display_error)?;
-        let code = match outcome.status {
-            PendingValidationStatus::Valid | PendingValidationStatus::None => 0,
-            PendingValidationStatus::Interrupted => 75,
-            PendingValidationStatus::Restored | PendingValidationStatus::NoUsable => 1,
-        };
-        Ok(code)
     }
 
     fn apply_plan(&mut self) -> Result<u8, String> {
@@ -1455,10 +1487,7 @@ fn resolve(
 }
 
 fn execute_plan(session: &mut Session) -> Result<u8, String> {
-    let _guard = ActivityGuard::acquire(
-        &session.paths.operation_lock,
-        &session.paths.operation_active,
-    )?;
+    let _guard = ActivityGuard::acquire(&session.paths.operation_lock)?;
     let actions = read_plan(&session.paths.plan)?;
     write_text(&session.paths.result, "")?;
     let _ = fs::remove_file(&session.paths.progress);
@@ -1723,7 +1752,7 @@ fn install_portmaster_action(
     match install_stable_release(session, &source) {
         Ok(()) => append_result(
             &session.paths.result,
-            "OK\tportmaster\tpending-validation\n",
+            "OK\tportmaster\tinstalled\n",
         ),
         Err(error) => {
             session.log(&format!("PortMaster installation failed: {error}"));
@@ -1738,10 +1767,7 @@ fn install_portmaster_action(
 }
 
 fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(), String> {
-    let _guard = ActivityGuard::acquire(
-        &session.paths.portmaster_lock,
-        &session.paths.portmaster_active,
-    )?;
+    let _guard = ActivityGuard::acquire(&session.paths.portmaster_lock)?;
     let _ = fs::remove_file(&session.paths.cancel);
     write_progress(
         &session.paths.progress,
@@ -1772,13 +1798,14 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
             "PortMaster",
         );
         GitHubTransport::new()
-            .fetch(
+            .fetch_with_timeout(
                 Capability::Release,
                 &url,
                 &archive,
                 |candidate| stable_archive_valid(candidate, &expected_md5),
                 Some(&progress),
                 None,
+                std::time::Duration::from_secs(15 * 60),
             )
             .map_err(display_error)?;
     }
@@ -1799,15 +1826,6 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         "Installing PortMaster",
     )?;
     install_archive(session, archive)?;
-    for name in [
-        "pending-install.tsv",
-        "pending-manifest.tsv",
-        "pending-frontend-manifest.tsv",
-    ] {
-        if !session.paths.state.join(name).exists() {
-            return Err(format!("installation did not publish {name}"));
-        }
-    }
     write_progress(
         &session.paths.progress,
         session.progress_channel.as_ref(),
@@ -1815,7 +1833,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         100,
         100,
         0,
-        &format!("PortMaster {version} installed; reopen required"),
+        &format!("PortMaster {version} installed"),
     )?;
     Ok(())
 }
@@ -1845,8 +1863,6 @@ fn install_archive(session: &Session, archive: PathBuf) -> Result<(), String> {
         progress_channel: session.progress_channel.clone(),
         probe_root: session.root.clone(),
         plan,
-        fail_after_backup: false,
-        fail_restore_after: None,
     })
     .map(|_| ())
     .map_err(display_error)
@@ -1930,11 +1946,10 @@ fn read_release_row(path: &Path) -> Result<(String, String, String), String> {
 
 struct ActivityGuard {
     _lock: ExclusiveFileLock,
-    marker: PathBuf,
 }
 
 impl ActivityGuard {
-    fn acquire(lock: &Path, marker: &Path) -> Result<Self, String> {
+    fn acquire(lock: &Path) -> Result<Self, String> {
         let lock = ExclusiveFileLock::try_acquire(lock).map_err(|error| {
             if error.kind() == std::io::ErrorKind::WouldBlock {
                 "another APP Manager operation is already running".to_owned()
@@ -1942,27 +1957,7 @@ impl ActivityGuard {
                 error.to_string()
             }
         })?;
-        let started = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        write_text(
-            marker,
-            &format!(
-                "version\t1\npid\t{}\nstarted\t{started}\n",
-                std::process::id()
-            ),
-        )?;
-        Ok(Self {
-            _lock: lock,
-            marker: marker.to_path_buf(),
-        })
-    }
-}
-
-impl Drop for ActivityGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.marker);
+        Ok(Self { _lock: lock })
     }
 }
 
@@ -2202,18 +2197,6 @@ fn read_update_cache(path: &Path) -> (u64, String, String) {
     (checked, status, latest)
 }
 
-fn cleanup_marker(lock: &Path, marker: &Path) {
-    if lock.is_dir() {
-        let _ = fs::remove_dir_all(lock);
-        let _ = fs::remove_file(marker);
-        return;
-    }
-    if let Ok(lock) = ExclusiveFileLock::try_acquire(lock) {
-        let _ = fs::remove_file(marker);
-        drop(lock);
-    }
-}
-
 fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(value).map_err(display_error)?;
     portkit_core::atomic_write(path, &bytes).map_err(display_error)
@@ -2262,16 +2245,6 @@ mod tests {
 
     #[test]
     fn validation_and_refresh_rows_are_published_as_structured_data() {
-        assert_eq!(
-            parse_validation_result("1\tvalid\tready\n"),
-            json!({"status": "valid", "detail": "ready"})
-        );
-        assert_eq!(
-            parse_config_refresh_result("1\tupdated\n"),
-            json!({"status": "updated"})
-        );
-        assert_eq!(parse_validation_result("broken"), Value::Null);
-        assert_eq!(parse_config_refresh_result("broken"), Value::Null);
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub fn sync_newer(request: &SyncRequest) -> io::Result<usize> {
         if !needs_copy(&source.metadata()?, destination.metadata().ok().as_ref())? {
             continue;
         }
-        portkit_core::atomic_copy(&source, &destination)?;
+        crate::atomic::atomic_copy(&source, &destination)?;
         copied += 1;
     }
     Ok(copied)

@@ -121,6 +121,9 @@ run_love_launcher_ui() {
     return
   fi
   _love_provide_font "$ui_dir" || true
+  # The UI rewrites this file on confirm. Removing it first means a crashed UI
+  # hands stage-2 validated defaults, never the previous run's settings.
+  rm -f "$LAUNCH_ENV"
   (   # Display env stays in this subshell — leaking it breaks the stage-2 game.
     export LOVE_IDENTITY="${PORT_NAME:-portmaster}_launcher"
     export LOVE_WINDOW_TITLE="${PORT_NAME:-PortMaster} Launcher"

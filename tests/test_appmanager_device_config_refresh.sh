@@ -80,17 +80,14 @@ run_refresh() {
       --app-root "$TMP/app" -- --refresh-device-config
 }
 
-run_refresh "$TMP/newer.json" "$TMP/newer-detail.json"
+[ "$(run_refresh "$TMP/newer.json" "$TMP/newer-detail.json")" = updated ]
 cmp "$TMP/newer.json" "$TMP/state/device-config/config.json"
 cmp "$TMP/newer-detail.json" "$TMP/state/device-config/platforms/trimui.json"
-grep -Fxq $'1\tupdated' "$TMP/state/config-refresh.tsv"
 
-run_refresh "$TMP/newer.json" "$TMP/newer-detail.json"
-grep -Fxq $'1\tunchanged' "$TMP/state/config-refresh.tsv"
+[ "$(run_refresh "$TMP/newer.json" "$TMP/newer-detail.json")" = unchanged ]
 
 # An older or same-version response never replaces the last-known-good cache.
-run_refresh "$ROOT/config/config.json" "$ROOT/config/platforms/trimui.json"
-grep -Fxq $'1\tunchanged' "$TMP/state/config-refresh.tsv"
+[ "$(run_refresh "$ROOT/config/config.json" "$ROOT/config/platforms/trimui.json")" = unchanged ]
 cmp "$TMP/newer.json" "$TMP/state/device-config/config.json"
 
 # The UI gives refresh a bounded startup window. A download that outlives that
@@ -102,7 +99,6 @@ if PAM_TEST_CONFIG_DELAY=2 PAM_CONFIG_REFRESH_TIMEOUT_SECONDS=1 run_refresh "$TM
   exit 1
 fi
 [ "$SECONDS" -le 2 ] || { echo "device config refresh did not honor its global deadline" >&2; exit 1; }
-grep -Fxq $'1\terror' "$TMP/state/config-refresh.tsv"
 cmp "$TMP/active-before.json" "$TMP/state/device-config/config.json"
 
 # Only one refresh may select and promote a generation at a time.
@@ -119,7 +115,6 @@ if run_refresh "$TMP/newest.json" "$TMP/newest-detail.json"; then
   echo "concurrent device config refresh unexpectedly succeeded" >&2
   exit 1
 fi
-grep -Fxq $'1\terror' "$TMP/state/config-refresh.tsv"
 kill "$lock_pid" 2>/dev/null || true
 wait "$lock_pid" 2>/dev/null || true
 lock_pid=""
@@ -129,7 +124,6 @@ if run_refresh "$TMP/broken.json" "$ROOT/config/platforms/trimui.json"; then
   echo "invalid remote device config was accepted" >&2
   exit 1
 fi
-grep -Fxq $'1\terror' "$TMP/state/config-refresh.tsv"
 cmp "$TMP/newer.json" "$TMP/state/device-config/config.json"
 
 echo "appmanager device config refresh tests: PASS"

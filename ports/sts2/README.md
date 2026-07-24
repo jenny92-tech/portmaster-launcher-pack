@@ -32,7 +32,7 @@ OOMs immediately.
 
 | Fork | Branch | Purpose |
 |---|---|---|
-| [`jenny92-tech/godot`][gh-godot] | `linuxbsd-sdl2` | Godot 4.5 mono with a KMSDRM+SDL2 display server backend for PortMaster devices |
+| [`jenny92-tech/godot`][gh-godot] | `4.5-arm64-sdl2` | Godot 4.5 mono with an SDL-only display server (SDL2 video driver owns display/EGL; no libdrm/libgbm) for PortMaster devices |
 | [`jenny92-tech/fmod-gdextension`][gh-fmod] | `master` | FMOD Studio bindings for the audio layer |
 | [`jenny92-tech/spine-runtimes`][gh-spine] | `4.2` | Spine 4.2 GDExtension for character animation |
 

@@ -289,37 +289,6 @@ function Model.new(kit,native)
         return "reinstall"
     end
 
-    function self.invalidate_for_plan(plan)
-        local ports,trash,runtimes,sizes,all=false,false,false,false,false
-        for _,item in ipairs(plan or {}) do
-            local kind=item.kind
-            if kind=="INSTALL_PORTMASTER" then all=true
-            elseif kind=="INSTALL_RUNTIME" then runtimes=true
-            elseif kind=="TRASH" or kind=="DELETE_MANAGED" or kind=="RESTORE_TRASH" or kind=="RESTORE_ITEM" then
-                ports=true; trash=true; runtimes=true; sizes=true
-            elseif kind=="EMPTY_TRASH" or kind=="DELETE_ITEM" then
-                trash=true; sizes=true
-            elseif kind=="CLEAN_APPLEDOUBLE" then
-                ports=true; sizes=true
-            end
-        end
-        if all then self.invalidate_all(); return end
-        if ports or trash or runtimes then
-            self.invalidate("native-inventory")
-            self.native_inventory=nil
-        end
-        if ports then
-            self.invalidate("ports")
-        end
-        if trash then
-            self.invalidate("trash")
-        end
-        if runtimes then
-            self.invalidate("required-runtimes","installed-runtimes","runtime-metadata")
-        end
-        if sizes then self.invalidate("sizes") end
-    end
-
     return self
 end
 

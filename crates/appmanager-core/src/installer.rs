@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -7,7 +7,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use portkit_core::atomic_write;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zip::ZipArchive;
 
@@ -16,7 +15,6 @@ use crate::{
     ValidatedInstallPlan,
 };
 
-const PROTOCOL_VERSION: u8 = 1;
 #[derive(Clone, Copy)]
 struct ArchiveLimits {
     entries: usize,
@@ -50,12 +48,6 @@ pub struct InstallRequest {
     /// Optional filesystem prefix used only to probe device-absolute library candidates in tests.
     pub probe_root: Option<PathBuf>,
     pub plan: ValidatedInstallPlan,
-    /// Deterministic fault injection for transaction rollback tests.
-    #[doc(hidden)]
-    pub fail_after_backup: bool,
-    /// Deterministic interruption after restoring this many backup entries.
-    #[doc(hidden)]
-    pub fail_restore_after: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -63,15 +55,6 @@ pub struct InstallRequest {
 pub enum InstallMode {
     Install,
     Update,
-}
-
-impl InstallMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Install => "install",
-            Self::Update => "update",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -84,47 +67,6 @@ pub struct InstallOutcome {
     pub frontend_manifest_count: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct PendingValidationRequest {
-    pub state_dir: PathBuf,
-    pub plan: ValidatedInstallPlan,
-    /// Result of the config-derived PortMaster health probe performed before
-    /// entering the native transaction validator.
-    pub core_health_healthy: bool,
-    #[doc(hidden)]
-    pub interrupt_before_mutation: bool,
-    #[doc(hidden)]
-    pub fail_restore_after: Option<usize>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PendingValidationStatus {
-    None,
-    Valid,
-    Restored,
-    NoUsable,
-    Interrupted,
-}
-
-impl PendingValidationStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Valid => "valid",
-            Self::Restored => "restored",
-            Self::NoUsable => "no-usable",
-            Self::Interrupted => "interrupted",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PendingValidationOutcome {
-    pub status: PendingValidationStatus,
-    pub detail: String,
-}
-
 #[derive(Debug, Error)]
 pub enum InstallError {
     #[error("invalid install request: {0}")]
@@ -133,27 +75,9 @@ pub enum InstallError {
     Cancelled,
     #[error("another installation is already running")]
     Locked,
-    #[error("a previous installation is still pending validation")]
-    Pending,
-    #[error("a previous installation transaction requires recovery")]
-    RecoveryRequired,
     #[error("unsafe or invalid PortMaster archive: {0}")]
     Archive(String),
     #[error("installation failed: {0}")]
-    Io(#[from] io::Error),
-    #[error(
-        "installation failed and automatic rollback was incomplete: {install}; rollback: {rollback}"
-    )]
-    Rollback { install: String, rollback: String },
-}
-
-#[derive(Debug, Error)]
-pub enum PendingValidationError {
-    #[error("another PortMaster install or validation is already running")]
-    Locked,
-    #[error("invalid pending PortMaster transaction: {0}")]
-    Invalid(String),
-    #[error("pending PortMaster validation failed: {0}")]
     Io(#[from] io::Error),
 }
 
@@ -169,20 +93,6 @@ impl Drop for WorkGuard {
     }
 }
 
-struct Transaction<'a> {
-    request: &'a InstallRequest,
-    rollback: PathBuf,
-    frontend_rollback: PathBuf,
-    core_stage_name: String,
-    mode: InstallMode,
-    mutation_started: bool,
-    backup_complete: bool,
-    frontend_existing: Vec<String>,
-    backup_tops: Vec<String>,
-    frontend_backup_hash: String,
-    backup_top_hash: String,
-}
-
 pub fn install_portmaster(request: &InstallRequest) -> Result<InstallOutcome, InstallError> {
     let state_is_safe = ManagedRoot::new(&request.state_dir).is_ok();
     let result = install_portmaster_inner(request);
@@ -192,538 +102,6 @@ pub fn install_portmaster(request: &InstallRequest) -> Result<InstallOutcome, In
         }
     }
     result
-}
-
-pub fn validate_pending_install(
-    request: &PendingValidationRequest,
-) -> Result<PendingValidationOutcome, PendingValidationError> {
-    ManagedRoot::new(&request.state_dir)
-        .map_err(|error| PendingValidationError::Invalid(error.to_string()))?;
-    fs::create_dir_all(&request.state_dir)?;
-    let _lock = match acquire_lock(&request.state_dir) {
-        Ok(lock) => lock,
-        Err(InstallError::Locked) => {
-            publish_validation(
-                request,
-                "checking",
-                "Another validation process is still running",
-            )?;
-            return Err(PendingValidationError::Locked);
-        }
-        Err(error) => {
-            return Err(PendingValidationError::Invalid(error.to_string()));
-        }
-    };
-    validate_pending_install_locked(request)
-}
-
-fn validate_pending_install_locked(
-    request: &PendingValidationRequest,
-) -> Result<PendingValidationOutcome, PendingValidationError> {
-    let pending = request.state_dir.join("pending-install.tsv");
-    let transaction = request.state_dir.join("install-transaction.tsv");
-    if !pending.is_file() && transaction.is_file() {
-        publish_validation(
-            request,
-            "checking",
-            "Recovering an interrupted PortMaster transaction",
-        )?;
-        return match recover_interrupted_validation(request) {
-            Ok(RestoreDisposition::Restored) => finish_validation(
-                request,
-                PendingValidationStatus::Restored,
-                "The previous PortMaster environment was restored",
-            ),
-            Ok(RestoreDisposition::NoUsable) => finish_validation(
-                request,
-                PendingValidationStatus::NoUsable,
-                "The incomplete first installation was removed",
-            ),
-            Err(_) => finish_validation(
-                request,
-                PendingValidationStatus::Interrupted,
-                "Automatic recovery could not complete; recovery state was preserved",
-            ),
-        };
-    }
-    if !pending.is_file() {
-        return finish_validation(
-            request,
-            PendingValidationStatus::None,
-            "No pending installation",
-        );
-    }
-    publish_validation(request, "checking", "Validating installed PortMaster core")?;
-    if request.interrupt_before_mutation {
-        return finish_validation(
-            request,
-            PendingValidationStatus::Interrupted,
-            "Validation was interrupted before any state changed",
-        );
-    }
-    if pending_core_valid(request).unwrap_or(false) {
-        let result = (|| -> io::Result<()> {
-            remove_any(&request.plan.target.join(".appmanager-rollback"))?;
-            remove_any(&request.plan.frontend_dir.join(".appmanager-rollback"))?;
-            remove_any(&request.state_dir.join("rollback"))?;
-            // The journal is the commit marker. Delete it last so a power loss
-            // during backup cleanup simply retries finalization next launch.
-            clear_pending_state(&request.state_dir)
-        })();
-        return match result {
-            Ok(()) => finish_validation(
-                request,
-                PendingValidationStatus::Valid,
-                "PortMaster environment validated",
-            ),
-            Err(_) => finish_validation(
-                request,
-                PendingValidationStatus::Interrupted,
-                "Validated core could not finalize its pending state",
-            ),
-        };
-    }
-    match rollback_pending_validation(request) {
-        Ok(RestoreDisposition::Restored) => finish_validation(
-            request,
-            PendingValidationStatus::Restored,
-            "The previous PortMaster environment was restored",
-        ),
-        Ok(RestoreDisposition::NoUsable) => finish_validation(
-            request,
-            PendingValidationStatus::NoUsable,
-            "The incomplete first installation was removed",
-        ),
-        Err(_) => finish_validation(
-            request,
-            PendingValidationStatus::Interrupted,
-            "Automatic rollback could not complete; recovery state was preserved",
-        ),
-    }
-}
-
-fn finish_validation(
-    request: &PendingValidationRequest,
-    status: PendingValidationStatus,
-    detail: &str,
-) -> Result<PendingValidationOutcome, PendingValidationError> {
-    publish_validation(request, status.as_str(), detail)?;
-    Ok(PendingValidationOutcome {
-        status,
-        detail: detail.to_owned(),
-    })
-}
-
-fn publish_validation(
-    request: &PendingValidationRequest,
-    status: &str,
-    detail: &str,
-) -> Result<(), PendingValidationError> {
-    let detail = detail.replace(['\t', '\r', '\n'], " ");
-    atomic_write(
-        &request.state_dir.join("validation-result.tsv"),
-        format!("1\t{status}\t{detail}\n").as_bytes(),
-    )?;
-    Ok(())
-}
-
-fn pending_core_valid(request: &PendingValidationRequest) -> Result<bool, String> {
-    if !request.core_health_healthy {
-        return Ok(false);
-    }
-    let state = read_state(&request.state_dir.join("pending-install.tsv"))?;
-    require_state(&state, "version", "1")?;
-    match required(&state, "mode")? {
-        "install" | "update" => {}
-        _ => return Ok(false),
-    }
-    require_state(&state, "device", &request.plan.device)?;
-    require_path(&state, "target", &request.plan.target)?;
-    require_path(&state, "scripts", &request.plan.scripts)?;
-    require_path(&state, "frontend_dir", &request.plan.frontend_dir)?;
-    require_state(&state, "frontend_names", &frontend_names(&request.plan))?;
-    require_path(
-        &state,
-        "rollback",
-        &request.plan.target.join(".appmanager-rollback"),
-    )?;
-    require_path(
-        &state,
-        "frontend_rollback",
-        &request.plan.frontend_dir.join(".appmanager-rollback"),
-    )?;
-    let launcher_hash = required_hash(&state, "launcher_sha256")?;
-    let launcher = if request.plan.frontend_names.is_empty() {
-        request.plan.target.join(&request.plan.primary_frontend)
-    } else {
-        request
-            .plan
-            .frontend_dir
-            .join(&request.plan.primary_frontend)
-    };
-    if sha256_file(&launcher).map_err(|error| error.to_string())? != launcher_hash {
-        return Ok(false);
-    }
-    if !validate_pending_manifest(
-        &request.plan.target,
-        &request.state_dir.join("pending-manifest.tsv"),
-        required_count(&state, "manifest_count", false)?,
-        &required_hash(&state, "manifest_sha256")?,
-        None,
-    )? {
-        return Ok(false);
-    }
-    validate_pending_manifest(
-        &request.plan.frontend_dir,
-        &request.state_dir.join("pending-frontend-manifest.tsv"),
-        required_count(&state, "frontend_manifest_count", true)?,
-        &required_hash(&state, "frontend_manifest_sha256")?,
-        Some(&request.plan.frontend_names),
-    )
-}
-
-fn validate_pending_manifest(
-    root: &Path,
-    manifest: &Path,
-    expected_count: usize,
-    expected_hash: &str,
-    allowed_names: Option<&[String]>,
-) -> Result<bool, String> {
-    let bytes = fs::read(manifest).map_err(|error| error.to_string())?;
-    if sha256_bytes(&bytes) != expected_hash {
-        return Ok(false);
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
-    let managed = ManagedRoot::new(root).map_err(|error| error.to_string())?;
-    let mut count = 0_usize;
-    let mut seen = BTreeSet::new();
-    for line in text.lines() {
-        let (hash, relative) = line
-            .split_once('\t')
-            .ok_or_else(|| "malformed pending manifest row".to_owned())?;
-        if relative.contains('\t') || !valid_hash(hash) || !seen.insert(relative.to_owned()) {
-            return Ok(false);
-        }
-        if let Some(names) = allowed_names {
-            ManagedRoot::validate_child_name(relative).map_err(|error| error.to_string())?;
-            if !names.iter().any(|name| name == relative) {
-                return Ok(false);
-            }
-        } else if validate_archive_relative(relative).is_err() {
-            return Ok(false);
-        }
-        let path = root.join(relative);
-        managed
-            .validate_descendant(&path)
-            .map_err(|error| error.to_string())?;
-        if !path.is_file() || sha256_file(&path).map_err(|error| error.to_string())? != hash {
-            return Ok(false);
-        }
-        count += 1;
-    }
-    Ok(count == expected_count
-        && allowed_names.is_none_or(|names| count == names.len())
-        && (allowed_names.is_some() || count > 0))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RestoreDisposition {
-    Restored,
-    NoUsable,
-}
-
-fn rollback_pending_validation(
-    request: &PendingValidationRequest,
-) -> Result<RestoreDisposition, String> {
-    let state = read_state(&request.state_dir.join("pending-install.tsv"))?;
-    require_state(&state, "version", "1")?;
-    validate_transaction_identity(request, &state)?;
-    let result = restore_pending_rollback(
-        request,
-        true,
-        Some((
-            required_count(&state, "backup_top_count", true)?,
-            required_hash(&state, "backup_top_sha256")?,
-        )),
-        required_count(&state, "frontend_backup_count", true)?,
-        &required_hash(&state, "frontend_backup_sha256")?,
-    )?;
-    clear_pending_state(&request.state_dir).map_err(|error| error.to_string())?;
-    Ok(result)
-}
-
-fn recover_interrupted_validation(
-    request: &PendingValidationRequest,
-) -> Result<RestoreDisposition, String> {
-    let state = read_state(&request.state_dir.join("install-transaction.tsv"))?;
-    require_state(&state, "version", "1")?;
-    validate_transaction_identity(request, &state)?;
-    let mode = required(&state, "mode")?;
-    if !matches!(mode, "install" | "update")
-        || !matches!(required(&state, "had_launcher")?, "0" | "1")
-    {
-        return Err("invalid interrupted transaction mode".to_owned());
-    }
-    let phase = required(&state, "phase")?;
-    let (sweep, expected) = match phase {
-        "prepared" => (false, None),
-        "backed-up" => (
-            true,
-            Some((
-                required_count(&state, "backup_top_count", true)?,
-                required_hash(&state, "backup_top_sha256")?,
-            )),
-        ),
-        _ => return Err("invalid interrupted transaction phase".to_owned()),
-    };
-    let result = restore_pending_rollback(
-        request,
-        sweep,
-        expected,
-        required_count(&state, "frontend_backup_count", true)?,
-        &required_hash(&state, "frontend_backup_sha256")?,
-    )?;
-    clear_pending_state(&request.state_dir).map_err(|error| error.to_string())?;
-    if phase == "prepared" && mode == "update" && result == RestoreDisposition::NoUsable {
-        Ok(RestoreDisposition::Restored)
-    } else {
-        Ok(result)
-    }
-}
-
-fn validate_transaction_identity(
-    request: &PendingValidationRequest,
-    state: &BTreeMap<String, String>,
-) -> Result<(), String> {
-    require_path(state, "target", &request.plan.target)?;
-    require_path(state, "scripts", &request.plan.scripts)?;
-    require_path(state, "frontend_dir", &request.plan.frontend_dir)?;
-    require_state(state, "frontend_names", &frontend_names(&request.plan))?;
-    require_path(
-        state,
-        "rollback",
-        &request.plan.target.join(".appmanager-rollback"),
-    )?;
-    require_path(
-        state,
-        "frontend_rollback",
-        &request.plan.frontend_dir.join(".appmanager-rollback"),
-    )
-}
-
-fn restore_pending_rollback(
-    request: &PendingValidationRequest,
-    mut sweep: bool,
-    expected_core: Option<(usize, String)>,
-    frontend_count: usize,
-    frontend_hash: &str,
-) -> Result<RestoreDisposition, String> {
-    let plan = &request.plan;
-    let rollback = plan.target.join(".appmanager-rollback");
-    let frontend_rollback = plan.frontend_dir.join(".appmanager-rollback");
-    ManagedRoot::new(&rollback).map_err(|error| error.to_string())?;
-    ManagedRoot::new(&frontend_rollback).map_err(|error| error.to_string())?;
-    if !rollback.is_dir() || !frontend_rollback.is_dir() {
-        return Err("rollback directory is unavailable".to_owned());
-    }
-    let expected_tops = expected_core
-        .as_ref()
-        .map(|(count, hash)| {
-            validate_name_list(&rollback.join("expected-tops.tsv"), *count, hash, None)
-        })
-        .transpose()?;
-    let frontend_existing = validate_name_list(
-        &frontend_rollback.join("frontend-existing.tsv"),
-        frontend_count,
-        frontend_hash,
-        Some(&plan.frontend_names),
-    )?;
-    let restoring = rollback.join("restoring");
-    if path_exists(&restoring) {
-        if !restoring.is_file() {
-            return Err("rollback restoring marker is unsafe".to_owned());
-        }
-        sweep = false;
-    }
-    let mut restored = path_exists(&restoring);
-    if sweep {
-        let sweeping = rollback.join("sweeping");
-        atomic_write(&sweeping, b"1\n").map_err(|error| error.to_string())?;
-        for (_, path) in managed_top_entries(plan, None).map_err(|error| error.to_string())? {
-            remove_any(&path).map_err(|error| error.to_string())?;
-        }
-        for name in &plan.frontend_names {
-            remove_any(&plan.frontend_dir.join(name)).map_err(|error| error.to_string())?;
-        }
-        rename_synced(&sweeping, &restoring).map_err(|error| error.to_string())?;
-    }
-    let mut restore_count = 0_usize;
-    for name in direct_names(&rollback.join("core")).map_err(|error| error.to_string())? {
-        let backup = rollback.join("core").join(&name);
-        let live = plan.target.join(&name);
-        if path_exists(&live) {
-            return Err(format!("rollback collision at {}", live.display()));
-        }
-        rename_synced(&backup, &live).map_err(|error| error.to_string())?;
-        restored = true;
-        restore_count += 1;
-        if request.fail_restore_after == Some(restore_count) {
-            return Err("simulated interrupted rollback".to_owned());
-        }
-    }
-    for name in &plan.frontend_names {
-        let backup = frontend_rollback.join(name);
-        let live = plan.frontend_dir.join(name);
-        if path_exists(&backup) {
-            if path_exists(&live) {
-                return Err(format!("frontend rollback collision at {}", live.display()));
-            }
-            rename_synced(&backup, &live).map_err(|error| error.to_string())?;
-            restored = true;
-        } else if frontend_existing.iter().any(|existing| existing == name) {
-            if !path_exists(&live) {
-                return Err(format!("missing restored frontend {}", live.display()));
-            }
-        } else if (sweep || path_exists(&restoring)) && path_exists(&live) {
-            return Err(format!("unexpected frontend {}", live.display()));
-        }
-    }
-    if direct_names(&rollback.join("core"))
-        .map_err(|error| error.to_string())?
-        .is_empty()
-        && direct_names(&frontend_rollback)
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .all(|name| name == "frontend-existing.tsv")
-    {
-        if let Some(expected) = &expected_tops {
-            for name in expected {
-                if !path_exists(&plan.target.join(name)) {
-                    return Err(format!("missing restored core entry {name}"));
-                }
-            }
-        }
-        remove_any(&rollback).map_err(|error| error.to_string())?;
-        remove_any(&frontend_rollback).map_err(|error| error.to_string())?;
-        return Ok(if restored {
-            RestoreDisposition::Restored
-        } else {
-            RestoreDisposition::NoUsable
-        });
-    }
-    Err("rollback still contains unrestored entries".to_owned())
-}
-
-fn validate_name_list(
-    path: &Path,
-    expected_count: usize,
-    expected_hash: &str,
-    allowed: Option<&[String]>,
-) -> Result<Vec<String>, String> {
-    if !valid_hash(expected_hash) {
-        return Err("invalid rollback list hash".to_owned());
-    }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    if sha256_bytes(&bytes) != expected_hash {
-        return Err("rollback list hash mismatch".to_owned());
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
-    let mut values = Vec::new();
-    let mut seen = BTreeSet::new();
-    for value in text.lines() {
-        ManagedRoot::validate_child_name(value).map_err(|error| error.to_string())?;
-        if !seen.insert(value.to_owned())
-            || allowed.is_some_and(|names| !names.iter().any(|name| name == value))
-        {
-            return Err("unsafe rollback list entry".to_owned());
-        }
-        values.push(value.to_owned());
-    }
-    if values.len() != expected_count {
-        return Err("rollback list count mismatch".to_owned());
-    }
-    Ok(values)
-}
-
-fn read_state(path: &Path) -> Result<BTreeMap<String, String>, String> {
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    if bytes.len() > 64 * 1024 {
-        return Err("state file is too large".to_owned());
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
-    let mut values = BTreeMap::new();
-    for line in text.lines() {
-        let (key, value) = line
-            .split_once('\t')
-            .ok_or_else(|| "malformed state row".to_owned())?;
-        if key.is_empty()
-            || value.is_empty()
-            || value.contains(['\t', '\r', '\n', '\0'])
-            || values.insert(key.to_owned(), value.to_owned()).is_some()
-        {
-            return Err("unsafe or duplicate state row".to_owned());
-        }
-    }
-    Ok(values)
-}
-
-fn required<'a>(state: &'a BTreeMap<String, String>, key: &str) -> Result<&'a str, String> {
-    state
-        .get(key)
-        .map(String::as_str)
-        .ok_or_else(|| format!("missing state field {key}"))
-}
-
-fn require_state(
-    state: &BTreeMap<String, String>,
-    key: &str,
-    expected: &str,
-) -> Result<(), String> {
-    if required(state, key)? == expected {
-        Ok(())
-    } else {
-        Err(format!("state field {key} does not match"))
-    }
-}
-
-fn require_path(
-    state: &BTreeMap<String, String>,
-    key: &str,
-    expected: &Path,
-) -> Result<(), String> {
-    if Path::new(required(state, key)?) == expected {
-        Ok(())
-    } else {
-        Err(format!("state path {key} does not match"))
-    }
-}
-
-fn required_count(
-    state: &BTreeMap<String, String>,
-    key: &str,
-    allow_zero: bool,
-) -> Result<usize, String> {
-    let value = required(state, key)?;
-    let count = value
-        .parse::<usize>()
-        .map_err(|_| format!("invalid state count {key}"))?;
-    if !allow_zero && count == 0 {
-        return Err(format!("state count {key} cannot be zero"));
-    }
-    Ok(count)
-}
-
-fn required_hash(state: &BTreeMap<String, String>, key: &str) -> Result<String, String> {
-    let value = required(state, key)?;
-    if valid_hash(value) {
-        Ok(value.to_ascii_lowercase())
-    } else {
-        Err(format!("invalid state hash {key}"))
-    }
-}
-
-fn valid_hash(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn clear_pending_state(state: &Path) -> io::Result<()> {
@@ -771,25 +149,14 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     cancel(request)?;
 
     let _lock = acquire_lock(&request.state_dir)?;
-    if request.state_dir.join("pending-install.tsv").exists() {
-        return fail_before_mutation(request, InstallError::Pending);
-    }
-    if request.state_dir.join("install-transaction.tsv").exists() {
-        return fail_before_mutation(request, InstallError::RecoveryRequired);
-    }
+    // Leftovers of the retired transactional protocol (or of a crashed swap)
+    // are swept, never honored: the stable archive is small, so the recovery
+    // story is simply installing again.
+    clear_pending_state(&request.state_dir)?;
+    sweep_stale_artifacts(&request.plan, &[&core_work, &frontend_work])?;
     cancel(request)?;
 
     fs::create_dir_all(&request.plan.scripts)?;
-    let rollback = request.plan.target.join(".appmanager-rollback");
-    let frontend_rollback = request.plan.frontend_dir.join(".appmanager-rollback");
-    if rollback.exists() {
-        fs::remove_dir_all(&rollback)?;
-    }
-    if frontend_rollback.exists() {
-        fs::remove_dir_all(&frontend_rollback)?;
-    }
-    fs::create_dir_all(rollback.join("core"))?;
-    fs::create_dir_all(&frontend_rollback)?;
 
     let mode = if ["control.txt", "pugwash", "harbourmaster"]
         .iter()
@@ -806,122 +173,65 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
         .filter(|name| path_exists(&request.plan.frontend_dir.join(name)))
         .cloned()
         .collect::<Vec<_>>();
-    let frontend_list = lines(&frontend_existing);
-    atomic_write(
-        &frontend_rollback.join("frontend-existing.tsv"),
-        frontend_list.as_bytes(),
-    )?;
-    let frontend_backup_hash = sha256_bytes(frontend_list.as_bytes());
-    let mut transaction = Transaction {
-        request,
-        rollback,
-        frontend_rollback,
-        core_stage_name: core_work
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("generated stage name is UTF-8")
-            .to_owned(),
+    progress(request, "installing", 60, "Replacing managed core")?;
+
+    // Retire the current managed entries into the per-run work directories:
+    // same-filesystem renames, removed with the work directories on success,
+    // swept by the next install after a crash. There is no rollback — a
+    // failed swap leaves the core damaged and the fix is installing again.
+    let retired_core = core_work.join("retired");
+    let retired_frontend = frontend_work.join("retired");
+    fs::create_dir_all(&retired_core)?;
+    fs::create_dir_all(&retired_frontend)?;
+    let stage_name = core_work
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("generated stage name is UTF-8");
+    for (name, path) in managed_top_entries(&request.plan, Some(stage_name))? {
+        rename_synced(&path, &retired_core.join(&name))?;
+    }
+    for name in &frontend_existing {
+        rename_synced(
+            &request.plan.frontend_dir.join(name),
+            &retired_frontend.join(name),
+        )?;
+    }
+    install_staged(&request.plan, &staged_core, &staged_frontend)?;
+    set_executables(&request.plan)?;
+    progress(request, "complete", 100, "PortMaster core installed")?;
+    Ok(InstallOutcome {
+        device: request.plan.device.clone(),
+        target: request.plan.target.clone(),
         mode,
-        mutation_started: false,
-        backup_complete: false,
-        frontend_existing,
-        backup_tops: Vec::new(),
-        frontend_backup_hash,
-        backup_top_hash: sha256_bytes(b""),
-    };
-    if let Err(error) = transaction.write_state("prepared") {
-        let _ = transaction.discard_prepared();
-        return Err(error.into());
-    }
-    if let Err(error) = progress(request, "installing", 60, "Replacing managed core") {
-        let _ = transaction.discard_prepared();
-        return Err(error.into());
-    }
-    transaction.mutation_started = true;
-    let result = (|| -> Result<InstallOutcome, InstallError> {
-        transaction.back_up()?;
-        if request.fail_after_backup {
-            return Err(InstallError::Io(io::Error::other(
-                "simulated replacement failure",
-            )));
-        }
-        install_staged(&request.plan, &staged_core, &staged_frontend)?;
-        set_executables(&request.plan)?;
+        status: "installed",
+        manifest_count: staged_files.len(),
+        frontend_manifest_count: request.plan.frontend_names.len(),
+    })
+}
 
-        progress(request, "recording", 90, "Recording managed core manifest")?;
-        let manifest = manifest_for(&request.plan.target, &staged_files)?;
-        let frontend_manifest = frontend_manifest(&request.plan)?;
-        let manifest_text = manifest_rows(&manifest);
-        let frontend_text = manifest_rows(&frontend_manifest);
-        atomic_write(
-            &request.state_dir.join("pending-manifest.tsv"),
-            manifest_text.as_bytes(),
-        )?;
-        atomic_write(
-            &request.state_dir.join("pending-frontend-manifest.tsv"),
-            frontend_text.as_bytes(),
-        )?;
-        let launcher = if request.plan.frontend_names.is_empty() {
-            request.plan.target.join(&request.plan.primary_frontend)
-        } else {
-            request
-                .plan
-                .frontend_dir
-                .join(&request.plan.primary_frontend)
-        };
-        let pending = transaction.pending_state(
-            manifest.len(),
-            &sha256_bytes(manifest_text.as_bytes()),
-            &sha256_file(&launcher)?,
-            frontend_manifest.len(),
-            &sha256_bytes(frontend_text.as_bytes()),
-        );
-        atomic_write(
-            &request.state_dir.join("pending-install.tsv"),
-            pending.as_bytes(),
-        )?;
-        progress(request, "complete", 100, "PortMaster core installed")?;
-        match fs::remove_file(request.state_dir.join("install-transaction.tsv")) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
+// Removes artifacts of earlier installs from the managed directories: the
+// retired transactional protocol's rollback folders and any `.pm-install*`
+// work directory a crashed run left behind (except this run's own).
+fn sweep_stale_artifacts(
+    plan: &ValidatedInstallPlan,
+    keep: &[&Path],
+) -> Result<(), InstallError> {
+    for parent in [&plan.target, &plan.frontend_dir] {
+        let legacy = parent.join(".appmanager-rollback");
+        if path_exists(&legacy) {
+            remove_any(&legacy)?;
         }
-        Ok(InstallOutcome {
-            device: request.plan.device.clone(),
-            target: request.plan.target.clone(),
-            mode,
-            status: "pending-validation",
-            manifest_count: manifest.len(),
-            frontend_manifest_count: frontend_manifest.len(),
-        })
-    })();
-
-    match result {
-        Ok(outcome) => Ok(outcome),
-        Err(error) => match transaction.rollback() {
-            Ok(()) => {
-                let _ = progress(
-                    request,
-                    "rolled-back",
-                    0,
-                    "Previous core restored after installation failure",
-                );
-                Err(error)
+        for name in direct_names(parent)? {
+            if !name.starts_with(".pm-install") {
+                continue;
             }
-            Err(rollback) => {
-                let _ = progress(
-                    request,
-                    "rollback-failed",
-                    0,
-                    "Automatic rollback was incomplete; recovery state was preserved",
-                );
-                Err(InstallError::Rollback {
-                    install: error.to_string(),
-                    rollback: rollback.to_string(),
-                })
+            let path = parent.join(&name);
+            if !keep.iter().any(|kept| **kept == path) {
+                remove_any(&path)?;
             }
-        },
+        }
     }
+    Ok(())
 }
 
 fn progress_is_terminal(state: &Path) -> bool {
@@ -1609,133 +919,6 @@ fn copy_regular(source: &Path, destination: &Path, label: &str) -> Result<(), In
     Ok(())
 }
 
-impl Transaction<'_> {
-    fn discard_prepared(&self) -> io::Result<()> {
-        remove_any(&self.rollback)?;
-        remove_any(&self.frontend_rollback)?;
-        remove_any(&self.request.state_dir.join("install-transaction.tsv"))
-    }
-
-    fn write_state(&self, phase: &str) -> io::Result<()> {
-        let plan = &self.request.plan;
-        let content = format!(
-            concat!(
-                "version\t{}\nphase\t{}\nmode\t{}\ndevice\t{}\ntarget\t{}\nscripts\t{}\n",
-                "frontend_dir\t{}\nfrontend_names\t{}\nrollback\t{}\nfrontend_rollback\t{}\nhad_launcher\t{}\n",
-                "frontend_backup_count\t{}\nfrontend_backup_sha256\t{}\n",
-                "backup_top_count\t{}\nbackup_top_sha256\t{}\n"
-            ),
-            PROTOCOL_VERSION,
-            phase,
-            self.mode.as_str(),
-            plan.device,
-            plan.target.display(),
-            plan.scripts.display(),
-            plan.frontend_dir.display(),
-            frontend_names(plan),
-            self.rollback.display(),
-            self.frontend_rollback.display(),
-            u8::from(self.frontend_existing.contains(&plan.primary_frontend)),
-            self.frontend_existing.len(),
-            self.frontend_backup_hash,
-            self.backup_tops.len(),
-            self.backup_top_hash,
-        );
-        atomic_write(
-            &self.request.state_dir.join("install-transaction.tsv"),
-            content.as_bytes(),
-        )
-    }
-
-    fn back_up(&mut self) -> Result<(), InstallError> {
-        for (name, path) in
-            managed_top_entries(&self.request.plan, Some(self.core_stage_name.as_str()))?
-        {
-            rename_synced(&path, &self.rollback.join("core").join(&name))?;
-        }
-        for name in &self.frontend_existing {
-            rename_synced(
-                &self.request.plan.frontend_dir.join(name),
-                &self.frontend_rollback.join(name),
-            )?;
-        }
-        self.backup_tops = direct_names(&self.rollback.join("core"))?;
-        let content = lines(&self.backup_tops);
-        self.backup_top_hash = sha256_bytes(content.as_bytes());
-        atomic_write(&self.rollback.join("expected-tops.tsv"), content.as_bytes())?;
-        self.backup_complete = true;
-        self.write_state("backed-up")?;
-        Ok(())
-    }
-
-    fn pending_state(
-        &self,
-        manifest_count: usize,
-        manifest_hash: &str,
-        launcher_hash: &str,
-        frontend_count: usize,
-        frontend_hash: &str,
-    ) -> String {
-        let plan = &self.request.plan;
-        format!(
-            concat!(
-                "version\t{}\nmode\t{}\ndevice\t{}\ntarget\t{}\nscripts\t{}\n",
-                "frontend_dir\t{}\nfrontend_names\t{}\nrollback\t{}\nfrontend_rollback\t{}\n",
-                "manifest_count\t{}\nmanifest_sha256\t{}\nlauncher_sha256\t{}\n",
-                "frontend_manifest_count\t{}\nfrontend_manifest_sha256\t{}\nhad_launcher\t{}\n",
-                "frontend_backup_count\t{}\nfrontend_backup_sha256\t{}\n",
-                "backup_top_count\t{}\nbackup_top_sha256\t{}\ncreated\t{}\n"
-            ),
-            PROTOCOL_VERSION,
-            self.mode.as_str(),
-            plan.device,
-            plan.target.display(),
-            plan.scripts.display(),
-            plan.frontend_dir.display(),
-            frontend_names(plan),
-            self.rollback.display(),
-            self.frontend_rollback.display(),
-            manifest_count,
-            manifest_hash,
-            launcher_hash,
-            frontend_count,
-            frontend_hash,
-            u8::from(self.frontend_existing.contains(&plan.primary_frontend)),
-            self.frontend_existing.len(),
-            self.frontend_backup_hash,
-            self.backup_tops.len(),
-            self.backup_top_hash,
-            epoch_seconds(),
-        )
-    }
-
-    fn rollback(&mut self) -> Result<(), InstallError> {
-        if !self.mutation_started {
-            return Ok(());
-        }
-        let recovery = PendingValidationRequest {
-            state_dir: self.request.state_dir.clone(),
-            plan: self.request.plan.clone(),
-            core_health_healthy: false,
-            interrupt_before_mutation: false,
-            fail_restore_after: self.request.fail_restore_after,
-        };
-        let expected_core = self
-            .backup_complete
-            .then(|| (self.backup_tops.len(), self.backup_top_hash.clone()));
-        restore_pending_rollback(
-            &recovery,
-            self.backup_complete,
-            expected_core,
-            self.frontend_existing.len(),
-            &self.frontend_backup_hash,
-        )
-        .map_err(InstallError::Invalid)?;
-        clear_pending_state(&self.request.state_dir)?;
-        Ok(())
-    }
-}
-
 fn install_staged(plan: &ValidatedInstallPlan, core: &Path, frontend: &Path) -> io::Result<()> {
     for name in direct_names(core)? {
         rename_synced(&core.join(&name), &plan.target.join(name))?;
@@ -1860,58 +1043,6 @@ fn regular_files(root: &Path) -> io::Result<Vec<String>> {
     visit(root, root, &mut files)?;
     files.sort();
     Ok(files)
-}
-
-fn manifest_for(root: &Path, files: &[String]) -> Result<BTreeMap<String, String>, InstallError> {
-    files
-        .iter()
-        .map(|relative| Ok((relative.clone(), sha256_file(&root.join(relative))?)))
-        .collect()
-}
-
-fn frontend_manifest(
-    plan: &ValidatedInstallPlan,
-) -> Result<BTreeMap<String, String>, InstallError> {
-    plan.frontend_names
-        .iter()
-        .map(|name| Ok((name.clone(), sha256_file(&plan.frontend_dir.join(name))?)))
-        .collect()
-}
-
-fn manifest_rows(rows: &BTreeMap<String, String>) -> String {
-    rows.iter()
-        .map(|(name, hash)| format!("{hash}\t{name}\n"))
-        .collect()
-}
-
-fn frontend_names(plan: &ValidatedInstallPlan) -> String {
-    if plan.frontend_names.is_empty() {
-        "-".to_owned()
-    } else {
-        plan.frontend_names.join(",")
-    }
-}
-
-fn lines(values: &[String]) -> String {
-    values.iter().map(|value| format!("{value}\n")).collect()
-}
-
-fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(format!("{:x}", digest.finalize()))
-}
-
-fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn rename_synced(source: &Path, destination: &Path) -> io::Result<()> {
@@ -2051,17 +1182,16 @@ mod tests {
             progress_channel: None,
             probe_root: Some(temp.path().to_path_buf()),
             plan: plan(temp),
-            fail_after_backup: false,
-            fail_restore_after: None,
         }
     }
 
     #[test]
-    fn fresh_install_maps_frontend_and_writes_protocol_v1_state() {
+    fn fresh_install_maps_frontend_and_reports_installed() {
         let temp = tempfile::tempdir().unwrap();
         let request = request(&temp);
         let result = install_portmaster(&request).unwrap();
         assert_eq!(result.mode, InstallMode::Install);
+        assert_eq!(result.status, "installed");
         assert_eq!(
             fs::read(request.plan.target.join("control.txt")).unwrap(),
             b"mapped control"
@@ -2071,14 +1201,16 @@ mod tests {
             b"frontend"
         );
         assert!(!request.plan.target.join("config/archive-owned").exists());
-        let pending = fs::read_to_string(request.state_dir.join("pending-install.tsv")).unwrap();
-        assert!(pending.starts_with("version\t1\nmode\tinstall\n"));
-        assert!(pending.contains(&format!(
-            "frontend_rollback\t{}\n",
-            request.plan.frontend_dir.join(".appmanager-rollback").display()
-        )));
-        assert!(pending.contains("frontend_manifest_count\t2\n"));
+        // The retired transactional protocol publishes no state, and the
+        // per-run work directories are gone after a successful swap.
+        assert!(!request.state_dir.join("pending-install.tsv").exists());
         assert!(!request.state_dir.join("install-transaction.tsv").exists());
+        assert!(
+            direct_names(&request.plan.target)
+                .unwrap()
+                .iter()
+                .all(|name| !name.starts_with(".pm-install"))
+        );
     }
 
     #[test]
@@ -2130,13 +1262,7 @@ mod tests {
             b"transaction state"
         );
         assert!(!request.plan.target.join("obsolete").exists());
-        assert!(
-            request
-                .plan
-                .target
-                .join(".appmanager-rollback/core/obsolete")
-                .exists()
-        );
+        assert!(!request.plan.target.join(".appmanager-rollback").exists());
     }
 
     #[test]
@@ -2151,292 +1277,20 @@ mod tests {
     }
 
     #[test]
-    fn replacement_failure_restores_core_and_frontend_automatically() {
+    fn install_sweeps_legacy_transaction_artifacts() {
         let temp = tempfile::tempdir().unwrap();
-        let mut request = request(&temp);
-        fs::create_dir_all(&request.plan.target).unwrap();
-        fs::create_dir_all(&request.plan.frontend_dir).unwrap();
-        fs::write(request.plan.target.join("control.txt"), b"old core").unwrap();
-        fs::write(request.plan.frontend_dir.join("launch.sh"), b"old frontend").unwrap();
-        request.fail_after_backup = true;
-        assert!(install_portmaster(&request).is_err());
-        assert_eq!(
-            fs::read(request.plan.target.join("control.txt")).unwrap(),
-            b"old core"
-        );
-        assert_eq!(
-            fs::read(request.plan.frontend_dir.join("launch.sh")).unwrap(),
-            b"old frontend"
-        );
+        let request = request(&temp);
+        fs::create_dir_all(request.plan.target.join(".appmanager-rollback/core")).unwrap();
+        fs::create_dir_all(request.plan.target.join(".pm-install-stale/stage")).unwrap();
+        fs::create_dir_all(&request.state_dir).unwrap();
+        fs::write(request.state_dir.join("pending-install.tsv"), b"legacy").unwrap();
+        fs::write(request.state_dir.join("install-transaction.tsv"), b"legacy").unwrap();
+        install_portmaster(&request).unwrap();
         assert!(!request.plan.target.join(".appmanager-rollback").exists());
-        assert_eq!(
-            fs::read_to_string(request.state_dir.join("install-progress.tsv"))
-                .unwrap()
-                .split('\t')
-                .nth(1),
-            Some("rolled-back")
-        );
-    }
-
-    #[test]
-    fn interrupted_immediate_rollback_resumes_without_deleting_restored_files() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut install = request(&temp);
-        fs::create_dir_all(&install.plan.target).unwrap();
-        fs::create_dir_all(&install.plan.frontend_dir).unwrap();
-        fs::write(install.plan.target.join("control.txt"), b"old control").unwrap();
-        fs::write(install.plan.target.join("old.txt"), b"old data").unwrap();
-        fs::write(install.plan.frontend_dir.join("launch.sh"), b"old launcher").unwrap();
-        install.fail_after_backup = true;
-        install.fail_restore_after = Some(1);
-
-        assert!(matches!(
-            install_portmaster(&install),
-            Err(InstallError::Rollback { .. })
-        ));
-        assert!(
-            install
-                .plan
-                .target
-                .join(".appmanager-rollback/restoring")
-                .is_file()
-        );
-        assert!(install.state_dir.join("install-transaction.tsv").is_file());
-
-        let outcome = validate_pending_install(&PendingValidationRequest {
-            state_dir: install.state_dir.clone(),
-            plan: install.plan.clone(),
-            core_health_healthy: false,
-            interrupt_before_mutation: false,
-            fail_restore_after: None,
-        })
-        .unwrap();
-
-        assert_eq!(outcome.status, PendingValidationStatus::Restored);
-        assert_eq!(
-            fs::read(install.plan.target.join("control.txt")).unwrap(),
-            b"old control"
-        );
-        assert_eq!(
-            fs::read(install.plan.target.join("old.txt")).unwrap(),
-            b"old data"
-        );
-        assert_eq!(
-            fs::read(install.plan.frontend_dir.join("launch.sh")).unwrap(),
-            b"old launcher"
-        );
-        assert!(!install.state_dir.join("install-transaction.tsv").exists());
-    }
-
-    fn pending_request(install: &InstallRequest) -> PendingValidationRequest {
-        PendingValidationRequest {
-            state_dir: install.state_dir.clone(),
-            plan: install.plan.clone(),
-            core_health_healthy: true,
-            interrupt_before_mutation: false,
-            fail_restore_after: None,
-        }
-    }
-
-    #[test]
-    fn native_pending_validation_finalizes_a_verified_install() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        install_portmaster(&install).unwrap();
-
-        let outcome = validate_pending_install(&pending_request(&install)).unwrap();
-
-        assert_eq!(outcome.status, PendingValidationStatus::Valid);
-        assert!(!install.state_dir.join("pending-install.tsv").exists());
-        assert!(!install.plan.target.join(".appmanager-rollback").exists());
-        assert!(
-            !install
-                .plan
-                .frontend_dir
-                .join(".appmanager-rollback")
-                .exists()
-        );
-    }
-
-    #[test]
-    fn native_pending_validation_restores_an_update_and_preserves_runtime_state() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        fs::create_dir_all(install.plan.target.join("libs")).unwrap();
-        fs::create_dir_all(&install.plan.frontend_dir).unwrap();
-        fs::write(install.plan.target.join("control.txt"), b"old core").unwrap();
-        fs::write(install.plan.target.join("old.txt"), b"old data").unwrap();
-        fs::write(install.plan.target.join("libs/runtime"), b"runtime").unwrap();
-        fs::write(install.plan.frontend_dir.join("launch.sh"), b"old launcher").unwrap();
-        install_portmaster(&install).unwrap();
-        fs::remove_file(install.plan.target.join("funcs.txt")).unwrap();
-
-        let outcome = validate_pending_install(&pending_request(&install)).unwrap();
-
-        assert_eq!(outcome.status, PendingValidationStatus::Restored);
-        assert_eq!(
-            fs::read(install.plan.target.join("old.txt")).unwrap(),
-            b"old data"
-        );
-        assert_eq!(
-            fs::read(install.plan.frontend_dir.join("launch.sh")).unwrap(),
-            b"old launcher"
-        );
-        assert_eq!(
-            fs::read(install.plan.target.join("libs/runtime")).unwrap(),
-            b"runtime"
-        );
-    }
-
-    #[test]
-    fn native_pending_validation_removes_an_unusable_first_install() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        fs::create_dir_all(install.plan.target.join("libs")).unwrap();
-        fs::write(install.plan.target.join("libs/runtime"), b"runtime").unwrap();
-        install_portmaster(&install).unwrap();
-        fs::remove_file(install.plan.target.join("funcs.txt")).unwrap();
-
-        let outcome = validate_pending_install(&pending_request(&install)).unwrap();
-
-        assert_eq!(outcome.status, PendingValidationStatus::NoUsable);
-        assert!(!install.plan.target.join("control.txt").exists());
-        assert_eq!(
-            fs::read(install.plan.target.join("libs/runtime")).unwrap(),
-            b"runtime"
-        );
-    }
-
-    #[test]
-    fn native_pending_rollback_is_restartable_after_interruption() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        fs::create_dir_all(&install.plan.target).unwrap();
-        fs::create_dir_all(&install.plan.frontend_dir).unwrap();
-        fs::write(install.plan.target.join("control.txt"), b"old core").unwrap();
-        fs::write(install.plan.target.join("old.txt"), b"old data").unwrap();
-        fs::write(install.plan.frontend_dir.join("launch.sh"), b"old launcher").unwrap();
-        install_portmaster(&install).unwrap();
-        fs::remove_file(install.plan.target.join("funcs.txt")).unwrap();
-        let mut interrupted = pending_request(&install);
-        interrupted.fail_restore_after = Some(1);
-
-        let first = validate_pending_install(&interrupted).unwrap();
-        assert_eq!(first.status, PendingValidationStatus::Interrupted);
-        assert!(
-            install
-                .plan
-                .target
-                .join(".appmanager-rollback/restoring")
-                .is_file()
-        );
-
-        let second = validate_pending_install(&pending_request(&install)).unwrap();
-        assert_eq!(second.status, PendingValidationStatus::Restored);
-        assert_eq!(
-            fs::read(install.plan.target.join("old.txt")).unwrap(),
-            b"old data"
-        );
-    }
-
-    #[test]
-    fn native_pending_validation_rejects_tampered_rollback_metadata() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        fs::create_dir_all(&install.plan.target).unwrap();
-        fs::write(install.plan.target.join("control.txt"), b"old core").unwrap();
-        fs::write(install.plan.target.join("old.txt"), b"old data").unwrap();
-        install_portmaster(&install).unwrap();
-        fs::write(
-            install
-                .plan
-                .target
-                .join(".appmanager-rollback/expected-tops.tsv"),
-            b"tampered\n",
-        )
-        .unwrap();
-        fs::remove_file(install.plan.target.join("funcs.txt")).unwrap();
-
-        let outcome = validate_pending_install(&pending_request(&install)).unwrap();
-
-        assert_eq!(outcome.status, PendingValidationStatus::Interrupted);
-        assert!(install.state_dir.join("pending-install.tsv").is_file());
-        assert_eq!(
-            fs::read(install.plan.target.join("control.txt")).unwrap(),
-            b"mapped control"
-        );
-        assert!(
-            install
-                .plan
-                .target
-                .join(".appmanager-rollback/core/old.txt")
-                .is_file()
-        );
-    }
-
-    #[test]
-    fn native_pending_validation_shares_the_install_transaction_lock() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        fs::create_dir_all(&install.state_dir).unwrap();
-        let _held = acquire_lock(&install.state_dir).unwrap();
-
-        let error = validate_pending_install(&pending_request(&install)).unwrap_err();
-
-        assert!(matches!(error, PendingValidationError::Locked));
-        assert!(
-            fs::read_to_string(install.state_dir.join("validation-result.tsv"))
-                .unwrap()
-                .contains("\tchecking\t")
-        );
-    }
-
-    #[test]
-    fn native_validation_recovers_a_backed_up_transaction_without_pending_state() {
-        let temp = tempfile::tempdir().unwrap();
-        let install = request(&temp);
-        fs::create_dir_all(&install.plan.target).unwrap();
-        fs::create_dir_all(&install.plan.frontend_dir).unwrap();
-        fs::write(install.plan.target.join("control.txt"), b"old core").unwrap();
-        fs::write(install.plan.target.join("old.txt"), b"old data").unwrap();
-        fs::write(install.plan.frontend_dir.join("launch.sh"), b"old launcher").unwrap();
-        install_portmaster(&install).unwrap();
-        let pending = read_state(&install.state_dir.join("pending-install.tsv")).unwrap();
-        let transaction = format!(
-            concat!(
-                "version\t1\nphase\tbacked-up\nmode\t{}\ndevice\t{}\ntarget\t{}\nscripts\t{}\n",
-                "frontend_dir\t{}\nfrontend_names\t{}\nrollback\t{}\nfrontend_rollback\t{}\nhad_launcher\t{}\n",
-                "frontend_backup_count\t{}\nfrontend_backup_sha256\t{}\nbackup_top_count\t{}\nbackup_top_sha256\t{}\n"
-            ),
-            required(&pending, "mode").unwrap(),
-            required(&pending, "device").unwrap(),
-            required(&pending, "target").unwrap(),
-            required(&pending, "scripts").unwrap(),
-            required(&pending, "frontend_dir").unwrap(),
-            required(&pending, "frontend_names").unwrap(),
-            required(&pending, "rollback").unwrap(),
-            required(&pending, "frontend_rollback").unwrap(),
-            required(&pending, "had_launcher").unwrap(),
-            required(&pending, "frontend_backup_count").unwrap(),
-            required(&pending, "frontend_backup_sha256").unwrap(),
-            required(&pending, "backup_top_count").unwrap(),
-            required(&pending, "backup_top_sha256").unwrap(),
-        );
-        fs::remove_file(install.state_dir.join("pending-install.tsv")).unwrap();
-        fs::write(
-            install.state_dir.join("install-transaction.tsv"),
-            transaction,
-        )
-        .unwrap();
-
-        let outcome = validate_pending_install(&pending_request(&install)).unwrap();
-
-        assert_eq!(outcome.status, PendingValidationStatus::Restored);
-        assert_eq!(
-            fs::read(install.plan.target.join("old.txt")).unwrap(),
-            b"old data"
-        );
-        assert!(!install.state_dir.join("install-transaction.tsv").exists());
+        assert!(!request.plan.frontend_dir.join(".appmanager-rollback").exists());
+        assert!(!request.plan.target.join(".pm-install-stale").exists());
+        assert!(!request.state_dir.join("pending-install.tsv").exists());
+        assert!(!request.state_dir.join("install-transaction.tsv").exists());
     }
 
     #[test]

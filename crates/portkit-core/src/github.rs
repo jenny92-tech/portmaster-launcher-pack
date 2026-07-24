@@ -17,6 +17,11 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_BATCH_SIZE: usize = 5;
 const MAX_BATCH_SIZE: usize = 10;
+// Applied by `fetch` when the caller gives no explicit timeout. Without a
+// deadline the per-attempt request runs with no global/read timeout, so one
+// stalled connection would block its task (and any busy flag or lock the task
+// holds) until the process is killed.
+const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 // GitHub acceleration mirror registry. Keep the bundled route data lightweight
 // and non-plain so endpoint strings are not exposed by source/UI inspection.
@@ -338,8 +343,14 @@ impl GitHubTransport {
     where
         F: Fn(&Path) -> bool,
     {
-        self.fetch_inner(
-            capability, source, output, validator, progress, max_bytes, None,
+        self.fetch_with_timeout(
+            capability,
+            source,
+            output,
+            validator,
+            progress,
+            max_bytes,
+            DEFAULT_FETCH_TIMEOUT,
         )
     }
 

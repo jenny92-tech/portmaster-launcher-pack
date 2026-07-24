@@ -1,3 +1,4 @@
+pub mod atomic;
 pub mod font;
 pub mod json;
 pub mod runtime;

@@ -158,6 +158,7 @@
         "candidates": {"type": "array", "items": {"$ref": "#/$defs/absolutePath"}},
         "fallback": {"type": "array", "items": {"$ref": "#/$defs/absolutePath"}},
         "on_missing": {"const": "unresolved"},
+        "levels": {"type": "integer", "minimum": 1, "maximum": 32},
         "base": {"$ref": "#/$defs/id"},
         "of": {"$ref": "#/$defs/id"},
         "suffix": {"type": "string", "pattern": "^[^/](?:.*[^/])?$"}

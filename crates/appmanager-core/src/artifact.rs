@@ -15,6 +15,9 @@ use thiserror::Error;
 use crate::RuntimeMetadata;
 
 const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+// Small JSON manifests; a stalled connection must not hold the operation lock.
+const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+const METADATA_FETCH_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StableRelease {
@@ -204,7 +207,7 @@ pub fn fetch_stable_release(
         std::process::id()
     ));
     let _download = DownloadGuard(manifest.clone());
-    let outcome = GitHubTransport::new().fetch(
+    let outcome = GitHubTransport::new().fetch_with_timeout(
         Capability::Release,
         &request.manifest_url,
         &manifest,
@@ -216,6 +219,7 @@ pub fn fetch_stable_release(
         },
         None,
         None,
+        MANIFEST_FETCH_TIMEOUT,
     )?;
     let stable = parse_stable_manifest(&fs::read(&manifest)?)?;
     validate_stable_release_route(&request.manifest_url, &request.archive_name, &stable)?;
@@ -250,7 +254,7 @@ pub fn refresh_stable_cache(
     fs::create_dir_all(parent)?;
     let manifest = parent.join(format!(".stable-manifest-{}.json", std::process::id()));
     let _download = DownloadGuard(manifest.clone());
-    let fetch = GitHubTransport::new().fetch(
+    let fetch = GitHubTransport::new().fetch_with_timeout(
         Capability::Release,
         &request.manifest_url,
         &manifest,
@@ -262,6 +266,7 @@ pub fn refresh_stable_cache(
         },
         None,
         None,
+        MANIFEST_FETCH_TIMEOUT,
     );
     let checked = epoch_seconds();
     match fetch {
@@ -312,7 +317,7 @@ pub fn refresh_runtime_metadata(
     }
     let download = parent.join(format!(".runtime-metadata-{}.json", std::process::id()));
     let _download = DownloadGuard(download.clone());
-    let fetched = GitHubTransport::new().fetch(
+    let fetched = GitHubTransport::new().fetch_with_timeout(
         Capability::Release,
         &request.source,
         &download,
@@ -324,6 +329,7 @@ pub fn refresh_runtime_metadata(
         },
         None,
         None,
+        METADATA_FETCH_TIMEOUT,
     );
     let outcome = match fetched {
         Ok(outcome) => outcome,

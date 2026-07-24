@@ -37,10 +37,14 @@ function Operations.new(model)
         local data=event and event.data or {}
         local result=type(data.operation)=="table" and data.operation or {}
         local failed=event and event.status=="error" or result.failed==true
+        -- Every task completion (including failures) carries a snapshot of
+        -- the world as the service now sees it; render that, never a stale
+        -- guess. Without one, drop all caches instead of trusting them.
         if type(data.snapshot)=="table" then
             model.apply_snapshot(data.snapshot)
-        elseif not failed then
-            model.invalidate_for_plan(completed_task and completed_task.plan or self.confirm_plan)
+        else
+            model.invalidate_all()
+            self.confirm_plan={}
         end
         if completed_task and completed_task.kind=="portmaster" then
             -- The blocking result dialog below already gives the next step.
@@ -63,11 +67,10 @@ function Operations.new(model)
                     message=L("Please try again later.","请稍后重试。"),
                     confirm=L("OK","知道了"),cancel=L("Back","返回"),danger=false})
             else
+                environment.build_manage(); kit.goto_page(pages.MANAGE)
                 kit.dialog({title=L("PortMaster installed","PortMaster 已安装"),
-                    message=L("Exit and reopen App Manager to finish setup.",
-                        "请退出并重新打开 APP，完成设置。"),
-                    confirm=L("Exit now","立即退出"),cancel=L("Stay","暂不退出"),default_focus="cancel",danger=false,
-                    on_confirm=kit.quit})
+                    message=L("PortMaster is ready to use.","PortMaster 已可以使用。"),
+                    confirm=L("OK","知道了"),cancel=L("Back","返回"),danger=false})
             end
             return
         end

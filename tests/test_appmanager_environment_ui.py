@@ -132,15 +132,12 @@ appmanager = {
 '''
 
 
-def run_case(health: str, pending: bool = False, management: str = "app"):
+def run_case(health: str, management: str = "app"):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         for name in ("scripts", "games", "images", "libs", "state", "trash"):
             (root / name).mkdir()
         env_path = root / "state" / "env.json"
-        pending_path = root / "state" / "pending-install.tsv"
-        if pending:
-            pending_path.write_text("pending\n", encoding="utf-8")
         env_path.write_text(
             json.dumps(
                 {
@@ -164,10 +161,6 @@ def run_case(health: str, pending: bool = False, management: str = "app"):
                     "device_class": "tested",
                     "device_arch": "aarch64",
                     "size_cache_ready": False,
-                    "pending_install_exists": pending,
-                    "install_transaction_exists": False,
-                    "portmaster_active_exists": False,
-                    "operation_active_exists": False,
                     "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
                     "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"],
                     "self_port": "jenny92-appmanager",
@@ -277,21 +270,6 @@ assert page["sidebar_count"] == 2
 assert page["row_kinds"][11] == "textview"
 system_managed.execute('require("kit").input("right"); require("kit").input("confirm")')
 assert system_managed.eval('require("kit").debug_page().title') == "Runtime 修复"
-
-pending = run_case("healthy", pending=True)
-page = pending.eval('require("kit").debug_page()')
-assert page["title"] == "检查 PortMaster"
-assert page["row_count"] == 1
-assert page["sidebar_count"] == 0
-assert page["row_kinds"][1] == "textview"
-layout = pending.eval('require("kit").debug_layout()')
-assert not layout["has_sidebar"]
-assert layout["columns"] == 1
-busy = pending.eval('require("kit").debug_busy()')
-assert busy["busy"]
-assert busy["indeterminate"]
-pending.execute('require("kit").input("confirm"); require("kit").input("cancel")')
-assert pending.eval('LAST_QUIT == nil')
 
 with tempfile.TemporaryDirectory() as temporary:
     progress_path = Path(temporary) / "progress.tsv"

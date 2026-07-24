@@ -1071,7 +1071,6 @@ fn sanitize_result(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::CacheGenerations;
     use crate::context::{
         ContextCapabilities, ExpectedInstallContract, FrontendContext, ManagedRoots, ManagementMode,
     };
@@ -1224,10 +1223,7 @@ mod tests {
         })
         .unwrap();
 
-        let inventory = Inventory::scan_with_options(
-            &context,
-            CacheGenerations::default(),
-            &InventoryOptions {
+        let inventory = Inventory::scan_with_options(&context, &InventoryOptions {
                 directory: "/data".to_owned(),
                 ..InventoryOptions::default()
             },

@@ -473,7 +473,7 @@ fn model_and_platform_resolution_is_deterministic() {
     assert_eq!(resolution.model_id.as_deref(), Some("smart_pro"));
     assert_eq!(
         resolution.paths["images"],
-        PathBuf::from("/mnt/SDCARD/Roms/Imgs/PORTS")
+        PathBuf::from("/mnt/SDCARD/Imgs/PORTS")
     );
 }
 

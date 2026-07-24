@@ -73,10 +73,6 @@ local function poll_task(dt)
                 local ok,task_id=pcall(model.native.start,"scan-sizes",{})
                 if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
             end
-        elseif task.kind=="validation" then
-            local status,detail=environment.validation_result(data.validation)
-            if event.status=="error" or not status then status="interrupted" end
-            environment.finish_validation(status,detail)
         elseif task.kind=="scan-sizes" then
             operations.task=nil
             operations.refresh_home()
@@ -90,8 +86,6 @@ local function poll_task(dt)
             blocking_notice(L("PortMaster is still installing","PortMaster 仍在安装"),
                 L("Keep waiting, or reopen App Manager later to see the result.",
                     "请继续等待，或稍后重新打开 APP 查看结果。"),"install-timeout")
-        elseif task.kind=="validation" then
-            environment.finish_validation("timeout")
         elseif task.kind=="config-refresh" then
             operations.task=nil; finish_initial_load(true)
         elseif task.kind=="update-check" then
@@ -109,19 +103,6 @@ local function poll_task(dt)
 end
 
 finish_initial_load=function(skip_config_refresh)
-    if env.portmaster_management~="system" and
-       (env.pending_install_exists or env.install_transaction_exists) then
-        environment.start_pending_validation()
-        return
-    end
-    if env.portmaster_management~="system" and env.portmaster_active_exists then
-        environment.start_active_repair_wait()
-        return
-    end
-    if env.operation_active_exists then
-        environment.start_active_operation_wait()
-        return
-    end
     if not skip_config_refresh then
         kit.set_busy(true,L("Preparing device information…","正在准备设备信息……"),{
             indeterminate=true,stage=L("Preparing device information","正在准备设备信息"),

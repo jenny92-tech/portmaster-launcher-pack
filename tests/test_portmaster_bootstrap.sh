@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p portkit-launcher
+export PORTKIT_LAUNCHER_BIN_OVERRIDE="$ROOT/target/debug/portkit-launcher"
+
 mkdir -p "$tmp/scripts/PortMaster"
 source "$ROOT/_kit/portmaster_bootstrap.sh"
 source "$ROOT/_kit/launcher_artwork.sh"

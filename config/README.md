@@ -40,8 +40,8 @@ Predicates, path strategies, health checks, and environment operations are
 finite declarative vocabularies. There is no shell,
 evaluation, or arbitrary-code operation. Environment values are copied
 literally. Inheritance is default-open and blocks exactly the names and prefix
-listed in `environment`; each platform explicitly references the five concrete
-execution scopes.
+listed in `environment`; each platform explicitly references the `love_ui`
+execution scope.
 
 Each platform frontend also carries the normalized installer policy consumed
 by native plan validation. Optional shell `-` values are represented as JSON

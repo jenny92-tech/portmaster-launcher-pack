@@ -17,7 +17,7 @@ Theora 运行库，只要求固件提供基础 glibc 与 SDL2。它没有系统 
 - 修复启动脚本明确声明的缺失或损坏 Runtime。
 - 显示 PortMaster 版本、健康状态、设备、路径和环境信息。
 - MiniLoong 安装 Jenny92 稳定版 PortMaster；其他受支持设备使用官方稳定版。
-- 安装后退出，并在下次启动时阻断式验证；失败时恢复旧的受管核心。
+- 安装在单次任务内完成并立即可用；失败直接报告，修复方式是重新安装。
 
 Port App Manager 不管理游戏本体内容，也不替代 PortMaster 的 Port 目录、主题、
 图片或 Runtime 数据源。系统托管 PortMaster 的平台（如 ROCKNIX）不由 APP
@@ -27,7 +27,7 @@ Port App Manager 不管理游戏本体内容，也不替代 PortMaster 的 Port 
 
 首页、残留页和回收站采用左侧内容、右侧操作的布局。环境管理显示版本、状态、
 设备和路径，并提供检查更新、更新/重新安装、Runtime 修复和环境详情。简单提示、
-安装后验证和恢复页面使用单栏布局。
+
 
 危险 Dialog 默认聚焦安全操作；退出必须明确确认。APP 自带
 `love/ui.gptk` 和 `gamecontrollerdb.txt`，不修改其他启动器的按键映射。Start 和
@@ -67,18 +67,15 @@ config/platforms/<platform-id>.json
 可恢复的操作事务记录，Lua 不读取这些记录作为 IPC。
 Shell 只解析 APP 路径并 `exec` Rust 主程序。
 
-## 安装与回滚
+## 安装与恢复
 
-安装流程只接受 native resolution 生成并再次验证的计划。首发协议将回滚拆成两个
-同文件系统位置：
-
-- core rollback：`<PortMaster core>/.appmanager-rollback`
-- frontend rollback：`<frontend dir>/.appmanager-rollback`
-
-这样 core 和 frontend 都只使用同文件系统 rename，不依赖跨文件系统移动。事务状态和
-待验证状态同时记录两个路径；下一次启动验证通过后删除两份回滚，验证失败则恢复原文件
-并要求用户退出。`libs`、`config`、`themes`、日志和缓存不属于 core 替换范围，
-`libs` 由 Runtime 修复单独管理。
+安装流程只接受 native resolution 生成并再次验证的计划。归档解压到受管目录内的
+临时工作目录并完成校验后，旧受管条目先经同文件系统 rename 退役到工作目录，新内容
+再 rename 到位；成功后工作目录整体删除。没有回滚协议：stable 包很小，中断或断电后
+的恢复方式就是重新安装，下一次安装启动时会清扫上一次的残留工作目录和历史版本遗留的
+回滚/待验证文件。任务失败原因写入 `state/last-error.txt`（启动日志轮转为
+`log.txt.1`，最近一次失败因此总能被诊断）。`libs`、`config`、`themes`、日志和缓存
+不属于 core 替换范围，`libs` 由 Runtime 修复单独管理。
 
 卸载默认进入 `jenny92-appmanager/trash/<timestamp>/`。只有卸载 Dialog 主动勾选
 “直接删除”，或在回收站中再次确认，内容才永久删除。多个 SH 共用同一数据目录时，
@@ -139,10 +136,8 @@ cargo test --workspace
 _kit/build_appmanager_love_lite.sh
 _kit/dist_port.sh appmanager
 bash tests/test_appmanager_portable_package.sh
-bash tests/test_appmanager_pending_validation.sh
 bash tests/test_appmanager_inprocess_bridge.sh
 ```
 
-真机发布前执行 [SMOKE_TEST.md](SMOKE_TEST.md)。跨仓库职责与发布路由见
-[`../../docs/architecture.md`](../../docs/architecture.md)，第三方来源见
+真机发布前执行 [SMOKE_TEST.md](SMOKE_TEST.md)。第三方来源见
 [`portable/licenses/THIRD-PARTY-SOURCES.md`](portable/licenses/THIRD-PARTY-SOURCES.md)。

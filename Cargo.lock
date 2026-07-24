@@ -832,7 +832,6 @@ name = "portkit-launcher"
 version = "0.1.0"
 dependencies = [
  "lzma-rust2",
- "portkit-core",
  "serde",
  "serde_json",
  "tar",

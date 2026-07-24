@@ -13,23 +13,44 @@ its matching GodotSharp.dll.
 ## Source
 
 - **Repo**: <https://github.com/jenny92-tech/godot>
-- **Branch**: `linuxbsd-sdl2`
-- **CI Workflow**: `.github/workflows/build-linuxbsd-sdl2-arm64.yml` ("🛠 Build linuxbsd SDL2 arm64 POC")
-- **This build**: run [27211008063](https://github.com/jenny92-tech/godot/actions/runs/27211008063) (2026-06-09 13:53 UTC, glibc ≤ 2.31)
-- **Artifact**: `godot-linuxbsd-sdl2-mono-arm64-POC`
+- **Branch**: `4.5-arm64-sdl2` (supersedes `linuxbsd-sdl2`; the SDL2
+  DisplayServer is now SDL-only — the self-managed KMS/GBM/EGL path was
+  removed, so the binary no longer links `libdrm`/`libgbm`. CI hard-fails if
+  either shows up in DT_NEEDED.)
+- **CI Workflow**: `.github/workflows/build-sdl2-arm64.yml` ("🛠 Build linuxbsd SDL2 arm64")
+- **This build**: local Docker build (2026-07-24, image `godot-sdl2-builder`,
+  glibc ≤ 2.31) from uncommitted `4.5-arm64-sdl2` working tree — first
+  SDL-only build; DT_NEEDED verified free of libgbm/libdrm/libEGL/libGLESv2
+- **Artifact**: `godot-linuxbsd-sdl2-mono-arm64`
 
-## Refresh (pull a new CI build)
+## Refresh (option A: local Docker build)
+
+```bash
+docker run --rm \
+  -v <godot-repo>:/src \
+  -v <logs-dir>:/logs \
+  -v godot-dotnet:/dotnet \
+  godot-sdl2-builder:latest bash /logs/build-sdl2-mono.sh
+# build-sdl2-mono.sh mirrors the CI mono variant (scons flags, DT_NEEDED hard
+# check, .NET 8, mono glue, GodotSharp.dll). Then:
+cp <godot-repo>/bin/godot.linuxbsd.template_release.arm64.mono ./
+cp <godot-repo>/bin/GodotSharp/Api/Release/GodotSharp.dll ./
+```
+
+## Refresh (option B: pull a new CI build)
 
 ```bash
 # trigger the workflow (manual dispatch)
-gh workflow run "🛠 Build linuxbsd SDL2 arm64 POC" -R jenny92-tech/godot --ref linuxbsd-sdl2
+gh workflow run "🛠 Build linuxbsd SDL2 arm64" -R jenny92-tech/godot --ref 4.5-arm64-sdl2 -f variants=mono
 
 # wait ~20 min, then download
-gh run list -R jenny92-tech/godot --workflow "🛠 Build linuxbsd SDL2 arm64 POC" --limit 1
+gh run list -R jenny92-tech/godot --workflow "🛠 Build linuxbsd SDL2 arm64" --limit 1
 RUN=<run-id>
 gh run download $RUN -R jenny92-tech/godot --dir /tmp/godot-fresh
-cp /tmp/godot-fresh/godot-linuxbsd-sdl2-mono-arm64-POC/__w/godot/godot/bin/godot.linuxbsd.template_release.arm64.mono ./
-cp /tmp/godot-fresh/godot-linuxbsd-sdl2-mono-arm64-POC/__w/godot/godot/bin/GodotSharp/Api/Release/GodotSharp.dll ./
+cp /tmp/godot-fresh/godot-linuxbsd-sdl2-mono-arm64/__w/godot/godot/bin/godot.linuxbsd.template_release.arm64.mono ./
+cp /tmp/godot-fresh/godot-linuxbsd-sdl2-mono-arm64/__w/godot/godot/bin/GodotSharp/Api/Release/GodotSharp.dll ./
+# sanity: must print nothing
+objdump -p godot.linuxbsd.template_release.arm64.mono | grep -E "libgbm|libdrm"
 ```
 
 > ⚠️ **The two files must be paired**: the C# bindings' P/Invoke signatures
