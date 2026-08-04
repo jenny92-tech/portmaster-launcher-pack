@@ -70,6 +70,8 @@ class ConfigContractTests(unittest.TestCase):
             {
                 "miniloong",
                 "trimui",
+                "arkos",
+                "amberelec",
                 "muos",
                 "rocknix",
                 "jelos",
@@ -193,6 +195,8 @@ class ConfigContractTests(unittest.TestCase):
         expected = {
             "miniloong": (None, None, False, False, "PortMaster.sh", "PortMaster.sh"),
             "trimui": ("trimui/control.txt", None, True, True, None, "launch.sh"),
+            "arkos": (None, None, True, False, None, "PortMaster.sh"),
+            "amberelec": (None, None, True, False, None, "PortMaster.sh"),
             "muos": ("muos/control.txt", "muos/PortMaster.txt", False, True, "PortMaster.sh", None),
             "rocknix": (None, None, False, False, "PortMaster.sh", None),
             "jelos": (None, None, False, False, "PortMaster.sh", None),
@@ -246,6 +250,8 @@ class ConfigContractTests(unittest.TestCase):
         expected = {
             "miniloong": {"strategy": "literal", "value": "/mnt/sdcard/roms"},
             "trimui": {"strategy": "literal", "value": "/mnt/SDCARD/Data"},
+            "arkos": {"strategy": "parent", "of": "game_data"},
+            "amberelec": {"strategy": "parent", "of": "game_data"},
             "muos": {"strategy": "parent", "of": "game_data"},
             "rocknix": {"strategy": "parent", "of": "game_data"},
             "jelos": {"strategy": "parent", "of": "game_data"},
@@ -261,6 +267,46 @@ class ConfigContractTests(unittest.TestCase):
                 strategy,
                 name,
             )
+
+    def test_official_installer_layouts_are_declarative(self) -> None:
+        arkos = self.config["platforms"]["arkos"]
+        self.assertEqual(
+            arkos["recognition"],
+            {"kind": "directory_exists", "path": "/opt/system/Tools"},
+        )
+        self.assertEqual(
+            arkos["paths"]["game_data"],
+            {
+                "strategy": "first_existing",
+                "candidates": ["/roms2/ports", "/roms/ports"],
+            },
+        )
+        self.assertEqual(
+            arkos["paths"]["portmaster_core"],
+            {"strategy": "literal", "value": "/opt/system/Tools/PortMaster"},
+        )
+        self.assertEqual(
+            arkos["paths"]["frontend"],
+            {"strategy": "literal", "value": "/opt/system/Tools"},
+        )
+
+        amberelec = self.config["platforms"]["amberelec"]
+        self.assertEqual(
+            amberelec["recognition"],
+            {"kind": "directory_exists", "path": "/opt/tools"},
+        )
+        self.assertEqual(
+            amberelec["paths"]["game_data"],
+            {"strategy": "literal", "value": "/roms/ports"},
+        )
+        self.assertEqual(
+            amberelec["paths"]["portmaster_core"],
+            {"strategy": "literal", "value": "/opt/tools/PortMaster"},
+        )
+        self.assertEqual(
+            amberelec["paths"]["frontend"],
+            {"strategy": "literal", "value": "/opt/tools"},
+        )
 
     def test_no_executable_escape_hatches(self) -> None:
         forbidden = {"run_shell", "eval", "exec", "command", "shell"}

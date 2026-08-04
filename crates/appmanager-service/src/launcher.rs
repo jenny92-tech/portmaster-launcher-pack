@@ -1942,7 +1942,6 @@ fn install_archive(session: &Session, archive: PathBuf) -> Result<(), String> {
         .map_err(display_error)?;
     appmanager_core::install_portmaster(&appmanager_core::InstallRequest {
         archive,
-        launcher: session.paths.launcher.clone(),
         state_dir: session.paths.state.clone(),
         trash_dir: session.paths.trash.clone(),
         cancel_token: session.cancel_token.clone(),

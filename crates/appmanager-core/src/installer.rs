@@ -35,7 +35,6 @@ pub const PORTMASTER_STATE_PRESERVED: &[&str] = &["log.txt", "pugwash.txt", "har
 #[derive(Debug, Clone)]
 pub struct InstallRequest {
     pub archive: PathBuf,
-    pub launcher: PathBuf,
     pub state_dir: PathBuf,
     pub trash_dir: PathBuf,
     pub cancel_token: Option<CancellationToken>,
@@ -207,10 +206,6 @@ fn validate_request(request: &InstallRequest) -> Result<(), InstallError> {
         return Err(InstallError::Invalid("archive is not a file".to_owned()));
     }
     for (name, path) in [
-        (
-            "launcher directory",
-            request.launcher.parent().unwrap_or(Path::new("/")),
-        ),
         ("target", &request.plan.target),
         ("scripts", &request.plan.scripts),
         ("frontend", &request.plan.frontend_dir),
@@ -247,11 +242,9 @@ fn validate_request(request: &InstallRequest) -> Result<(), InstallError> {
 
 fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> {
     let plan = &request.plan;
-    let launcher_directory = request
-        .launcher
-        .parent()
-        .ok_or_else(|| InstallError::Invalid("launcher has no parent directory".to_owned()))?;
 
+    // Platform config is the sole source of path layout. This layer validates
+    // path roles and containment only; it must not classify device mount roots.
     let resolved = |path: &Path| {
         ManagedRoot::new(path)
             .map(|root| root.resolved_path().to_path_buf())
@@ -260,7 +253,6 @@ fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> 
     let target_resolved = resolved(&plan.target)?;
     let frontend_resolved = resolved(&plan.frontend_dir)?;
     let scripts_resolved = resolved(&plan.scripts)?;
-    let launcher_resolved = resolved(launcher_directory)?;
     let state_resolved = resolved(&request.state_dir)?;
     let trash_resolved = resolved(&request.trash_dir)?;
     for (name, root) in [("app state", &state_resolved), ("trash", &trash_resolved)] {
@@ -290,60 +282,56 @@ fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> 
         ));
     }
 
-    let launcher_device = device_path(&launcher_resolved, request.probe_root.as_deref());
     let scripts_device = device_path(&scripts_resolved, request.probe_root.as_deref());
-    let launcher_anchor = storage_anchor(&launcher_device).ok_or_else(|| {
-        InstallError::Invalid(format!(
-            "launcher directory {} has no supported storage anchor",
-            launcher_device.display()
-        ))
-    })?;
     let target_device = device_path(&target_resolved, request.probe_root.as_deref());
     if !app_specific_leaf(&target_device) {
         return Err(InstallError::Invalid(
             "PortMaster target must be an app-specific PortMaster leaf".to_owned(),
         ));
     }
+    if protected_system_namespace(&target_device) {
+        return Err(InstallError::Invalid(format!(
+            "target root {} is in a protected system namespace",
+            target_device.display()
+        )));
+    }
+    if !plan.target.parent().is_some_and(Path::is_dir)
+        || (plan.target.exists() && !plan.target.is_dir())
+    {
+        return Err(InstallError::Invalid(
+            "PortMaster target must be a directory or a new direct child of an existing directory"
+                .to_owned(),
+        ));
+    }
     for (name, root) in [("app state", &state_resolved), ("trash", &trash_resolved)] {
         let device = device_path(root, request.probe_root.as_deref());
-        if forbidden_system_namespace(&device) {
+        if protected_system_namespace(&device) {
             return Err(InstallError::Invalid(format!(
                 "{name} root {} is in a protected system namespace",
                 device.display()
             )));
         }
     }
-    if scripts_device != launcher_device
-        || storage_anchor(&scripts_device).as_deref() != Some(launcher_anchor.as_path())
-    {
+    if protected_system_namespace(&scripts_device) || !plan.scripts.is_dir() {
         return Err(InstallError::Invalid(
-            "scripts root must be the launcher directory on the same storage anchor".to_owned(),
+            "scripts root must be an existing declared directory outside protected system namespaces"
+                .to_owned(),
         ));
     }
 
-    for (name, physical, resolved_root) in [
-        ("target", &plan.target, &target_resolved),
-        ("frontend", &plan.frontend_dir, &frontend_resolved),
-    ] {
-        let device = device_path(resolved_root, request.probe_root.as_deref());
-        if forbidden_system_namespace(&device) {
-            return Err(InstallError::Invalid(format!(
-                "{name} root {} is in a protected system namespace",
-                device.display()
-            )));
-        }
-        let is_dynamic_frontend = name == "frontend" && device == launcher_device;
-        if is_dynamic_frontend {
-            continue;
-        }
-        if storage_anchor(&device).is_some() {
-            continue;
-        }
-        if !physical.is_dir() || !app_specific_leaf(&device) {
-            return Err(InstallError::Invalid(format!(
-                "cross-anchor explicit {name} root must already exist as an app-specific leaf"
-            )));
-        }
+    let frontend_device = device_path(&frontend_resolved, request.probe_root.as_deref());
+    if protected_system_namespace(&frontend_device) {
+        return Err(InstallError::Invalid(format!(
+            "frontend root {} is in a protected system namespace",
+            frontend_device.display()
+        )));
+    }
+    let new_frontend =
+        !plan.frontend_dir.exists() && plan.frontend_dir.parent().is_some_and(Path::is_dir);
+    if !plan.frontend_dir.is_dir() && !new_frontend {
+        return Err(InstallError::Invalid(
+            "frontend root must be an existing directory or a new direct child of one".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -363,43 +351,13 @@ fn device_path(path: &Path, fixture_root: Option<&Path>) -> PathBuf {
     Path::new("/").join(relative)
 }
 
-fn storage_anchor(path: &Path) -> Option<PathBuf> {
-    let parts = path
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(value) => value.to_str(),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        ["mnt" | "media", volume, ..] => Some(Path::new("/").join(parts[0]).join(volume)),
-        ["run", "media", volume, ..] => Some(Path::new("/run/media").join(volume)),
-        [anchor @ ("userdata" | "storage" | "roms" | "sdcard"), ..] => {
-            Some(Path::new("/").join(anchor))
-        }
-        _ => None,
-    }
-}
-
-fn forbidden_system_namespace(path: &Path) -> bool {
+fn protected_system_namespace(path: &Path) -> bool {
     const FORBIDDEN: &[&str] = &[
-        "/bin", "/dev", "/etc", "/lib", "/lib64", "/proc", "/sbin", "/sys", "/tmp", "/usr", "/var",
+        "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/sbin", "/sys", "/usr",
     ];
     FORBIDDEN.iter().any(|root| path.starts_with(root))
+        || path == Path::new("/run")
         || (path.starts_with("/run") && !path.starts_with("/run/media"))
-        || (path.starts_with("/root") && !path.starts_with("/root/.local/share"))
-        || (path.starts_with("/home") && !home_app_data_path(path))
-}
-
-fn home_app_data_path(path: &Path) -> bool {
-    let parts = path
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(value) => value.to_str(),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    matches!(parts.as_slice(), ["home", _, ".local", "share", _, ..])
 }
 
 fn app_specific_leaf(path: &Path) -> bool {
@@ -1026,15 +984,17 @@ mod tests {
     }
 
     fn request(temp: &TempDir) -> InstallRequest {
+        let plan = plan(temp);
+        fs::create_dir_all(&plan.scripts).unwrap();
+        fs::create_dir_all(&plan.frontend_dir).unwrap();
         InstallRequest {
             archive: archive(temp, None),
-            launcher: temp.path().join("mnt/card/ports/App.sh"),
             state_dir: temp.path().join("state"),
             trash_dir: temp.path().join("trash"),
             cancel_token: None,
             progress_channel: None,
             probe_root: Some(temp.path().to_path_buf()),
-            plan: plan(temp),
+            plan,
         }
     }
 
@@ -1328,7 +1288,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_system_namespace_and_cross_anchor_dynamic_scripts() {
+    fn rejects_system_namespace_and_missing_scripts_root() {
         let temp = tempfile::tempdir().unwrap();
         let mut candidate = request(&temp);
         candidate.plan.frontend_dir = temp.path().join("etc/PortMaster");
@@ -1343,7 +1303,7 @@ mod tests {
         let mut candidate = request(&temp);
         candidate.plan.scripts = temp.path().join("media/other/ports");
         let error = validate_request(&candidate).unwrap_err();
-        assert!(error.to_string().contains("same storage anchor"));
+        assert!(error.to_string().contains("existing declared directory"));
     }
 
     #[test]
@@ -1366,7 +1326,78 @@ mod tests {
     }
 
     #[test]
-    fn allows_existing_home_app_data_and_distinct_storage_anchors() {
+    fn allows_official_external_launcher_beside_a_fresh_declared_core() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut candidate = request(&temp);
+        candidate.plan.scripts = temp.path().join("roms2/ports");
+        candidate.plan.target = temp.path().join("opt/system/Tools/PortMaster");
+        candidate.plan.frontend_dir = temp.path().join("opt/system/Tools");
+        candidate.plan.frontend_names = vec!["PortMaster.sh".into()];
+        candidate.plan.primary_frontend = "PortMaster.sh".into();
+        candidate.plan.control_source = None;
+        candidate.plan.frontend_map = vec![FrontendMapEntry {
+            source: "PortMaster.sh".into(),
+            destination: "PortMaster.sh".into(),
+        }];
+        candidate.plan.empty_tasksetter = false;
+        candidate.plan.core_executable = None;
+        candidate.plan.frontend_executable = Some("PortMaster.sh".into());
+        fs::create_dir_all(&candidate.plan.scripts).unwrap();
+        fs::create_dir_all(candidate.plan.target.parent().unwrap()).unwrap();
+        fs::create_dir_all(&candidate.plan.frontend_dir).unwrap();
+
+        if let Err(error) = validate_request(&candidate) {
+            panic!("official external launcher layout was rejected: {error}");
+        }
+        install_portmaster(&candidate).unwrap();
+        assert!(candidate.plan.target.join("control.txt").is_file());
+        assert!(candidate.plan.frontend_dir.join("PortMaster.sh").is_file());
+        assert!(!candidate.plan.target.join("PortMaster.sh").exists());
+    }
+
+    #[test]
+    fn accepts_unlisted_vendor_roots_from_the_resolved_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut candidate = request(&temp);
+        candidate.plan.scripts = temp.path().join("vendor/card/ports");
+        candidate.plan.target = temp.path().join("srv/vendor/tools/PortMaster");
+        candidate.plan.frontend_dir = temp.path().join("srv/vendor/menu");
+        candidate.plan.frontend_names = vec!["PortMaster.sh".into()];
+        candidate.plan.primary_frontend = "PortMaster.sh".into();
+        candidate.plan.control_source = None;
+        candidate.plan.frontend_map = vec![FrontendMapEntry {
+            source: "PortMaster.sh".into(),
+            destination: "PortMaster.sh".into(),
+        }];
+        candidate.plan.core_executable = None;
+        candidate.plan.frontend_executable = Some("PortMaster.sh".into());
+        fs::create_dir_all(&candidate.plan.scripts).unwrap();
+        fs::create_dir_all(candidate.plan.target.parent().unwrap()).unwrap();
+        fs::create_dir_all(&candidate.plan.frontend_dir).unwrap();
+
+        install_portmaster(&candidate).unwrap();
+        assert!(candidate.plan.target.join("control.txt").is_file());
+        assert!(candidate.plan.frontend_dir.join("PortMaster.sh").is_file());
+    }
+
+    #[test]
+    fn declared_roots_still_require_bounded_existing_parents() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut candidate = request(&temp);
+        candidate.plan.target = temp.path().join("vendor/missing/PortMaster");
+        let error = validate_request(&candidate).unwrap_err();
+        assert!(error.to_string().contains("existing directory"));
+
+        let mut candidate = request(&temp);
+        let parent = temp.path().join("vendor/menu");
+        fs::create_dir_all(&parent).unwrap();
+        candidate.plan.frontend_dir = parent.join("nested/missing");
+        let error = validate_request(&candidate).unwrap_err();
+        assert!(error.to_string().contains("new direct child"));
+    }
+
+    #[test]
+    fn allows_existing_home_app_data_and_distinct_declared_roots() {
         let temp = tempfile::tempdir().unwrap();
         let mut candidate = request(&temp);
         candidate.plan.frontend_dir = temp.path().join("root/.local/share/PortMaster");
@@ -1375,6 +1406,8 @@ mod tests {
 
         candidate.plan.target = temp.path().join("mnt/other/MUOS/PortMaster");
         candidate.plan.frontend_dir = temp.path().join("roms/ports/PortMaster");
+        fs::create_dir_all(candidate.plan.target.parent().unwrap()).unwrap();
+        fs::create_dir_all(candidate.plan.frontend_dir.parent().unwrap()).unwrap();
         assert!(validate_request(&candidate).is_ok());
     }
 

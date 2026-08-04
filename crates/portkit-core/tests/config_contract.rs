@@ -478,6 +478,61 @@ fn model_and_platform_resolution_is_deterministic() {
 }
 
 #[test]
+fn official_installer_arkos_and_amberelec_layouts_resolve_without_native_branches() {
+    let loader = ConfigLoader::default();
+    let root = tempfile_dir("official-installer-layouts");
+    std::fs::create_dir_all(root.join("opt/system/Tools")).unwrap();
+    std::fs::create_dir_all(root.join("opt/tools")).unwrap();
+    std::fs::create_dir_all(root.join("roms2/ports")).unwrap();
+
+    let arkos = platform_config("arkos")
+        .detect_and_resolve(
+            &loader,
+            &DetectionContext {
+                root: Some(root.clone()),
+                launcher_path: "/roms2/ports/APP Manager.sh".into(),
+                environment: BTreeMap::new(),
+                os_release: BTreeMap::new(),
+                target_override: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(arkos.platform_id, "arkos");
+    assert_eq!(arkos.device_class, "official-untested");
+    assert!(arkos.target_confirmed);
+    assert_eq!(arkos.paths["game_data"], root.join("roms2/ports"));
+    assert_eq!(
+        arkos.paths["portmaster_core"],
+        root.join("opt/system/Tools/PortMaster")
+    );
+    assert_eq!(arkos.paths["frontend"], root.join("opt/system/Tools"));
+
+    let amberelec = platform_config("amberelec")
+        .detect_and_resolve(
+            &loader,
+            &DetectionContext {
+                root: Some(root.clone()),
+                launcher_path: "/roms/ports/APP Manager.sh".into(),
+                environment: BTreeMap::new(),
+                os_release: BTreeMap::new(),
+                target_override: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(amberelec.platform_id, "amberelec");
+    assert_eq!(amberelec.device_class, "official-untested");
+    assert!(amberelec.target_confirmed);
+    assert_eq!(amberelec.paths["game_data"], root.join("roms/ports"));
+    assert_eq!(
+        amberelec.paths["portmaster_core"],
+        root.join("opt/tools/PortMaster")
+    );
+    assert_eq!(amberelec.paths["frontend"], root.join("opt/tools"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn unused_future_adapter_is_tolerated_but_rejected_in_selected_closure() {
     let loader = ConfigLoader::default();
     let mut config = platform_config("miniloong");
