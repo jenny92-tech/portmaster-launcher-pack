@@ -11,11 +11,18 @@ ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 PORT="$ROOT/ports/sunkendragon"
 BOGODROID_ROOT="${1:-$ROOT/../Bogodroid}"
 PAYLOAD="${2:-$BOGODROID_ROOT/tools/unity_convert/work/bogodroid-gamefiles}"
-LOADER="${3:-$BOGODROID_ROOT/build-sunkendragon-release-final/unityloader}"
+LOADER="${3:-$BOGODROID_ROOT/build-log/unityloader}"
 STEAM_STUB="${4:-$BOGODROID_ROOT/tools/steam_mock/libsteam_api64.so}"
 TICKET_STUB="${5:-$BOGODROID_ROOT/tools/steam_mock/libsdkencryptedappticket64.so}"
 SUPPORT_FILES="${6:-$BOGODROID_ROOT/gamefiles/support_files}"
 DIST="$PORT/dist"
+LOADER_DIR="$(dirname "$LOADER")"
+UNITYLOADER_PLUGINS=(
+  android_base
+  unity_2021_3
+  platform_sdl_runtime
+  sdk_unity_burst
+)
 
 if ! python3 -c 'import tomllib' >/dev/null 2>&1; then
   MODERN_PYTHON=""
@@ -60,6 +67,18 @@ for executable in "$LOADER" "$STEAM_STUB" "$TICKET_STUB"; do
       ;;
   esac
 done
+for runtime_library in libstdc++.so.6 libgcc_s.so.1; do
+  [ -s "$LOADER_DIR/unityloader.libs/$runtime_library" ] || {
+    echo "missing unityloader private library: $LOADER_DIR/unityloader.libs/$runtime_library" >&2
+    exit 1
+  }
+done
+for plugin in "${UNITYLOADER_PLUGINS[@]}"; do
+  [ -s "$LOADER_DIR/unityloader.d/$plugin.so" ] || {
+    echo "missing unityloader plugin: $LOADER_DIR/unityloader.d/$plugin.so" >&2
+    exit 1
+  }
+done
 
 for support_file in cpu_present.txt cpu_possible.txt cpuinfo.txt libc.so; do
   [ -s "$SUPPORT_FILES/$support_file" ] || {
@@ -76,10 +95,18 @@ mkdir -p \
   "$DIST/GameData" \
   "$DIST/patch" \
   "$DIST/conf" \
-  "$DIST/cache"
+  "$DIST/cache" \
+  "$DIST/unityloader.libs" \
+  "$DIST/unityloader.d"
 cp "$PORT/config.toml.template" "$DIST/config.toml"
 cp "$LOADER" "$DIST/unityloader"
 chmod a+x "$DIST/unityloader"
+cp "$LOADER_DIR/unityloader.libs/libstdc++.so.6" \
+  "$LOADER_DIR/unityloader.libs/libgcc_s.so.1" \
+  "$DIST/unityloader.libs/"
+for plugin in "${UNITYLOADER_PLUGINS[@]}"; do
+  cp "$LOADER_DIR/unityloader.d/$plugin.so" "$DIST/unityloader.d/"
+done
 # APFS clone copies avoid consuming another full payload on development Macs.
 # Other platforms fall back to a normal recursive copy.
 if ! cp -cR "$PAYLOAD/." "$DIST/gamefiles/" 2>/dev/null; then
@@ -101,6 +128,12 @@ printf '%s\n' full-android-baseline > "$DIST/gamefiles/.gamedata_ready"
     cd "$DIST"
     shasum -a 256 \
       unityloader \
+      unityloader.libs/libstdc++.so.6 \
+      unityloader.libs/libgcc_s.so.1 \
+      unityloader.d/android_base.so \
+      unityloader.d/unity_2021_3.so \
+      unityloader.d/platform_sdl_runtime.so \
+      unityloader.d/sdk_unity_burst.so \
       libsteam_api64.so \
       libsdkencryptedappticket64.so \
       gamefiles/lib/arm64-v8a/libil2cpp.so \

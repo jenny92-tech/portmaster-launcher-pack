@@ -98,8 +98,24 @@ restore_unity_handheld_input() {
   done
 }
 
+# Keep the loader's matching C++ runtime ahead of game and firmware libraries.
+# Every current unityloader/plugin build is one deployment unit, so falling
+# back to another libstdc++ would silently defeat that contract.
+prepare_unityloader_private_libs() {
+  local private_libs="$GAMEDIR/unityloader.libs"
+  local library
+  for library in libstdc++.so.6 libgcc_s.so.1; do
+    [ -r "$private_libs/$library" ] || {
+      echo "$LOG_PREFIX missing unityloader private library: $private_libs/$library"
+      return 1
+    }
+  done
+  export LD_LIBRARY_PATH="$private_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
 run_unity_game() {
   local toml="$1"
+  prepare_unityloader_private_libs || return 1
   export XDG_DATA_HOME="$CONFDIR"
   export XDG_CONFIG_HOME="$CONFDIR"
   mkdir -p "$GAMEDIR/cache/UnityShaderCache"

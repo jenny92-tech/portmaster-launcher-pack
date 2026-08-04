@@ -66,6 +66,17 @@ grep -Fq 'libil2cpp.so' "$STAGE_SCRIPT"
 grep -Fq 'libunity.so' "$STAGE_SCRIPT"
 grep -Fq 'libmain.so' "$STAGE_SCRIPT"
 grep -Fq 'global-metadata.dat' "$STAGE_SCRIPT"
+for runtime_file in \
+  unityloader.libs/libstdc++.so.6 \
+  unityloader.libs/libgcc_s.so.1 \
+  unityloader.d/android_base.so \
+  unityloader.d/unity_2021_3.so \
+  unityloader.d/platform_sdl_runtime.so \
+  unityloader.d/sdk_unity_burst.so
+do
+  grep -Fq "$runtime_file" "$STAGE_SCRIPT"
+  grep -Fq "$runtime_file" "$FULL_STAGE_SCRIPT"
+done
 if grep -Fq 'cp -R "$PAYLOAD/."' "$STAGE_SCRIPT"; then
   echo "sunkendragon: minimal package script still copies the full Android payload" >&2
   exit 1

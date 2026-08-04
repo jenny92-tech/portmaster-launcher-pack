@@ -26,6 +26,29 @@ PortMaster 自带的 LÖVE 11.5 显示设置界面；Stage 2 按选择修改 `co
 | 交换 A/B、交换 X/Y | on/off | `[input.remap]` |
 | 减伤、无限资源、技能冷却 | 多档 | `[[il2cpp_patch]]` |
 
+触屏 HUD 隐藏/移动和上面的数值修改现在由同一个通用
+`il2cpp_patch.so` 提供；类名、方法名和字段偏移仍只写在本游戏的
+`config.toml`，不再需要 `heishenhua_mods.so`。
+
+## Bogodroid 运行文件
+
+```text
+unityloader
+unityloader.libs/
+  libstdc++.so.6
+  libgcc_s.so.1
+unityloader.d/
+  android_base.so
+  unity_2021_3.so
+  platform_sdl_runtime.so
+  sdk_unity_burst.so
+  il2cpp_patch.so
+```
+
+需要详细诊断时可额外放入 `platform_log_stderr.so`；正常发布不必携带。
+`unityloader.libs/` 是 loader 和所有插件共用的一份工具链运行库，必须和
+本次构建的 `unityloader`、插件一起更新。
+
 ## 构建与部署
 
 ```bash

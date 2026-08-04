@@ -13,6 +13,13 @@ PAYLOAD="${2:-$BOGODROID_ROOT/tools/unity_convert/work/bogodroid-gamefiles}"
 LOADER="${3:-$BOGODROID_ROOT/build-log/unityloader}"
 SUPPORT_FILES="${4:-$BOGODROID_ROOT/gamefiles/support_files}"
 DIST="$PORT/dist"
+LOADER_DIR="$(dirname "$LOADER")"
+UNITYLOADER_PLUGINS=(
+  android_base
+  unity_2021_3
+  platform_sdl_runtime
+  sdk_unity_burst
+)
 
 # The repository build helper imports stdlib tomllib (Python 3.11+). macOS may
 # put its older system Python first, so prefer an installed modern interpreter.
@@ -60,6 +67,18 @@ case "$(file "$LOADER")" in
     exit 1
     ;;
 esac
+for runtime_library in libstdc++.so.6 libgcc_s.so.1; do
+  [ -s "$LOADER_DIR/unityloader.libs/$runtime_library" ] || {
+    echo "missing unityloader private library: $LOADER_DIR/unityloader.libs/$runtime_library" >&2
+    exit 1
+  }
+done
+for plugin in "${UNITYLOADER_PLUGINS[@]}"; do
+  [ -s "$LOADER_DIR/unityloader.d/$plugin.so" ] || {
+    echo "missing unityloader plugin: $LOADER_DIR/unityloader.d/$plugin.so" >&2
+    exit 1
+  }
+done
 
 for support_file in cpu_present.txt cpu_possible.txt cpuinfo.txt libc.so; do
   [ -s "$SUPPORT_FILES/$support_file" ] || {
@@ -77,10 +96,18 @@ mkdir -p \
   "$DIST/GameData" \
   "$DIST/patch" \
   "$DIST/conf" \
-  "$DIST/cache"
+  "$DIST/cache" \
+  "$DIST/unityloader.libs" \
+  "$DIST/unityloader.d"
 cp "$PORT/config.toml.template" "$DIST/config.toml"
 cp "$LOADER" "$DIST/unityloader"
 chmod a+x "$DIST/unityloader"
+cp "$LOADER_DIR/unityloader.libs/libstdc++.so.6" \
+  "$LOADER_DIR/unityloader.libs/libgcc_s.so.1" \
+  "$DIST/unityloader.libs/"
+for plugin in "${UNITYLOADER_PLUGINS[@]}"; do
+  cp "$LOADER_DIR/unityloader.d/$plugin.so" "$DIST/unityloader.d/"
+done
 cp "$PAYLOAD/lib/arm64-v8a/libil2cpp.so" "$DIST/gamefiles/lib/arm64-v8a/"
 cp "$PAYLOAD/lib/arm64-v8a/libunity.so" "$DIST/gamefiles/lib/arm64-v8a/"
 cp "$PAYLOAD/lib/arm64-v8a/libmain.so" "$DIST/gamefiles/lib/arm64-v8a/"
@@ -103,6 +130,12 @@ chmod a+x "$DIST/patch/setup-gamedata.sh"
     cd "$DIST"
     shasum -a 256 \
       unityloader \
+      unityloader.libs/libstdc++.so.6 \
+      unityloader.libs/libgcc_s.so.1 \
+      unityloader.d/android_base.so \
+      unityloader.d/unity_2021_3.so \
+      unityloader.d/platform_sdl_runtime.so \
+      unityloader.d/sdk_unity_burst.so \
       gamefiles/lib/arm64-v8a/libil2cpp.so \
       gamefiles/lib/arm64-v8a/libunity.so \
       gamefiles/lib/arm64-v8a/libmain.so \

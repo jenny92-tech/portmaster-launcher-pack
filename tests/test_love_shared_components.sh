@@ -40,6 +40,14 @@ grep -Fq 'function launcher.select' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'k.switch(f.label_key' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'k.select(f.label_key' "$ROOT/_kit/love/launcher.lua"
 
+# All Bogodroid launchers use the matching private C++ runtime before any
+# game- or firmware-provided libraries.
+unity_common="$ROOT/_kit/launcher_unity_common.sh"
+grep -Fq 'prepare_unityloader_private_libs()' "$unity_common"
+grep -Fq 'for library in libstdc++.so.6 libgcc_s.so.1' "$unity_common"
+grep -Fq 'LD_LIBRARY_PATH="$private_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' "$unity_common"
+grep -Fq 'prepare_unityloader_private_libs || return 1' "$unity_common"
+
 # Every game uses the same explicit Chinese wording for controller swaps.
 for main in "$ROOT"/ports/*/love/main.lua; do
   if grep -Fq 'key = "swap_ab"' "$main"; then

@@ -14,7 +14,7 @@ Installed layout:
   launcher.sh
   manifest.json
   unityloader
-  runtime/
+  unityloader.libs/
     libstdc++.so.6
     libgcc_s.so.1
   unityloader.d/
@@ -152,8 +152,8 @@ directory below represents the matching Bogodroid build output:
 ```bash
 scp build-release/unityloader \
   root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.new
-rsync -a --delete build-release/runtime/ \
-  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/runtime/
+rsync -a --delete build-release/unityloader.libs/ \
+  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.libs/
 rsync -a --delete build-release/unityloader.d/ \
   root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.d/
 _kit/dist_port.sh vampiresurvivors114

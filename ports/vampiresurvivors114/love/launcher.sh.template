@@ -114,7 +114,8 @@ sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
 
 # ── Library paths + glibc memory tuning for 1GB handhelds ────────────────
 export XDG_DATA_HOME="$CONFDIR" XDG_CONFIG_HOME="$CONFDIR"
-export LD_LIBRARY_PATH="$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+prepare_unityloader_private_libs || exit 1
 memory_tuning
 
 # Unity 6/PAD compatibility is handled by unityloader.d plugins.

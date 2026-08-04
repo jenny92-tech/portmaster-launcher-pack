@@ -36,6 +36,11 @@ ports/sunkendragon/src/scripts/stage-full-package.sh
 `unityloader`、ARM64 Steam API stub 和安全失败的加密票据 companion，输出到 Git 忽略的
 `ports/sunkendragon/dist/`。
 
+两个 staging 脚本会从 loader 所在构建目录同时复制匹配的
+`unityloader.libs/`，以及本端口最小插件集：`android_base`、
+`unity_2021_3`、`platform_sdl_runtime`、`sdk_unity_burst`。不能只替换
+`unityloader` 单个文件。
+
 后续逐文件删减实验使用：
 
 ```bash
