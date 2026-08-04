@@ -60,6 +60,16 @@ function Model.new(kit,native)
         return true
     end
 
+    function self.apply_update_result(update)
+        if type(update)~="table" then return false end
+        local status=tostring(update.update_status or "")
+        if status~="ok" and status~="error" and status~="unknown" then return false end
+        self.env.update_checked=tonumber(update.update_checked) or 0
+        self.env.update_status=status
+        self.env.portmaster_latest=tostring(update.portmaster_latest or "")
+        return true
+    end
+
     function self.load_env()
         local ok,snapshot=pcall(self.native.snapshot)
         if not ok then return false,tostring(snapshot) end

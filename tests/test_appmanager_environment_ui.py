@@ -28,6 +28,11 @@ assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删
 assert 'checked=false,danger=true}' in source
 assert 'if checked then for _,item in ipairs(plan) do item.kind="DELETE_MANAGED" end end' in source
 assert 'model.native.start,"inventory-refresh"' in source
+assert 'model.native.start,"update-check-if-stale"' in source
+assert "operations.background_task=" in source
+assert "operations.accept_background_update(data.update)" in source
+assert "function self.apply_update_result(update)" in source
+assert 'model.native.start,"scan-sizes"' not in source
 assert 'L("Rescan","重新扫描")' in source
 assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true,checked=true}' not in source
 assert 'indeterminate=true' in source

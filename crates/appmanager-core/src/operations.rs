@@ -258,17 +258,8 @@ pub fn apply_file_plan(
         mark_changed(request.context, mutation, &mut outcome);
     }
     if appledouble_ran {
-        write_appledouble_progress(request, "indexing", outcome.appledouble_removed);
         if let Some(path) = request.size_cache {
-            if scan_size_cache(&SizeScanRequest {
-                context: request.context,
-                output: path,
-                self_port: request.self_port,
-            })
-            .is_err()
-            {
-                let _ = fs::remove_file(path);
-            }
+            let _ = fs::remove_file(path);
         }
         write_appledouble_progress(request, "complete", outcome.appledouble_removed);
     } else if let Some(path) = request.size_cache {
@@ -730,8 +721,9 @@ fn apply_size_mutations(path: &Path, mutations: &[Mutation]) -> io::Result<()> {
     for mutation in mutations {
         match mutation {
             Mutation::Move { from, to } => {
-                let bytes = values.remove(from).unwrap_or_else(|| allocated_size(to));
-                values.insert(to.clone(), bytes);
+                if let Some(bytes) = values.remove(from) {
+                    values.insert(to.clone(), bytes);
+                }
             }
             Mutation::Delete { path } => {
                 values.retain(|item, _| item != path && !item.starts_with(path));
@@ -1358,6 +1350,29 @@ mod tests {
     }
 
     #[test]
+    fn incremental_size_updates_never_measure_an_uncached_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("sizes.tsv");
+        let known = temp.path().join("known");
+        let moved = temp.path().join("moved");
+        fs::write(&cache, format!("42\t{}\n", known.display())).unwrap();
+        fs::create_dir(&moved).unwrap();
+        fs::write(moved.join("large.bin"), vec![0_u8; 1024 * 1024]).unwrap();
+
+        apply_size_mutations(
+            &cache,
+            &[Mutation::Move {
+                from: temp.path().join("uncached"),
+                to: moved.clone(),
+            }],
+        )
+        .unwrap();
+        let rows = fs::read_to_string(cache).unwrap();
+        assert!(rows.contains(&format!("42\t{}", known.display())));
+        assert!(!rows.contains(&moved.display().to_string()));
+    }
+
+    #[test]
     fn appledouble_cleanup_does_not_follow_symlinks() {
         use std::os::unix::fs::symlink;
 
@@ -1375,6 +1390,7 @@ mod tests {
         let result = context.roots.app_state.join("result.txt");
         let sizes = context.roots.app_state.join("sizes.tsv");
         let progress = context.roots.app_state.join("progress.tsv");
+        fs::write(&sizes, "1\tstale\n").unwrap();
 
         let outcome = apply_file_plan(&FileApplyRequest {
             context: &context,
@@ -1393,7 +1409,7 @@ mod tests {
         assert!(!nested.join("._local").exists());
         assert!(nested.join("._real-directory").is_dir());
         assert!(outside.join("._keep").exists());
-        assert!(sizes.is_file());
+        assert!(!sizes.exists());
         assert!(
             fs::read_to_string(progress)
                 .unwrap()

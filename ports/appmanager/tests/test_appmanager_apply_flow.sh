@@ -10,12 +10,16 @@ APP_UI_DIR="$ROOT/love"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# UI work remains asynchronous, while mutations and recursive size scans are
-# linked into the Rust main process rather than duplicated in Lua or Shell.
+# Mutations stay on the foreground Rust lane. The automatic PortMaster release
+# check has its own read-only lane, while recursive size scans never auto-start.
 grep -Fq 'model.native.start,"apply"' "$APP_UI_DIR/app_operations.lua"
-grep -Fq 'model.native.start,"scan-sizes"' "$APP_UI_DIR/main.lua"
+! grep -Fq 'model.native.start,"scan-sizes"' "$APP_UI_DIR/main.lua"
+grep -Fq 'model.native.start,"update-check-if-stale"' "$APP_UI_DIR/main.lua"
+grep -Fq 'background_busy' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
+grep -Fq 'run_background_update_check' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
 grep -Fq 'apply_file_plan' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
 grep -Fq 'scan_size_cache' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
+! grep -Fq 'unwrap_or_else(|| allocated_size(to))' "$REPO_ROOT/crates/appmanager-core/src/operations.rs"
 grep -Fq '|candidate| stable_archive_valid(candidate, &expected_md5)' \
   "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"
 ! grep -Fq '|_| valid()' "$REPO_ROOT/crates/appmanager-service/src/launcher.rs"

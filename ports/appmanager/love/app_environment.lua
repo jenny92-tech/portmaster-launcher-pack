@@ -124,6 +124,14 @@ function Environment.new(model,operations,pages_ui)
         end
         env.update_status="checking"; env.portmaster_latest=""
         kit.toast(L("Checking for updates…","正在检查更新……"),{kind="info"})
+        if operations.background_task then
+            local task=operations.background_task
+            operations.background_task=nil
+            task.kind="update-check"
+            task.timeout=35
+            operations.task=task
+            return
+        end
         local ok,task_id=pcall(model.native.start,"update-check",{})
         if not ok then
             env.update_status="error"

@@ -64,6 +64,8 @@ pub struct EmbeddedService {
     snapshot: Arc<Mutex<Option<Value>>>,
     next_task: Arc<AtomicU64>,
     busy: Arc<AtomicBool>,
+    background_busy: Arc<AtomicBool>,
+    active_task: Arc<AtomicU64>,
     cancel_path: PathBuf,
     progress_path: PathBuf,
     last_progress: Arc<Mutex<String>>,
@@ -273,6 +275,8 @@ impl EmbeddedService {
             snapshot: Arc::new(Mutex::new(None)),
             next_task: Arc::new(AtomicU64::new(1)),
             busy: Arc::new(AtomicBool::new(false)),
+            background_busy: Arc::new(AtomicBool::new(false)),
+            active_task: Arc::new(AtomicU64::new(0)),
             cancel_path: paths.cancel,
             progress_path: paths.progress,
             last_progress: Arc::new(Mutex::new(String::new())),
@@ -346,6 +350,15 @@ impl EmbeddedService {
     }
 
     pub fn start(&self, kind: &str, actions: Option<Vec<EmbeddedAction>>) -> Result<u64, String> {
+        if kind == "update-check-if-stale" {
+            if actions.is_some() {
+                return Err(format!("task {kind:?} does not accept a payload"));
+            }
+            return self.start_background_update_check();
+        }
+        if kind == "update-check" && self.background_busy.load(Ordering::Acquire) {
+            return Err("the automatic PortMaster update check is already running".into());
+        }
         if self
             .busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -374,7 +387,6 @@ impl EmbeddedService {
             "apply"
                 | "config-refresh"
                 | "update-check"
-                | "update-check-if-stale"
                 | "runtime-metadata"
                 | "scan-sizes"
                 | "inventory-refresh"
@@ -383,10 +395,12 @@ impl EmbeddedService {
             self.busy.store(false, Ordering::Release);
             return Err(format!("unsupported APP Manager task {kind:?}"));
         }
+        self.active_task.store(task_id, Ordering::Release);
         let request = self.request.clone();
         let events = Arc::clone(&self.events);
         let snapshot = Arc::clone(&self.snapshot);
         let busy = Arc::clone(&self.busy);
+        let active_task = Arc::clone(&self.active_task);
         let progress = self.progress_path.clone();
         let cancel = self.cancel_path.clone();
         self.last_progress
@@ -446,10 +460,63 @@ impl EmbeddedService {
                     .lock()
                     .unwrap_or_else(|value| value.into_inner())
                     .push_back(event);
+                active_task.store(0, Ordering::Release);
                 busy.store(false, Ordering::Release);
             })
             .map_err(|error| {
+                self.active_task.store(0, Ordering::Release);
                 self.busy.store(false, Ordering::Release);
+                error.to_string()
+            })?;
+        Ok(task_id)
+    }
+
+    fn start_background_update_check(&self) -> Result<u64, String> {
+        if self
+            .background_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err("the automatic PortMaster update check is already running".into());
+        }
+        let task_id = self.next_task.fetch_add(1, Ordering::Relaxed);
+        let request = self.request.clone();
+        let events = Arc::clone(&self.events);
+        let background_busy = Arc::clone(&self.background_busy);
+        std::thread::Builder::new()
+            .name("appmanager-update-check-background".into())
+            .spawn(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_background_update_check(&request)
+                }))
+                .unwrap_or_else(|_| {
+                    Err((
+                        "PortMaster update check stopped unexpectedly".into(),
+                        json!({}),
+                    ))
+                });
+                let event = match outcome {
+                    Ok(data) => ServiceEvent {
+                        task_id,
+                        kind: "update-check-if-stale".into(),
+                        status: "complete".into(),
+                        data,
+                    },
+                    Err((message, update)) => ServiceEvent {
+                        task_id,
+                        kind: "update-check-if-stale".into(),
+                        status: "error".into(),
+                        data: json!({"message": message, "update": update}),
+                    },
+                };
+                events
+                    .lock()
+                    .unwrap_or_else(|value| value.into_inner())
+                    .push_back(event);
+                background_busy.store(false, Ordering::Release);
+            })
+            .map_err(|error| {
+                self.background_busy.store(false, Ordering::Release);
                 error.to_string()
             })?;
         Ok(task_id)
@@ -467,9 +534,13 @@ impl EmbeddedService {
         if !self.busy.load(Ordering::Acquire) {
             return None;
         }
+        let task_id = self.active_task.load(Ordering::Acquire);
+        if task_id == 0 {
+            return None;
+        }
         if let Some(progress) = self.progress_channel.take() {
             return Some(ServiceEvent {
-                task_id: self.next_task.load(Ordering::Relaxed).saturating_sub(1),
+                task_id,
                 kind: "progress".into(),
                 status: "progress".into(),
                 data: serde_json::to_value(progress).unwrap_or_else(|_| json!({})),
@@ -485,7 +556,7 @@ impl EmbeddedService {
         }
         *previous = text.clone();
         Some(ServiceEvent {
-            task_id: self.next_task.load(Ordering::Relaxed).saturating_sub(1),
+            task_id,
             kind: "progress".into(),
             status: "progress".into(),
             data: progress_value(&text),
@@ -498,6 +569,23 @@ impl EmbeddedService {
         }
         self.cancel_token.cancel();
         Ok(())
+    }
+}
+
+fn update_cache_value(path: &Path) -> Value {
+    let (checked, status, latest) = read_update_cache(path);
+    json!({
+        "update_checked": checked,
+        "update_status": status,
+        "portmaster_latest": latest,
+    })
+}
+
+fn run_background_update_check(request: &Request) -> Result<Value, (String, Value)> {
+    let session = Session::new(request.clone()).map_err(|message| (message, json!({})))?;
+    match session.check_update(false) {
+        Ok(_) => Ok(json!({"update": update_cache_value(&session.paths.update_cache)})),
+        Err(message) => Err((message, update_cache_value(&session.paths.update_cache))),
     }
 }
 
@@ -523,20 +611,16 @@ fn run_embedded_task(
         match kind {
             "apply" => {
                 write_embedded_plan(&session.paths.plan, actions.unwrap_or_default())?;
-                let code = session.apply_plan()?;
-                // File mutations invalidate the size cache; rescanning here
-                // keeps the sizes the UI shows in step with the disk.
-                session.scan_sizes()?;
-                Ok(code)
+                session.apply_plan()
             }
             "config-refresh" => session.refresh_device_config(),
             "update-check" => session.check_update(true),
-            "update-check-if-stale" => session.check_update(false),
             "runtime-metadata" => session.refresh_runtime_metadata(true),
             "scan-sizes" => session.scan_sizes(),
             "inventory-refresh" => {
                 session.refresh_inventory_state()?;
-                session.scan_sizes()
+                let _ = fs::remove_file(&session.paths.size_cache);
+                Ok(0)
             }
             _ => Err(format!("unsupported APP Manager task {kind:?}")),
         }
@@ -566,10 +650,7 @@ fn run_embedded_task(
         .map_or(Value::Null, |status| json!({"status": status}));
     let reuse_inventory = if matches!(kind, "apply" | "config-refresh" | "inventory-refresh") {
         session.persisted_inventory()
-    } else if matches!(
-        kind,
-        "update-check" | "update-check-if-stale" | "runtime-metadata" | "scan-sizes"
-    ) {
+    } else if matches!(kind, "update-check" | "runtime-metadata" | "scan-sizes") {
         cached_snapshot
             .lock()
             .unwrap_or_else(|value| value.into_inner())
@@ -2244,12 +2325,54 @@ fn exit_code(code: u8) -> ExitCode {
 mod tests {
     use super::*;
 
+    fn embedded_fixture() -> (tempfile::TempDir, EmbeddedService) {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("ports");
+        let app_root = source.join("jenny92-appmanager");
+        fs::create_dir_all(app_root.join("state")).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        let launcher = source.join("APP Manager.sh");
+        fs::write(&launcher, "#!/bin/sh\n").unwrap();
+        let config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
+        let service = EmbeddedService::new(EmbeddedRequest {
+            source_dir: source,
+            launcher,
+            app_root,
+            config_dir: Some(config),
+            remote_config_dir: None,
+        })
+        .unwrap();
+        (temp, service)
+    }
+
     #[test]
     fn damaged_app_managed_environment_still_exposes_game_inventory() {
         assert!(inventory_available(&ManagementMode::App, "healthy"));
         assert!(inventory_available(&ManagementMode::App, "damaged"));
         assert!(!inventory_available(&ManagementMode::App, "missing"));
         assert!(inventory_available(&ManagementMode::System, "missing"));
+    }
+
+    #[test]
+    fn background_update_lane_never_blocks_foreground_file_work() {
+        let (_temp, service) = embedded_fixture();
+        service.background_busy.store(true, Ordering::Release);
+        let task_id = service.start("inventory-refresh", None).unwrap();
+        assert!(task_id > 0);
+        let error = service.start("update-check", None).unwrap_err();
+        assert!(error.contains("automatic PortMaster update check"));
+        service.background_busy.store(false, Ordering::Release);
+
+        for _ in 0..100 {
+            if service
+                .poll()
+                .is_some_and(|event| event.task_id == task_id && event.status != "progress")
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("foreground task did not complete");
     }
 
     #[test]

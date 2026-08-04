@@ -3,7 +3,7 @@ local Operations = {}
 function Operations.new(model)
     local kit,L=model.kit,model.L
     local env,pages=model.env,model.pages
-    local self={confirm_plan=nil,confirm_return=pages.HOME,task=nil}
+    local self={confirm_plan=nil,confirm_return=pages.HOME,task=nil,background_task=nil,pending_update=nil}
     local page_builders,environment
 
     function self.bind(builders,environment_pages)
@@ -12,6 +12,25 @@ function Operations.new(model)
 
     function self.refresh_home()
         page_builders.build_home(true)
+    end
+
+    function self.merge_pending_update()
+        local update=self.pending_update
+        self.pending_update=nil
+        if update then return model.apply_update_result(update) end
+        return false
+    end
+
+    function self.accept_background_update(update)
+        if type(update)~="table" then return end
+        if self.task then
+            self.pending_update=update
+            return
+        end
+        if model.apply_update_result(update) then
+            self.refresh_home()
+            if environment then environment.build_manage(true) end
+        end
     end
 
     local function rebuild_return_page(return_page)
@@ -46,6 +65,7 @@ function Operations.new(model)
             model.invalidate_all()
             self.confirm_plan={}
         end
+        self.merge_pending_update()
         if completed_task and completed_task.kind=="portmaster" then
             -- The blocking result dialog below already gives the next step.
         elseif failed then

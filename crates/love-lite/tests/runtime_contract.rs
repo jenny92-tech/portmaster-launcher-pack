@@ -676,6 +676,58 @@ fn runtime_repair_completion_rebuilds_the_home_and_runtime_pages() {
 }
 
 #[test]
+fn background_update_result_survives_a_concurrent_foreground_snapshot() {
+    let lua = mlua::Lua::new();
+    let app_lua =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/love");
+    lua.globals()
+        .set("APP_LUA", app_lua.to_string_lossy().as_ref())
+        .expect("publish App Manager Lua directory");
+    lua.load(
+        r#"
+        package.path=APP_LUA.."/?.lua;"..package.path
+        local calls={home=0}
+        local kit={
+            set_busy=function() end,
+            toast=function() end,
+            goto_page=function() end,
+        }
+        local model=require("app_model").new(kit,{})
+        local function snapshot()
+            return {
+                env={update_checked=0,update_status="unknown",portmaster_latest=""},
+                inventory={ports={},refcount={},orphan_dirs={},orphan_images={},dead_scripts={},
+                    trash={},runtimes={need={},facts={}}},
+                sizes={},runtime_metadata={},
+            }
+        end
+        assert(model.apply_snapshot(snapshot()))
+
+        local operations=require("app_operations").new(model)
+        operations.bind({
+            reset_selection=function() end,
+            build_home=function() calls.home=calls.home+1 end,
+        },{build_manage=function() end})
+        operations.task={kind="operation",plan={}}
+        operations.accept_background_update({
+            update_checked=123,update_status="ok",portmaster_latest="2026.07",
+        })
+        assert(model.env.update_status=="unknown")
+        operations.finish_task({
+            status="complete",
+            data={snapshot=snapshot(),operation={failed=false}},
+        })
+        assert(model.env.update_checked==123)
+        assert(model.env.update_status=="ok")
+        assert(model.env.portmaster_latest=="2026.07")
+        assert(calls.home==1)
+        "#,
+    )
+    .exec()
+    .expect("merge background update after foreground snapshot");
+}
+
+#[test]
 fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
     let lua = mlua::Lua::new();
     let app_lua =

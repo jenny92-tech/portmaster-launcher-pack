@@ -113,6 +113,8 @@ grep -Fq '"portmaster_management"' "$ROOT/crates/appmanager-service/src/launcher
 grep -Fq 'L("Environment Management","环境管理")' "$APP/love_ui/app_environment.lua"
 grep -Fq 'L("PortMaster not found","未找到 PortMaster")' "$APP/love_ui/app_environment.lua"
 grep -Fq 'model.native.start,"update-check-if-stale"' "$APP/love_ui/main.lua"
+grep -Fq 'operations.background_task=' "$APP/love_ui/main.lua"
+! grep -Fq 'model.native.start,"scan-sizes"' "$APP/love_ui/main.lua"
 python3 - "$ROOT/ports/appmanager/trimui-app/icon.png" <<'PY'
 import struct
 import sys

@@ -13,21 +13,30 @@ local finish_initial_load
 
 local function poll_task(dt)
     local task=operations.task
-    if not task then return end
-    task.elapsed=task.elapsed+dt; task.poll=task.poll+dt
-    if task.poll<0.1 then return end
-    task.poll=0
+    local background=operations.background_task
+    if not task and not background then return end
+    local timer=task or background
+    timer.elapsed=timer.elapsed+dt; timer.poll=timer.poll+dt
+    if timer.poll<0.1 then return end
+    timer.poll=0
 
     local poll_ok,event=pcall(model.native.poll)
     if not poll_ok then
-        if not task.poll_error_notified then
+        if task and not task.poll_error_notified then
             task.poll_error_notified=true
             kit.toast(L("Waiting for the background task. Please keep this page open.",
                 "正在等待后台任务，请保持当前页面。"),{kind="warning"})
         end
         return
     end
-    if type(event)=="table" and event.task_id==task.id then
+    if type(event)=="table" and background and event.task_id==background.id then
+        operations.background_task=nil
+        local data=event.data or {}
+        operations.accept_background_update(data.update)
+        return
+    end
+    task=operations.task
+    if type(event)=="table" and task and event.task_id==task.id then
         if event.status=="progress" then
             local progress=model.runtime_progress(event.data)
             if progress then
@@ -52,30 +61,24 @@ local function poll_task(dt)
             local status=type(data.config_refresh)=="table" and data.config_refresh.status or nil
             finish_initial_load(true)
             if status=="updated" then kit.toast(L("Device information updated.","设备信息已更新。"),{kind="success"}) end
-        elseif task.kind=="update-check" or task.kind=="update-check-background" then
-            if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
+        elseif task.kind=="update-check" then
+            if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot)
+            elseif type(data.update)=="table" then model.apply_update_result(data.update) end
+            operations.merge_pending_update()
             operations.task=nil; kit.set_busy(false)
             if event.status=="error" then env.update_status="error" end
             operations.refresh_home()
-            if task.kind=="update-check" then environment.build_manage(true); kit.goto_page(page.MANAGE) end
+            environment.build_manage(true); kit.goto_page(page.MANAGE)
             if event.status=="error" then
                 kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
-            elseif task.kind=="update-check" then
+            else
                 kit.toast(L("Update check completed.","更新检查完成。"),{kind="success"})
             end
-            if task.kind=="update-check-background" and not env.size_cache_ready then
-                local ok,task_id=pcall(model.native.start,"scan-sizes",{})
-                if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
-            end
-        elseif task.kind=="scan-sizes" then
-            if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
-            operations.task=nil
-            operations.refresh_home()
         else operations.finish_task(event) end
         return
     end
 
-    if not task.timeout_notified and task.elapsed>(task.timeout or 45) then
+    if task and not task.timeout_notified and task.elapsed>(task.timeout or 45) then
         task.timeout_notified=true
         if task.kind=="portmaster" then
             kit.toast(L("PortMaster is still installing. Please keep waiting.",
@@ -83,15 +86,12 @@ local function poll_task(dt)
         elseif task.kind=="config-refresh" then
             kit.toast(L("Device information is still loading. Please keep waiting.",
                 "设备信息仍在加载，请继续等待。"),{kind="info"})
-        elseif task.kind=="update-check" or task.kind=="update-check-background" then
+        elseif task.kind=="update-check" then
             kit.toast(L("The update check is taking longer than usual.",
                 "更新检查耗时较长，请继续等待。"),{kind="info"})
         elseif task.kind=="inventory-refresh" then
             kit.toast(L("The file scan is still running. Please keep waiting.",
                 "文件扫描仍在进行，请继续等待。"),{kind="info"})
-        elseif task.kind=="scan-sizes" then
-            kit.toast(L("File sizes are still being calculated.",
-                "文件大小仍在计算。"),{kind="info"})
         else
             kit.toast(L("The operation is still running. Please keep waiting.",
                 "操作仍在进行，请继续等待。"),{kind="info"})
@@ -116,17 +116,16 @@ finish_initial_load=function(skip_config_refresh)
         environment.build_repair_gate()
     else
         pages.build_home()
-        if env.portmaster_management~="system" then
+        if env.portmaster_management~="system" and env.capability_update_portmaster~=false and
+            env.portmaster_release_install_allowed~=false and not operations.background_task then
             local ok,task_id=pcall(model.native.start,"update-check-if-stale",{})
-            if ok then operations.task={id=task_id,kind="update-check-background",elapsed=0,poll=0,timeout=35} end
+            if ok then
+                operations.background_task={id=task_id,kind="update-check-background",elapsed=0,poll=0}
+            end
         end
         if env.portmaster_health=="damaged" or env.portmaster_python_ok==false then
             kit.toast(L("PortMaster needs attention. See Environment Management.","PortMaster 需要注意，请查看环境管理。"),{kind="warn"})
         end
-    end
-    if not operations.task and not env.size_cache_ready then
-        local ok,task_id=pcall(model.native.start,"scan-sizes",{})
-        if ok then operations.task={id=task_id,kind="scan-sizes",elapsed=0,poll=0,timeout=120} end
     end
 end
 

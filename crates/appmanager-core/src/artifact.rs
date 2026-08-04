@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::RuntimeMetadata;
 
 const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const ERROR_CACHE_RETRY_AGE: Duration = Duration::from_secs(15 * 60);
 // Small JSON manifests; a stalled connection must not hold the operation lock.
 const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const METADATA_FETCH_TIMEOUT: Duration = Duration::from_secs(300);
@@ -237,15 +238,26 @@ pub fn fetch_stable_release(
 pub fn refresh_stable_cache(
     request: &StableCacheRequest,
 ) -> Result<StableCacheOutcome, ArtifactError> {
-    if !request.force && cache_is_fresh(&request.cache) && stable_cache_row_valid(&request.cache) {
-        let (_, _, latest) = read_stable_cache(&request.cache).ok_or_else(|| {
+    if !request.force && stable_cache_row_valid(&request.cache) {
+        let (_, status, latest) = read_stable_cache(&request.cache).ok_or_else(|| {
             ArtifactError::InvalidStable("fresh stable cache is malformed".into())
         })?;
-        return Ok(StableCacheOutcome {
-            status: CacheRefreshStatus::Cached,
-            latest: Some(latest),
-            route: None,
-        });
+        let max_age = if status == "ok" {
+            CACHE_MAX_AGE
+        } else {
+            ERROR_CACHE_RETRY_AGE
+        };
+        if cache_is_fresh_for(&request.cache, max_age) {
+            return Ok(StableCacheOutcome {
+                status: if status == "ok" {
+                    CacheRefreshStatus::Cached
+                } else {
+                    CacheRefreshStatus::CachedStale
+                },
+                latest: (status == "ok").then_some(latest),
+                route: None,
+            });
+        }
     }
     let parent = request
         .cache
@@ -390,11 +402,15 @@ fn read_stable_cache(path: &Path) -> Option<(u64, String, String)> {
 }
 
 fn cache_is_fresh(path: &Path) -> bool {
+    cache_is_fresh_for(path, CACHE_MAX_AGE)
+}
+
+fn cache_is_fresh_for(path: &Path, max_age: Duration) -> bool {
     path.metadata()
         .ok()
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|age| age < CACHE_MAX_AGE)
+        .is_some_and(|age| age < max_age)
 }
 
 fn runtime_cache_valid(json_cache: &Path, tsv_cache: Option<&Path>) -> bool {
@@ -491,5 +507,23 @@ mod tests {
         assert!(stable_cache_row_valid(&cache));
         fs::write(&cache, "123\tok\t2026.07\textra\n").unwrap();
         assert!(!stable_cache_row_valid(&cache));
+    }
+
+    #[test]
+    fn failed_update_checks_retry_before_successful_cache_entries_expire() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("update.tsv");
+        write_update_cache(&cache, 123, "error", "").unwrap();
+        let modified = SystemTime::now()
+            .checked_sub(ERROR_CACHE_RETRY_AGE + Duration::from_secs(1))
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&cache)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(!cache_is_fresh_for(&cache, ERROR_CACHE_RETRY_AGE));
+        assert!(cache_is_fresh(&cache));
     }
 }
