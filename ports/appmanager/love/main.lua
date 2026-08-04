@@ -9,9 +9,10 @@ pages.bind_environment(environment)
 operations.bind(pages,environment)
 
 local L,page,env=model.L,model.pages,model.env
-local finish_initial_load
+local finish_initial_load,start_background_update
 
 local function poll_task(dt)
+    operations.maybe_show_config_restart()
     local task=operations.task
     local background=operations.background_task
     if not task and not background then return end
@@ -22,16 +23,42 @@ local function poll_task(dt)
 
     local poll_ok,event=pcall(model.native.poll)
     if not poll_ok then
-        if task and not task.poll_error_notified then
-            task.poll_error_notified=true
-            kit.toast(L("Waiting for the background task. Please keep this page open.",
-                "正在等待后台任务，请保持当前页面。"),{kind="warning"})
+        timer.poll_errors=(timer.poll_errors or 0)+1
+        if timer.poll_errors>=3 and not timer.bridge_dialog_shown then
+            timer.bridge_dialog_shown=true
+            kit.dialog({
+                title=L("Connection interrupted","连接暂时中断"),
+                message=L(
+                    "Port App Manager could not read the current task. Retry the connection or return and wait.",
+                    "暂时无法读取当前任务。可以重试连接，或返回后继续等待。"),
+                confirm=L("Retry","重试"),cancel=L("Return","返回"),danger=false,
+                over_busy=true,
+                on_confirm=function()
+                    timer.poll_errors=0
+                    timer.bridge_dialog_shown=false
+                end,
+            })
         end
         return
     end
+    timer.poll_errors=0
+    if timer.bridge_dialog_shown and not kit.debug_dialog().open then
+        timer.bridge_dialog_shown=false
+    end
     if type(event)=="table" and background and event.task_id==background.id then
         local data=event.data or {}
-        operations.finish_background_update(data.update)
+        if background.kind=="config-refresh-background" then
+            operations.background_task=nil
+            local status=type(data.config_refresh)=="table" and data.config_refresh.status or nil
+            if status=="updated" then operations.queue_config_restart() end
+            if operations.forced_update_pending then
+                operations.try_start_forced_update()
+            else
+                start_background_update()
+            end
+        else
+            operations.finish_background_update(data.update)
+        end
         return
     end
     task=operations.task
@@ -54,20 +81,14 @@ local function poll_task(dt)
         end
 
         local data=event.data or {}
-        if task.kind=="config-refresh" then
-            if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot) end
-            operations.task=nil; kit.set_busy(false)
-            local status=type(data.config_refresh)=="table" and data.config_refresh.status or nil
-            finish_initial_load(true)
-            if status=="updated" then kit.toast(L("Device information updated.","设备信息已更新。"),{kind="success"}) end
-        elseif task.kind=="update-check" then
+        if task.kind=="update-check" then
             if type(data.snapshot)=="table" then model.apply_snapshot(data.snapshot)
             elseif type(data.update)=="table" then model.apply_update_result(data.update) end
             operations.merge_pending_update()
             operations.task=nil; kit.set_busy(false)
             if event.status=="error" then env.update_status="error" end
             operations.refresh_home()
-            environment.build_manage(true); kit.goto_page(page.MANAGE)
+            environment.build_manage(true)
             if event.status=="error" then
                 kit.toast(L("Cannot check for updates right now. Try again later.","暂时无法检查更新，请稍后再试。"),{kind="error"})
             else
@@ -82,10 +103,7 @@ local function poll_task(dt)
         if task.kind=="portmaster" then
             kit.toast(L("PortMaster is still installing. Please keep waiting.",
                 "PortMaster 仍在安装，请继续等待。"),{kind="info"})
-        elseif task.kind=="config-refresh" then
-            kit.toast(L("Device information is still loading. Please keep waiting.",
-                "设备信息仍在加载，请继续等待。"),{kind="info"})
-        elseif task.kind=="update-check" or task.kind=="update-check-wait" then
+        elseif task.kind=="update-check" then
             kit.toast(L("The update check is taking longer than usual.",
                 "更新检查耗时较长，请继续等待。"),{kind="info"})
         elseif task.kind=="inventory-refresh" then
@@ -98,33 +116,32 @@ local function poll_task(dt)
     end
 end
 
-finish_initial_load=function(skip_config_refresh)
-    if not skip_config_refresh then
-        kit.set_busy(true,L("Preparing device information…","正在准备设备信息……"),{
-            indeterminate=true,stage=L("Preparing device information","正在准备设备信息"),
-            detail="",footer_left="",footer_right=L("Please wait…","请稍候……")})
-        local ok,task_id=pcall(model.native.start,"config-refresh",{})
+start_background_update=function()
+    if env.portmaster_health~="missing" and env.portmaster_management~="system" and
+        env.capability_update_portmaster~=false and env.portmaster_release_install_allowed~=false and
+        not operations.background_task then
+        local ok,task_id=pcall(model.native.start,"update-check-if-stale",{})
         if ok then
-            operations.task={id=task_id,kind="config-refresh",elapsed=0,poll=0,timeout=45}
-            return
+            operations.background_task={id=task_id,kind="update-check-background",elapsed=0,poll=0}
         end
-        kit.set_busy(false)
     end
+end
+
+finish_initial_load=function()
     pages.reset_selection()
     if env.portmaster_health=="missing" and env.portmaster_management~="system" then
         environment.build_repair_gate()
     else
         pages.build_home()
-        if env.portmaster_management~="system" and env.capability_update_portmaster~=false and
-            env.portmaster_release_install_allowed~=false and not operations.background_task then
-            local ok,task_id=pcall(model.native.start,"update-check-if-stale",{})
-            if ok then
-                operations.background_task={id=task_id,kind="update-check-background",elapsed=0,poll=0}
-            end
-        end
         if env.portmaster_health=="damaged" or env.portmaster_python_ok==false then
             kit.toast(L("PortMaster needs attention. See Environment Management.","PortMaster 需要注意，请查看环境管理。"),{kind="warn"})
         end
+    end
+    local ok,task_id=pcall(model.native.start,"config-refresh-if-newer",{})
+    if ok then
+        operations.background_task={id=task_id,kind="config-refresh-background",elapsed=0,poll=0}
+    else
+        start_background_update()
     end
 end
 
@@ -149,7 +166,7 @@ local port={
             },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
             return
         end
-        finish_initial_load(false)
+        finish_initial_load()
     end,
     update=poll_task,
 }

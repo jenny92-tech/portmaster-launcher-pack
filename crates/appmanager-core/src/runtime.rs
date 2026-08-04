@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -16,7 +16,7 @@ use crate::path::{ManagedRoot, PathSafetyError};
 use crate::{CancellationToken, ProgressChannel, TaskProgress};
 
 const OFFICIAL_PREFIX: &str = "https://github.com/PortsMaster/PortMaster-New/releases/download/";
-const MAX_METADATA_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_METADATA_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RuntimeMetadataEntry {
@@ -151,8 +151,7 @@ pub struct RuntimeRepairRequest {
     pub runtime_names: Vec<String>,
     pub arch: String,
     pub libs_root: PathBuf,
-    pub progress_file: PathBuf,
-    pub cancel_file: Option<PathBuf>,
+    pub state_dir: PathBuf,
     pub cancel_token: Option<CancellationToken>,
     pub progress_channel: Option<ProgressChannel>,
 }
@@ -261,7 +260,7 @@ where
     }
 
     let progress = ProgressWriter::new(
-        &request.progress_file,
+        &request.state_dir,
         selected.len(),
         total,
         request.progress_channel.clone(),
@@ -290,12 +289,8 @@ where
 {
     check_cancel(request)?;
     let libs = prepare_root(&request.libs_root)?;
-    let progress_parent = request
-        .progress_file
-        .parent()
-        .ok_or_else(|| RuntimeRepairError::InvalidName("progress file has no parent".to_owned()))?;
-    let state = ManagedRoot::new(progress_parent)?;
-    state.validate_direct_child(&request.progress_file)?;
+    fs::create_dir_all(&request.state_dir)?;
+    let state = ManagedRoot::new(&request.state_dir)?;
     let cache_path = state.join_child("runtime-cache")?;
     let cache = prepare_root(&cache_path)?;
 
@@ -362,7 +357,6 @@ where
             )?;
             let live_progress = RuntimeDownloadProgress::new(
                 progress,
-                request.cancel_file.as_deref(),
                 request.cancel_token.as_ref(),
                 &entry.name,
                 index,
@@ -505,10 +499,6 @@ fn check_cancel(request: &RuntimeRepairRequest) -> Result<(), RuntimeRepairError
         .cancel_token
         .as_ref()
         .is_some_and(CancellationToken::is_cancelled)
-        || request
-            .cancel_file
-            .as_ref()
-            .is_some_and(|path| path.exists())
     {
         Err(RuntimeRepairError::Cancelled)
     } else {
@@ -568,7 +558,6 @@ fn suffixed_path(path: &Path, suffix: &str) -> PathBuf {
 
 struct RuntimeDownloadProgress<'a> {
     writer: &'a ProgressWriter,
-    cancel_file: Option<&'a Path>,
     cancel_token: Option<&'a CancellationToken>,
     runtime: &'a str,
     index: usize,
@@ -586,7 +575,6 @@ struct RuntimeDownloadState {
 impl<'a> RuntimeDownloadProgress<'a> {
     fn new(
         writer: &'a ProgressWriter,
-        cancel_file: Option<&'a Path>,
         cancel_token: Option<&'a CancellationToken>,
         runtime: &'a str,
         index: usize,
@@ -594,7 +582,6 @@ impl<'a> RuntimeDownloadProgress<'a> {
     ) -> Self {
         Self {
             writer,
-            cancel_file,
             cancel_token,
             runtime,
             index,
@@ -637,7 +624,6 @@ impl Progress for RuntimeDownloadProgress<'_> {
         if self
             .cancel_token
             .is_some_and(CancellationToken::is_cancelled)
-            || self.cancel_file.is_some_and(Path::exists)
         {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
         }
@@ -684,7 +670,6 @@ impl Progress for RuntimeDownloadProgress<'_> {
 }
 
 struct ProgressWriter {
-    path: PathBuf,
     count: usize,
     total: u64,
     channel: Option<ProgressChannel>,
@@ -693,25 +678,18 @@ struct ProgressWriter {
 
 impl ProgressWriter {
     fn new(
-        path: &Path,
+        state_dir: &Path,
         count: usize,
         total: u64,
         channel: Option<ProgressChannel>,
     ) -> Result<Self, RuntimeRepairError> {
-        if !path.is_absolute() {
+        if !state_dir.is_absolute() {
             return Err(RuntimeRepairError::UnsafePath(PathSafetyError::NotAbsolute));
         }
-        let parent = path.parent().ok_or(PathSafetyError::FilesystemRoot)?;
-        let root = ManagedRoot::new(parent)?;
+        fs::create_dir_all(state_dir)?;
+        let root = ManagedRoot::new(state_dir)?;
         fs::create_dir_all(root.path())?;
-        let root = ManagedRoot::new(parent)?;
-        root.validate_direct_child(path)?;
-        if is_symlink(path)? {
-            return Err(RuntimeRepairError::UnsafePath(PathSafetyError::Symlink(
-                path.to_path_buf(),
-            )));
-        }
-        let lock_path = suffixed_path(path, ".lock");
+        let lock_path = root.join_child("runtime-repair.lock")?;
         if is_symlink(&lock_path)? {
             return Err(RuntimeRepairError::UnsafePath(PathSafetyError::Symlink(
                 lock_path,
@@ -728,7 +706,6 @@ impl ProgressWriter {
             }
         })?;
         Ok(Self {
-            path: path.to_path_buf(),
             count,
             total,
             channel,
@@ -756,7 +733,6 @@ impl ProgressWriter {
         speed: u64,
         detail: &str,
     ) -> Result<(), RuntimeRepairError> {
-        let clean = detail.replace(['\t', '\r', '\n'], " ");
         if let Some(channel) = &self.channel {
             channel.publish(TaskProgress {
                 phase: phase.to_owned(),
@@ -766,36 +742,9 @@ impl ProgressWriter {
                 current: current.min(self.total),
                 total: self.total,
                 speed,
-                detail: clean.clone(),
+                detail: detail.replace(['\t', '\r', '\n'], " "),
             });
         }
-        let temp = suffixed_path(&self.path, &format!(".tmp.{}", std::process::id()));
-        if is_symlink(&temp)? {
-            return Err(RuntimeRepairError::UnsafePath(PathSafetyError::Symlink(
-                temp,
-            )));
-        }
-        remove_regular_if_exists(&temp)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)?;
-        writeln!(
-            file,
-            "1\t{phase}\t{runtime}\t{index}\t{}\t{}\t{}\t{speed}\t{clean}",
-            self.count,
-            current.min(self.total),
-            self.total
-        )?;
-        file.sync_all()?;
-        drop(file);
-        if is_symlink(&self.path)? {
-            let _ = fs::remove_file(&temp);
-            return Err(RuntimeRepairError::UnsafePath(PathSafetyError::Symlink(
-                self.path.clone(),
-            )));
-        }
-        fs::rename(temp, &self.path)?;
         Ok(())
     }
 }
@@ -831,8 +780,7 @@ mod tests {
             runtime_names: vec!["godot".to_owned()],
             arch: "aarch64".to_owned(),
             libs_root: temp.path().join("libs"),
-            progress_file: temp.path().join("state/progress.tsv"),
-            cancel_file: Some(temp.path().join("state/cancel")),
+            state_dir: temp.path().join("state"),
             cancel_token: None,
             progress_channel: None,
         }
@@ -891,8 +839,6 @@ mod tests {
         assert_eq!(fs::read(target).unwrap(), payload);
         assert_eq!(result.runtimes[0].source, RuntimeRepairSource::Network);
         assert_eq!(result.runtimes[0].route_id.as_deref(), Some("origin"));
-        let progress = fs::read_to_string(&request.progress_file).unwrap();
-        assert!(progress.starts_with("1\tcomplete\t\t1\t1\t"));
         assert_eq!(progress_channel.take().unwrap().phase, "complete");
     }
 
@@ -912,67 +858,47 @@ mod tests {
         assert!(matches!(error, RuntimeRepairError::Validation(_)));
         assert_eq!(fs::read(&target).unwrap(), b"old-runtime");
 
-        fs::create_dir_all(request.progress_file.parent().unwrap()).unwrap();
-        fs::write(request.cancel_file.as_ref().unwrap(), b"cancel").unwrap();
+        let cancel = CancellationToken::default();
+        cancel.cancel();
+        let mut request = request;
+        request.cancel_token = Some(cancel);
         let error = repair_with_fetcher(&request, |_entry, _output, _progress| {
             panic!("cancelled repair must not download")
         })
         .unwrap_err();
         assert!(matches!(error, RuntimeRepairError::Cancelled));
         assert_eq!(fs::read(target).unwrap(), b"old-runtime");
-        assert!(
-            fs::read_to_string(&request.progress_file)
-                .unwrap()
-                .starts_with("1\tcancelled\t")
-        );
     }
 
     #[test]
     fn live_download_progress_observes_mid_transfer_cancellation() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("state/progress.tsv");
-        let writer = ProgressWriter::new(&path, 1, 16, None).unwrap();
-        let cancel = temp.path().join("state/cancel");
-        let progress = RuntimeDownloadProgress::new(&writer, Some(&cancel), None, "godot", 1, 4);
+        let state = temp.path().join("state");
+        let channel = ProgressChannel::default();
+        let writer = ProgressWriter::new(&state, 1, 16, Some(channel.clone())).unwrap();
+        let cancel = CancellationToken::default();
+        let progress = RuntimeDownloadProgress::new(&writer, Some(&cancel), "godot", 1, 4);
         progress.update(3, 12).unwrap();
-        let row = fs::read_to_string(&path).unwrap();
-        assert_eq!(row.split('\t').nth(5), Some("7"));
-        fs::write(&cancel, b"cancel").unwrap();
+        assert_eq!(channel.take().unwrap().current, 7);
+        cancel.cancel();
         assert_eq!(
             progress.update(4, 12).unwrap_err().kind(),
             io::ErrorKind::Interrupted
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn progress_temp_symlink_is_rejected_without_touching_target() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("state/progress.tsv");
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let victim = temp.path().join("victim");
-        fs::write(&victim, b"keep").unwrap();
-        let progress_temp = suffixed_path(&path, &format!(".tmp.{}", std::process::id()));
-        symlink(&victim, progress_temp).unwrap();
-        let writer = ProgressWriter::new(&path, 1, 8, None).unwrap();
-        assert!(writer.write("preparing", "", 0, 0, "test").is_err());
-        assert_eq!(fs::read(victim).unwrap(), b"keep");
-    }
-
     #[test]
     fn progress_writer_excludes_concurrent_repairs_without_stale_poisoning() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("state/progress.tsv");
-        let first = ProgressWriter::new(&path, 1, 8, None).unwrap();
-        let Err(error) = ProgressWriter::new(&path, 1, 8, None) else {
+        let state = temp.path().join("state");
+        let first = ProgressWriter::new(&state, 1, 8, None).unwrap();
+        let Err(error) = ProgressWriter::new(&state, 1, 8, None) else {
             panic!("a concurrent progress writer must be rejected")
         };
         assert!(
             matches!(error, RuntimeRepairError::Io(ref error) if error.kind() == io::ErrorKind::WouldBlock)
         );
         drop(first);
-        drop(ProgressWriter::new(&path, 1, 8, None).unwrap());
+        drop(ProgressWriter::new(&state, 1, 8, None).unwrap());
     }
 }

@@ -492,6 +492,64 @@ fn loads_the_real_launcher_uikit() {
 }
 
 #[test]
+fn urgent_dialog_can_recover_a_busy_native_task() {
+    let directory = tempfile::tempdir().expect("temporary UIKit directory");
+    fs::write(
+        directory.path().join("kit.lua"),
+        include_str!("../../../_kit/love/kit.lua"),
+    )
+    .expect("write kit.lua");
+    fs::write(
+        directory.path().join("main.lua"),
+        r#"
+        local kit=require("kit")
+        confirmed=false
+        kit.run({
+            theme={kind="app"},
+            state={},
+            build_pages=function(k)
+                k.add_page("Task",{k.textview("Status","Working",{focusable=false})})
+            end,
+            on_load=function(k)
+                k.set_busy(true,"Working")
+                k.dialog({
+                    title="Connection interrupted",
+                    message="Retry",
+                    confirm="Retry",
+                    cancel="Return",
+                    over_busy=true,
+                    on_confirm=function() confirmed=true end,
+                })
+            end,
+        })
+        "#,
+    )
+    .expect("write main.lua");
+
+    let engine = Engine::load(directory.path(), 640, 480).expect("load real UIKit");
+    engine
+        .update_and_draw(1.0 / 60.0)
+        .expect("draw busy dialog");
+    engine
+        .key_pressed("left", false)
+        .expect("focus dialog confirmation");
+    engine
+        .key_pressed("return", false)
+        .expect("confirm busy dialog");
+    let (confirmed, busy): (bool, bool) = engine
+        .runtime
+        .lua
+        .load("return confirmed, require('kit').debug_busy().busy")
+        .eval()
+        .expect("read dialog result");
+    assert!(confirmed, "the urgent dialog must receive input over busy");
+    assert!(
+        busy,
+        "recovering the bridge must not unlock the native task"
+    );
+}
+
+#[test]
 fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
     let directory = tempfile::tempdir().expect("temporary App Manager directory");
     fs::write(
@@ -577,8 +635,8 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
             .eval()
             .expect("read App Manager busy state");
         assert!(
-            busy,
-            "a native poll protocol error must not unlock an unfinished task"
+            !busy,
+            "the startup device-config refresh must stay off the foreground busy lane"
         );
         assert!(
             engine.frame_rgba().iter().any(|value| *value != 0),
@@ -728,7 +786,7 @@ fn background_update_result_survives_a_concurrent_foreground_snapshot() {
 }
 
 #[test]
-fn manual_update_waits_for_background_check_then_forces_a_new_request() {
+fn manual_update_wait_does_not_reserve_the_foreground_lane() {
     let lua = mlua::Lua::new();
     let app_lua =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/love");
@@ -743,6 +801,8 @@ fn manual_update_waits_for_background_check_then_forces_a_new_request() {
             toast=function() end,
             button=function() end,
             textview=function() end,
+            set_busy=function() end,
+            goto_page=function() end,
         }
         local native={
             start=function(kind)
@@ -765,18 +825,21 @@ fn manual_update_waits_for_background_check_then_forces_a_new_request() {
         operations.background_task={id=7,kind="update-check-background"}
 
         environment.start_update_check()
-        assert(operations.task.kind=="update-check-wait")
+        assert(operations.task==nil)
         assert(operations.background_task.id==7)
         assert(operations.forced_update_pending==true)
         assert(#starts==0)
         operations.confirm_plan={{kind="CLEAN_APPLEDOUBLE",arg=""}}
         operations.start_apply()
-        assert(#starts==0)
+        assert(#starts==1 and starts[1]=="apply")
 
         operations.finish_background_update({
             update_checked=1,update_status="ok",portmaster_latest="cached",
         })
-        assert(#starts==1 and starts[1]=="update-check")
+        assert(#starts==1)
+        operations.task=nil
+        operations.try_start_forced_update()
+        assert(#starts==2 and starts[2]=="update-check")
         assert(operations.task.id==99 and operations.task.kind=="update-check")
         assert(operations.forced_update_pending==false)
         assert(model.env.portmaster_latest=="")

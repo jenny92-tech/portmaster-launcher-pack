@@ -1,29 +1,29 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
-use std::ffi::CString;
 use std::fs;
-use std::io::{Read, Write};
-use std::os::unix::ffi::OsStrExt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitCode, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::Duration;
 
 use appmanager_core::{
-    DEFAULT_LAUNCHER_SCRIPT_NAME, FileApplyRequest, Inventory, InventoryOptions, ManagementMode,
-    PROTECTED_SCRIPT_NAMES, RuntimeMetadata,
-    RuntimeRepairRequest, SCAN_EXCLUDED_DIR_NAMES, SizeScanRequest, apply_file_plan,
-    plan_contains_only_file_actions, repair_runtimes, scan_size_cache,
+    FileAction, FileActionKind, FileApplyOutcome, FileApplyRequest, Inventory, InventoryOptions,
+    ManagementMode, PROTECTED_SCRIPT_NAMES, RuntimeMetadata, RuntimeRepairRequest,
+    SCAN_EXCLUDED_DIR_NAMES, apply_file_actions as apply_typed_file_actions, repair_runtimes,
 };
-use portkit_core::github::{Capability, GitHubTransport, Progress};
+use portkit_core::github::{Capability, GitHubTransport};
 use portkit_core::{
-    DigestAlgorithm, ExclusiveFileLock, HealthStatus, digest_file, evaluate_health, zip_readable,
+    DigestAlgorithm, HealthReport, HealthStatus, digest_file, evaluate_health, zip_readable,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::resolution::{ConfigDirectories, DeviceResolution};
+
+mod support;
+use support::*;
 
 const PORT_NAME: &str = "jenny92-appmanager";
 // Keep a corrupt or unbounded proxy response from filling the SD card. The
@@ -35,7 +35,6 @@ pub(crate) struct Request {
     pub source_dir: PathBuf,
     pub launcher: PathBuf,
     pub app_root: PathBuf,
-    pub entry_arguments: Vec<String>,
     pub config_directories: ConfigDirectories,
     pub cancel_token: Option<appmanager_core::CancellationToken>,
     pub progress_channel: Option<appmanager_core::ProgressChannel>,
@@ -52,6 +51,18 @@ pub struct EmbeddedRequest {
     pub remote_config_dir: Option<PathBuf>,
 }
 
+pub struct EmbeddedBootstrap {
+    request: EmbeddedRequest,
+    resolved: Arc<DeviceResolution>,
+    environment: BTreeMap<String, String>,
+}
+
+impl EmbeddedBootstrap {
+    pub fn environment(&self) -> &BTreeMap<String, String> {
+        &self.environment
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ServiceEvent {
     pub task_id: u64,
@@ -63,15 +74,14 @@ pub struct ServiceEvent {
 #[derive(Clone)]
 pub struct EmbeddedService {
     request: Request,
+    resolved: Arc<DeviceResolution>,
+    health: SharedHealth,
     events: Arc<Mutex<VecDeque<ServiceEvent>>>,
     snapshot: Arc<Mutex<Option<Value>>>,
     next_task: Arc<AtomicU64>,
     busy: Arc<AtomicBool>,
     background_busy: Arc<AtomicBool>,
     active_task: Arc<AtomicU64>,
-    cancel_path: PathBuf,
-    progress_path: PathBuf,
-    last_progress: Arc<Mutex<String>>,
     input_helper: Arc<Mutex<Option<Child>>>,
     cancel_token: appmanager_core::CancellationToken,
     progress_channel: appmanager_core::ProgressChannel,
@@ -84,42 +94,6 @@ pub struct EmbeddedAction {
     pub arg: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Mode {
-    ApplyPlan,
-    ScanSizes,
-    HealthCheck,
-    CheckUpdate,
-    ForceCheckUpdate,
-    RefreshRuntimeMetadata,
-    WriteInstallPlan,
-    RefreshDeviceConfig,
-    WriteEnv,
-    RefreshInventory,
-}
-
-impl Mode {
-    fn parse(arguments: &[String]) -> Result<Self, String> {
-        if arguments.len() > 1 {
-            return Err("launcher session accepts at most one mode argument".into());
-        }
-        match arguments.first().map(String::as_str).unwrap_or("") {
-            "" => Err("launcher-session is diagnostic-only and requires an explicit mode".into()),
-            "--apply-plan" => Ok(Self::ApplyPlan),
-            "--scan-sizes" => Ok(Self::ScanSizes),
-            "--health-check" => Ok(Self::HealthCheck),
-            "--check-pm-update" => Ok(Self::CheckUpdate),
-            "--check-pm-update-force" => Ok(Self::ForceCheckUpdate),
-            "--refresh-runtime-metadata" => Ok(Self::RefreshRuntimeMetadata),
-            "--write-install-plan" => Ok(Self::WriteInstallPlan),
-            "--refresh-device-config" => Ok(Self::RefreshDeviceConfig),
-            "--write-env" => Ok(Self::WriteEnv),
-            "--refresh-inventory" => Ok(Self::RefreshInventory),
-            value => Err(format!("unsupported launcher mode {value:?}")),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct Paths {
     source_dir: PathBuf,
@@ -130,10 +104,6 @@ struct Paths {
     config_dir: PathBuf,
     state: PathBuf,
     trash: PathBuf,
-    plan: PathBuf,
-    result: PathBuf,
-    progress: PathBuf,
-    cancel: PathBuf,
     update_cache: PathBuf,
     portmaster_lock: PathBuf,
     operation_lock: PathBuf,
@@ -158,13 +128,9 @@ impl Paths {
             share_dir: request.app_root.join("share"),
             config_dir: request.app_root.join("config"),
             trash: request.app_root.join("trash"),
-            plan: std::env::temp_dir().join(format!("appmanager-plan-{}.tsv", std::process::id())),
-            result: std::env::temp_dir().join(format!("appmanager-result-{}.tsv", std::process::id())),
-            progress: state.join("progress.tsv"),
-            cancel: state.join("cancel.request"),
             update_cache: state.join("portmaster-update.tsv"),
-            portmaster_lock: state.join("portmaster-active.lock"),
-            operation_lock: state.join("operation-active.lock"),
+            portmaster_lock: state.join("portmaster.lock"),
+            operation_lock: state.join("operation.lock"),
             size_cache: state.join("sizes.tsv"),
             runtime_metadata_json: state.join("ports.json"),
             remote_config: remote_config_dir.join("config.json"),
@@ -184,115 +150,116 @@ struct ReleaseSource {
 
 struct Session {
     paths: Paths,
-    config_directories: ConfigDirectories,
-    resolved: DeviceResolution,
+    resolved: Arc<DeviceResolution>,
     root: Option<PathBuf>,
-    target_override: Option<PathBuf>,
     cancel_token: Option<appmanager_core::CancellationToken>,
     progress_channel: Option<appmanager_core::ProgressChannel>,
-    config_refresh_status: Mutex<Option<String>>,
+    config_refresh_status: Option<String>,
+    health: SharedHealth,
 }
+
+#[derive(Clone)]
+struct HealthFacts {
+    status: &'static str,
+    report: Option<HealthReport>,
+    python_ok: bool,
+    system_python_ok: bool,
+    python_imports: String,
+}
+
+type SharedHealth = Arc<Mutex<Option<HealthFacts>>>;
+type BackgroundRunner =
+    fn(&Request, &Arc<DeviceResolution>, &SharedHealth) -> Result<Value, (String, Value)>;
 
 fn inventory_available(management: &ManagementMode, health: &str) -> bool {
     management == &ManagementMode::System || matches!(health, "healthy" | "damaged")
 }
 
-pub(crate) fn run(request: Request) -> ExitCode {
-    let mode = match Mode::parse(&request.entry_arguments) {
-        Ok(mode) => mode,
-        Err(error) => return fail(64, &error),
-    };
-    let mut session = match Session::new(request) {
-        Ok(session) => session,
-        Err(error) => return fail(78, &error),
-    };
-    match session.execute(mode) {
-        Ok(code) => exit_code(code),
-        Err(error) => {
-            session.log(&error);
-            fail(1, &error)
-        }
-    }
+fn configured_directories(request: &Request, paths: &Paths) -> ConfigDirectories {
+    let mut directories = request.config_directories.clone();
+    directories
+        .embedded
+        .get_or_insert_with(|| paths.config_dir.clone());
+    directories
+        .remote
+        .get_or_insert_with(|| paths.remote_config_dir.clone());
+    directories
 }
 
 impl EmbeddedService {
-    /// Resolves only the process environment required to create the UI.
-    ///
-    /// This intentionally skips cleanup, artwork synchronization, diagnostics,
-    /// inventory and PortMaster health work so SDL can present a window first.
-    pub fn bootstrap_environment(
+    fn request(
         request: &EmbeddedRequest,
-    ) -> Result<BTreeMap<String, String>, String> {
-        let session = Session::new(Request {
+        cancel_token: Option<appmanager_core::CancellationToken>,
+        progress_channel: Option<appmanager_core::ProgressChannel>,
+    ) -> Request {
+        Request {
             source_dir: request.source_dir.clone(),
             launcher: request.launcher.clone(),
             app_root: request.app_root.clone(),
-            entry_arguments: Vec::new(),
             config_directories: ConfigDirectories {
                 embedded: request.config_dir.clone(),
                 remote: request.remote_config_dir.clone(),
             },
-            cancel_token: None,
-            progress_channel: None,
-        })?;
-        session.love_environment()
+            cancel_token,
+            progress_channel,
+        }
+    }
+
+    /// Resolves only the process environment required to create the UI.
+    ///
+    /// This intentionally skips cleanup, artwork synchronization, diagnostics,
+    /// inventory and PortMaster health work so SDL can present a window first.
+    pub fn prepare(request: EmbeddedRequest) -> Result<EmbeddedBootstrap, String> {
+        let session = Session::new(Self::request(&request, None, None))?;
+        let environment = session.love_environment()?;
+        Ok(EmbeddedBootstrap {
+            request,
+            resolved: session.resolved,
+            environment,
+        })
     }
 
     pub fn new(request: EmbeddedRequest) -> Result<Self, String> {
+        Self::activate(Self::prepare(request)?)
+    }
+
+    pub fn activate(bootstrap: EmbeddedBootstrap) -> Result<Self, String> {
         let cancel_token = appmanager_core::CancellationToken::default();
         let progress_channel = appmanager_core::ProgressChannel::default();
-        let request = Request {
-            source_dir: request.source_dir,
-            launcher: request.launcher,
-            app_root: request.app_root,
-            entry_arguments: Vec::new(),
-            config_directories: ConfigDirectories {
-                embedded: request.config_dir,
-                remote: request.remote_config_dir,
-            },
-            cancel_token: Some(cancel_token.clone()),
-            progress_channel: Some(progress_channel.clone()),
-        };
-        let paths = Paths::new(&request);
-        let session = Session::new(request.clone())?;
-        session.cleanup_stale_activity();
-        // Files of the retired disk-journal and pending-validation protocols.
-        // Swept only at the UI entry: `--apply-plan` stages plan.txt on purpose.
-        for name in [
-            "plan.txt",
-            "result.txt",
-            "config-refresh.tsv",
-            "validation-result.tsv",
-            "pending-install.tsv",
-            "pending-manifest.tsv",
-            "pending-frontend-manifest.tsv",
-            "install-transaction.tsv",
-        ] {
-            let _ = fs::remove_file(session.paths.state.join(name));
-        }
+        let request = Self::request(
+            &bootstrap.request,
+            Some(cancel_token.clone()),
+            Some(progress_channel.clone()),
+        );
+        let resolved = bootstrap.resolved;
+        let health = Arc::new(Mutex::new(None));
+        let session =
+            Session::new_pinned(request.clone(), Arc::clone(&resolved), Arc::clone(&health))?;
         session.sync_artwork();
         session.write_startup_diagnostics();
         Ok(Self {
             request,
+            resolved,
+            health,
             events: Arc::new(Mutex::new(VecDeque::new())),
             snapshot: Arc::new(Mutex::new(None)),
             next_task: Arc::new(AtomicU64::new(1)),
             busy: Arc::new(AtomicBool::new(false)),
             background_busy: Arc::new(AtomicBool::new(false)),
             active_task: Arc::new(AtomicU64::new(0)),
-            cancel_path: paths.cancel,
-            progress_path: paths.progress,
-            last_progress: Arc::new(Mutex::new(String::new())),
             input_helper: Arc::new(Mutex::new(None)),
             cancel_token,
             progress_channel,
         })
     }
 
-    pub fn start_input_helper(&self, process_name: &str) {
+    pub fn start_input_helper(&self, process_name: &str) -> Result<(), String> {
         let helper = self.request.app_root.join("bin/gptokeyb");
         if !helper.is_file() {
-            return;
+            return Err(format!(
+                "controller input helper is missing: {}",
+                helper.display()
+            ));
         }
         let mut words = env::var("ESUDO")
             .unwrap_or_default()
@@ -306,19 +273,29 @@ impl EmbeddedService {
             command.args(words).arg(&helper);
             command
         };
-        let child = command
+        let mut child = command
             .arg(process_name)
             .arg("-c")
             .arg(self.request.app_root.join("love_ui/ui.gptk"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
-            .ok();
+            .map_err(|error| format!("controller input helper could not start: {error}"))?;
+        std::thread::sleep(Duration::from_millis(25));
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("controller input helper status failed: {error}"))?
+        {
+            return Err(format!(
+                "controller input helper exited during startup: {status}"
+            ));
+        }
         *self
             .input_helper
             .lock()
-            .unwrap_or_else(|value| value.into_inner()) = child;
+            .unwrap_or_else(|value| value.into_inner()) = Some(child);
+        Ok(())
     }
 
     pub fn stop_input_helper(&self) {
@@ -342,7 +319,11 @@ impl EmbeddedService {
         {
             return Ok(snapshot);
         }
-        let session = Session::new(self.request.clone())?;
+        let session = Session::new_pinned(
+            self.request.clone(),
+            Arc::clone(&self.resolved),
+            Arc::clone(&self.health),
+        )?;
         let snapshot = session.embedded_snapshot(None)?;
         session.write_snapshot_diagnostics(&snapshot);
         *self
@@ -353,6 +334,12 @@ impl EmbeddedService {
     }
 
     pub fn start(&self, kind: &str, actions: Option<Vec<EmbeddedAction>>) -> Result<u64, String> {
+        if kind == "config-refresh-if-newer" {
+            if actions.is_some() {
+                return Err(format!("task {kind:?} does not accept a payload"));
+            }
+            return self.start_background_config_refresh();
+        }
         if kind == "update-check-if-stale" {
             if actions.is_some() {
                 return Err(format!("task {kind:?} does not accept a payload"));
@@ -387,12 +374,7 @@ impl EmbeddedService {
         };
         let supported = matches!(
             kind.as_str(),
-            "apply"
-                | "config-refresh"
-                | "update-check"
-                | "runtime-metadata"
-                | "scan-sizes"
-                | "inventory-refresh"
+            "apply" | "update-check" | "inventory-refresh"
         );
         if !supported {
             self.busy.store(false, Ordering::Release);
@@ -400,25 +382,26 @@ impl EmbeddedService {
         }
         self.active_task.store(task_id, Ordering::Release);
         let request = self.request.clone();
+        let resolved = Arc::clone(&self.resolved);
+        let health = Arc::clone(&self.health);
         let events = Arc::clone(&self.events);
         let snapshot = Arc::clone(&self.snapshot);
         let busy = Arc::clone(&self.busy);
         let active_task = Arc::clone(&self.active_task);
-        let progress = self.progress_path.clone();
-        let cancel = self.cancel_path.clone();
-        self.last_progress
-            .lock()
-            .unwrap_or_else(|value| value.into_inner())
-            .clear();
         self.cancel_token.reset();
         self.progress_channel.clear();
-        let _ = fs::remove_file(&progress);
-        let _ = fs::remove_file(&cancel);
         std::thread::Builder::new()
             .name(format!("appmanager-{kind}"))
             .spawn(move || {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_embedded_task(&request, &kind, actions.as_deref(), &snapshot)
+                    run_embedded_task(
+                        &request,
+                        &resolved,
+                        &health,
+                        &kind,
+                        actions.as_deref(),
+                        &snapshot,
+                    )
                 }))
                 .unwrap_or_else(|_| Err("APP Manager task stopped unexpectedly".into()));
                 let event = match outcome {
@@ -429,18 +412,6 @@ impl EmbeddedService {
                         data,
                     },
                     Err(message) => {
-                        // Durable failure record: the launch log is rotated
-                        // away, but this file survives for diagnosis.
-                        if let Some(state) = progress.parent() {
-                            let stamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            let _ = fs::write(
-                                state.join("last-error.txt"),
-                                format!("{stamp}\t{kind}\t{message}\n"),
-                            );
-                        }
                         // A failed task may have already changed the disk;
                         // run_embedded_task refreshed the shared snapshot, so
                         // the UI can re-render reality instead of a stale view.
@@ -457,8 +428,6 @@ impl EmbeddedService {
                         }
                     }
                 };
-                let _ = fs::remove_file(&progress);
-                let _ = fs::remove_file(&cancel);
                 let mut events = events.lock().unwrap_or_else(|value| value.into_inner());
                 // Publish completion only after releasing the task lane. A
                 // consumer may start its next queued task immediately after
@@ -476,46 +445,78 @@ impl EmbeddedService {
     }
 
     fn start_background_update_check(&self) -> Result<u64, String> {
+        self.start_background_task(
+            "update-check-if-stale",
+            "appmanager-update-check-background",
+            "the automatic PortMaster update check is already running",
+            "PortMaster update check stopped unexpectedly",
+            "update",
+            run_background_update_check,
+        )
+    }
+
+    fn start_background_config_refresh(&self) -> Result<u64, String> {
+        self.start_background_task(
+            "config-refresh-if-newer",
+            "appmanager-config-refresh-background",
+            "an APP Manager background task is already running",
+            "device information refresh stopped unexpectedly",
+            "config_refresh",
+            run_background_config_refresh,
+        )
+    }
+
+    fn start_background_task(
+        &self,
+        kind: &'static str,
+        thread_name: &'static str,
+        busy_message: &'static str,
+        panic_message: &'static str,
+        error_field: &'static str,
+        runner: BackgroundRunner,
+    ) -> Result<u64, String> {
         if self
             .background_busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            return Err("the automatic PortMaster update check is already running".into());
+            return Err(busy_message.into());
         }
         let task_id = self.next_task.fetch_add(1, Ordering::Relaxed);
         let request = self.request.clone();
+        let resolved = Arc::clone(&self.resolved);
+        let health = Arc::clone(&self.health);
         let events = Arc::clone(&self.events);
         let background_busy = Arc::clone(&self.background_busy);
         std::thread::Builder::new()
-            .name("appmanager-update-check-background".into())
+            .name(thread_name.into())
             .spawn(move || {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_background_update_check(&request)
+                    runner(&request, &resolved, &health)
                 }))
-                .unwrap_or_else(|_| {
-                    Err((
-                        "PortMaster update check stopped unexpectedly".into(),
-                        json!({}),
-                    ))
-                });
+                .unwrap_or_else(|_| Err((panic_message.into(), json!({}))));
                 let event = match outcome {
                     Ok(data) => ServiceEvent {
                         task_id,
-                        kind: "update-check-if-stale".into(),
+                        kind: kind.into(),
                         status: "complete".into(),
                         data,
                     },
-                    Err((message, update)) => ServiceEvent {
-                        task_id,
-                        kind: "update-check-if-stale".into(),
-                        status: "error".into(),
-                        data: json!({"message": message, "update": update}),
-                    },
+                    Err((message, details)) => {
+                        let mut data = serde_json::Map::new();
+                        data.insert("message".into(), Value::String(message));
+                        data.insert(error_field.into(), details);
+                        ServiceEvent {
+                            task_id,
+                            kind: kind.into(),
+                            status: "error".into(),
+                            data: Value::Object(data),
+                        }
+                    }
                 };
                 let mut events = events.lock().unwrap_or_else(|value| value.into_inner());
                 // An event is the public completion boundary: once visible,
-                // a forced check must be able to acquire this lane.
+                // the next background request must be able to acquire this lane.
                 background_busy.store(false, Ordering::Release);
                 events.push_back(event);
             })
@@ -550,21 +551,7 @@ impl EmbeddedService {
                 data: serde_json::to_value(progress).unwrap_or_else(|_| json!({})),
             });
         }
-        let text = fs::read_to_string(&self.progress_path).ok()?;
-        let mut previous = self
-            .last_progress
-            .lock()
-            .unwrap_or_else(|value| value.into_inner());
-        if *previous == text {
-            return None;
-        }
-        *previous = text.clone();
-        Some(ServiceEvent {
-            task_id,
-            kind: "progress".into(),
-            status: "progress".into(),
-            data: progress_value(&text),
-        })
+        None
     }
 
     pub fn cancel(&self) -> Result<(), String> {
@@ -585,76 +572,82 @@ fn update_cache_value(path: &Path) -> Value {
     })
 }
 
-fn run_background_update_check(request: &Request) -> Result<Value, (String, Value)> {
-    let session = Session::new(request.clone()).map_err(|message| (message, json!({})))?;
+fn run_background_update_check(
+    request: &Request,
+    resolved: &Arc<DeviceResolution>,
+    health: &SharedHealth,
+) -> Result<Value, (String, Value)> {
+    let session = Session::new_pinned(request.clone(), Arc::clone(resolved), Arc::clone(health))
+        .map_err(|message| (message, json!({})))?;
     match session.check_update(false) {
         Ok(_) => Ok(json!({"update": update_cache_value(&session.paths.update_cache)})),
         Err(message) => Err((message, update_cache_value(&session.paths.update_cache))),
     }
 }
 
+fn run_background_config_refresh(
+    request: &Request,
+    resolved: &Arc<DeviceResolution>,
+    health: &SharedHealth,
+) -> Result<Value, (String, Value)> {
+    let mut session =
+        Session::new_pinned(request.clone(), Arc::clone(resolved), Arc::clone(health))
+            .map_err(|message| (message, json!({})))?;
+    match session.refresh_device_config() {
+        Ok(_) => {
+            let status = session
+                .config_refresh_status
+                .take()
+                .unwrap_or_else(|| "unchanged".into());
+            Ok(json!({"config_refresh": {"status": status}}))
+        }
+        Err(message) => Err((message, json!({"status": "error"}))),
+    }
+}
+
 fn run_embedded_task(
     request: &Request,
+    resolved: &Arc<DeviceResolution>,
+    health: &SharedHealth,
     kind: &str,
     actions: Option<&[EmbeddedAction]>,
     cached_snapshot: &Mutex<Option<Value>>,
 ) -> Result<Value, String> {
-    let mut session = Session::new(request.clone())?;
-    session.cleanup_stale_activity();
-    // The plan/result exchange files are per-task scratch: removed on every
-    // exit path so no later task can read another task's outcome.
-    struct ScratchGuard(PathBuf, PathBuf);
-    impl Drop for ScratchGuard {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
-            let _ = fs::remove_file(&self.1);
-        }
-    }
-    let _scratch = ScratchGuard(session.paths.plan.clone(), session.paths.result.clone());
-    let outcome = (|| -> Result<u8, String> {
+    let mut session =
+        Session::new_pinned(request.clone(), Arc::clone(resolved), Arc::clone(health))?;
+    let outcome = (|| -> Result<(u8, OperationOutcome), String> {
         match kind {
-            "apply" => {
-                write_embedded_plan(&session.paths.plan, actions.unwrap_or_default())?;
-                session.apply_plan()
-            }
-            "config-refresh" => session.refresh_device_config(),
-            "update-check" => session.check_update(true),
-            "runtime-metadata" => session.refresh_runtime_metadata(true),
-            "scan-sizes" => session.scan_sizes(),
+            "apply" => execute_actions(&mut session, actions.unwrap_or_default())
+                .map(|outcome| (0, outcome)),
+            "update-check" => session
+                .check_update(true)
+                .map(|code| (code, OperationOutcome::default())),
             "inventory-refresh" => {
                 session.refresh_inventory_state()?;
                 let _ = fs::remove_file(&session.paths.size_cache);
-                Ok(0)
+                Ok((0, OperationOutcome::default()))
             }
             _ => Err(format!("unsupported APP Manager task {kind:?}")),
         }
     })();
+    if kind == "inventory-refresh" || (kind == "apply" && outcome.is_err()) {
+        session.clear_health();
+    }
     // Refresh the shared snapshot even when the task failed: mutations may
     // already be on disk, and a stale snapshot invites operating on a world
     // that no longer exists.
     if let Err(task_error) = outcome {
-        if session.reload().is_ok() {
-            if let Ok(current) = session.embedded_snapshot(session.persisted_inventory()) {
-                *cached_snapshot
-                    .lock()
-                    .unwrap_or_else(|value| value.into_inner()) = Some(current);
-            }
+        if let Ok(current) = session.embedded_snapshot(None) {
+            *cached_snapshot
+                .lock()
+                .unwrap_or_else(|value| value.into_inner()) = Some(current);
         }
         return Err(task_error);
     }
-    let code = outcome.expect("checked above");
-    session.reload()?;
-    let operation =
-        parse_operation_result(&fs::read_to_string(&session.paths.result).unwrap_or_default());
-    let config_refresh = session
-        .config_refresh_status
-        .lock()
-        .unwrap_or_else(|value| value.into_inner())
-        .take()
-        .map_or(Value::Null, |status| json!({"status": status}));
-    let reuse_inventory = if matches!(kind, "apply" | "config-refresh" | "inventory-refresh") {
+    let (code, operation) = outcome.expect("checked above");
+    let reuse_inventory = if matches!(kind, "apply" | "inventory-refresh") {
         session.persisted_inventory()
-    } else if matches!(kind, "update-check" | "runtime-metadata" | "scan-sizes") {
+    } else if kind == "update-check" {
         cached_snapshot
             .lock()
             .unwrap_or_else(|value| value.into_inner())
@@ -670,73 +663,26 @@ fn run_embedded_task(
         .unwrap_or_else(|value| value.into_inner()) = Some(snapshot.clone());
     Ok(json!({
         "code": code,
-        "operation": operation,
-        "config_refresh": config_refresh,
+        "operation": serde_json::to_value(operation).unwrap_or_else(|_| json!({})),
         "snapshot": snapshot,
     }))
 }
 
-fn parse_operation_result(text: &str) -> Value {
-    let mut failed = false;
-    let mut appledouble_removed = 0_u64;
-    let mut handled = 0_u64;
-    for line in text.lines() {
-        let fields = line.split('\t').collect::<Vec<_>>();
-        if fields.first() == Some(&"FAIL") {
-            failed = true;
-        }
-        if fields.first() == Some(&"OK") {
-            handled = handled.saturating_add(1);
-        }
-        if fields.first() == Some(&"OK") && fields.get(1) == Some(&"appledouble") {
-            appledouble_removed = fields
-                .get(2)
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0);
-        }
-    }
-    json!({
-        "failed": failed,
-        "handled": handled,
-        "appledouble_removed": appledouble_removed,
-    })
+#[derive(Clone, Debug, Default, Serialize)]
+struct OperationOutcome {
+    failed: bool,
+    handled: usize,
+    appledouble_removed: usize,
 }
 
-fn write_embedded_plan(path: &Path, actions: &[EmbeddedAction]) -> Result<(), String> {
-    let mut rendered = String::from("# APP Manager recovery plan v1\n");
-    for action in actions {
-        if action.kind.is_empty()
-            || action.arg.contains(['\t', '\r', '\n', '\0'])
-            || !action
-                .kind
-                .bytes()
-                .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
-        {
-            return Err("APP Manager action contains unsafe text".into());
+impl From<FileApplyOutcome> for OperationOutcome {
+    fn from(value: FileApplyOutcome) -> Self {
+        Self {
+            failed: value.failures != 0,
+            handled: value.handled,
+            appledouble_removed: value.appledouble_removed,
         }
-        rendered.push_str(&action.kind);
-        rendered.push('\t');
-        rendered.push_str(&action.arg);
-        rendered.push('\n');
     }
-    write_text(path, &rendered)
-}
-
-fn progress_value(text: &str) -> Value {
-    let fields = text.trim_end().split('\t').collect::<Vec<_>>();
-    if fields.len() < 9 || fields[0] != "1" {
-        return json!({});
-    }
-    json!({
-        "phase": fields[1],
-        "runtime": fields[2],
-        "index": fields[3].parse::<u64>().unwrap_or(0),
-        "count": fields[4].parse::<u64>().unwrap_or(0),
-        "current": fields[5].parse::<u64>().unwrap_or(0),
-        "total": fields[6].parse::<u64>().unwrap_or(0),
-        "speed": fields[7].parse::<u64>().unwrap_or(0),
-        "detail": fields[8],
-    })
 }
 
 fn read_size_cache(path: &Path) -> BTreeMap<String, u64> {
@@ -756,6 +702,41 @@ fn read_size_cache(path: &Path) -> BTreeMap<String, u64> {
 impl Session {
     fn new(request: Request) -> Result<Self, String> {
         let paths = Paths::new(&request);
+        let root = env_path("PAM_NATIVE_ROOT");
+        let target_override = normalized_target_override(root.as_deref());
+        let config_directories = configured_directories(&request, &paths);
+        let resolved = resolve(
+            &paths,
+            root.clone(),
+            target_override.clone(),
+            &config_directories,
+        )?;
+        Self::from_resolution(
+            request,
+            paths,
+            Arc::new(resolved),
+            root,
+            Arc::new(Mutex::new(None)),
+        )
+    }
+
+    fn new_pinned(
+        request: Request,
+        resolved: Arc<DeviceResolution>,
+        health: SharedHealth,
+    ) -> Result<Self, String> {
+        let paths = Paths::new(&request);
+        let root = env_path("PAM_NATIVE_ROOT");
+        Self::from_resolution(request, paths, resolved, root, health)
+    }
+
+    fn from_resolution(
+        request: Request,
+        paths: Paths,
+        resolved: Arc<DeviceResolution>,
+        root: Option<PathBuf>,
+        health: SharedHealth,
+    ) -> Result<Self, String> {
         if !paths.app_root.is_dir() {
             return Err(format!(
                 "APP Manager directory is missing: {}",
@@ -764,95 +745,22 @@ impl Session {
         }
         fs::create_dir_all(&paths.state).map_err(display_error)?;
         fs::create_dir_all(&paths.trash).map_err(display_error)?;
-        let root = env_path("PAM_NATIVE_ROOT");
-        let target_override = normalized_target_override(root.as_deref());
-        let mut config_directories = request.config_directories;
-        config_directories
-            .embedded
-            .get_or_insert_with(|| paths.config_dir.clone());
-        config_directories
-            .remote
-            .get_or_insert_with(|| paths.remote_config_dir.clone());
-        let resolved = resolve(
-            &paths,
-            root.clone(),
-            target_override.clone(),
-            &config_directories,
-        )?;
         Ok(Self {
             paths,
-            config_directories,
             resolved,
             root,
-            target_override,
             cancel_token: request.cancel_token,
             progress_channel: request.progress_channel,
-            config_refresh_status: Mutex::new(None),
+            config_refresh_status: None,
+            health,
         })
     }
 
-    fn execute(&mut self, mode: Mode) -> Result<u8, String> {
-        self.cleanup_stale_activity();
-        match mode {
-            Mode::ApplyPlan => {
-                // Compatibility entry: the caller stages an explicit plan at
-                // state/plan.txt; it is consumed exactly once.
-                let staged = self.paths.state.join("plan.txt");
-                fs::copy(&staged, &self.paths.plan).map_err(display_error)?;
-                let code = self.apply_plan();
-                let _ = fs::remove_file(&self.paths.plan);
-                let _ = fs::remove_file(&self.paths.result);
-                fs::remove_file(&staged).map_err(display_error)?;
-                code
-            }
-            Mode::ScanSizes => self.scan_sizes(),
-            Mode::HealthCheck => {
-                let health = self.health_status()?;
-                println!(
-                    "{}\t{}\t{}\t{}",
-                    health,
-                    self.core_version().unwrap_or_default(),
-                    self.resolved.resolution.device_class,
-                    self.portmaster_root()
-                        .map_or_else(String::new, |path| path.display().to_string())
-                );
-                Ok(0)
-            }
-            Mode::CheckUpdate => self.check_update(false),
-            Mode::ForceCheckUpdate => self.check_update(true),
-            Mode::RefreshRuntimeMetadata => self.refresh_runtime_metadata(false),
-            Mode::WriteInstallPlan => self.write_install_plan(),
-            Mode::RefreshDeviceConfig => {
-                let code = self.refresh_device_config()?;
-                let status = self
-                    .config_refresh_status
-                    .lock()
-                    .unwrap_or_else(|value| value.into_inner())
-                    .take();
-                if let Some(status) = status {
-                    println!("{status}");
-                }
-                Ok(code)
-            }
-            Mode::WriteEnv => {
-                self.write_env()?;
-                Ok(0)
-            }
-            Mode::RefreshInventory => {
-                self.refresh_inventory()?;
-                Ok(0)
-            }
-        }
-    }
-
-    fn reload(&mut self) -> Result<(), String> {
-        self.resolved = resolve(
-            &self.paths,
-            self.root.clone(),
-            self.target_override.clone(),
-            &self.config_directories,
-        )?;
-        Ok(())
+    fn clear_health(&self) {
+        *self
+            .health
+            .lock()
+            .unwrap_or_else(|value| value.into_inner()) = None;
     }
 
     fn log(&self, message: &str) {
@@ -871,7 +779,6 @@ impl Session {
         let resolution = &self.resolved.resolution;
         let mut lines = vec![
             "----- startup diagnostics -----".to_owned(),
-            format!("app.id={}", crate::APP_ID),
             format!("app.version={}", env!("CARGO_PKG_VERSION")),
             format!("config.origin={:?}", self.resolved.config_origin),
             format!("platform.id={}", resolution.platform_id),
@@ -1008,7 +915,6 @@ impl Session {
         self.cancel_token
             .as_ref()
             .is_some_and(appmanager_core::CancellationToken::is_cancelled)
-            || self.paths.cancel.exists()
     }
 
     fn source(&self) -> Result<ReleaseSource, String> {
@@ -1071,34 +977,75 @@ impl Session {
         self.resolved.resolution.capabilities.get(name) == Some(&true)
     }
 
-    fn health_status(&self) -> Result<&'static str, String> {
-        if !self.portmaster_root().is_some_and(Path::is_dir) {
-            return Ok("missing");
+    fn health_facts(&self) -> Result<HealthFacts, String> {
+        if let Some(facts) = self
+            .health
+            .lock()
+            .unwrap_or_else(|value| value.into_inner())
+            .clone()
+        {
+            return Ok(facts);
         }
-        let report = evaluate_health(&self.resolved.resolution).map_err(display_error)?;
-        Ok(match report.status {
-            HealthStatus::Unresolved => "missing",
-            HealthStatus::Damaged => "damaged",
-            HealthStatus::Healthy => "healthy",
-        })
+        let root_exists = self.portmaster_root().is_some_and(Path::is_dir);
+        let report = match evaluate_health(&self.resolved.resolution) {
+            Ok(report) => Some(report),
+            Err(_) if !root_exists => None,
+            Err(error) => return Err(display_error(error)),
+        };
+        let status = if !root_exists {
+            "missing"
+        } else {
+            match report
+                .as_ref()
+                .expect("an existing PortMaster root requires a health report")
+                .status
+            {
+                HealthStatus::Unresolved => "missing",
+                HealthStatus::Damaged => "damaged",
+                HealthStatus::Healthy => "healthy",
+            }
+        };
+        let python_imports = report
+            .as_ref()
+            .map(|report| report.python_imports.join(","))
+            .unwrap_or_default();
+        let system_python_ok = report.as_ref().is_some_and(|report| {
+            !matches!(report.python_mode.as_str(), "system" | "runtime_mount")
+                || python_imports_ready(&report.python_imports)
+        });
+        let python_ok = report
+            .as_ref()
+            .is_some_and(|report| match report.python_mode.as_str() {
+                "system" => system_python_ok,
+                "runtime_mount" => report
+                    .python_runtime_image
+                    .as_deref()
+                    .is_some_and(squashfs_has_magic),
+                "" => true,
+                _ => false,
+            });
+        let facts = HealthFacts {
+            status,
+            report,
+            python_ok,
+            system_python_ok,
+            python_imports,
+        };
+        *self
+            .health
+            .lock()
+            .unwrap_or_else(|value| value.into_inner()) = Some(facts.clone());
+        Ok(facts)
+    }
+
+    fn health_status(&self) -> Result<&'static str, String> {
+        Ok(self.health_facts()?.status)
     }
 
     fn python_health(&self) -> (bool, String) {
-        let report = match evaluate_health(&self.resolved.resolution) {
-            Ok(report) => report,
-            Err(_) => return (false, String::new()),
-        };
-        let imports = report.python_imports.join(",");
-        let ready = match report.python_mode.as_str() {
-            "system" => python_imports_ready(&report.python_imports),
-            "runtime_mount" => report
-                .python_runtime_image
-                .as_deref()
-                .is_some_and(squashfs_has_magic),
-            "" => true,
-            _ => false,
-        };
-        (ready, imports)
+        self.health_facts()
+            .map(|facts| (facts.python_ok, facts.python_imports))
+            .unwrap_or_else(|_| (false, String::new()))
     }
 
     fn core_version(&self) -> Option<String> {
@@ -1158,11 +1105,9 @@ impl Session {
             let _ = fs::remove_file(&self.paths.inventory);
             return Ok(());
         }
-        let inventory = Inventory::scan_with_options(
-            &self.resolved.context,
-            &self.inventory_options(),
-        )
-        .map_err(display_error)?;
+        let inventory =
+            Inventory::scan_with_options(&self.resolved.context, &self.inventory_options())
+                .map_err(display_error)?;
         write_json(&self.paths.inventory, &inventory)
     }
 
@@ -1266,20 +1211,13 @@ impl Session {
         Ok(values)
     }
 
-    fn write_env(&self) -> Result<(), String> {
-        write_json(&self.paths.state.join("env.json"), &self.env_document()?)
-    }
-
     fn inventory_snapshot(&self) -> Result<Option<Inventory>, String> {
         if !self.capability("manage_ports") {
             return Ok(None);
         }
-        Inventory::scan_with_options(
-            &self.resolved.context,
-            &self.inventory_options(),
-        )
-        .map(Some)
-        .map_err(display_error)
+        Inventory::scan_with_options(&self.resolved.context, &self.inventory_options())
+            .map(Some)
+            .map_err(display_error)
     }
 
     fn persisted_inventory(&self) -> Option<Value> {
@@ -1335,36 +1273,6 @@ impl Session {
     fn refresh_inventory_state(&self) -> Result<(), String> {
         let health = self.health_status()?;
         self.refresh_inventory_if_available(health)
-    }
-
-    fn cleanup_stale_activity(&self) {
-        // Markers and directory-form locks of retired activity protocols; the
-        // flock files themselves are kept (they are the lock).
-        let _ = fs::remove_file(self.paths.state.join("operation-active.tsv"));
-        let _ = fs::remove_file(self.paths.state.join("portmaster-active.tsv"));
-        for lock in [&self.paths.operation_lock, &self.paths.portmaster_lock] {
-            if lock.is_dir() {
-                let _ = fs::remove_dir_all(lock);
-            }
-        }
-        // PID-keyed scratch of processes that no longer exist: size-scan and
-        // download temporaries never survive their writer usefully.
-        let own = std::process::id().to_string();
-        if let Ok(entries) = fs::read_dir(&self.paths.state) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let stale = (name.starts_with("sizes.tmp.")
-                    || name.starts_with("progress.tsv.tmp.")
-                    || name.starts_with(".stable-manifest-")
-                    || name.starts_with(".stable-release-manifest-")
-                    || name.starts_with(".runtime-metadata-"))
-                    && !name.contains(&own)
-                    && !name.ends_with(".lock");
-                if stale {
-                    let _ = fs::remove_file(entry.path());
-                }
-            }
-        }
     }
 
     fn love_environment(&self) -> Result<BTreeMap<String, String>, String> {
@@ -1465,16 +1373,6 @@ impl Session {
         }
     }
 
-    fn scan_sizes(&self) -> Result<u8, String> {
-        scan_size_cache(&SizeScanRequest {
-            context: &self.resolved.context,
-            output: &self.paths.size_cache,
-            self_port: PORT_NAME,
-        })
-        .map_err(display_error)?;
-        Ok(0)
-    }
-
     fn check_update(&self, force: bool) -> Result<u8, String> {
         if !self.capability("update_portmaster") {
             return Ok(0);
@@ -1489,27 +1387,6 @@ impl Session {
             force,
         })
         .map_err(display_error)?;
-        Ok(0)
-    }
-
-    fn refresh_runtime_metadata(&self, force: bool) -> Result<u8, String> {
-        if !self.capability("repair_runtimes") {
-            return Ok(0);
-        }
-        refresh_runtime_metadata_cache(self, force)?;
-        Ok(0)
-    }
-
-    fn write_install_plan(&self) -> Result<u8, String> {
-        let source = self.source()?;
-        if !source.install_allowed || !self.capability("install_portmaster") {
-            return Err("PortMaster installation is disabled by the device configuration".into());
-        }
-        let plan = appmanager_core::InstallPlan::from_context(&self.resolved.context)
-            .map_err(display_error)?;
-        plan.validate(&self.resolved.context)
-            .map_err(display_error)?;
-        print!("{}", plan.to_tsv().map_err(display_error)?);
         Ok(0)
     }
 
@@ -1530,7 +1407,7 @@ impl Session {
             .unwrap_or(40);
         let mut detection = portkit_core::DetectionContext::current(self.paths.launcher.clone());
         detection.root = self.root.clone();
-        detection.target_override = self.target_override.clone();
+        detection.target_override = normalized_target_override(self.root.as_deref());
         let status = match portkit_core::refresh_config(&portkit_core::ConfigRefreshRequest {
             source,
             packaged_root: self.paths.config_dir.join("config.json"),
@@ -1542,24 +1419,12 @@ impl Session {
         }) {
             Ok(status) => status,
             Err(error) => {
-                *self
-                    .config_refresh_status
-                    .lock()
-                    .unwrap_or_else(|value| value.into_inner()) = Some("error".to_owned());
+                self.config_refresh_status = Some("error".to_owned());
                 return Err(display_error(error));
             }
         };
-        *self
-            .config_refresh_status
-            .lock()
-            .unwrap_or_else(|value| value.into_inner()) = Some(status.as_str().to_owned());
-        self.reload()?;
-        self.refresh_inventory_state()?;
+        self.config_refresh_status = Some(status.as_str().to_owned());
         Ok(0)
-    }
-
-    fn apply_plan(&mut self) -> Result<u8, String> {
-        execute_plan(self)
     }
 }
 
@@ -1583,87 +1448,166 @@ fn resolve(
     )
 }
 
-fn execute_plan(session: &mut Session) -> Result<u8, String> {
+fn execute_actions(
+    session: &mut Session,
+    embedded_actions: &[EmbeddedAction],
+) -> Result<OperationOutcome, String> {
     let _guard = ActivityGuard::acquire(&session.paths.operation_lock)?;
-    let actions = read_plan(&session.paths.plan)?;
-    write_text(&session.paths.result, "")?;
-    let _ = fs::remove_file(&session.paths.progress);
-    let _ = fs::remove_file(progress_temporary(&session.paths.progress));
-
-    let file_only = plan_contains_only_file_actions(&session.paths.plan).map_err(display_error)?;
-    let has_file_actions = actions.iter().any(|action| is_file_action(&action.kind));
-    if file_only {
-        apply_file_actions(session)?;
-    } else if has_file_actions {
-        append_result(&session.paths.result, "FAIL\toperation\tmixed-file-plan\n")?;
-    } else {
-        apply_network_actions(session, &actions)?;
+    let actions = embedded_actions
+        .iter()
+        .map(ServiceAction::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+    if actions.is_empty() {
+        return Err("APP Manager action list is empty".into());
     }
+    let has_file_actions = actions.iter().any(|action| is_file_action(&action.kind));
+    let file_only = actions.iter().all(|action| is_file_action(&action.kind));
+    let outcome = if file_only {
+        validate_destructive_intent(session, &actions)?;
+        apply_file_action_batch(session, &actions)?
+    } else if has_file_actions {
+        OperationOutcome {
+            failed: true,
+            handled: actions.len(),
+            ..OperationOutcome::default()
+        }
+    } else {
+        session.clear_health();
+        apply_network_actions(session, &actions)?
+    };
 
-    unsafe { libc::sync() };
-    session.reload()?;
     let health = session.health_status()?;
     session.refresh_inventory_if_available(health)?;
-    fs::remove_file(&session.paths.plan).map_err(display_error)?;
-    Ok(0)
+    Ok(outcome)
+}
+
+fn validate_destructive_intent(session: &Session, actions: &[ServiceAction]) -> Result<(), String> {
+    if !actions
+        .iter()
+        .any(|action| matches!(action.kind.as_str(), "TRASH" | "DELETE_MANAGED"))
+    {
+        return Ok(());
+    }
+    let inventory =
+        Inventory::scan_with_options(&session.resolved.context, &session.inventory_options())
+            .map_err(display_error)?;
+    validate_destructive_inventory(&inventory, actions)
+}
+
+fn validate_destructive_inventory(
+    inventory: &Inventory,
+    actions: &[ServiceAction],
+) -> Result<(), String> {
+    let selected = actions
+        .iter()
+        .filter(|action| matches!(action.kind.as_str(), "TRASH" | "DELETE_MANAGED"))
+        .map(|action| Path::new(&action.argument))
+        .collect::<BTreeSet<_>>();
+
+    for action in actions
+        .iter()
+        .filter(|action| matches!(action.kind.as_str(), "TRASH" | "DELETE_MANAGED"))
+    {
+        let path = Path::new(&action.argument);
+        if let Some(entry) = inventory.data_dirs.iter().find(|entry| entry.path == path) {
+            let selected_references = inventory
+                .ports
+                .iter()
+                .filter(|port| port.data_path == path && selected.contains(port.path.as_path()))
+                .count();
+            let current_references = inventory.refcount.get(&entry.name).copied().unwrap_or(0);
+            let still_orphan = inventory.orphan_dirs.iter().any(|name| name == &entry.name);
+            if current_references > selected_references
+                || (current_references == 0 && !still_orphan)
+            {
+                return Err(format!(
+                    "selection changed; rescan before removing {}",
+                    path.display()
+                ));
+            }
+        }
+
+        if inventory.images.iter().any(|image| image.path == path) {
+            let used_by_unselected = inventory.ports.iter().any(|port| {
+                !selected.contains(port.path.as_path())
+                    && port.images.iter().any(|image| image.path == path)
+            });
+            let associated = inventory
+                .ports
+                .iter()
+                .any(|port| port.images.iter().any(|image| image.path == path));
+            let still_orphan = inventory
+                .orphan_images
+                .iter()
+                .any(|image| image.path == path);
+            if used_by_unselected || (!associated && !still_orphan) {
+                return Err(format!(
+                    "selection changed; rescan before removing {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
-struct PlanAction {
+struct ServiceAction {
     kind: String,
     argument: String,
 }
 
-fn read_plan(path: &Path) -> Result<Vec<PlanAction>, String> {
-    let text = fs::read_to_string(path).map_err(display_error)?;
-    let mut actions = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        if line.trim().is_empty() || line.starts_with('#') {
-            continue;
+impl TryFrom<&EmbeddedAction> for ServiceAction {
+    type Error = String;
+
+    fn try_from(action: &EmbeddedAction) -> Result<Self, Self::Error> {
+        if action.kind.is_empty()
+            || action.arg.contains(['\t', '\r', '\n', '\0'])
+            || !action
+                .kind
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+        {
+            return Err("APP Manager action contains unsafe text".into());
         }
-        let fields = line.split('\t').collect::<Vec<_>>();
-        if fields.len() != 2 || fields.iter().any(|field| field.contains(['\r', '\n'])) {
-            return Err(format!("invalid plan row {}", index + 1));
-        }
-        actions.push(PlanAction {
-            kind: fields[0].to_owned(),
-            argument: fields[1].to_owned(),
-        });
+        Ok(Self {
+            kind: action.kind.clone(),
+            argument: action.arg.clone(),
+        })
     }
-    if actions.is_empty() {
-        return Err("operation plan is empty".into());
-    }
-    Ok(actions)
 }
 
 fn is_file_action(kind: &str) -> bool {
-    matches!(
-        kind,
-        "TRASH"
-            | "DELETE_MANAGED"
-            | "EMPTY_TRASH"
-            | "RESTORE_TRASH"
-            | "RESTORE_ITEM"
-            | "DELETE_ITEM"
-            | "CLEAN_APPLEDOUBLE"
-    )
+    FileActionKind::from_code(kind).is_some()
 }
 
-fn apply_file_actions(session: &Session) -> Result<(), String> {
+fn apply_file_action_batch(
+    session: &Session,
+    actions: &[ServiceAction],
+) -> Result<OperationOutcome, String> {
+    let actions = actions
+        .iter()
+        .map(|action| {
+            Ok(FileAction {
+                kind: FileActionKind::from_code(&action.kind)
+                    .ok_or_else(|| format!("unknown file action {:?}", action.kind))?,
+                argument: PathBuf::from(&action.argument),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let (privilege_command, privilege_arguments) = privilege_command();
-    apply_file_plan(&FileApplyRequest {
+    apply_typed_file_actions(&FileApplyRequest {
         context: &session.resolved.context,
-        plan: &session.paths.plan,
-        result: &session.paths.result,
+        actions: &actions,
         size_cache: Some(&session.paths.size_cache),
         self_launcher: &session.paths.launcher,
         self_port: PORT_NAME,
         privilege_command: privilege_command.as_deref(),
         privilege_arguments: &privilege_arguments,
-        progress_file: Some(&session.paths.progress),
+        progress_channel: session.progress_channel.clone(),
     })
-    .map_err(display_error)?;
-    Ok(())
+    .map(OperationOutcome::from)
+    .map_err(display_error)
 }
 
 fn privilege_command() -> (Option<PathBuf>, Vec<String>) {
@@ -1679,23 +1623,74 @@ fn privilege_command() -> (Option<PathBuf>, Vec<String>) {
     (Some(command), words)
 }
 
-fn apply_network_actions(session: &Session, actions: &[PlanAction]) -> Result<(), String> {
-    let runtime_names = actions
+fn apply_network_actions(
+    session: &Session,
+    actions: &[ServiceAction],
+) -> Result<OperationOutcome, String> {
+    let validated = match validate_network_actions(session, actions) {
+        Ok(validated) => validated,
+        Err(reason) => {
+            session.log(&format!("Network action rejected: {reason}"));
+            return Ok(OperationOutcome {
+                failed: true,
+                handled: actions.len(),
+                ..OperationOutcome::default()
+            });
+        }
+    };
+    match validated {
+        ValidatedNetworkActions::Runtimes(runtime_names) => {
+            repair_runtime_batch(session, &runtime_names)
+        }
+        ValidatedNetworkActions::PortMaster {
+            action,
+            risk_ack,
+            support_ack,
+        } => install_portmaster_action(session, &action, risk_ack, support_ack),
+    }
+}
+
+#[derive(Debug)]
+enum ValidatedNetworkActions {
+    Runtimes(Vec<String>),
+    PortMaster {
+        action: ServiceAction,
+        risk_ack: bool,
+        support_ack: bool,
+    },
+}
+
+fn validate_network_actions(
+    session: &Session,
+    actions: &[ServiceAction],
+) -> Result<ValidatedNetworkActions, &'static str> {
+    if actions
         .iter()
-        .filter(|action| action.kind == "INSTALL_RUNTIME")
-        .map(|action| action.argument.clone())
-        .collect::<Vec<_>>();
-    if !runtime_names.is_empty() {
-        repair_runtime_batch(session, &runtime_names)?;
+        .any(|action| action.kind == "INSTALL_RUNTIME")
+    {
+        if !actions
+            .iter()
+            .all(|action| action.kind == "INSTALL_RUNTIME")
+        {
+            return Err("mixed-network-actions");
+        }
+        return Ok(ValidatedNetworkActions::Runtimes(
+            actions
+                .iter()
+                .map(|action| action.argument.clone())
+                .collect(),
+        ));
     }
 
     let mut risk_ack = false;
     let mut support_ack = false;
-    for action in actions {
+    let mut install = None;
+    for (index, action) in actions.iter().enumerate() {
         match action.kind.as_str() {
-            "INSTALL_RUNTIME" => {}
             "ACK_DEVICE_RISK"
-                if action.argument == session.resolved.resolution.device_class
+                if install.is_none()
+                    && !risk_ack
+                    && action.argument == session.resolved.resolution.device_class
                     && matches!(
                         action.argument.as_str(),
                         "official-untested" | "unsupported-known"
@@ -1704,43 +1699,57 @@ fn apply_network_actions(session: &Session, actions: &[PlanAction]) -> Result<()
                 risk_ack = true;
             }
             "ACK_DEVICE_SUPPORT"
-                if session.resolved.resolution.device_class == "unsupported-known"
+                if install.is_none()
+                    && !support_ack
+                    && session.resolved.resolution.device_class == "unsupported-known"
                     && session
                         .portmaster_root()
                         .is_some_and(|path| path == Path::new(&action.argument)) =>
             {
                 support_ack = true;
             }
-            "ACK_DEVICE_RISK" => append_result(
-                &session.paths.result,
-                "FAIL\tportmaster\tinvalid-device-ack\n",
-            )?,
-            "ACK_DEVICE_SUPPORT" => append_result(
-                &session.paths.result,
-                "FAIL\tportmaster\tinvalid-support-ack\n",
-            )?,
-            "INSTALL_PORTMASTER" => {
-                install_portmaster_action(session, action, risk_ack, support_ack)?;
+            "INSTALL_PORTMASTER"
+                if install.is_none()
+                    && index + 1 == actions.len()
+                    && action.argument == "stable" =>
+            {
+                install = Some(action.clone());
             }
-            _ => {
-                append_result(&session.paths.result, "FAIL\toperation\tunknown-action\n")?;
-            }
+            "ACK_DEVICE_RISK" => return Err("invalid-device-ack"),
+            "ACK_DEVICE_SUPPORT" => return Err("invalid-support-ack"),
+            "INSTALL_PORTMASTER" => return Err("invalid-portmaster-action"),
+            _ => return Err("unknown-action"),
         }
     }
-    Ok(())
+    let action = install.ok_or("missing-portmaster-action")?;
+    match session.resolved.resolution.device_class.as_str() {
+        "tested" if !risk_ack && !support_ack => {}
+        "official-untested" if risk_ack && !support_ack => {}
+        "unsupported-known" if risk_ack && support_ack => {}
+        "tested" | "official-untested" | "unsupported-known" => {
+            return Err("invalid-device-ack-set");
+        }
+        _ => return Err("unsupported-device"),
+    }
+    Ok(ValidatedNetworkActions::PortMaster {
+        action,
+        risk_ack,
+        support_ack,
+    })
 }
 
-fn repair_runtime_batch(session: &Session, runtime_names: &[String]) -> Result<(), String> {
+fn repair_runtime_batch(
+    session: &Session,
+    runtime_names: &[String],
+) -> Result<OperationOutcome, String> {
     if !session.capability("repair_runtimes") {
-        for name in runtime_names {
-            append_result(
-                &session.paths.result,
-                &format!("FAIL\truntime\t{name}\tcapability-disabled\n"),
-            )?;
-        }
-        return Ok(());
+        return Ok(OperationOutcome {
+            failed: true,
+            handled: runtime_names.len(),
+            ..OperationOutcome::default()
+        });
     }
-    refresh_runtime_metadata_cache(session, true)?;
+    refresh_runtime_metadata_cache(session, false)?;
     let libs = session
         .resolved
         .context
@@ -1754,47 +1763,32 @@ fn repair_runtime_batch(session: &Session, runtime_names: &[String]) -> Result<(
         runtime_names: runtime_names.to_vec(),
         arch: runtime_arch(),
         libs_root: libs,
-        progress_file: session.paths.progress.clone(),
-        cancel_file: session
-            .cancel_token
-            .is_none()
-            .then(|| session.paths.cancel.clone()),
+        state_dir: session.paths.state.clone(),
         cancel_token: session.cancel_token.clone(),
         progress_channel: session.progress_channel.clone(),
     });
     match outcome {
-        Ok(_) => {
-            for name in runtime_names {
-                append_result(
-                    &session.paths.result,
-                    &format!("OK\truntime\t{name}\tnative\n"),
-                )?;
-            }
-        }
+        Ok(_) => Ok(OperationOutcome {
+            handled: runtime_names.len(),
+            ..OperationOutcome::default()
+        }),
         Err(error) => {
             session.log(&format!("Runtime repair failed: {error}"));
             let metadata = RuntimeMetadata::parse(
                 &fs::read(&session.paths.runtime_metadata_json).map_err(display_error)?,
             )
             .map_err(display_error)?;
-            for name in runtime_names {
-                let valid = runtime_image_matches(session, &metadata, name);
-                append_result(
-                    &session.paths.result,
-                    &format!(
-                        "{}\truntime\t{name}\t{}\n",
-                        if valid { "OK" } else { "FAIL" },
-                        if session.cancelled() {
-                            "cancelled"
-                        } else {
-                            "repair"
-                        }
-                    ),
-                )?;
-            }
+            let failures = runtime_names
+                .iter()
+                .filter(|name| !runtime_image_matches(session, &metadata, name))
+                .count();
+            Ok(OperationOutcome {
+                failed: failures != 0,
+                handled: runtime_names.len(),
+                ..OperationOutcome::default()
+            })
         }
     }
-    Ok(())
 }
 
 fn runtime_image_matches(session: &Session, metadata: &RuntimeMetadata, name: &str) -> bool {
@@ -1814,15 +1808,17 @@ fn runtime_image_matches(session: &Session, metadata: &RuntimeMetadata, name: &s
 
 fn install_portmaster_action(
     session: &Session,
-    action: &PlanAction,
+    action: &ServiceAction,
     risk_ack: bool,
     support_ack: bool,
-) -> Result<(), String> {
+) -> Result<OperationOutcome, String> {
     let failure = |reason: &str| {
-        append_result(
-            &session.paths.result,
-            &format!("FAIL\tportmaster\t{reason}\n"),
-        )
+        session.log(&format!("PortMaster installation rejected: {reason}"));
+        Ok(OperationOutcome {
+            failed: true,
+            handled: 1,
+            ..OperationOutcome::default()
+        })
     };
     if session.resolved.context.management == ManagementMode::System {
         return failure("system-managed");
@@ -1847,10 +1843,10 @@ fn install_portmaster_action(
         _ => return failure("unsupported-device"),
     }
     match install_stable_release(session, &source) {
-        Ok(()) => append_result(
-            &session.paths.result,
-            "OK\tportmaster\tinstalled\n",
-        ),
+        Ok(()) => Ok(OperationOutcome {
+            handled: 1,
+            ..OperationOutcome::default()
+        }),
         Err(error) => {
             session.log(&format!("PortMaster installation failed: {error}"));
             let reason = if session.cancelled() {
@@ -1865,9 +1861,7 @@ fn install_portmaster_action(
 
 fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(), String> {
     let _guard = ActivityGuard::acquire(&session.paths.portmaster_lock)?;
-    let _ = fs::remove_file(&session.paths.cancel);
-    write_progress(
-        &session.paths.progress,
+    publish_task_progress(
         session.progress_channel.as_ref(),
         "preparing",
         2,
@@ -1887,13 +1881,10 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     .map_err(display_error)?;
     let (version, url, expected_md5) = read_release_row(&release)?;
     let archive = cache.join(&source.archive_name);
-    if !stable_archive_valid(&archive, &expected_md5) {
+    let mut archive_valid = stable_archive_valid(&archive, &expected_md5);
+    if !archive_valid {
         let _ = fs::remove_file(&archive);
-        let progress = DownloadProgress::new(
-            session.paths.progress.clone(),
-            session.progress_channel.clone(),
-            "PortMaster",
-        );
+        let progress = DownloadProgress::new(session.progress_channel.clone(), "PortMaster");
         GitHubTransport::new()
             .fetch_with_timeout(
                 Capability::Release,
@@ -1905,16 +1896,17 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
                 std::time::Duration::from_secs(15 * 60),
             )
             .map_err(display_error)?;
+        // A successful fetch has already passed the exact validator above.
+        archive_valid = true;
     }
-    if !stable_archive_valid(&archive, &expected_md5) {
+    if !archive_valid {
         let _ = fs::remove_file(&archive);
         return Err("downloaded PortMaster archive failed verification".into());
     }
     if session.cancelled() {
         return Err("PortMaster installation was cancelled".into());
     }
-    write_progress(
-        &session.paths.progress,
+    publish_task_progress(
         session.progress_channel.as_ref(),
         "installing",
         88,
@@ -1925,8 +1917,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
     install_archive(session, archive)?;
     // Installation has committed. Completion progress is best-effort so a
     // full or briefly unavailable SD card cannot turn success into failure.
-    let _ = write_progress(
-        &session.paths.progress,
+    let _ = publish_task_progress(
         session.progress_channel.as_ref(),
         "complete",
         100,
@@ -1954,10 +1945,6 @@ fn install_archive(session: &Session, archive: PathBuf) -> Result<(), String> {
         launcher: session.paths.launcher.clone(),
         state_dir: session.paths.state.clone(),
         trash_dir: session.paths.trash.clone(),
-        cancel_file: session
-            .cancel_token
-            .is_none()
-            .then(|| session.paths.cancel.clone()),
         cancel_token: session.cancel_token.clone(),
         progress_channel: session.progress_channel.clone(),
         probe_root: session.root.clone(),
@@ -1968,8 +1955,11 @@ fn install_archive(session: &Session, archive: PathBuf) -> Result<(), String> {
 }
 
 fn ensure_python_runtime(session: &Session) -> Result<(), String> {
-    let report = evaluate_health(&session.resolved.resolution).map_err(display_error)?;
-    if report.python_mode != "runtime_mount" || python_imports_ready(&report.python_imports) {
+    let facts = session.health_facts()?;
+    let report = facts
+        .report
+        .ok_or_else(|| "PortMaster Python requirements could not be checked".to_owned())?;
+    if report.python_mode != "runtime_mount" || facts.system_python_ok {
         return Ok(());
     }
     let runtime = report.python_runtime.as_deref().unwrap_or("python_3.11");
@@ -1980,7 +1970,7 @@ fn ensure_python_runtime(session: &Session) -> Result<(), String> {
     if metadata_ready {
         return Ok(());
     }
-    refresh_runtime_metadata_cache(session, true)?;
+    refresh_runtime_metadata_cache(session, false)?;
     let libs = session
         .resolved
         .context
@@ -1993,11 +1983,7 @@ fn ensure_python_runtime(session: &Session) -> Result<(), String> {
         runtime_names: vec![runtime.to_owned()],
         arch: runtime_arch(),
         libs_root: libs,
-        progress_file: session.paths.progress.clone(),
-        cancel_file: session
-            .cancel_token
-            .is_none()
-            .then(|| session.paths.cancel.clone()),
+        state_dir: session.paths.state.clone(),
         cancel_token: session.cancel_token.clone(),
         progress_channel: session.progress_channel.clone(),
     })
@@ -2043,290 +2029,6 @@ fn read_release_row(path: &Path) -> Result<(String, String, String), String> {
     ))
 }
 
-struct ActivityGuard {
-    _lock: ExclusiveFileLock,
-}
-
-impl ActivityGuard {
-    fn acquire(lock: &Path) -> Result<Self, String> {
-        let lock = ExclusiveFileLock::try_acquire(lock).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                "another APP Manager operation is already running".to_owned()
-            } else {
-                error.to_string()
-            }
-        })?;
-        Ok(Self { _lock: lock })
-    }
-}
-
-struct DownloadProgress {
-    path: PathBuf,
-    channel: Option<appmanager_core::ProgressChannel>,
-    runtime: &'static str,
-    state: Mutex<(Instant, u64)>,
-}
-
-impl DownloadProgress {
-    fn new(
-        path: PathBuf,
-        channel: Option<appmanager_core::ProgressChannel>,
-        runtime: &'static str,
-    ) -> Self {
-        Self {
-            path,
-            channel,
-            runtime,
-            state: Mutex::new((Instant::now(), 0)),
-        }
-    }
-
-    fn publish(&self, received: u64, total: u64) -> std::io::Result<()> {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let elapsed = state.0.elapsed().as_secs_f64();
-        let speed = if elapsed > 0.25 {
-            let speed = ((received.saturating_sub(state.1)) as f64 / elapsed) as u64;
-            *state = (Instant::now(), received);
-            speed
-        } else {
-            0
-        };
-        write_progress_io(
-            &self.path,
-            "downloading",
-            received,
-            total,
-            speed,
-            self.runtime,
-        )?;
-        publish_progress(
-            self.channel.as_ref(),
-            "downloading",
-            self.runtime,
-            received,
-            total,
-            speed,
-            self.runtime,
-        );
-        Ok(())
-    }
-}
-
-impl Progress for DownloadProgress {
-    fn update(&self, received: u64, total: u64) -> std::io::Result<()> {
-        self.publish(received, total)
-    }
-}
-
-fn write_progress(
-    path: &Path,
-    channel: Option<&appmanager_core::ProgressChannel>,
-    phase: &str,
-    current: u64,
-    total: u64,
-    speed: u64,
-    detail: &str,
-) -> Result<(), String> {
-    write_progress_io(path, phase, current, total, speed, detail).map_err(display_error)?;
-    publish_progress(channel, phase, "PortMaster", current, total, speed, detail);
-    Ok(())
-}
-
-fn publish_progress(
-    channel: Option<&appmanager_core::ProgressChannel>,
-    phase: &str,
-    runtime: &str,
-    current: u64,
-    total: u64,
-    speed: u64,
-    detail: &str,
-) {
-    if let Some(channel) = channel {
-        channel.publish(appmanager_core::TaskProgress {
-            phase: phase.to_owned(),
-            runtime: runtime.to_owned(),
-            index: 0,
-            count: 1,
-            current,
-            total,
-            speed,
-            detail: detail.replace(['\t', '\r', '\n'], " "),
-        });
-    }
-}
-
-fn write_progress_io(
-    path: &Path,
-    phase: &str,
-    current: u64,
-    total: u64,
-    speed: u64,
-    detail: &str,
-) -> std::io::Result<()> {
-    let detail = detail.replace(['\t', '\r', '\n'], " ");
-    let row = format!("1\t{phase}\tPortMaster\t0\t1\t{current}\t{total}\t{speed}\t{detail}\n");
-    let temporary = progress_temporary(path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&temporary, row)?;
-    fs::rename(temporary, path)
-}
-
-fn progress_temporary(path: &Path) -> PathBuf {
-    let mut value = path.as_os_str().to_os_string();
-    value.push(format!(".tmp.{}", std::process::id()));
-    PathBuf::from(value)
-}
-
-fn append_result(path: &Path, value: &str) -> Result<(), String> {
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(display_error)?;
-    file.write_all(value.as_bytes()).map_err(display_error)
-}
-
-fn write_text(path: &Path, value: &str) -> Result<(), String> {
-    portkit_core::atomic_write(path, value.as_bytes()).map_err(display_error)
-}
-
-fn env_path(name: &str) -> Option<PathBuf> {
-    env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-fn normalized_target_override(root: Option<&Path>) -> Option<PathBuf> {
-    let target = env_path("PAM_PORTMASTER_DIR_OVERRIDE")?;
-    let Some(root) = root else {
-        return Some(target);
-    };
-    target
-        .strip_prefix(root)
-        .ok()
-        .map(|relative| Path::new("/").join(relative))
-        .or(Some(target))
-}
-
-fn launcher_name(path: &Path) -> &str {
-    path.file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(DEFAULT_LAUNCHER_SCRIPT_NAME)
-}
-
-fn path_string(path: Option<&Path>) -> String {
-    path.map_or_else(String::new, |value| value.display().to_string())
-}
-
-fn safe_version(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric() || "._-".contains(*character))
-        .collect()
-}
-
-fn safe_asset_name(value: &str) -> bool {
-    !value.is_empty()
-        && !matches!(value, "." | "..")
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
-}
-
-fn device_arch() -> String {
-    env::var("DEVICE_ARCH").unwrap_or_else(|_| match env::consts::ARCH {
-        "aarch64" => "aarch64".into(),
-        "x86_64" => "x86_64".into(),
-        value => value.into(),
-    })
-}
-
-fn python_imports_ready(imports: &[String]) -> bool {
-    let executable = env::var("PAM_PYTHON3_CMD_OVERRIDE").unwrap_or_else(|_| "python3".into());
-    const CHECK: &str =
-        "import importlib,sys\nfor name in sys.argv[1:]: importlib.import_module(name)";
-    Command::new(executable)
-        .arg("-c")
-        .arg(CHECK)
-        .args(imports)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn squashfs_has_magic(path: &Path) -> bool {
-    let mut magic = [0_u8; 4];
-    fs::File::open(path)
-        .and_then(|mut file| file.read_exact(&mut magic))
-        .is_ok()
-        && magic == *b"hsqs"
-}
-
-fn read_update_cache(path: &Path) -> (u64, String, String) {
-    let Ok(value) = fs::read_to_string(path) else {
-        return (0, "unknown".into(), String::new());
-    };
-    let mut fields = value.trim_end().split('\t');
-    let checked = fields
-        .next()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0);
-    let status = match fields.next().unwrap_or("") {
-        "ok" => "ok",
-        "error" => "error",
-        _ => "unknown",
-    }
-    .to_owned();
-    let latest = fields
-        .next()
-        .filter(|value| {
-            value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
-        .unwrap_or("")
-        .to_owned();
-    (checked, status, latest)
-}
-
-fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
-    let bytes = serde_json::to_vec_pretty(value).map_err(display_error)?;
-    portkit_core::atomic_write(path, &bytes).map_err(display_error)
-}
-
-fn free_bytes(path: &Path) -> u64 {
-    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
-        return 0;
-    };
-    let mut value = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    let result = unsafe { libc::statvfs(path.as_ptr(), value.as_mut_ptr()) };
-    if result != 0 {
-        return 0;
-    }
-    let value = unsafe { value.assume_init() };
-    u64::from(value.f_bavail).saturating_mul(value.f_frsize)
-}
-
-fn display_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
-}
-
-fn fail(code: u8, message: &str) -> ExitCode {
-    eprintln!("[PAM] {message}");
-    ExitCode::from(code)
-}
-
-fn exit_code(code: u8) -> ExitCode {
-    ExitCode::from(code)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2368,30 +2070,133 @@ mod tests {
         let error = service.start("update-check", None).unwrap_err();
         assert!(error.contains("automatic PortMaster update check"));
         service.background_busy.store(false, Ordering::Release);
-
-        for _ in 0..100 {
-            if service
-                .poll()
-                .is_some_and(|event| event.task_id == task_id && event.status != "progress")
-            {
-                assert!(!service.busy.load(Ordering::Acquire));
-                assert_eq!(service.active_task.load(Ordering::Acquire), 0);
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        panic!("foreground task did not complete");
     }
 
     #[test]
-    fn legacy_operation_rows_are_published_as_structured_data() {
-        let value = parse_operation_result("OK\tappledouble\t3\nOK\truntime\tmono\tnative\n");
-        assert_eq!(value["failed"], false);
-        assert_eq!(value["handled"], 2);
-        assert_eq!(value["appledouble_removed"], 3);
+    fn destructive_data_removal_rejects_a_new_unselected_reference() {
+        use appmanager_core::{InventoryEntry, InventoryKind, PortFact, RuntimeInventory};
 
-        let value = parse_operation_result("FAIL\toperation\tunknown-action\n");
-        assert_eq!(value["failed"], true);
+        let data = PathBuf::from("/ports/data/shared");
+        let port = |name: &str| PortFact {
+            script: format!("{name}.sh"),
+            path: PathBuf::from(format!("/ports/{name}.sh")),
+            dir: "shared".into(),
+            data_path: data.clone(),
+            claimed_dir: "shared".into(),
+            dir_exists: true,
+            images: Vec::new(),
+            runtime: String::new(),
+            runtimes: Vec::new(),
+        };
+        let mut inventory = Inventory {
+            schema: 3,
+            entries: Vec::new(),
+            ports: vec![port("A"), port("B"), port("C")],
+            refcount: BTreeMap::from([("shared".into(), 3)]),
+            data_dirs: vec![InventoryEntry {
+                root: "game-dirs".into(),
+                name: "shared".into(),
+                path: data.clone(),
+                kind: InventoryKind::Directory,
+                bytes: None,
+            }],
+            images: Vec::new(),
+            orphan_dirs: Vec::new(),
+            orphan_images: Vec::new(),
+            dead_scripts: Vec::new(),
+            trash: Vec::new(),
+            runtimes: RuntimeInventory {
+                need: BTreeMap::new(),
+                facts: Vec::new(),
+            },
+            diagnostics: Vec::new(),
+        };
+        let actions = vec![
+            ServiceAction {
+                kind: "TRASH".into(),
+                argument: "/ports/A.sh".into(),
+            },
+            ServiceAction {
+                kind: "TRASH".into(),
+                argument: "/ports/B.sh".into(),
+            },
+            ServiceAction {
+                kind: "TRASH".into(),
+                argument: data.display().to_string(),
+            },
+        ];
+        assert!(validate_destructive_inventory(&inventory, &actions).is_err());
+        inventory.ports.pop();
+        inventory.refcount.insert("shared".into(), 2);
+        validate_destructive_inventory(&inventory, &actions).unwrap();
+    }
+
+    #[test]
+    fn missing_controller_input_helper_is_reported() {
+        let (_temp, service) = embedded_fixture();
+        let error = service.start_input_helper("love.aarch64").unwrap_err();
+        assert!(error.contains("controller input helper is missing"));
+        assert!(
+            service
+                .input_helper
+                .lock()
+                .unwrap_or_else(|value| value.into_inner())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn network_actions_are_fully_validated_before_execution() {
+        let (_temp, service) = embedded_fixture();
+        let session = Session::new(service.request.clone()).unwrap();
+        let actions = vec![
+            ServiceAction {
+                kind: "INSTALL_RUNTIME".into(),
+                argument: "python_3.11".into(),
+            },
+            ServiceAction {
+                kind: "UNKNOWN".into(),
+                argument: "-".into(),
+            },
+        ];
+        assert!(matches!(
+            validate_network_actions(&session, &actions),
+            Err("mixed-network-actions")
+        ));
+
+        let actions = vec![
+            ServiceAction {
+                kind: "INSTALL_RUNTIME".into(),
+                argument: "python_3.11".into(),
+            },
+            ServiceAction {
+                kind: "INSTALL_RUNTIME".into(),
+                argument: "mono_6.12".into(),
+            },
+        ];
+        let ValidatedNetworkActions::Runtimes(names) =
+            validate_network_actions(&session, &actions).unwrap()
+        else {
+            panic!("Runtime actions were not classified as a Runtime batch");
+        };
+        assert_eq!(names, ["python_3.11", "mono_6.12"]);
+    }
+
+    #[test]
+    fn embedded_actions_reject_unsafe_boundary_text() {
+        let unsafe_action = EmbeddedAction {
+            kind: "TRASH".into(),
+            arg: "/ports/Game.sh\nDELETE_MANAGED\t/ports/Game".into(),
+        };
+        assert!(ServiceAction::try_from(&unsafe_action).is_err());
+
+        let valid_action = EmbeddedAction {
+            kind: "TRASH".into(),
+            arg: "/ports/Game.sh".into(),
+        };
+        let parsed = ServiceAction::try_from(&valid_action).unwrap();
+        assert_eq!(parsed.kind, "TRASH");
+        assert_eq!(parsed.argument, "/ports/Game.sh");
     }
 
     #[test]

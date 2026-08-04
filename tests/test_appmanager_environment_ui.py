@@ -22,7 +22,9 @@ assert 'L("The PortMaster directory was not found. Install it to manage Port gam
 assert 'L("PortMaster needs attention. See Environment Management.","PortMaster 需要注意，请查看环境管理。")' in source
 assert 'L("Managed by system · Available","系统管理 · 当前可用")' in source
 assert "PortMaster 由系统维护。" in source
-assert 'L("Preparing device information…","正在准备设备信息……")' in source
+assert 'model.native.start,"config-refresh-if-newer"' in source
+assert 'kit.set_busy(true,L("Preparing device information' not in source
+assert 'L("Device support updated","设备适配已更新")' in source
 assert 'value.status~="progress" and value.status~="complete" and value.status~="error"' in source
 assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),' in source
 assert 'checked=false,danger=true}' in source
@@ -32,13 +34,12 @@ assert 'model.native.start,"update-check-if-stale"' in source
 assert "operations.background_task=" in source
 assert "operations.finish_background_update(data.update)" in source
 assert "operations.request_forced_update()" in source
-assert 'kind="update-check-wait"' in source
+assert 'kind="update-check-wait"' not in source
 assert 'model.native.start,"update-check",{}' in source
 assert "function self.apply_update_result(update)" in source
 assert 'model.native.start,"scan-sizes"' not in source
 assert 'L("Rescan","重新扫描")' in source
 assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true,checked=true}' not in source
-assert 'indeterminate=true' in source
 assert "请继续等待。" in source
 assert 'cancel=L("Stay","暂不退出")' in source
 assert "focusable=false" in source
@@ -123,7 +124,7 @@ appmanager = {
     request=function(method,payload)
         if method=="snapshot" then return {ok=true,value=APP_SNAPSHOT} end
         if method=="start" then
-            if payload.kind=="config-refresh" then
+            if payload.kind=="config-refresh-if-newer" then
                 return {ok=false,error={code="offline",message="offline fixture"}}
             end
             return {ok=true,value=1}
@@ -275,33 +276,21 @@ assert page["row_kinds"][11] == "textview"
 system_managed.execute('require("kit").input("right"); require("kit").input("confirm")')
 assert system_managed.eval('require("kit").debug_page().title') == "Runtime 修复"
 
-with tempfile.TemporaryDirectory() as temporary:
-    progress_path = Path(temporary) / "progress.tsv"
-    healthy.globals().PROGRESS_PATH = str(progress_path)
+healthy.execute(r'''
+    local model=require("app_model").new(require("kit"),require("json"),{})
+    local progress=model.runtime_progress({phase="downloading",runtime="PortMaster",index=1,count=1,
+        current=22,total=100,speed=4096,detail="Downloading verified release assets"})
+    assert(progress.stage.zh=="正在下载 PortMaster")
+    assert(progress.footer_right.zh=="4.0 KB/秒")
+    assert(progress.detail=="")
+''')
 
-    progress_path.write_text(
-        "1\tdownloading\tPortMaster\t1\t1\t22\t100\t4096\tDownloading verified release assets\n",
-        encoding="utf-8",
-    )
-    healthy.execute(r'''
-        local model=require("app_model").new(require("kit"),require("json"),{})
-        local progress=model.runtime_progress({phase="downloading",runtime="PortMaster",index=1,count=1,
-            current=22,total=100,speed=4096,detail="Downloading verified release assets"})
-        assert(progress.stage.zh=="正在下载 PortMaster")
-        assert(progress.footer_right.zh=="4.0 KB/秒")
-        assert(progress.detail=="")
-    ''')
-
-    progress_path.write_text(
-        "1\tdownloading\tPortMaster\t1\t1\t78\t100\t0\tUsing local cache\n",
-        encoding="utf-8",
-    )
-    healthy.execute(r'''
-        local model=require("app_model").new(require("kit"),require("json"),{})
-        local progress=model.runtime_progress({phase="downloading",runtime="PortMaster",index=1,count=1,
-            current=78,total=100,speed=0,detail="Using local cache"})
-        assert(progress.stage.zh=="正在下载 PortMaster")
-        assert(progress.footer_right.zh=="使用缓存")
-    ''')
+healthy.execute(r'''
+    local model=require("app_model").new(require("kit"),require("json"),{})
+    local progress=model.runtime_progress({phase="downloading",runtime="PortMaster",index=1,count=1,
+        current=78,total=100,speed=0,detail="Using local cache"})
+    assert(progress.stage.zh=="正在下载 PortMaster")
+    assert(progress.footer_right.zh=="使用缓存")
+''')
 
 print("appmanager environment UI tests: PASS")

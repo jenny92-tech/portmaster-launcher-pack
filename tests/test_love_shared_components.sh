@@ -86,7 +86,7 @@ grep -Fq 'function kit.debug_page' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'preserve_focus=' "$app_lua/app_pages.lua"
 grep -Fq 'function self.refresh_home()' "$app_lua/app_operations.lua"
 grep -Fq 'rebuild_return_page(self.confirm_return)' "$app_lua/app_operations.lua"
-[ "$(grep -Fc 'operations.refresh_home()' "$app_lua/main.lua")" -ge 2 ]
+[ "$(grep -Fc 'operations.refresh_home()' "$app_lua/main.lua")" -ge 1 ]
 grep -Fq 'state.onboarding_seen~="1" and not preserve_focus' "$app_lua/app_pages.lua"
 grep -Fq 'on_home_cancel=operations.show_exit_dialog' "$app_lua/main.lua"
 grep -Fq 'onboarding_seen="0"' "$app_lua/main.lua"

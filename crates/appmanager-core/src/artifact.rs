@@ -12,13 +12,14 @@ use portkit_core::{ExclusiveFileLock, atomic_write};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::RuntimeMetadata;
+use crate::{RuntimeMetadata, runtime::MAX_METADATA_BYTES};
 
 const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const ERROR_CACHE_RETRY_AGE: Duration = Duration::from_secs(15 * 60);
 // Small JSON manifests; a stalled connection must not hold the operation lock.
 const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const METADATA_FETCH_TIMEOUT: Duration = Duration::from_secs(300);
+const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StableRelease {
@@ -108,6 +109,11 @@ struct StableManifest {
 }
 
 pub fn parse_stable_manifest(bytes: &[u8]) -> Result<StableRelease, ArtifactError> {
+    if bytes.is_empty() || bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(ArtifactError::InvalidStable(
+            "stable manifest is empty or exceeds 1 MiB".into(),
+        ));
+    }
     let manifest: StableManifest = serde_json::from_slice(bytes)
         .map_err(|error| ArtifactError::InvalidStable(error.to_string()))?;
     let mut stable = manifest.stable;
@@ -219,7 +225,7 @@ pub fn fetch_stable_release(
                 .is_some()
         },
         None,
-        None,
+        Some(MAX_MANIFEST_BYTES as u64),
         MANIFEST_FETCH_TIMEOUT,
     )?;
     let stable = parse_stable_manifest(&fs::read(&manifest)?)?;
@@ -246,8 +252,7 @@ pub fn refresh_stable_cache(
         .parent()
         .ok_or_else(|| ArtifactError::InvalidPath("update cache has no parent".into()))?;
     fs::create_dir_all(parent)?;
-    let _refresh_lock =
-        acquire_refresh_lock(&parent.join(".stable-cache-refresh.lock"))?;
+    let _refresh_lock = acquire_refresh_lock(&parent.join(".stable-cache-refresh.lock"))?;
     // Another process may have completed the same automatic refresh between
     // the optimistic cache read and this lock acquisition.
     if let Some(outcome) = fresh_stable_cache(request)? {
@@ -266,7 +271,7 @@ pub fn refresh_stable_cache(
                 .is_some()
         },
         None,
-        None,
+        Some(MAX_MANIFEST_BYTES as u64),
         MANIFEST_FETCH_TIMEOUT,
     );
     let checked = epoch_seconds();
@@ -331,8 +336,7 @@ pub fn refresh_runtime_metadata(
         .parent()
         .ok_or_else(|| ArtifactError::InvalidPath("Runtime cache has no parent".into()))?;
     fs::create_dir_all(parent)?;
-    let _refresh_lock =
-        acquire_refresh_lock(&parent.join(".runtime-metadata-refresh.lock"))?;
+    let _refresh_lock = acquire_refresh_lock(&parent.join(".runtime-metadata-refresh.lock"))?;
     if repair_runtime_cache(&request.json_cache, request.tsv_cache.as_deref())?
         && !request.force
         && cache_is_fresh(&request.json_cache)
@@ -355,7 +359,7 @@ pub fn refresh_runtime_metadata(
                 .is_some()
         },
         None,
-        None,
+        Some(MAX_METADATA_BYTES as u64),
         METADATA_FETCH_TIMEOUT,
     );
     let outcome = match fetched {
@@ -522,6 +526,12 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn stable_manifest_rejects_empty_and_oversized_documents() {
+        assert!(parse_stable_manifest(&[]).is_err());
+        assert!(parse_stable_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1]).is_err());
     }
 
     #[test]

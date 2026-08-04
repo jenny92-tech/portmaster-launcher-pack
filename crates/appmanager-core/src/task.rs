@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::Serialize;
 
 /// Process-local cancellation shared by the embedded UI and worker threads.
-/// Diagnostic CLI adapters may additionally use their legacy marker file.
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 

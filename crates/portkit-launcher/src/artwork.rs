@@ -153,13 +153,8 @@ mod tests {
         let scripts = temp.path().join("somewhere/else");
         fs::create_dir_all(&scripts).unwrap();
         assert_eq!(probe_image_dir(&scripts, &markers), None);
-        let outcome = sync_launcher_artwork(
-            &scripts,
-            &scripts.join("Game.sh"),
-            &scripts,
-            &markers,
-        )
-        .unwrap();
+        let outcome =
+            sync_launcher_artwork(&scripts, &scripts.join("Game.sh"), &scripts, &markers).unwrap();
         assert_eq!(outcome, SyncOutcome::Skipped("no-package-image"));
     }
 
@@ -189,8 +184,8 @@ mod tests {
         assert_eq!(fs::read(&target).unwrap(), b"frontend-owned");
 
         // A renamed launcher has no exactly-matching stem: nothing is copied.
-        let renamed = sync_launcher_artwork(&scripts, &scripts.join("Renamed.sh"), &game, &markers)
-            .unwrap();
+        let renamed =
+            sync_launcher_artwork(&scripts, &scripts.join("Renamed.sh"), &game, &markers).unwrap();
         assert_eq!(renamed, SyncOutcome::Skipped("no-package-image"));
     }
 }

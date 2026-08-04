@@ -58,24 +58,24 @@ config/platforms/<platform-id>.json
 | Core | 职责 |
 | --- | --- |
 | `portkit-core` | 设备/机型识别、路径和环境解析、配置刷新与校验、GitHub transport、通用文件原语 |
-| `appmanager-core` | APP 设备上下文、资源元数据、inventory、安装事务、Runtime 修复、缓存与任务状态 |
+| `appmanager-core` | APP 设备上下文、资源元数据、inventory、安全文件操作、安装、Runtime 修复与缓存 |
 | `appmanager-service` | 将 APP 业务组织成 snapshot、task、progress、cancel，并直接暴露为 Lua table |
 
 生产路径中的 resolver 出错会直接停止相关危险操作，不会静默退回 Shell。Lua 只通过
 `appmanager` API 读取快照、启动任务、轮询事件和请求取消，不执行命令，也不通过任务文件
-与 Rust 交换消息。Rust service 向 Lua 提供内存事件；磁盘仅保存配置、缓存、下载和
-可恢复的操作事务记录，Lua 不读取这些记录作为 IPC。
-Shell 只解析 APP 路径并 `exec` Rust 主程序。
+与 Rust 交换消息。Rust service 向 Lua 提供内存事件；磁盘只保存配置、缓存、下载内容
+以及安装过程使用的临时工作目录，Lua 不读取这些内容作为 IPC。
+Shell 只解析 APP 路径，作为前端持有的父进程启动并等待 Rust 主程序，最后透传退出码。
+这里不能改成 `exec`：部分掌机前端以启动脚本的生命周期管理显示和输入归属。
 
 ## 安装与恢复
 
 安装流程只接受 native resolution 生成并再次验证的计划。归档解压到受管目录内的
 临时工作目录并完成校验后，旧受管条目先经同文件系统 rename 退役到工作目录，新内容
-再 rename 到位；成功后工作目录整体删除。没有回滚协议：stable 包很小，中断或断电后
-的恢复方式就是重新安装，下一次安装启动时会清扫上一次的残留工作目录和历史版本遗留的
-回滚/待验证文件。任务失败原因写入 `state/last-error.txt`（启动日志轮转为
-`log.txt.1`，最近一次失败因此总能被诊断）。`libs`、`config`、`themes`、日志和缓存
-不属于 core 替换范围，`libs` 由 Runtime 修复单独管理。
+再 rename 到位；成功后工作目录整体删除。没有文件式回滚或待验证协议：stable 包很小，
+中断或断电后的恢复方式就是重新安装，下一次安装会清扫上一次留下的 `.pm-install*`
+工作目录。错误写入 APP 的 `log.txt`；`libs`、`config`、`themes`、日志和缓存不属于
+core 替换范围，`libs` 由 Runtime 修复单独管理。
 
 卸载默认进入 `jenny92-appmanager/trash/<timestamp>/`。只有卸载 Dialog 主动勾选
 “直接删除”，或在回收站中再次确认，内容才永久删除。多个 SH 共用同一数据目录时，
@@ -109,7 +109,7 @@ jenny92-appmanager/
   love_ui/   UIKit and application Lua modules
   runtime/   production APP Manager LOVE-lite Rust executable
   share/     font, CA and controller data
-  state/     caches and crash-recovery transactions
+  state/     caches, download metadata and advisory lock files
   trash/     recoverable uninstall batches
 ```
 

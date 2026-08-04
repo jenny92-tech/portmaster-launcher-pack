@@ -68,9 +68,9 @@ fn run() -> Result<i32> {
         remote_config_dir: Some(app_root.join("state/device-config")),
         app_root,
     };
-    apply_process_environment(
-        EmbeddedService::bootstrap_environment(&service_request).map_err(anyhow::Error::msg)?,
-    );
+    let service_bootstrap =
+        EmbeddedService::prepare(service_request).map_err(anyhow::Error::msg)?;
+    apply_process_environment(service_bootstrap.environment().clone());
     log_display_environment();
 
     // Establish the display before starting inventory, artwork, health or
@@ -111,7 +111,7 @@ fn run() -> Result<i32> {
         .output_size()
         .map_err(anyhow::Error::msg)
         .context("read SDL2 renderer output size")?;
-    let service = EmbeddedService::new(service_request)
+    let service = EmbeddedService::activate(service_bootstrap)
         .map_err(anyhow::Error::msg)
         .context("initialize APP Manager service")?;
     let engine = Engine::load_appmanager(&source, render_width, render_height, service.clone())?;
@@ -151,7 +151,10 @@ fn run() -> Result<i32> {
                 .map(|name| name.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| "love.aarch64".into());
-    service.start_input_helper(&process_name);
+    service
+        .start_input_helper(&process_name)
+        .map_err(anyhow::Error::msg)
+        .context("start controller input helper")?;
     let _input_helper = InputHelperGuard(service);
 
     'running: loop {

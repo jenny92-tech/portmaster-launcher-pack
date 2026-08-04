@@ -1778,7 +1778,7 @@ function kit.draw()
     if not L.app then plain(kit.CONTACT,0,H-32*L.cs,CRED_PX*L.cs,{1,1,1,0.9},"right",W-16*L.cs) end
 
     if guide_state then draw_guide(L) end
-    if dialog_state then draw_dialog(L) end
+    if dialog_state and dialog_state.over_busy~=true then draw_dialog(L) end
 
     if busy then
         love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,W,H)
@@ -1825,6 +1825,7 @@ function kit.draw()
             end
         end
     end
+    if dialog_state and dialog_state.over_busy==true then draw_dialog(L) end
 
     -- Toasts report short-lived outcomes without changing page content or
     -- stealing controller focus. They slide up from the bottom, remain visible
@@ -1873,7 +1874,26 @@ function kit.draw()
 end
 
 
+local function dialog_input(action)
+    if action=="up" and dialog_state.checkbox then dialog_focus=3
+    elseif action=="down" and dialog_focus==3 then dialog_focus=2
+    elseif action=="left" and dialog_focus~=3 then dialog_focus=1
+    elseif action=="right" and dialog_focus~=3 then dialog_focus=2
+    elseif action=="up" then dialog_focus=1
+    elseif action=="down" then dialog_focus=2
+    elseif action=="confirm" and dialog_focus==3 then
+        dialog_state._checkbox_checked=not dialog_state._checkbox_checked
+        if dialog_state.checkbox.on_change then
+            dialog_state.checkbox.on_change(dialog_state._checkbox_checked,dialog_state.checkbox)
+        end
+    elseif action=="confirm" then finish_dialog(dialog_focus==1)
+    elseif action=="cancel" then finish_dialog(false)
+    else return false end
+    return true
+end
+
 function kit.input(action)
+    if dialog_state and dialog_state.over_busy==true then return dialog_input(action) end
     if busy then
         if action=="confirm" and busy_info and type(busy_info.on_cancel)=="function" and
            not busy_info.cancel_disabled and not busy_info.cancel_requested then
@@ -1891,21 +1911,7 @@ function kit.input(action)
         return true
     end
     if dialog_state then
-        if action=="up" and dialog_state.checkbox then dialog_focus=3
-        elseif action=="down" and dialog_focus==3 then dialog_focus=2
-        elseif action=="left" and dialog_focus~=3 then dialog_focus=1
-        elseif action=="right" and dialog_focus~=3 then dialog_focus=2
-        elseif action=="up" then dialog_focus=1
-        elseif action=="down" then dialog_focus=2
-        elseif action=="confirm" and dialog_focus==3 then
-            dialog_state._checkbox_checked=not dialog_state._checkbox_checked
-            if dialog_state.checkbox.on_change then
-                dialog_state.checkbox.on_change(dialog_state._checkbox_checked,dialog_state.checkbox)
-            end
-        elseif action=="confirm" then finish_dialog(dialog_focus==1)
-        elseif action=="cancel" then finish_dialog(false)
-        else return false end
-        return true
+        return dialog_input(action)
     end
     if action=="up" then move_v(-1)
     elseif action=="down" then move_v(1)

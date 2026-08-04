@@ -42,7 +42,7 @@ pub use operations::{
     AUTOINSTALL_DIR_NAME, DEFAULT_LAUNCHER_SCRIPT_NAME, FileAction, FileActionKind,
     FileApplyOutcome, FileApplyRequest, FileOperationError, PROTECTED_DIR_NAMES,
     PROTECTED_SCRIPT_NAMES, SCAN_EXCLUDED_DIR_NAMES, SizeScanOutcome, SizeScanRequest,
-    apply_file_plan, plan_contains_only_file_actions, scan_size_cache,
+    apply_file_actions, scan_size_cache,
 };
 pub use path::{ManagedRoot, PathSafetyError};
 pub use plan::{InstallPlan, PlanError, ValidatedInstallPlan};

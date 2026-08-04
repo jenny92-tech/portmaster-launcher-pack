@@ -640,7 +640,7 @@ with tempfile.TemporaryDirectory() as source:
             request=function(method,payload)
                 if method=="snapshot" then return {ok=true,value=APP_SNAPSHOT} end
                 if method=="start" then
-                    if payload.kind=="config-refresh" then
+                    if payload.kind=="config-refresh-if-newer" then
                         return {ok=false,error={code="offline",message="offline fixture"}}
                     end
                     return {ok=true,value=1}

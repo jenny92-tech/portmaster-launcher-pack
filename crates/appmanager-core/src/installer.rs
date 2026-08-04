@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use portkit_core::atomic_write;
+use portkit_core::ExclusiveFileLock;
 use serde::Serialize;
 use thiserror::Error;
 use zip::ZipArchive;
@@ -32,17 +32,12 @@ const ARCHIVE_LIMITS: ArchiveLimits = ArchiveLimits {
 /// this list is a compiled-in constant shared with other consumers.
 pub const PORTMASTER_STATE_PRESERVED: &[&str] = &["log.txt", "pugwash.txt", "harbourmaster.txt"];
 
-/// APP-private transaction state files, always preserved across core
-/// reinstalls. These belong to the APP itself, not to PortMaster.
-const APP_TRANSACTION_PRESERVED: &[&str] = &[".appmanager-state", ".appmanager-rollback"];
-
 #[derive(Debug, Clone)]
 pub struct InstallRequest {
     pub archive: PathBuf,
     pub launcher: PathBuf,
     pub state_dir: PathBuf,
     pub trash_dir: PathBuf,
-    pub cancel_file: Option<PathBuf>,
     pub cancel_token: Option<CancellationToken>,
     pub progress_channel: Option<ProgressChannel>,
     /// Optional filesystem prefix used only to probe device-absolute library candidates in tests.
@@ -81,10 +76,6 @@ pub enum InstallError {
     Io(#[from] io::Error),
 }
 
-struct LockGuard {
-    _file: File,
-}
-
 struct WorkGuard(PathBuf);
 
 impl Drop for WorkGuard {
@@ -94,32 +85,19 @@ impl Drop for WorkGuard {
 }
 
 pub fn install_portmaster(request: &InstallRequest) -> Result<InstallOutcome, InstallError> {
-    let state_is_safe = ManagedRoot::new(&request.state_dir).is_ok();
     let result = install_portmaster_inner(request);
-    if state_is_safe && !progress_is_terminal(&request.state_dir) {
-        if let Err(error) = &result {
-            let _ = progress(request, "failed", 0, &error.to_string());
-        }
+    if let Err(error) = &result
+        && !matches!(error, InstallError::Cancelled)
+    {
+        progress(request, "failed", 0, &error.to_string());
     }
     result
-}
-
-fn clear_pending_state(state: &Path) -> io::Result<()> {
-    for name in [
-        "pending-install.tsv",
-        "pending-manifest.tsv",
-        "pending-frontend-manifest.tsv",
-        "install-transaction.tsv",
-    ] {
-        remove_any(&state.join(name))?;
-    }
-    Ok(())
 }
 
 fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, InstallError> {
     validate_request(request)?;
     fs::create_dir_all(&request.state_dir)?;
-    progress(request, "extracting", 10, "Extracting PortMaster core")?;
+    progress(request, "extracting", 10, "Extracting PortMaster core");
     cancel(request)?;
 
     fs::create_dir_all(&request.plan.target)?;
@@ -141,18 +119,11 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     )?;
     let staged_files = regular_files(&staged_core)?;
     if staged_files.is_empty() {
-        return fail_before_mutation(
-            request,
-            InstallError::Archive("managed core is empty".into()),
-        );
+        return Err(InstallError::Archive("managed core is empty".into()));
     }
     cancel(request)?;
 
     let _lock = acquire_lock(&request.state_dir)?;
-    // Leftovers of the retired transactional protocol (or of a crashed swap)
-    // are swept, never honored: the stable archive is small, so the recovery
-    // story is simply installing again.
-    clear_pending_state(&request.state_dir)?;
     sweep_stale_artifacts(&request.plan, &[&core_work, &frontend_work])?;
     cancel(request)?;
 
@@ -173,7 +144,7 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
         .filter(|name| path_exists(&request.plan.frontend_dir.join(name)))
         .cloned()
         .collect::<Vec<_>>();
-    progress(request, "installing", 60, "Replacing managed core")?;
+    progress(request, "installing", 60, "Replacing managed core");
 
     // Retire the current managed entries into the per-run work directories:
     // same-filesystem renames, removed with the work directories on success,
@@ -201,7 +172,7 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     // The replacement above is the commit point. A removable filesystem may
     // reject this final UI-only write; never report a committed install as
     // failed because its completion message could not be persisted.
-    let _ = progress(request, "complete", 100, "PortMaster core installed");
+    progress(request, "complete", 100, "PortMaster core installed");
     Ok(InstallOutcome {
         device: request.plan.device.clone(),
         target: request.plan.target.clone(),
@@ -212,18 +183,9 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     })
 }
 
-// Removes artifacts of earlier installs from the managed directories: the
-// retired transactional protocol's rollback folders and any `.pm-install*`
-// work directory a crashed run left behind (except this run's own).
-fn sweep_stale_artifacts(
-    plan: &ValidatedInstallPlan,
-    keep: &[&Path],
-) -> Result<(), InstallError> {
+// Removes per-run work directories left by a crashed install.
+fn sweep_stale_artifacts(plan: &ValidatedInstallPlan, keep: &[&Path]) -> Result<(), InstallError> {
     for parent in [&plan.target, &plan.frontend_dir] {
-        let legacy = parent.join(".appmanager-rollback");
-        if path_exists(&legacy) {
-            remove_any(&legacy)?;
-        }
         for name in direct_names(parent)? {
             if !name.starts_with(".pm-install") {
                 continue;
@@ -235,16 +197,6 @@ fn sweep_stale_artifacts(
         }
     }
     Ok(())
-}
-
-fn progress_is_terminal(state: &Path) -> bool {
-    let Ok(contents) = fs::read_to_string(state.join("install-progress.tsv")) else {
-        return false;
-    };
-    matches!(
-        contents.split('\t').nth(1),
-        Some("cancelled" | "rolled-back" | "rollback-failed")
-    )
 }
 
 fn validate_request(request: &InstallRequest) -> Result<(), InstallError> {
@@ -456,25 +408,13 @@ fn app_specific_leaf(path: &Path) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case("PortMaster"))
 }
 
-fn fail_before_mutation<T>(
-    request: &InstallRequest,
-    error: InstallError,
-) -> Result<T, InstallError> {
-    let _ = progress(request, "failed", 0, &error.to_string());
-    Err(error)
-}
-
 fn cancel(request: &InstallRequest) -> Result<(), InstallError> {
     if request
         .cancel_token
         .as_ref()
         .is_some_and(CancellationToken::is_cancelled)
-        || request
-            .cancel_file
-            .as_ref()
-            .is_some_and(|path| path.exists())
     {
-        let _ = progress(
+        progress(
             request,
             "cancelled",
             0,
@@ -485,7 +425,7 @@ fn cancel(request: &InstallRequest) -> Result<(), InstallError> {
     Ok(())
 }
 
-fn progress(request: &InstallRequest, phase: &str, percent: u8, detail: &str) -> io::Result<()> {
+fn progress(request: &InstallRequest, phase: &str, percent: u8, detail: &str) {
     let detail = detail.replace(['\t', '\r', '\n'], " ");
     if let Some(channel) = &request.progress_channel {
         channel.publish(TaskProgress {
@@ -499,103 +439,16 @@ fn progress(request: &InstallRequest, phase: &str, percent: u8, detail: &str) ->
             detail: detail.clone(),
         });
     }
-    atomic_write(
-        &request.state_dir.join("install-progress.tsv"),
-        format!("1\t{phase}\t{percent}\t{detail}\n").as_bytes(),
-    )
 }
 
-fn acquire_lock(state: &Path) -> Result<LockGuard, InstallError> {
-    let lock = state.join("install-lock");
-    if fs::symlink_metadata(&lock).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return Err(InstallError::Locked);
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock)?;
-    verify_open_lock_path(&lock, &file)?;
-    try_lock_install(&file).map_err(|error| {
+fn acquire_lock(state: &Path) -> Result<ExclusiveFileLock, InstallError> {
+    ExclusiveFileLock::try_acquire(&state.join("install.lock")).map_err(|error| {
         if error.kind() == io::ErrorKind::WouldBlock {
             InstallError::Locked
         } else {
             InstallError::Io(error)
         }
-    })?;
-    let token = format!(
-        "{}-{}-{}",
-        std::process::id(),
-        epoch_seconds(),
-        unique_counter()
-    );
-    if let Err(error) = file
-        .set_len(0)
-        .and_then(|()| file.write_all(format!("{token}\n").as_bytes()))
-        .and_then(|()| file.sync_all())
-        .and_then(|()| sync_parent(&lock))
-    {
-        return Err(error.into());
-    }
-    Ok(LockGuard { _file: file })
-}
-
-#[cfg(unix)]
-fn verify_open_lock_path(path: &Path, file: &File) -> io::Result<()> {
-    use std::os::unix::fs::MetadataExt;
-    let path_metadata = fs::symlink_metadata(path)?;
-    let file_metadata = file.metadata()?;
-    if !path_metadata.file_type().is_file()
-        || path_metadata.dev() != file_metadata.dev()
-        || path_metadata.ino() != file_metadata.ino()
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "install lock path changed while opening",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn verify_open_lock_path(path: &Path, _file: &File) -> io::Result<()> {
-    if fs::symlink_metadata(path)?.file_type().is_file() {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "install lock is not a regular file",
-        ))
-    }
-}
-
-#[cfg(unix)]
-fn try_lock_install(file: &File) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    unsafe extern "C" {
-        fn flock(file_descriptor: i32, operation: i32) -> i32;
-    }
-    const LOCK_EXCLUSIVE: i32 = 2;
-    const LOCK_NONBLOCKING: i32 = 4;
-    if unsafe { flock(file.as_raw_fd(), LOCK_EXCLUSIVE | LOCK_NONBLOCKING) } == 0 {
-        Ok(())
-    } else {
-        let error = io::Error::last_os_error();
-        if matches!(error.raw_os_error(), Some(11 | 35)) {
-            Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "another installation is already active",
-            ))
-        } else {
-            Err(error)
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn try_lock_install(_file: &File) -> io::Result<()> {
-    Ok(())
+    })
 }
 
 fn extract_archive(archive: &Path, staged_core: &Path) -> Result<(), InstallError> {
@@ -810,7 +663,6 @@ fn prepare_staging(
         .iter()
         .map(String::as_str)
         .chain(PORTMASTER_STATE_PRESERVED.iter().copied())
-        .chain(APP_TRANSACTION_PRESERVED.iter().copied())
     {
         remove_any(&core.join(name))?;
     }
@@ -981,7 +833,6 @@ fn managed_top_entries(
         .iter()
         .map(String::as_str)
         .chain(PORTMASTER_STATE_PRESERVED.iter().copied())
-        .chain(APP_TRANSACTION_PRESERVED.iter().copied())
         .collect::<BTreeSet<_>>();
     let mut result = Vec::new();
     for entry in fs::read_dir(&plan.target)? {
@@ -1180,7 +1031,6 @@ mod tests {
             launcher: temp.path().join("mnt/card/ports/App.sh"),
             state_dir: temp.path().join("state"),
             trash_dir: temp.path().join("trash"),
-            cancel_file: None,
             cancel_token: None,
             progress_channel: None,
             probe_root: Some(temp.path().to_path_buf()),
@@ -1204,10 +1054,6 @@ mod tests {
             b"frontend"
         );
         assert!(!request.plan.target.join("config/archive-owned").exists());
-        // The retired transactional protocol publishes no state, and the
-        // per-run work directories are gone after a successful swap.
-        assert!(!request.state_dir.join("pending-install.tsv").exists());
-        assert!(!request.state_dir.join("install-transaction.tsv").exists());
         assert!(
             direct_names(&request.plan.target)
                 .unwrap()
@@ -1222,7 +1068,6 @@ mod tests {
         let request = request(&temp);
         fs::create_dir_all(request.plan.target.join("config")).unwrap();
         fs::create_dir_all(request.plan.target.join("libs")).unwrap();
-        fs::create_dir_all(request.plan.target.join(".appmanager-state")).unwrap();
         fs::write(request.plan.target.join("config/user.ini"), b"user").unwrap();
         fs::write(request.plan.target.join("libs/runtime"), b"runtime").unwrap();
         fs::write(request.plan.target.join("log.txt"), b"runtime log").unwrap();
@@ -1230,11 +1075,6 @@ mod tests {
         fs::write(
             request.plan.target.join("harbourmaster.txt"),
             b"harbourmaster state",
-        )
-        .unwrap();
-        fs::write(
-            request.plan.target.join(".appmanager-state/marker"),
-            b"transaction state",
         )
         .unwrap();
         fs::write(request.plan.target.join("control.txt"), b"old").unwrap();
@@ -1260,12 +1100,8 @@ mod tests {
             fs::read(request.plan.target.join("harbourmaster.txt")).unwrap(),
             b"harbourmaster state"
         );
-        assert_eq!(
-            fs::read(request.plan.target.join(".appmanager-state/marker")).unwrap(),
-            b"transaction state"
-        );
+        assert!(!request.plan.target.join(".appmanager-state").exists());
         assert!(!request.plan.target.join("obsolete").exists());
-        assert!(!request.plan.target.join(".appmanager-rollback").exists());
     }
 
     #[test]
@@ -1276,38 +1112,24 @@ mod tests {
         let error = install_portmaster(&request).unwrap_err();
         assert!(matches!(error, InstallError::Archive(_)));
         assert!(!temp.path().join("escaped").exists());
-        assert!(!request.state_dir.join("install-transaction.tsv").exists());
     }
 
     #[test]
-    fn install_sweeps_legacy_transaction_artifacts() {
+    fn install_sweeps_stale_work_directories() {
         let temp = tempfile::tempdir().unwrap();
         let request = request(&temp);
-        fs::create_dir_all(request.plan.target.join(".appmanager-rollback/core")).unwrap();
         fs::create_dir_all(request.plan.target.join(".pm-install-stale/stage")).unwrap();
-        fs::create_dir_all(&request.state_dir).unwrap();
-        fs::write(request.state_dir.join("pending-install.tsv"), b"legacy").unwrap();
-        fs::write(request.state_dir.join("install-transaction.tsv"), b"legacy").unwrap();
         install_portmaster(&request).unwrap();
-        assert!(!request.plan.target.join(".appmanager-rollback").exists());
-        assert!(!request.plan.frontend_dir.join(".appmanager-rollback").exists());
         assert!(!request.plan.target.join(".pm-install-stale").exists());
-        assert!(!request.state_dir.join("pending-install.tsv").exists());
-        assert!(!request.state_dir.join("install-transaction.tsv").exists());
     }
 
     #[test]
-    fn stale_lock_is_replaced_and_cancellation_is_pre_mutation() {
+    fn cancellation_is_observed_before_mutation() {
         let temp = tempfile::tempdir().unwrap();
         let mut request = request(&temp);
-        fs::create_dir_all(request.state_dir.join("install-lock")).unwrap();
-        fs::write(
-            request.state_dir.join("install-lock/pid"),
-            format!("{}\n", std::process::id()),
-        )
-        .unwrap();
-        request.cancel_file = Some(temp.path().join("cancel"));
-        fs::write(request.cancel_file.as_ref().unwrap(), b"").unwrap();
+        let cancel = CancellationToken::default();
+        cancel.cancel();
+        request.cancel_token = Some(cancel);
         assert!(matches!(
             install_portmaster(&request),
             Err(InstallError::Cancelled)
@@ -1322,31 +1144,31 @@ mod tests {
         fs::create_dir(&state).unwrap();
         let guard = acquire_lock(&state).unwrap();
         assert!(matches!(acquire_lock(&state), Err(InstallError::Locked)));
-        fs::write(state.join("install-lock"), b"replacement-owner\n").unwrap();
+        fs::write(state.join("install.lock"), b"diagnostic-content\n").unwrap();
         drop(guard);
         assert_eq!(
-            fs::read_to_string(state.join("install-lock")).unwrap(),
-            "replacement-owner\n"
+            fs::read_to_string(state.join("install.lock")).unwrap(),
+            "diagnostic-content\n"
         );
         let next = acquire_lock(&state).unwrap();
         drop(next);
-        assert!(state.join("install-lock").is_file());
+        assert!(state.join("install.lock").is_file());
     }
 
     #[test]
-    fn crash_stale_regular_lock_is_reused_but_a_live_lock_is_excluded() {
+    fn persistent_lock_file_has_no_stale_ownership() {
         let temp = tempfile::tempdir().unwrap();
         let state = temp.path().join("state");
         fs::create_dir(&state).unwrap();
-        fs::write(state.join("install-lock"), b"stale-owner\n").unwrap();
+        fs::write(state.join("install.lock"), b"stale-content\n").unwrap();
         let guard = acquire_lock(&state).unwrap();
         assert!(matches!(acquire_lock(&state), Err(InstallError::Locked)));
-        assert_ne!(
-            fs::read_to_string(state.join("install-lock")).unwrap(),
-            "stale-owner\n"
+        assert_eq!(
+            fs::read_to_string(state.join("install.lock")).unwrap(),
+            "stale-content\n"
         );
         drop(guard);
-        assert!(state.join("install-lock").is_file());
+        assert!(state.join("install.lock").is_file());
     }
 
     #[test]

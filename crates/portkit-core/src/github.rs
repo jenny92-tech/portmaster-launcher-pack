@@ -1396,7 +1396,9 @@ mod tests {
             )
             .unwrap_err();
         assert!(
-            error.to_string().contains("all GitHub transport routes failed"),
+            error
+                .to_string()
+                .contains("all GitHub transport routes failed"),
             "unexpected error: {error}"
         );
         assert!(!output.exists());

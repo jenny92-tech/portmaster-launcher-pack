@@ -433,24 +433,21 @@ fn scan_facts(
                 missing_dir: claimed_dir.clone(),
             });
         }
-        let data_path = if dir_exists
-            && !uncertain
-            && refs.len() == 1
-            && refs.contains(&claimed_dir)
-        {
-            data_dir_paths
-                .get(&claimed_dir)
-                .cloned()
-                .unwrap_or_default()
-        } else {
-            if dir_exists {
-                diagnostics.push(format!(
-                    "data directory association is not unique for script {}",
-                    entry.name
-                ));
-            }
-            PathBuf::new()
-        };
+        let data_path =
+            if dir_exists && !uncertain && refs.len() == 1 && refs.contains(&claimed_dir) {
+                data_dir_paths
+                    .get(&claimed_dir)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                if dir_exists {
+                    diagnostics.push(format!(
+                        "data directory association is not unique for script {}",
+                        entry.name
+                    ));
+                }
+                PathBuf::new()
+            };
         let shell_runtimes = runtimes_of(&text);
         let runtimes = if dir_exists {
             let declaration = port_json_cache
@@ -1416,12 +1413,8 @@ mod tests {
             directory: "/mnt/card".to_owned(),
             ..InventoryOptions::default()
         };
-        let snapshot =
-            Inventory::scan_with_options(&fixture.context, &options)
-                .unwrap();
-        let repeated =
-            Inventory::scan_with_options(&fixture.context, &options)
-                .unwrap();
+        let snapshot = Inventory::scan_with_options(&fixture.context, &options).unwrap();
+        let repeated = Inventory::scan_with_options(&fixture.context, &options).unwrap();
         assert_eq!(snapshot, repeated);
         assert_eq!(snapshot.to_tsv(), repeated.to_tsv());
         assert_eq!(snapshot.ports.len(), 2);

@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::context::{CapabilityState, ResolvedDeviceContext};
 use crate::path::ManagedRoot;
+use crate::{ProgressChannel, TaskProgress};
 
 /// Script names in the managed scripts root that are always protected from
 /// managed file operations and excluded from inventory/size scans. This is a
@@ -52,7 +53,7 @@ pub enum FileActionKind {
 }
 
 impl FileActionKind {
-    fn parse(value: &str) -> Option<Self> {
+    pub fn from_code(value: &str) -> Option<Self> {
         Some(match value {
             "TRASH" => Self::Trash,
             "DELETE_MANAGED" => Self::DeleteManaged,
@@ -75,14 +76,13 @@ pub struct FileAction {
 #[derive(Debug, Clone)]
 pub struct FileApplyRequest<'a> {
     pub context: &'a ResolvedDeviceContext,
-    pub plan: &'a Path,
-    pub result: &'a Path,
+    pub actions: &'a [FileAction],
     pub size_cache: Option<&'a Path>,
     pub self_launcher: &'a Path,
     pub self_port: &'a str,
     pub privilege_command: Option<&'a Path>,
     pub privilege_arguments: &'a [String],
-    pub progress_file: Option<&'a Path>,
+    pub progress_channel: Option<ProgressChannel>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,15 +115,11 @@ pub enum FileOperationError {
     Context(String),
     #[error("file operations are unavailable for this device")]
     Capability,
-    #[error("operation plan cannot be read: {0}")]
-    PlanIo(#[source] io::Error),
-    #[error("operation plan line {line} is malformed")]
-    PlanRow { line: usize },
-    #[error("operation plan line {line} contains unsafe text")]
-    UnsafePlanRow { line: usize },
-    #[error("operation plan contains no file actions")]
-    EmptyPlan,
-    #[error("operation result cannot be published: {0}")]
+    #[error("operation contains no file actions")]
+    EmptyActions,
+    #[error("file action is invalid: {0}")]
+    InvalidAction(String),
+    #[error("file operation failed: {0}")]
     ResultIo(#[source] io::Error),
 }
 
@@ -162,24 +158,7 @@ enum Mutation {
     Delete { path: PathBuf },
 }
 
-pub fn plan_contains_only_file_actions(path: &Path) -> Result<bool, FileOperationError> {
-    let file = File::open(path).map_err(FileOperationError::PlanIo)?;
-    let mut found = false;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line = line.map_err(FileOperationError::PlanIo)?;
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let (kind, _) = parse_row(index + 1, &line)?;
-        if FileActionKind::parse(kind).is_none() {
-            return Ok(false);
-        }
-        found = true;
-    }
-    Ok(found)
-}
-
-pub fn apply_file_plan(
+pub fn apply_file_actions(
     request: &FileApplyRequest<'_>,
 ) -> Result<FileApplyOutcome, FileOperationError> {
     request
@@ -189,26 +168,23 @@ pub fn apply_file_plan(
     if request.context.capabilities.manage_ports != CapabilityState::Current {
         return Err(FileOperationError::Capability);
     }
-    let actions = read_actions(request.plan)?;
-    if actions.is_empty() {
-        return Err(FileOperationError::EmptyPlan);
+    if request.actions.is_empty() {
+        return Err(FileOperationError::EmptyActions);
     }
-    let mut result = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(request.result)
-        .map_err(FileOperationError::ResultIo)?;
+    validate_actions(request, request.actions)?;
     let mut outcome = FileApplyOutcome::default();
     let mut mutations = Vec::new();
+    let mut changed_directories = BTreeSet::new();
     let mut appledouble_ran = false;
-    let trash_batch = actions
+    let trash_batch = request
+        .actions
         .iter()
         .any(|action| action.kind == FileActionKind::Trash)
         .then(|| create_trash_batch(request))
         .transpose()
         .map_err(|message| FileOperationError::ResultIo(io::Error::other(message)))?;
 
-    for action in actions {
+    for action in request.actions {
         outcome.handled += 1;
         let operation = match action.kind {
             FileActionKind::Trash => require_capability(request.context.capabilities.trash)
@@ -241,21 +217,18 @@ pub fn apply_file_plan(
                 }
                 write_appledouble_progress(request, "scanning", 0);
                 appledouble_ran = true;
-                let removed = cleanup_appledouble(request)?;
+                let removed = cleanup_appledouble(request, &mut changed_directories)?;
                 outcome.appledouble_removed += removed;
-                writeln!(result, "OK\tappledouble\t{removed}")
-                    .map_err(|error| error.to_string())?;
                 Ok(())
             }),
         };
-        if let Err(message) = operation {
+        if operation.is_err() {
             outcome.failures += 1;
-            writeln!(result, "FAIL\toperation\t{}", sanitize_result(&message))
-                .map_err(FileOperationError::ResultIo)?;
         }
     }
     for mutation in &mutations {
         mark_changed(request.context, mutation, &mut outcome);
+        collect_mutation_directories(mutation, &mut changed_directories);
     }
     if appledouble_ran {
         if let Some(path) = request.size_cache {
@@ -270,47 +243,56 @@ pub fn apply_file_plan(
     if let Some(batch) = trash_batch {
         remove_empty(&batch);
     }
-    result.flush().map_err(FileOperationError::ResultIo)?;
+    sync_directories(&changed_directories);
     Ok(outcome)
+}
+
+fn validate_actions(
+    request: &FileApplyRequest<'_>,
+    actions: &[FileAction],
+) -> Result<(), FileOperationError> {
+    for action in actions {
+        let result = match action.kind {
+            FileActionKind::Trash | FileActionKind::DeleteManaged => {
+                require_capability(request.context.capabilities.trash)
+                    .and_then(|()| managed_source(request, &action.argument).map(|_| ()))
+            }
+            FileActionKind::EmptyTrash | FileActionKind::RestoreTrash => {
+                require_capability(request.context.capabilities.trash).and_then(|()| {
+                    (action.argument == Path::new("-"))
+                        .then_some(())
+                        .ok_or_else(|| "invalid Trash action marker".to_owned())
+                })
+            }
+            FileActionKind::RestoreItem => require_capability(request.context.capabilities.trash)
+                .and_then(|()| {
+                    validate_trash_item(&request.context.roots.trash, &action.argument, false)?;
+                    structured_trash_bucket(&request.context.roots.trash, &action.argument)?;
+                    Ok(())
+                }),
+            FileActionKind::DeleteItem => require_capability(request.context.capabilities.trash)
+                .and_then(|()| {
+                    validate_trash_item(&request.context.roots.trash, &action.argument, true)
+                        .map(|_| ())
+                }),
+            FileActionKind::CleanAppleDouble => require_capability(
+                request.context.capabilities.cleanup_appledouble,
+            )
+            .and_then(|()| {
+                (action.argument == Path::new("-"))
+                    .then_some(())
+                    .ok_or_else(|| "invalid cleanup marker".to_owned())
+            }),
+        };
+        result.map_err(FileOperationError::InvalidAction)?;
+    }
+    Ok(())
 }
 
 fn require_capability(value: CapabilityState) -> Result<(), String> {
     (value == CapabilityState::Current)
         .then_some(())
         .ok_or_else(|| "capability disabled".to_owned())
-}
-
-fn read_actions(path: &Path) -> Result<Vec<FileAction>, FileOperationError> {
-    let file = File::open(path).map_err(FileOperationError::PlanIo)?;
-    let mut actions = Vec::new();
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line = line.map_err(FileOperationError::PlanIo)?;
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let (kind, argument) = parse_row(index + 1, &line)?;
-        let Some(kind) = FileActionKind::parse(kind) else {
-            return Err(FileOperationError::PlanRow { line: index + 1 });
-        };
-        actions.push(FileAction {
-            kind,
-            argument: PathBuf::from(argument),
-        });
-    }
-    Ok(actions)
-}
-
-fn parse_row(line: usize, value: &str) -> Result<(&str, &str), FileOperationError> {
-    if value.contains(['\0', '\r', '\n']) {
-        return Err(FileOperationError::UnsafePlanRow { line });
-    }
-    let mut fields = value.split('\t');
-    let kind = fields.next().unwrap_or_default();
-    let argument = fields.next().ok_or(FileOperationError::PlanRow { line })?;
-    if kind.is_empty() || argument.is_empty() || fields.next().is_some() {
-        return Err(FileOperationError::PlanRow { line });
-    }
-    Ok((kind, argument))
 }
 
 fn trash_item(
@@ -431,9 +413,7 @@ fn restore_all(
             if item
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    matches!(name, "scripts" | "script-images" | "images" | "data")
-                })
+                .is_some_and(|name| matches!(name, "scripts" | "script-images" | "images" | "data"))
             {
                 continue;
             }
@@ -484,7 +464,10 @@ fn delete_selected(
     Ok(())
 }
 
-fn cleanup_appledouble(request: &FileApplyRequest<'_>) -> Result<usize, String> {
+fn cleanup_appledouble(
+    request: &FileApplyRequest<'_>,
+    changed_directories: &mut BTreeSet<PathBuf>,
+) -> Result<usize, String> {
     let mut count = 0;
     let mut roots = [
         Some(&request.context.roots.scripts),
@@ -508,7 +491,7 @@ fn cleanup_appledouble(request: &FileApplyRequest<'_>) -> Result<usize, String> 
         }
     }
     for root in selected {
-        cleanup_appledouble_under(request, &root, &mut count)?;
+        cleanup_appledouble_under(request, &root, &mut count, changed_directories)?;
     }
     Ok(count)
 }
@@ -517,6 +500,7 @@ fn cleanup_appledouble_under(
     request: &FileApplyRequest<'_>,
     root: &Path,
     count: &mut usize,
+    changed_directories: &mut BTreeSet<PathBuf>,
 ) -> Result<(), String> {
     ensure_real_directory(root)?;
     let root_device = fs::symlink_metadata(root)
@@ -538,6 +522,7 @@ fn cleanup_appledouble_under(
             }
             if name.to_string_lossy().starts_with("._") && kind.is_file() {
                 remove_managed(request, &path)?;
+                changed_directories.insert(directory.clone());
                 *count += 1;
                 if *count % 10 == 0 {
                     write_appledouble_progress(request, "cleaning", *count);
@@ -550,19 +535,61 @@ fn cleanup_appledouble_under(
     Ok(())
 }
 
+fn collect_mutation_directories(mutation: &Mutation, output: &mut BTreeSet<PathBuf>) {
+    match mutation {
+        Mutation::Move { from, to } => {
+            if let Some(parent) = from.parent() {
+                output.insert(parent.to_path_buf());
+            }
+            if let Some(parent) = to.parent() {
+                output.insert(parent.to_path_buf());
+            }
+        }
+        Mutation::Delete { path } => {
+            if let Some(parent) = path.parent() {
+                output.insert(parent.to_path_buf());
+            }
+        }
+    }
+}
+
+fn sync_directories(directories: &BTreeSet<PathBuf>) {
+    let mut existing = BTreeSet::new();
+    for directory in directories {
+        let mut candidate = directory.as_path();
+        while !candidate.is_dir() {
+            let Some(parent) = candidate.parent() else {
+                break;
+            };
+            candidate = parent;
+        }
+        if candidate.is_dir() {
+            existing.insert(candidate.to_path_buf());
+        }
+    }
+    for directory in existing {
+        if let Ok(handle) = File::open(&directory) {
+            // Some FAT/FUSE implementations reject directory fsync. The
+            // mutation itself has already completed, so persistence remains
+            // best effort instead of turning a successful delete into an
+            // operation failure.
+            let _ = handle.sync_all();
+        }
+    }
+}
+
 fn write_appledouble_progress(request: &FileApplyRequest<'_>, phase: &str, count: usize) {
-    let Some(path) = request.progress_file else {
-        return;
-    };
-    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
-    let published = File::create(&temporary)
-        .and_then(|mut output| {
-            writeln!(output, "1\t{phase}\tAppleDouble\t1\t1\t{count}\t0\t0\t")?;
-            output.flush()
-        })
-        .and_then(|()| fs::rename(&temporary, path));
-    if published.is_err() {
-        let _ = fs::remove_file(temporary);
+    if let Some(channel) = &request.progress_channel {
+        channel.publish(TaskProgress {
+            phase: phase.to_owned(),
+            runtime: "AppleDouble".to_owned(),
+            index: 1,
+            count: 1,
+            current: count as u64,
+            total: 0,
+            speed: 0,
+            detail: String::new(),
+        });
     }
 }
 
@@ -1065,10 +1092,6 @@ fn is_image(path: &Path) -> bool {
         .any(|extension| extension_is(path, extension))
 }
 
-fn sanitize_result(value: &str) -> String {
-    value.replace(['\t', '\r', '\n'], " ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1163,6 +1186,31 @@ mod tests {
         (temp, context)
     }
 
+    fn action(kind: FileActionKind, argument: impl Into<PathBuf>) -> FileAction {
+        FileAction {
+            kind,
+            argument: argument.into(),
+        }
+    }
+
+    fn apply(
+        context: &ResolvedDeviceContext,
+        actions: &[FileAction],
+        size_cache: Option<&Path>,
+        progress_channel: Option<ProgressChannel>,
+    ) -> Result<FileApplyOutcome, FileOperationError> {
+        apply_file_actions(&FileApplyRequest {
+            context,
+            actions,
+            size_cache,
+            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
+            self_port: "jenny92-appmanager",
+            privilege_command: None,
+            privilege_arguments: &[],
+            progress_channel,
+        })
+    }
+
     #[test]
     fn deleting_one_duplicate_launcher_and_orphan_images_keeps_other_ports_linked() {
         let (_temp, context) = fixture();
@@ -1187,44 +1235,25 @@ mod tests {
             b"b",
         )
         .unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        fs::write(
-            &plan,
-            format!(
-                "TRASH\t{}\nTRASH\t{}\nTRASH\t{}\n",
-                context.roots.scripts.join("Duplicate.sh").display(),
-                context
-                    .roots
-                    .images
-                    .as_ref()
-                    .unwrap()
-                    .join("OldA.png")
-                    .display(),
-                context
-                    .roots
-                    .images
-                    .as_ref()
-                    .unwrap()
-                    .join("OldB.png")
-                    .display(),
+        let actions = [
+            action(
+                FileActionKind::Trash,
+                context.roots.scripts.join("Duplicate.sh"),
             ),
-        )
-        .unwrap();
-        let result = context.roots.app_state.join("result.txt");
-        apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+            action(
+                FileActionKind::Trash,
+                context.roots.images.as_ref().unwrap().join("OldA.png"),
+            ),
+            action(
+                FileActionKind::Trash,
+                context.roots.images.as_ref().unwrap().join("OldB.png"),
+            ),
+        ];
+        apply(&context, &actions, None, None).unwrap();
 
-        let inventory = Inventory::scan_with_options(&context, &InventoryOptions {
+        let inventory = Inventory::scan_with_options(
+            &context,
+            &InventoryOptions {
                 directory: "/data".to_owned(),
                 ..InventoryOptions::default()
             },
@@ -1238,37 +1267,22 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_cannot_move_the_app_launcher_or_an_outside_path() {
+    fn an_invalid_later_action_rejects_the_whole_operation_before_mutation() {
         let (_temp, context) = fixture();
         let launcher = context.roots.scripts.join("APP Manager.sh");
+        let managed = context.roots.scripts.join("Game.sh");
         let outside = context.roots.app_state.join("outside.sh");
         fs::write(&launcher, b"app").unwrap();
+        fs::write(&managed, b"game").unwrap();
         fs::write(&outside, b"outside").unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        fs::write(
-            &plan,
-            format!(
-                "TRASH\t{}\nTRASH\t{}\n",
-                launcher.display(),
-                outside.display()
-            ),
-        )
-        .unwrap();
-        let result = context.roots.app_state.join("result.txt");
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &launcher,
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
-        assert_eq!(outcome.failures, 2);
+        let actions = [
+            action(FileActionKind::Trash, managed.clone()),
+            action(FileActionKind::Trash, outside.clone()),
+        ];
+        let error = apply(&context, &actions, None, None).unwrap_err();
+        assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert!(launcher.exists());
+        assert!(managed.exists());
         assert!(outside.exists());
     }
 
@@ -1279,30 +1293,12 @@ mod tests {
         fs::write(&outside, b"keep").unwrap();
         let escaped = context.roots.trash.join("../state/outside");
         let deep_escaped = context.roots.trash.join("batch/../../state/outside");
-        let plan = context.roots.app_state.join("plan.txt");
-        fs::write(
-            &plan,
-            format!(
-                "DELETE_ITEM\t{}\nRESTORE_ITEM\t{}\n",
-                escaped.display(),
-                deep_escaped.display()
-            ),
-        )
-        .unwrap();
-        let result = context.roots.app_state.join("result.txt");
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
-        assert_eq!(outcome.failures, 2);
+        let actions = [
+            action(FileActionKind::DeleteItem, escaped),
+            action(FileActionKind::RestoreItem, deep_escaped),
+        ];
+        let error = apply(&context, &actions, None, None).unwrap_err();
+        assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert_eq!(fs::read(outside).unwrap(), b"keep");
     }
 
@@ -1385,36 +1381,21 @@ mod tests {
         fs::create_dir(&outside).unwrap();
         fs::write(outside.join("._keep"), b"metadata").unwrap();
         symlink(&outside, context.roots.game_dirs.join("Game/link")).unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        fs::write(&plan, "CLEAN_APPLEDOUBLE\t-\n").unwrap();
-        let result = context.roots.app_state.join("result.txt");
         let sizes = context.roots.app_state.join("sizes.tsv");
-        let progress = context.roots.app_state.join("progress.tsv");
+        let progress = ProgressChannel::default();
         fs::write(&sizes, "1\tstale\n").unwrap();
 
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: Some(&sizes),
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: Some(&progress),
-        })
-        .unwrap();
+        let actions = [action(FileActionKind::CleanAppleDouble, "-")];
+        let outcome = apply(&context, &actions, Some(&sizes), Some(progress.clone())).unwrap();
 
         assert_eq!(outcome.appledouble_removed, 1);
         assert!(!nested.join("._local").exists());
         assert!(nested.join("._real-directory").is_dir());
         assert!(outside.join("._keep").exists());
         assert!(!sizes.exists());
-        assert!(
-            fs::read_to_string(progress)
-                .unwrap()
-                .contains("\tcomplete\tAppleDouble\t")
-        );
+        let update = progress.take().unwrap();
+        assert_eq!(update.phase, "complete");
+        assert_eq!(update.runtime, "AppleDouble");
     }
 
     #[test]
@@ -1427,45 +1408,16 @@ mod tests {
         fs::write(&image, b"image").unwrap();
         fs::create_dir(&data).unwrap();
         fs::write(data.join("save.dat"), b"save").unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        let result = context.roots.app_state.join("result.txt");
-        fs::write(
-            &plan,
-            format!(
-                "TRASH\t{}\nTRASH\t{}\nTRASH\t{}\n",
-                script.display(),
-                image.display(),
-                data.display()
-            ),
-        )
-        .unwrap();
-        apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+        let trash_actions = [
+            action(FileActionKind::Trash, script.clone()),
+            action(FileActionKind::Trash, image.clone()),
+            action(FileActionKind::Trash, data.clone()),
+        ];
+        apply(&context, &trash_actions, None, None).unwrap();
         assert!(!script.exists() && !image.exists() && !data.exists());
 
-        fs::write(&plan, "RESTORE_TRASH\t-\n").unwrap();
-        apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+        let restore_actions = [action(FileActionKind::RestoreTrash, "-")];
+        apply(&context, &restore_actions, None, None).unwrap();
         assert!(script.exists() && image.exists() && data.join("save.dat").exists());
         assert!(direct_entries(&context.roots.trash).unwrap().is_empty());
     }
@@ -1478,32 +1430,14 @@ mod tests {
         fs::write(managed.join("data"), b"data").unwrap();
         let outside = context.roots.app_state.join("outside");
         fs::write(&outside, b"keep").unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        let result = context.roots.app_state.join("result.txt");
-        fs::write(
-            &plan,
-            format!(
-                "DELETE_MANAGED\t{}\nDELETE_MANAGED\t{}\n",
-                managed.display(),
-                outside.display()
-            ),
-        )
-        .unwrap();
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
-        assert!(!managed.exists());
+        let actions = [
+            action(FileActionKind::DeleteManaged, managed.clone()),
+            action(FileActionKind::DeleteManaged, outside.clone()),
+        ];
+        let error = apply(&context, &actions, None, None).unwrap_err();
+        assert!(matches!(error, FileOperationError::InvalidAction(_)));
+        assert!(managed.exists());
         assert!(outside.exists());
-        assert_eq!(outcome.failures, 1);
     }
 
     #[test]
@@ -1514,21 +1448,8 @@ mod tests {
         fs::create_dir_all(trashed.parent().unwrap()).unwrap();
         fs::write(&installed, b"new").unwrap();
         fs::write(&trashed, b"old").unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        let result = context.roots.app_state.join("result.txt");
-        fs::write(&plan, format!("RESTORE_ITEM\t{}\n", trashed.display())).unwrap();
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+        let actions = [action(FileActionKind::RestoreItem, trashed.clone())];
+        let outcome = apply(&context, &actions, None, None).unwrap();
         assert_eq!(outcome.failures, 1);
         assert_eq!(fs::read(&installed).unwrap(), b"new");
         assert_eq!(fs::read(&trashed).unwrap(), b"old");
@@ -1541,39 +1462,14 @@ mod tests {
         fs::create_dir_all(legacy.parent().unwrap()).unwrap();
         fs::write(&legacy, b"legacy").unwrap();
         let guessed_target = context.roots.scripts.join("Unknown.sh");
-        let plan = context.roots.app_state.join("plan.txt");
-        let result = context.roots.app_state.join("result.txt");
-
-        fs::write(&plan, format!("RESTORE_ITEM\t{}\n", legacy.display())).unwrap();
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
-        assert_eq!(outcome.failures, 1);
+        let restore_actions = [action(FileActionKind::RestoreItem, legacy.clone())];
+        let error = apply(&context, &restore_actions, None, None).unwrap_err();
+        assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert!(legacy.exists());
         assert!(!guessed_target.exists());
 
-        fs::write(&plan, format!("DELETE_ITEM\t{}\n", legacy.display())).unwrap();
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+        let delete_actions = [action(FileActionKind::DeleteItem, legacy.clone())];
+        let outcome = apply(&context, &delete_actions, None, None).unwrap();
         assert_eq!(outcome.failures, 0);
         assert!(!legacy.exists());
     }
@@ -1588,21 +1484,8 @@ mod tests {
         fs::create_dir_all(&bucket).unwrap();
         fs::write(bucket.join("Conflict.sh"), b"trash").unwrap();
         fs::write(bucket.join("Restored.sh"), b"restore").unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        fs::write(&plan, "RESTORE_TRASH\t-\n").unwrap();
-        let result = context.roots.app_state.join("result.txt");
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+        let actions = [action(FileActionKind::RestoreTrash, "-")];
+        let outcome = apply(&context, &actions, None, None).unwrap();
         assert_eq!(outcome.failures, 1);
         assert_eq!(fs::read(conflict).unwrap(), b"installed");
         assert_eq!(fs::read(bucket.join("Conflict.sh")).unwrap(), b"trash");
@@ -1619,21 +1502,8 @@ mod tests {
         let link = context.roots.trash.join("batch/images/Game.png");
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         symlink(&outside, &link).unwrap();
-        let plan = context.roots.app_state.join("plan.txt");
-        fs::write(&plan, format!("DELETE_ITEM\t{}\n", link.display())).unwrap();
-        let result = context.roots.app_state.join("result.txt");
-        let outcome = apply_file_plan(&FileApplyRequest {
-            context: &context,
-            plan: &plan,
-            result: &result,
-            size_cache: None,
-            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
-            self_port: "jenny92-appmanager",
-            privilege_command: None,
-            privilege_arguments: &[],
-            progress_file: None,
-        })
-        .unwrap();
+        let actions = [action(FileActionKind::DeleteItem, link.clone())];
+        let outcome = apply(&context, &actions, None, None).unwrap();
         assert_eq!(outcome.failures, 0);
         assert!(!path_exists(&link));
         assert_eq!(fs::read(outside).unwrap(), b"keep");
@@ -1687,16 +1557,16 @@ mod tests {
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
         let prefix = PathBuf::from(format!("{} --preserve-env=DEVICE", helper.display()));
         let explicit = vec!["--non-interactive".to_owned()];
+        let actions = [action(FileActionKind::CleanAppleDouble, "-")];
         let request = FileApplyRequest {
             context: &context,
-            plan: &context.roots.app_state.join("unused-plan"),
-            result: &context.roots.app_state.join("unused-result"),
+            actions: &actions,
             size_cache: None,
             self_launcher: &context.roots.scripts.join("APP Manager.sh"),
             self_port: "jenny92-appmanager",
             privilege_command: Some(&prefix),
             privilege_arguments: &explicit,
-            progress_file: None,
+            progress_channel: None,
         };
 
         run_privileged(

@@ -7,8 +7,6 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 bash "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
-cargo build --quiet --manifest-path "$ROOT/Cargo.toml" -p appmanager-cli
-HOST_APPMANAGER="$ROOT/target/debug/appmanager-cli"
 
 [ -x "$DIST/APP Manager.sh" ]
 [ -d "$APP" ]
@@ -87,7 +85,8 @@ file "$APP/bin/gptokeyb" | grep -Fq 'ARM aarch64'
 grep -Fq 'runtime/love.aarch64' "$DIST/APP Manager.sh"
 ! grep -Fq 'launcher-session' "$DIST/APP Manager.sh"
 [ "$(wc -l < "$DIST/APP Manager.sh" | tr -d ' ')" -le 120 ]
-grep -A2 -Fq 'indeterminate=true,stage=L("Preparing device information"' "$APP/love_ui/main.lua"
+grep -Fq 'model.native.start,"config-refresh-if-newer"' "$APP/love_ui/main.lua"
+! grep -Fq 'kit.set_busy(true,L("Preparing device information' "$APP/love_ui/main.lua"
 ! grep -Fq 'Event::ControllerButton' "$ROOT/crates/love-lite/src/main.rs"
 ! grep -Fq 'PAM_LOVE_LIBRARY_PATH' "$DIST/APP Manager.sh"
 ! grep -Fq 'resolved_love_library_path' "$DIST/APP Manager.sh"
@@ -142,38 +141,15 @@ for unexpected in "$APP"/*.pck "$APP"/hacksdl "$APP"/libs/*.squashfs "$APP"/stat
   [ ! -e "$unexpected" ] || { echo "portable app: unexpected distributable content: $unexpected" >&2; exit 1; }
 done
 
-# Launcher-relative discovery must survive frontend paths containing spaces and
-# must be able to report a missing managed environment before starting LÖVE.
+# Launcher-relative discovery must survive frontend paths containing spaces.
 SPACED="$TMP/Ports With Space"
 mkdir -p "$SPACED/images"
 cp "$DIST/APP Manager.sh" "$SPACED/APP Manager.sh"
 cp "$DIST/APP Manager.png" "$SPACED/APP Manager.png"
 cp -R "$APP" "$SPACED/jenny92-appmanager"
-health="$(PAM_PORTMASTER_DIR_OVERRIDE="$TMP/missing PortMaster" \
-  PAM_NATIVE_LAUNCHER_OVERRIDE="$SPACED/APP Manager.sh" \
-  "$HOST_APPMANAGER" --config-dir "$SPACED/jenny92-appmanager/config" launcher-session \
-  --source-dir "$SPACED" --launcher "$SPACED/APP Manager.sh" \
-  --app-root "$SPACED/jenny92-appmanager" -- --health-check)"
-case "$health" in
-  missing$'\t'*"$TMP/missing PortMaster") ;;
-  *) echo "portable app: unexpected health result: $health" >&2; exit 1 ;;
-esac
-printf '%s\tok\t2026.07\n' "$(date +%s)" > "$SPACED/jenny92-appmanager/state/portmaster-update.tsv"
-PAM_SOURCE_DIR="$SPACED" PAM_PORTMASTER_DIR_OVERRIDE="$TMP/missing PortMaster" \
-  PAM_NATIVE_LAUNCHER_OVERRIDE="$SPACED/APP Manager.sh" \
-  "$HOST_APPMANAGER" --config-dir "$SPACED/jenny92-appmanager/config" launcher-session \
-  --source-dir "$SPACED" --launcher "$SPACED/APP Manager.sh" \
-  --app-root "$SPACED/jenny92-appmanager" -- --write-env
-grep -Fq $'\tok\t2026.07' "$SPACED/jenny92-appmanager/state/portmaster-update.tsv"
-python3 - "$SPACED/jenny92-appmanager/state/env.json" <<'PY'
-import json, sys
-env=json.load(open(sys.argv[1], encoding="utf-8"))
-assert env["update_status"] == "ok"
-assert env["portmaster_latest"] == "2026.07"
-PY
 
 # Replace the foreign-architecture executable with a recorder. This tests only
-# the Shell bootstrap boundary; Rust session behavior is covered above.
+# the Shell bootstrap boundary; Rust behavior is covered by native tests.
 rm -f "$SPACED/jenny92-appmanager/runtime/love.aarch64"
 cat > "$SPACED/jenny92-appmanager/runtime/love.aarch64" <<'LOVE'
 #!/bin/sh

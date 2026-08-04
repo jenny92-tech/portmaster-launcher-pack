@@ -4,7 +4,7 @@ function Operations.new(model)
     local kit,L=model.kit,model.L
     local env,pages=model.env,model.pages
     local self={confirm_plan=nil,confirm_return=pages.HOME,task=nil,background_task=nil,
-        pending_update=nil,forced_update_pending=false}
+        pending_update=nil,forced_update_pending=false,config_restart_pending=false}
     local page_builders,environment
 
     function self.bind(builders,environment_pages)
@@ -36,12 +36,6 @@ function Operations.new(model)
 
     function self.request_forced_update()
         self.forced_update_pending=true
-        -- Reserve the foreground lane while the automatic check drains. This
-        -- prevents an install or file mutation from overtaking the explicit
-        -- update request before its forced check can start.
-        if not self.task then
-            self.task={id=0,kind="update-check-wait",elapsed=0,poll=0,timeout=35}
-        end
     end
 
     function self.try_start_forced_update()
@@ -56,11 +50,29 @@ function Operations.new(model)
     function self.finish_background_update(update)
         self.background_task=nil
         if self.forced_update_pending then
-            if self.task and self.task.kind=="update-check-wait" then self.task=nil end
             self.try_start_forced_update()
             return
         end
         self.accept_background_update(update)
+    end
+
+    function self.queue_config_restart()
+        self.config_restart_pending=true
+    end
+
+    function self.maybe_show_config_restart()
+        if not self.config_restart_pending or self.task or self.background_task then return false end
+        if kit.debug_busy().busy or kit.debug_dialog().open or kit.debug_guide().open then return false end
+        self.config_restart_pending=false
+        kit.dialog({
+            title=L("Device support updated","设备适配已更新"),
+            message=L(
+                "Restart Port App Manager to use the updated device settings.",
+                "重新打开 Port App Manager 后，将使用新的设备适配设置。"),
+            confirm=L("Exit now","现在退出"),cancel=L("Later","稍后"),
+            danger=false,on_confirm=kit.quit,
+        })
+        return true
     end
 
     local function rebuild_return_page(return_page)
@@ -99,7 +111,11 @@ function Operations.new(model)
         if completed_task and completed_task.kind=="portmaster" then
             -- The blocking result dialog below already gives the next step.
         elseif failed then
-            kit.toast(L("The operation failed. Please try again.","操作失败，请重试。"),{kind="error"})
+            if tostring(data.message or ""):find("selection changed",1,true) then
+                kit.toast(L("Files changed. Rescan and try again.","文件已发生变化，请重新扫描后再试。"),{kind="warning"})
+            else
+                kit.toast(L("The operation failed. Please try again.","操作失败，请重试。"),{kind="error"})
+            end
         elseif completed_task and completed_task.kind=="appledouble" then
             local count=tonumber(result.appledouble_removed) or 0
             kit.toast(L(string.format("Removed %d ._Files.",count),
