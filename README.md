@@ -11,6 +11,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 |---|---|---|---|---|
 | [`hk`](ports/hk) | Hollow Knight | Unity 2020 Mono | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`heishenhua`](ports/heishenhua) | Wukong pixel edition | Unity 2021.3 IL2CPP | LÖVE 11.5 | TrimUI |
+| [`sunkendragon`](ports/sunkendragon) | 龙沉异世录 (Sunken Dragon) | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 (experimental) |
 | [`terraria`](ports/terraria) | Terraria | Unity 2021.3 IL2CPP | LÖVE 11.5 | PortMaster aarch64 |
 | [`vampiresurvivors114`](ports/vampiresurvivors114) | Vampire Survivors 1.14.111 | Unity 6 IL2CPP + PAD | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |

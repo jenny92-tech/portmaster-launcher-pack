@@ -1,0 +1,42 @@
+{
+  "name": "sunkendragon",
+  "title": "龙沉异世录",
+  "engine": "Unity 2021.3 (IL2CPP)",
+  "runtime": "Bogodroid unityloader",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "devices": [
+    "PortMaster aarch64 (experimental)"
+  ],
+  "language": [
+    "zh-CN"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "sunkendragon",
+  "script": "L_龙沉异世录[中].sh",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
+  "portmaster": {
+    "desc": "龙沉异世录实验性 Bogodroid 移植；需要玩家自行购买并复制 Windows 正版游戏。",
+    "genres": [
+      "rpg"
+    ],
+    "availability": "paid",
+    "exp": true,
+    "rtr": false,
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "L_龙沉异世录[中].png"
+      ]
+    }
+  },
+  "depends_on": [
+    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "PortMaster runtimes/love_11.5"
+  ]
+}

@@ -1,0 +1,92 @@
+#!/bin/bash
+# PORTMASTER: sunkendragon, L_龙沉异世录[中].sh
+#
+# Stage-0: migrate resources from a player-owned Windows copy in GameData/.
+# Stage-1: shared LÖVE settings UI writes launch_config.env.
+# Stage-2: apply resolution/button choices and run the Bogodroid Unity loader.
+
+PORT_NAME="sunkendragon"; LOG_PREFIX="[SDR-LOVE]"
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_artwork.sh"
+#@KIT-END
+portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
+source "$controlfolder/control.txt"
+[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+get_controls
+
+if [ -n "$directory" ] && [ -d "/$directory/ports/$PORT_NAME" ]; then
+  GAMEDIR="/$directory/ports/$PORT_NAME"
+else
+  GAMEDIR="/sdcard/roms/ports/$PORT_NAME"
+fi
+portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
+CONFDIR="$GAMEDIR/conf"
+cd "$GAMEDIR" || exit 1
+exec > "$GAMEDIR/log.txt" 2>&1
+echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
+mkdir -p \
+  "$CONFDIR" \
+  "$GAMEDIR/cache"
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_common.sh"
+source "$KIT/launcher_unity_common.sh"
+#@KIT-END
+
+resolve_port_toml
+
+sdr_core_files_ok() {
+  local f
+  for f in \
+    gamefiles/lib/arm64-v8a/libil2cpp.so \
+    gamefiles/lib/arm64-v8a/libunity.so \
+    gamefiles/lib/arm64-v8a/libmain.so \
+    gamefiles/assets/bin/Data/Managed/Metadata/global-metadata.dat \
+    gamefiles/assets/bin/Data/globalgamemanagers \
+    gamefiles/.gamedata_ready
+  do
+    [ -f "$GAMEDIR/$f" ] || return 1
+  done
+  return 0
+}
+
+# Migrate before showing settings. Missing GameData is not fatal here: the
+# LÖVE prelaunch gate will explain what the player needs to copy.
+if ! sdr_core_files_ok && [ -x "$GAMEDIR/patch/setup-gamedata.sh" ]; then
+  echo "$LOG_PREFIX preparing resources from player-owned GameData"
+  GAMEDIR="$GAMEDIR" "$GAMEDIR/patch/setup-gamedata.sh" || \
+    echo "$LOG_PREFIX GameData preparation incomplete; launcher will show guidance"
+fi
+
+run_love_launcher_ui
+
+SDR_ENV="$LAUNCH_ENV"
+if [ -f "$SDR_ENV" ]; then
+  source "$SDR_ENV"
+  echo "$LOG_PREFIX env: ${SDR_WIDTH}x${SDR_HEIGHT} swap_ab=$SDR_SWAP_AB swap_xy=$SDR_SWAP_XY"
+
+  if [ "$SDR_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
+  if [ "$SDR_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
+else
+  echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
+fi
+
+resolve_display_resolution "${SDR_WIDTH:-auto}" "${SDR_HEIGHT:-auto}"
+apply_display_resolution "$PORT_TOML"
+
+if ! sdr_core_files_ok; then
+  echo "$LOG_PREFIX core files missing at launch time"
+  exit 1
+fi
+
+# Steamworks.NET P/Invoke asks for "steam_api64" and separately for
+# "sdkencryptedappticket64"; Bogodroid loads both approved ARM64 companions
+# from these native search paths.
+export LD_LIBRARY_PATH="$GAMEDIR:$GAMEDIR/gamefiles/lib/arm64-v8a${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+run_unity_game "$PORT_TOML"

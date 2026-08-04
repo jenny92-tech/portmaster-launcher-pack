@@ -1,0 +1,30 @@
+龙沉异世录 Launcher — License
+
+Copyright (c) 2026 jenny92-tech <jennyliu90223@gmail.com>
+
+The original launcher code, build scripts, and documentation in this port are
+licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International (CC BY-NC-SA 4.0).
+
+You may share and adapt that material with attribution, for non-commercial
+purposes, provided derivatives use the same or a compatible license. The full
+license text is at:
+
+  https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+Third-party components, including Bogodroid unityloader, retain their own
+licenses.
+
+IMPORTANT SEPARATE NOTICE — Game files are NOT covered
+
+This license grants no rights to the underlying Sunken Dragon game, its code,
+assemblies, art, audio, scripts, data, or compiled resources. All game rights
+remain with their respective copyright holders.
+
+The installer requires a player-supplied Windows copy and migrates resources
+locally without modifying the original GameData input. Large game assets are
+not included in the launcher package. The ARM64 compatibility binaries and
+matching metadata retain whatever rights apply to their underlying Unity/game
+sources and are not relicensed by this launcher license. Users and distributors
+remain responsible for obtaining, modifying, and distributing every component
+lawfully.
