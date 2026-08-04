@@ -22,7 +22,8 @@ function Environment.new(model,operations,pages_ui)
             if env.portmaster_health=="damaged" then return L("Managed by system · Needs repair","系统管理 · 需要修复") end
             return L("Managed by system · Not available","系统管理 · 当前不可用")
         end
-        if env.portmaster_health=="healthy" then return L("Healthy","正常") end
+        if env.portmaster_health=="healthy" and env.portmaster_python_ok~=false then return L("Healthy","正常") end
+        if env.portmaster_health=="healthy" then return L("Healthy · Python issue","正常 · Python 问题") end
         if env.portmaster_health=="damaged" then return L("Needs repair","需要修复") end
         return L("Not installed","未安装")
     end
@@ -110,6 +111,10 @@ function Environment.new(model,operations,pages_ui)
     end
 
     function self.start_update_check()
+        if operations.task then
+            kit.toast(L("Another task is still running. Please wait.",
+                "其他任务仍在进行，请稍候。"),{kind="info"}); return
+        end
         if system_managed() then
             kit.toast(L("PortMaster updates are managed by the system.","PortMaster 更新由系统管理。"),{kind="info"}); return
         end
@@ -152,6 +157,16 @@ function Environment.new(model,operations,pages_ui)
             rows[#rows+1]=note(L("Maintenance","维护方式"),
                 L("PortMaster is maintained by the system. Runtime repair and game management are still available here.",
                     "PortMaster 由系统维护。这里仍可修复 Runtime 和管理游戏。"),"manage:system")
+        elseif env.portmaster_health=="healthy" and env.portmaster_python_ok==false then
+            rows[#rows+1]=note(L("Python environment","Python 环境"),
+                L(string.format("The system Python cannot import: %s. The official PortMaster app may not work, but game management and Runtime repair are still available.",
+                    env.portmaster_python_imports or "unknown"),
+                string.format("系统 Python 无法导入：%s。官方 PortMaster APP 可能无法使用，但游戏管理和 Runtime 修复仍可正常使用。",
+                    env.portmaster_python_imports or "未知")),"manage:python")
+        elseif env.portmaster_health=="damaged" then
+            rows[#rows+1]=note(L("Core files","核心文件"),
+                L("Some PortMaster core files are missing or damaged. Game management is still available.",
+                    "部分 PortMaster 核心文件丢失或损坏。游戏管理功能仍可正常使用。"),"manage:damaged")
         end
         local actions={}
         if not managed and can_update() then
@@ -175,15 +190,12 @@ function Environment.new(model,operations,pages_ui)
     end
 
     function self.build_repair_gate()
-        local damaged=env.portmaster_health=="damaged"
-        local page_title=damaged and L("Repair PortMaster","修复 PortMaster") or
-            L("PortMaster required","需要安装 PortMaster")
+        local page_title=L("PortMaster not found","未找到 PortMaster")
         local rows={
-            note(L("Status","状态"),damaged and
-                L("PortMaster needs repair. Repair it to continue.","PortMaster 需要修复，请先处理。") or
-                L("PortMaster is not installed. Install it to continue.","未安装 PortMaster，请先安装。"),"repair:note"),
+            note(L("Status","状态"),
+                L("The PortMaster directory was not found. Install it to manage Port games.","未找到 PortMaster 目录，请安装后再管理 Port 游戏。"),"repair:note"),
         }
-        if can_install() then rows[#rows+1]=button(L("Repair PortMaster","修复 PortMaster"),self.repair_environment,{id="repair:open"})
+        if can_install() then rows[#rows+1]=button(L("Install PortMaster","安装 PortMaster"),self.repair_environment,{id="repair:open"})
         else rows[#rows+1]=note(L("Install","安装"),L(
             "PortMaster installation is not available on this device.",
             "当前设备暂不支持安装 PortMaster。"),"repair:unavailable") end

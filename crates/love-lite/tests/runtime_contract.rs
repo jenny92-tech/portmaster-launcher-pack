@@ -550,8 +550,9 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
                             assert!(matches!(payload, Some(mlua::Value::Table(_))));
                             response.set("value", 1u64)?;
                         }
-                        // A malformed native value must be caught by app_native
-                        // and converted into a task error by main.lua.
+                        // A malformed native value must be caught by app_native.
+                        // main.lua must keep the task blocked and retry instead
+                        // of pretending a native mutation has completed.
                         "poll" => response.set(
                             "value",
                             mlua::Value::LightUserData(mlua::LightUserData(std::ptr::null_mut())),
@@ -569,6 +570,16 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
         engine
             .update_and_draw(0.2)
             .unwrap_or_else(|error| panic!("draw App Manager at {width}x{height}: {error:#}"));
+        let busy: bool = engine
+            .runtime
+            .lua
+            .load("return require('kit').debug_busy().busy")
+            .eval()
+            .expect("read App Manager busy state");
+        assert!(
+            busy,
+            "a native poll protocol error must not unlock an unfinished task"
+        );
         assert!(
             engine.frame_rgba().iter().any(|value| *value != 0),
             "App Manager rendered an empty {width}x{height} frame"
@@ -662,4 +673,195 @@ fn runtime_repair_completion_rebuilds_the_home_and_runtime_pages() {
     )
     .exec()
     .expect("exercise Runtime completion page refresh");
+}
+
+#[test]
+fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
+    let lua = mlua::Lua::new();
+    let app_lua =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/love");
+    lua.globals()
+        .set("APP_LUA", app_lua.to_string_lossy().as_ref())
+        .expect("publish App Manager Lua directory");
+    lua.load(
+        r#"
+        package.path=APP_LUA.."/?.lua;"..package.path
+
+        local captured=nil
+        local kit={_junk_rows={}}
+        function kit.get_state() return {ui_lang="en",onboarding_seen="1"} end
+        function kit.checkbox(label,opts)
+            opts.kind="checkbox"; opts.label=label
+            opts.on_toggle=opts.on_toggle or opts.on_change
+            return opts
+        end
+        function kit.textview(label,value,opts)
+            opts=opts or {}; opts.kind="textview"; opts.label=label; opts.value=value
+            return opts
+        end
+        function kit.section(label,opts)
+            opts=opts or {}; opts.kind="section"; opts.label=label
+            return opts
+        end
+        function kit.button(label,action,opts)
+            opts=opts or {}; opts.kind="button"; opts.label=label; opts.action=action
+            return opts
+        end
+        function kit.set_page(_,_,rows,opts)
+            kit._junk_rows=rows
+            kit.sidebar=opts.sidebar
+        end
+        function kit.back_page() end
+
+        local report={
+            ports={
+                {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",images={}},
+                {script="B_Game.sh",path="/scripts/B_Game.sh",dir="Shared",images={}},
+            },
+            refcount={Shared=2},orphan_dirs={},orphan_images={},dead_scripts={},
+        }
+        local model={
+            kit=kit,
+            L=function(en,zh) return {en=en,zh=zh} end,
+            env={
+                scripts_dir="/scripts",gamedirs_dir="/data",
+                capability_cleanup_appledouble=false,
+            },
+            report=report,pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6},
+            ensure_report=function() return report end,
+            display_name=function(name)
+                return (name:gsub("%.[^.]+$",""):gsub("^[A-Z]_",""))
+            end,
+            join=function(parts) return table.concat(parts," · ") end,
+            selected_count=function(values)
+                local count=0
+                for _,value in pairs(values) do if value then count=count+1 end end
+                return count
+            end,
+            dynamic_count=function(_,_,values)
+                return function()
+                    local count=0
+                    for _,value in pairs(values) do if value then count=count+1 end end
+                    return tostring(count)
+                end
+            end,
+            missing_runtime=function() return "" end,
+            path_size=function() return 0 end,
+            human=function() return "0 B" end,
+            runtime_issue_count=function() return 0 end,
+            update_state=function() return "unknown" end,
+            trash_items=function() return {} end,
+        }
+        local operations={
+            show_confirm=function(_,plan,labels)
+                captured={plan=plan,labels=labels}
+            end,
+            refresh_inventory=function() end,
+        }
+        local pages=require("app_pages").new(model,operations)
+        pages.build_junk()
+
+        local first,second
+        for _,row in ipairs(kit._junk_rows) do
+            if row.kind=="checkbox" and row.meta and row.meta.path=="/scripts/A_Game.sh" then first=row end
+            if row.kind=="checkbox" and row.meta and row.meta.path=="/scripts/B_Game.sh" then second=row end
+        end
+        assert(first and second,"both shared launchers must be individually selectable")
+        assert(first.label=="A_Game.sh" and second.label=="B_Game.sh",
+            "shared launchers must show their exact filenames")
+
+        second.on_toggle(true,second.meta,second)
+        kit.sidebar[1].action()
+        assert(captured and #captured.plan==1)
+        assert(captured.plan[1].arg=="/scripts/B_Game.sh",
+            "the selected launcher path must be the path sent to Rust")
+
+        -- If a refreshed inventory removes the selected item, preserving page
+        -- focus must not preserve a now-invisible destructive action.
+        captured=nil
+        report.ports={
+            {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",images={}},
+        }
+        report.refcount={Shared=1}
+        pages.build_junk(true)
+        kit.sidebar[1].action()
+        assert(captured==nil,
+            "an item no longer present on the page must not remain in the delete plan")
+
+        -- A display name without an authoritative inventory path must fail
+        -- closed. Never reconstruct a destructive path from root + name.
+        report.ports={}
+        report.refcount={}
+        report.entries={}
+        report.orphan_dirs={"Unverified"}
+        captured=nil
+        pages.build_junk()
+        kit.sidebar[2].action() -- Select all.
+        kit.sidebar[1].action()
+        assert(captured==nil,
+            "an unverified orphan name must not produce a destructive action")
+
+        -- A verified orphan keeps the exact path supplied by the Rust
+        -- inventory even when its display name suggests another root.
+        report.entries={{
+            root="game-dirs",name="Verified",path="/authoritative/Verified",
+        }}
+        report.orphan_dirs={"Verified"}
+        captured=nil
+        pages.build_junk()
+        kit.sidebar[2].action() -- Select all.
+        kit.sidebar[1].action()
+        assert(captured and #captured.plan==1)
+        assert(captured.plan[1].arg=="/authoritative/Verified")
+        assert(captured.plan[1].arg~="/data/Verified",
+            "orphan cleanup must use the inventory path, not root + display name")
+
+        -- The Home page uses friendly names normally. If two launcher
+        -- filenames collapse to the same friendly name, show the exact names
+        -- and keep uninstall bound to the selected inventory path.
+        report.ports={
+            {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",
+                data_path="/authoritative/Shared",images={}},
+            {script="B_Game.sh",path="/scripts/B_Game.sh",dir="Shared",
+                data_path="/authoritative/Shared",images={}},
+        }
+        report.refcount={Shared=2}
+        report.orphan_dirs={}
+        model.env.capability_manage_ports=true
+        model.env.capability_trash=true
+        model.env.capability_leftovers=false
+        model.env.capability_repair_runtimes=false
+        model.env.portmaster_management="app"
+        pages.bind_environment({build_manage=function() end})
+        captured=nil
+        pages.build_home()
+        first,second=nil,nil
+        for _,row in ipairs(kit._junk_rows) do
+            if row.kind=="checkbox" and row.id=="home:/scripts/A_Game.sh" then first=row end
+            if row.kind=="checkbox" and row.id=="home:/scripts/B_Game.sh" then second=row end
+        end
+        assert(first and second)
+        assert(first.label=="A_Game.sh" and second.label=="B_Game.sh",
+            "colliding friendly names must be disambiguated")
+        second.on_toggle(true,second.meta,second)
+        kit.sidebar[1].action()
+        assert(captured and #captured.plan==1)
+        assert(captured.plan[1].arg=="/scripts/B_Game.sh",
+            "Home uninstall must use the selected inventory path")
+
+        captured=nil
+        first.on_toggle(true,first.meta,first)
+        kit.sidebar[1].action()
+        assert(captured and #captured.plan==3)
+        local saw_data=false
+        for _,action in ipairs(captured.plan) do
+            assert(action.arg~="/data/Shared",
+                "Home uninstall must never reconstruct a data path from its display name")
+            if action.arg=="/authoritative/Shared" then saw_data=true end
+        end
+        assert(saw_data,"Home uninstall must use the authoritative inventory data path")
+        "#,
+    )
+    .exec()
+    .expect("exercise exact shared launcher cleanup selection");
 }

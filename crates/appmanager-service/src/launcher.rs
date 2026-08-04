@@ -188,6 +188,10 @@ struct Session {
     config_refresh_status: Mutex<Option<String>>,
 }
 
+fn inventory_available(management: &ManagementMode, health: &str) -> bool {
+    management == &ManagementMode::System || matches!(health, "healthy" | "damaged")
+}
+
 pub(crate) fn run(request: Request) -> ExitCode {
     let mode = match Mode::parse(&request.entry_arguments) {
         Ok(mode) => mode,
@@ -987,7 +991,20 @@ impl Session {
             return Ok("missing");
         }
         let report = evaluate_health(&self.resolved.resolution).map_err(display_error)?;
-        let python_ready = match report.python_mode.as_str() {
+        Ok(match report.status {
+            HealthStatus::Unresolved => "missing",
+            HealthStatus::Damaged => "damaged",
+            HealthStatus::Healthy => "healthy",
+        })
+    }
+
+    fn python_health(&self) -> (bool, String) {
+        let report = match evaluate_health(&self.resolved.resolution) {
+            Ok(report) => report,
+            Err(_) => return (false, String::new()),
+        };
+        let imports = report.python_imports.join(",");
+        let ready = match report.python_mode.as_str() {
             "system" => python_imports_ready(&report.python_imports),
             "runtime_mount" => report
                 .python_runtime_image
@@ -996,12 +1013,7 @@ impl Session {
             "" => true,
             _ => false,
         };
-        Ok(match report.status {
-            HealthStatus::Unresolved => "missing",
-            HealthStatus::Damaged => "damaged",
-            HealthStatus::Healthy if python_ready => "healthy",
-            HealthStatus::Healthy => "damaged",
-        })
+        (ready, imports)
     }
 
     fn core_version(&self) -> Option<String> {
@@ -1038,7 +1050,6 @@ impl Session {
             .into_iter()
             .map(str::to_owned)
             .collect(),
-            self_port: Some(PORT_NAME.into()),
             directory: self.launcher_directory().display().to_string(),
             controlfolder: self
                 .portmaster_root()
@@ -1071,7 +1082,7 @@ impl Session {
     }
 
     fn refresh_inventory_if_available(&self, health: &str) -> Result<(), String> {
-        if self.resolved.context.management == ManagementMode::System || health == "healthy" {
+        if inventory_available(&self.resolved.context.management, health) {
             self.refresh_inventory()
         } else {
             let _ = fs::remove_file(&self.paths.inventory);
@@ -1081,6 +1092,7 @@ impl Session {
 
     fn env_document(&self) -> Result<Value, String> {
         let health = self.health_status()?;
+        let (python_ok, python_imports) = self.python_health();
         let (update_checked, update_status, latest) = read_update_cache(&self.paths.update_cache);
         let portmaster = self.portmaster_root();
         let libs = self.resolved.context.roots.libs.as_deref();
@@ -1120,6 +1132,8 @@ impl Session {
             "size_cache_ready": self.paths.size_cache.is_file(),
             "app_root": self.paths.app_root,
             "portmaster_health": health,
+            "portmaster_python_ok": python_ok,
+            "portmaster_python_imports": python_imports,
             "portmaster_version": self.core_version().unwrap_or_default(),
             "portmaster_target": path_string(portmaster),
             "portmaster_release_channel": self.resolved.resolution.source_route,
@@ -1190,9 +1204,7 @@ impl Session {
 
     fn embedded_snapshot(&self, reusable_inventory: Option<Value>) -> Result<Value, String> {
         let health = self.health_status()?;
-        let inventory = if self.resolved.context.management == ManagementMode::System
-            || health == "healthy"
-        {
+        let inventory = if inventory_available(&self.resolved.context.management, health) {
             match reusable_inventory {
                 Some(value) => value,
                 None => serde_json::to_value(self.inventory_snapshot()?).map_err(display_error)?,
@@ -2231,6 +2243,14 @@ fn exit_code(code: u8) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn damaged_app_managed_environment_still_exposes_game_inventory() {
+        assert!(inventory_available(&ManagementMode::App, "healthy"));
+        assert!(inventory_available(&ManagementMode::App, "damaged"));
+        assert!(!inventory_available(&ManagementMode::App, "missing"));
+        assert!(inventory_available(&ManagementMode::System, "missing"));
+    }
 
     #[test]
     fn legacy_operation_rows_are_published_as_structured_data() {

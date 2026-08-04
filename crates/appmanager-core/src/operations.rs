@@ -418,15 +418,17 @@ fn restore_all(
     let mut first_error = None;
     for batch in direct_entries(&request.context.roots.trash)? {
         if !is_real_directory(&batch) {
+            remember_error(
+                &mut first_error,
+                "legacy Trash item has no recorded restore destination".to_owned(),
+            );
             continue;
         }
-        let mut structured = false;
         for bucket in ["scripts", "script-images", "images", "data"] {
             let directory = batch.join(bucket);
             if !is_real_directory(&directory) {
                 continue;
             }
-            structured = true;
             for item in direct_entries(&directory)? {
                 if let Err(error) = restore_to_bucket(request, &item, bucket, mutations) {
                     remember_error(&mut first_error, error);
@@ -435,26 +437,19 @@ fn restore_all(
             remove_empty(&directory);
         }
         for item in direct_entries(&batch)? {
-            if structured
-                && item
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| {
-                        matches!(name, "scripts" | "script-images" | "images" | "data")
-                    })
+            if item
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    matches!(name, "scripts" | "script-images" | "images" | "data")
+                })
             {
                 continue;
             }
-            let bucket = if is_real_directory(&item) {
-                "data"
-            } else if extension_is(&item, "sh") {
-                "scripts"
-            } else {
-                "images"
-            };
-            if let Err(error) = restore_to_bucket(request, &item, bucket, mutations) {
-                remember_error(&mut first_error, error);
-            }
+            remember_error(
+                &mut first_error,
+                "legacy Trash item has no recorded restore destination".to_owned(),
+            );
         }
         remove_empty(&batch);
     }
@@ -472,16 +467,12 @@ fn restore_selected(
     source: &Path,
     mutations: &mut Vec<Mutation>,
 ) -> Result<(), String> {
-    let bucket = validate_trash_item(&request.context.roots.trash, source, false)?;
+    validate_trash_item(&request.context.roots.trash, source, false)?;
+    let bucket = structured_trash_bucket(&request.context.roots.trash, source)?;
     if !path_exists(source) {
         return Ok(());
     }
-    let bucket = if bucket == "scripts" && is_real_directory(source) {
-        "data"
-    } else {
-        bucket.as_str()
-    };
-    restore_to_bucket(request, source, bucket, mutations)?;
+    restore_to_bucket(request, source, &bucket, mutations)?;
     cleanup_trash_parents(&request.context.roots.trash, source);
     Ok(())
 }
@@ -670,6 +661,24 @@ fn validate_trash_item(root: &Path, path: &Path, deleting: bool) -> Result<Strin
                 ))
     {
         return Err("Trash containers cannot be deleted as items".to_owned());
+    }
+    Ok(bucket)
+}
+
+fn structured_trash_bucket(root: &Path, path: &Path) -> Result<String, String> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "path is outside Trash".to_owned())?;
+    let parts = relative.components().collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return Err("legacy Trash item has no recorded restore destination".to_owned());
+    }
+    let bucket = parts[1].as_os_str().to_string_lossy().into_owned();
+    if !matches!(
+        bucket.as_str(),
+        "scripts" | "script-images" | "images" | "data"
+    ) {
+        return Err("unknown Trash bucket".to_owned());
     }
     Ok(bucket)
 }
@@ -1507,6 +1516,50 @@ mod tests {
         assert_eq!(outcome.failures, 1);
         assert_eq!(fs::read(&installed).unwrap(), b"new");
         assert_eq!(fs::read(&trashed).unwrap(), b"old");
+    }
+
+    #[test]
+    fn legacy_trash_items_can_be_deleted_but_are_never_restored_by_guessing() {
+        let (_temp, context) = fixture();
+        let legacy = context.roots.trash.join("old-batch/Unknown.sh");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, b"legacy").unwrap();
+        let guessed_target = context.roots.scripts.join("Unknown.sh");
+        let plan = context.roots.app_state.join("plan.txt");
+        let result = context.roots.app_state.join("result.txt");
+
+        fs::write(&plan, format!("RESTORE_ITEM\t{}\n", legacy.display())).unwrap();
+        let outcome = apply_file_plan(&FileApplyRequest {
+            context: &context,
+            plan: &plan,
+            result: &result,
+            size_cache: None,
+            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
+            self_port: "jenny92-appmanager",
+            privilege_command: None,
+            privilege_arguments: &[],
+            progress_file: None,
+        })
+        .unwrap();
+        assert_eq!(outcome.failures, 1);
+        assert!(legacy.exists());
+        assert!(!guessed_target.exists());
+
+        fs::write(&plan, format!("DELETE_ITEM\t{}\n", legacy.display())).unwrap();
+        let outcome = apply_file_plan(&FileApplyRequest {
+            context: &context,
+            plan: &plan,
+            result: &result,
+            size_cache: None,
+            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
+            self_port: "jenny92-appmanager",
+            privilege_command: None,
+            privilege_arguments: &[],
+            progress_file: None,
+        })
+        .unwrap();
+        assert_eq!(outcome.failures, 0);
+        assert!(!legacy.exists());
     }
 
     #[test]

@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::context::{CapabilityState, ResolvedDeviceContext};
 use crate::path::{ManagedRoot, PathSafetyError};
 
-pub const INVENTORY_SCHEMA: u32 = 2;
+pub const INVENTORY_SCHEMA: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -53,7 +53,6 @@ pub struct InventoryOptions {
     pub scan_script_images: bool,
     pub ignore_dirs: BTreeSet<String>,
     pub ignore_scripts: BTreeSet<String>,
-    pub self_port: Option<String>,
     pub directory: String,
     pub controlfolder: String,
     pub home: String,
@@ -65,7 +64,6 @@ impl Default for InventoryOptions {
             scan_script_images: false,
             ignore_dirs: BTreeSet::new(),
             ignore_scripts: BTreeSet::new(),
-            self_port: None,
             directory: String::new(),
             controlfolder: String::new(),
             home: "/root".to_owned(),
@@ -79,6 +77,7 @@ pub struct PortFact {
     pub script: String,
     pub path: PathBuf,
     pub dir: String,
+    pub data_path: PathBuf,
     pub claimed_dir: String,
     pub dir_exists: bool,
     pub images: Vec<ImageFact>,
@@ -238,10 +237,11 @@ impl Inventory {
         }
         for port in &self.ports {
             rows.push(format!(
-                "port\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "port\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 port.script,
                 port.path.display(),
                 port.dir,
+                port.data_path.display(),
                 port.claimed_dir,
                 u8::from(port.dir_exists),
                 port.runtime,
@@ -413,17 +413,13 @@ fn scan_facts(
                 continue;
             }
         };
-        if options
-            .self_port
-            .as_ref()
-            .is_some_and(|name| mentions(&text, name))
-        {
-            continue;
-        }
         let (claimed_dir, dir_exists) = port_dir_of(&text, &real_dirs, &seed, &options.ignore_dirs);
         let (refs, uncertain) =
             parsed_existing_dir_refs(&text, &real_dirs, &seed, &options.ignore_dirs);
-        parsed_dir_refs.extend(refs);
+        parsed_dir_refs.extend(refs.iter().cloned());
+        for referenced_dir in &refs {
+            *refcount.entry(referenced_dir.clone()).or_default() += 1;
+        }
         if uncertain {
             orphan_classification_uncertain = true;
             diagnostics.push(format!(
@@ -431,14 +427,30 @@ fn scan_facts(
                 entry.name
             ));
         }
-        if dir_exists {
-            *refcount.entry(claimed_dir.clone()).or_default() += 1;
-        } else if !claimed_dir.is_empty() {
+        if !dir_exists && !claimed_dir.is_empty() && !uncertain {
             dead_scripts.push(DeadScriptFact {
                 script: entry.name.clone(),
                 missing_dir: claimed_dir.clone(),
             });
         }
+        let data_path = if dir_exists
+            && !uncertain
+            && refs.len() == 1
+            && refs.contains(&claimed_dir)
+        {
+            data_dir_paths
+                .get(&claimed_dir)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            if dir_exists {
+                diagnostics.push(format!(
+                    "data directory association is not unique for script {}",
+                    entry.name
+                ));
+            }
+            PathBuf::new()
+        };
         let shell_runtimes = runtimes_of(&text);
         let runtimes = if dir_exists {
             let declaration = port_json_cache
@@ -472,6 +484,7 @@ fn scan_facts(
             } else {
                 String::new()
             },
+            data_path,
             claimed_dir,
             dir_exists,
             images: images_by_stem
@@ -1106,25 +1119,6 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
-fn mentions(text: &str, name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let mut offset = 0;
-    while let Some(found) = text[offset..].find(name) {
-        let start = offset + found;
-        let end = start + name.len();
-        let word = |byte: u8| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-');
-        let before = start == 0 || !word(text.as_bytes()[start - 1]);
-        let after = end == text.len() || !word(text.as_bytes()[end]);
-        if before && after {
-            return true;
-        }
-        offset = start + 1;
-    }
-    false
-}
-
 fn stem(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(stem, _)| stem)
 }
@@ -1433,6 +1427,10 @@ mod tests {
         assert_eq!(snapshot.ports.len(), 2);
         assert_eq!(snapshot.ports[0].script, "Alpha.sh");
         assert_eq!(snapshot.ports[0].dir, "GameA");
+        assert_eq!(
+            snapshot.ports[0].data_path,
+            fixture.context.roots.game_dirs.join("GameA")
+        );
         assert_eq!(snapshot.ports[0].images.len(), 2);
         assert_eq!(snapshot.ports[0].runtimes, ["mono", "godot"]);
         assert_eq!(snapshot.refcount["GameA"], 1);
@@ -1514,6 +1512,23 @@ mod tests {
     }
 
     #[test]
+    fn mentioning_the_app_name_never_hides_a_real_launcher() {
+        let fixture = fixture();
+        fs::create_dir(fixture.context.roots.game_dirs.join("Mentioned")).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("Mentioned.sh"),
+            b"GAMEDIR=/ports/Mentioned\n# compatible with jenny92-appmanager\n",
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert_eq!(snapshot.ports.len(), 1);
+        assert_eq!(snapshot.ports[0].script, "Mentioned.sh");
+        assert_eq!(snapshot.ports[0].dir, "Mentioned");
+        assert!(snapshot.orphan_dirs.is_empty());
+    }
+
+    #[test]
     fn dynamic_parsed_directory_reference_preserves_orphan_uncertainty() {
         let fixture = fixture();
         fs::create_dir(fixture.context.roots.game_dirs.join("MaybeDynamic")).unwrap();
@@ -1525,6 +1540,51 @@ mod tests {
         let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert!(snapshot.orphan_dirs.is_empty());
         assert!(snapshot.diagnostics[0].contains("orphan classification uncertain"));
+    }
+
+    #[test]
+    fn dynamic_directory_reference_never_marks_a_launcher_as_dead() {
+        let fixture = fixture();
+        fs::write(
+            fixture.context.roots.scripts.join("Dynamic.sh"),
+            b"GAMEDIR=/ports/Missing\ncd /ports/$GAME\n",
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert!(snapshot.dead_scripts.is_empty());
+        assert!(
+            snapshot
+                .diagnostics
+                .iter()
+                .any(|value| value.contains("orphan classification uncertain"))
+        );
+    }
+
+    #[test]
+    fn ambiguous_data_references_are_never_exposed_as_a_delete_target() {
+        let fixture = fixture();
+        for name in ["Primary", "Secondary"] {
+            fs::create_dir(fixture.context.roots.game_dirs.join(name)).unwrap();
+        }
+        fs::write(
+            fixture.context.roots.scripts.join("Ambiguous.sh"),
+            b"GAMEDIR=/ports/Primary\ncd /ports/Secondary\n",
+        )
+        .unwrap();
+
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert_eq!(snapshot.ports[0].dir, "Primary");
+        assert!(snapshot.ports[0].data_path.as_os_str().is_empty());
+        assert_eq!(snapshot.refcount["Primary"], 1);
+        assert_eq!(snapshot.refcount["Secondary"], 1);
+        assert!(snapshot.orphan_dirs.is_empty());
+        assert!(
+            snapshot
+                .diagnostics
+                .iter()
+                .any(|value| value.contains("association is not unique"))
+        );
     }
 
     #[test]

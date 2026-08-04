@@ -58,7 +58,9 @@ done
 grep -Fq 'kit=kit,native=native' "$app_lua/app_model.lua"
 [ "$(wc -l < "$app_lua/main.lua")" -lt 220 ]
 grep -Fq 'kit.checkbox' "$app_lua"/*.lua
-grep -Fq 'kit.checkbox(model.display_name(script),{' "$app_lua/app_pages.lua"
+grep -Fq 'local script_path=exact_path(port.path)' "$app_lua/app_pages.lua"
+grep -Fq 'id=key,detail=model.join(detail)' "$app_lua/app_pages.lua"
+! grep -Fq 'env.gamedirs_dir.."/"..' "$app_lua/app_pages.lua"
 grep -Fq 'on_change=' "$app_lua"/*.lua
 grep -Fq 'kit.set_busy' "$app_lua"/*.lua
 grep -Fq 'kit.toast' "$app_lua"/*.lua
@@ -84,7 +86,7 @@ grep -Fq 'function kit.debug_page' "$ROOT/_kit/love/kit.lua"
 grep -Fq 'preserve_focus=' "$app_lua/app_pages.lua"
 grep -Fq 'function self.refresh_home()' "$app_lua/app_operations.lua"
 grep -Fq 'rebuild_return_page(self.confirm_return)' "$app_lua/app_operations.lua"
-[ "$(grep -Fc 'operations.refresh_home()' "$app_lua/main.lua")" -ge 3 ]
+[ "$(grep -Fc 'operations.refresh_home()' "$app_lua/main.lua")" -ge 2 ]
 grep -Fq 'state.onboarding_seen~="1" and not preserve_focus' "$app_lua/app_pages.lua"
 grep -Fq 'on_home_cancel=operations.show_exit_dialog' "$app_lua/main.lua"
 grep -Fq 'onboarding_seen="0"' "$app_lua/main.lua"

@@ -65,11 +65,11 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 expected_tools = {
-    "heishenhua": ["font-provision", "runtime-discovery", "unity-config"],
-    "hk": ["font-provision", "json-merge", "runtime-discovery", "unity-config"],
-    "sts2": ["font-provision", "json-merge", "runtime-discovery", "sync-newer"],
-    "terraria": ["font-provision", "json-merge", "runtime-discovery", "unity-config"],
-    "vampiresurvivors114": ["font-provision", "runtime-discovery", "unity-config"],
+    "heishenhua": ["font-provision", "runtime-discovery", "unity-config", "artwork"],
+    "hk": ["font-provision", "json-merge", "runtime-discovery", "unity-config", "artwork"],
+    "sts2": ["font-provision", "json-merge", "runtime-discovery", "sync-newer", "artwork"],
+    "terraria": ["font-provision", "json-merge", "runtime-discovery", "unity-config", "artwork"],
+    "vampiresurvivors114": ["font-provision", "runtime-discovery", "unity-config", "artwork"],
 }
 for port in expected_tools:
     manifest = json.loads((root / "ports" / port / "manifest.json").read_text(encoding="utf-8"))
@@ -86,14 +86,20 @@ grep -Fq 'love_ui/main.lua' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
 grep -Fq 'love_ui/kit.lua' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"
 grep -Fq 'cp "$KIT_ROOT/love/"*.lua "$DIST/love_ui/"' "$ROOT/ports/sts2/src/scripts/dist-port.sh"
 UI_ONLY=1 bash "$ROOT/_kit/dist_port.sh" sts2 >/dev/null
-for file in 'Slay the Spire 2.sh' love_ui/kit.lua love_ui/launcher.lua love_ui/main.lua love_ui/ui.gptk; do
+STS2_SCRIPT="$(python3 - "$ROOT/ports/sts2/manifest.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["script"])
+PY
+)"
+for file in "$STS2_SCRIPT" love_ui/kit.lua love_ui/launcher.lua love_ui/main.lua love_ui/ui.gptk; do
   [ -f "$ROOT/ports/sts2/dist/$file" ] || {
     echo "sts2 UI-only dist: missing $file" >&2
     exit 1
   }
 done
 [ -x "$ROOT/ports/sts2/dist/bin/portkit-launcher" ]
-grep -Fq 'portkit_launcher json merge' "$ROOT/ports/sts2/dist/Slay the Spire 2.sh"
-! grep -Fq 'tail -c 8' "$ROOT/ports/sts2/dist/Slay the Spire 2.sh"
+grep -Fq 'portkit_launcher json merge' "$ROOT/ports/sts2/dist/$STS2_SCRIPT"
+! grep -Fq 'tail -c 8' "$ROOT/ports/sts2/dist/$STS2_SCRIPT"
 ! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
 ! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"

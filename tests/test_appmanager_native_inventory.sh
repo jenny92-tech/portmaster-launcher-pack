@@ -26,7 +26,7 @@ env PAM_SOURCE_DIR="$SCRIPTS" PAM_APP_ROOT_OVERRIDE="$APP" PAM_STATE_DIR_OVERRID
 python3 - "$STATE/inventory.json" <<'PY'
 import json, sys
 value=json.load(open(sys.argv[1], encoding="utf-8"))
-assert value["schema"] == 2
+assert value["schema"] == 3
 assert any(item["script"] == "Game.sh" for item in value["ports"])
 assert all(item.get("script") != "APP Manager.sh" for item in value["ports"])
 PY

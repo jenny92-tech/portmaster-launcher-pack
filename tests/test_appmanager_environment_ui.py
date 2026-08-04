@@ -12,19 +12,18 @@ APP = ROOT / "ports" / "appmanager" / "love"
 
 source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(APP.glob("*.lua")))
 operations_source = (APP / "app_operations.lua").read_text(encoding="utf-8")
-assert operations_source.index("model.invalidate_for_plan") < operations_source.index("model.apply_snapshot")
+assert operations_source.index("model.apply_snapshot") < operations_source.index("page_builders.reset_selection")
+assert "model.invalidate_all()" in operations_source
 assert "Port App Manager 使用自带 UI 环境，因此仍可运行" not in source
 assert "无法启动提权操作助手" not in source
 assert "SquashFS 镜像" not in source
 assert "kit.info" not in source
-assert 'L("PortMaster is not installed. Install it to continue.","未安装 PortMaster，请先安装。")' in source
-assert 'L("PortMaster needs repair. Repair it to continue.","PortMaster 需要修复，请先处理。")' in source
+assert 'L("The PortMaster directory was not found. Install it to manage Port games.","未找到 PortMaster 目录，请安装后再管理 Port 游戏。")' in source
+assert 'L("PortMaster needs attention. See Environment Management.","PortMaster 需要注意，请查看环境管理。")' in source
 assert 'L("Managed by system · Available","系统管理 · 当前可用")' in source
 assert "PortMaster 由系统维护。" in source
-assert 'L("Checking PortMaster","检查 PortMaster")' in source
-assert "正在检查 PortMaster，完成后会自动继续。" in source
-assert "return result.status,nil" in source
-assert "result.status,result.detail" not in source
+assert 'L("Preparing device information…","正在准备设备信息……")' in source
+assert 'value.status~="progress" and value.status~="complete" and value.status~="error"' in source
 assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),' in source
 assert 'checked=false,danger=true}' in source
 assert 'if checked then for _,item in ipairs(plan) do item.kind="DELETE_MANAGED" end end' in source
@@ -32,7 +31,7 @@ assert 'model.native.start,"inventory-refresh"' in source
 assert 'L("Rescan","重新扫描")' in source
 assert 'checkbox={label=L("Delete permanently instead of using Trash","直接删除，不放入回收站"),danger=true,checked=true}' not in source
 assert 'indeterminate=true' in source
-assert 'L("Keep waiting","继续等待")' in source
+assert "请继续等待。" in source
 assert 'cancel=L("Stay","暂不退出")' in source
 assert "focusable=false" in source
 assert "surface=false" in source
@@ -41,7 +40,6 @@ for clear_copy in (
     "无法确定 PortMaster 安装位置，未进行任何修改。",
     "这台设备尚未实测。确认后可以继续。",
     "PortMaster 尚未支持这台设备。请确认安装位置。",
-    "安装未完成。请退出 APP，重新打开后再试。",
     "未配套的启动项和数据目录会默认选中。多个启动项共用同一目录时不会默认选中，请确认后处理。选中内容会移入回收站。",
     "存放菜单里的游戏启动脚本。",
     "Port App Manager 无法启动。请重新安装后再试。",
@@ -77,8 +75,6 @@ for contract in (
     'info("device:submodel"', 'info("device:system"',
     'info("device:system-version"',
     'for _,item in ipairs(self.confirm_plan)', 'item.kind=="INSTALL_PORTMASTER"',
-    'env.install_transaction_exists', 'env.portmaster_active_exists',
-    'operations.task={kind="active-repair"',
     'L("Cached","使用缓存")', 'L("Downloading…","下载中…")',
 ):
     assert contract in source, contract
@@ -172,7 +168,7 @@ def run_case(health: str, management: str = "app"):
         lua.globals().SOURCE = str(APP)
         lua.globals().APP_SNAPSHOT = lua.table_from({
             "env": json.loads(env_path.read_text(encoding="utf-8")),
-            "inventory": {"schema": 2, "ports": [], "refcount": {}, "orphan_dirs": [],
+            "inventory": {"schema": 3, "ports": [], "refcount": {}, "orphan_dirs": [],
                 "orphan_images": [], "dead_scripts": [], "trash": [],
                 "runtimes": {"need": {}, "facts": []}},
             "sizes": {}, "runtime_metadata": {},

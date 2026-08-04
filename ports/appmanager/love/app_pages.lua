@@ -11,6 +11,7 @@ function Pages.new(model,operations)
     local self={}
     local environment
     local selected_home,selected_junk,selected_trash,selected_runtime={},{},{},{}
+    local home_actions,junk_actions={},{}
 
     local function button(label,action,opts) return kit.button(label,action,opts) end
     local function note(label,value,id)
@@ -19,6 +20,41 @@ function Pages.new(model,operations)
     end
     local function empty(values) return function() return model.selected_count(values)==0 end end
     local function enabled(name) return env[name]~=false end
+    local function exact_path(value)
+        return type(value)=="string" and value~="" and value or nil
+    end
+    local function inventory_paths()
+        local paths={}
+        for _,entry in ipairs(report.entries or {}) do
+            local path=exact_path(entry.path)
+            if path and type(entry.root)=="string" and type(entry.name)=="string" then
+                paths[entry.root]=paths[entry.root] or {}
+                paths[entry.root][entry.name]=path
+            end
+        end
+        return paths
+    end
+    local function port_name_counts()
+        local counts={}
+        for _,port in ipairs(report.ports or {}) do
+            local name=model.display_name(port.script)
+            counts[name]=(counts[name] or 0)+1
+        end
+        return counts
+    end
+    local function port_label(port,counts)
+        local name=model.display_name(port.script)
+        return (counts[name] or 0)>1 and port.script or name
+    end
+    local function primary_dir_counts()
+        local counts={}
+        for _,port in ipairs(report.ports or {}) do
+            if type(port.dir)=="string" and port.dir~="" then
+                counts[port.dir]=(counts[port.dir] or 0)+1
+            end
+        end
+        return counts
+    end
 
     function self.bind_environment(value) environment=value end
     function self.reset_selection()
@@ -26,26 +62,29 @@ function Pages.new(model,operations)
     end
 
     local function select_all_home(value)
-        for _,port in ipairs(report.ports) do selected_home[port.script]=value end
+        for key in pairs(home_actions) do selected_home[key]=value end
         self.build_home(true)
     end
 
     local function uninstall_selected()
-        local plan,labels,selected_ports,dir_counts,planned_dirs={},{},{},{},{}
-        for _,port in ipairs(report.ports) do
-            if selected_home[port.script] then
-                selected_ports[#selected_ports+1]=port; labels[#labels+1]=model.display_name(port.script)
-                if port.dir~="" then dir_counts[port.dir]=(dir_counts[port.dir] or 0)+1 end
+        local plan,labels,chosen,dir_counts,planned_dirs={},{},{},{},{}
+        for key,action in pairs(home_actions) do
+            if selected_home[key] then
+                chosen[#chosen+1]=action
+                if action.dir~="" then dir_counts[action.dir]=(dir_counts[action.dir] or 0)+1 end
             end
         end
-        for _,port in ipairs(selected_ports) do
-            plan[#plan+1]={kind="TRASH",arg=env.scripts_dir.."/"..port.script}
-            for _,image in ipairs(port.images or {}) do
-                if image.path and image.path~="" then plan[#plan+1]={kind="TRASH",arg=image.path} end
+        table.sort(chosen,function(a,b) return a.script_path<b.script_path end)
+        for _,action in ipairs(chosen) do
+            labels[#labels+1]=action.label
+            plan[#plan+1]={kind="TRASH",arg=action.script_path}
+            for _,path in ipairs(action.image_paths) do
+                plan[#plan+1]={kind="TRASH",arg=path}
             end
-            if port.dir~="" and dir_counts[port.dir]==(report.refcount[port.dir] or 0) and not planned_dirs[port.dir] then
-                planned_dirs[port.dir]=true
-                plan[#plan+1]={kind="TRASH",arg=env.gamedirs_dir.."/"..port.dir}
+            if action.dir~="" and action.data_path and
+               dir_counts[action.dir]==(report.refcount[action.dir] or 0) and not planned_dirs[action.dir] then
+                planned_dirs[action.dir]=true
+                plan[#plan+1]={kind="TRASH",arg=action.data_path}
             end
         end
         if #plan>0 then
@@ -71,30 +110,58 @@ function Pages.new(model,operations)
         local can_leftovers=can_manage_ports and enabled("capability_leftovers") and can_trash
         local can_runtimes=enabled("capability_repair_runtimes")
         if can_manage_ports then model.ensure_report() end
-        local rows={}
+        clear(home_actions)
+        local rows,name_counts={},port_name_counts()
         for _,port in ipairs(can_manage_ports and (report.ports or {}) or {}) do
             local script=port.script
-            local paths={env.scripts_dir.."/"..script}
-            if port.dir~="" then paths[#paths+1]=env.gamedirs_dir.."/"..port.dir end
-            for _,image in ipairs(port.images or {}) do if image.path and image.path~="" then paths[#paths+1]=image.path end end
+            local script_path=exact_path(port.path)
+            local data_path=exact_path(port.data_path)
+            local label=port_label(port,name_counts)
+            local action_paths,image_paths={},{}
+            if script_path then action_paths[#action_paths+1]=script_path end
+            if data_path then action_paths[#action_paths+1]=data_path end
+            for _,image in ipairs(port.images or {}) do
+                local path=exact_path(image.path)
+                if path then
+                    image_paths[#image_paths+1]=path
+                    action_paths[#action_paths+1]=path
+                end
+            end
             local detail={}
             if port.dir~="" then detail[#detail+1]=port.dir.."/"
             elseif port.claimed_dir~="" then detail[#detail+1]=L("Missing data: ","数据缺失：")[kit.get_state().ui_lang]..port.claimed_dir end
+            if port.dir~="" and not data_path then
+                detail[#detail+1]=L("Data folder kept: association is not unique",
+                    "数据目录会保留：无法确认唯一关联")[kit.get_state().ui_lang]
+            end
             local missing=model.missing_runtime(script)
             if missing~="" then detail[#detail+1]=(kit.get_state().ui_lang=="zh" and "缺少 Runtime: " or "Missing Runtime: ")..missing end
-            local bytes=model.path_size(paths); if bytes>0 then detail[#detail+1]=model.human(bytes) end
-            rows[#rows+1]=kit.checkbox(model.display_name(script),{
-                id=script,detail=model.join(detail),checked=selected_home[script],sidebar_target="uninstall",
-                on_change=function(value) selected_home[script]=value end,
+            if not script_path then detail[#detail+1]=L("Path unavailable","路径未验证")[kit.get_state().ui_lang] end
+            local bytes=model.path_size(action_paths); if bytes>0 then detail[#detail+1]=model.human(bytes) end
+            local key=script_path and ("home:"..script_path) or ("home-unverified:"..script)
+            if script_path then
+                home_actions[key]={key=key,label=label,script_path=script_path,data_path=data_path,
+                    image_paths=image_paths,dir=port.dir or ""}
+            end
+            rows[#rows+1]=kit.checkbox(label,{
+                id=key,detail=model.join(detail),checked=script_path and selected_home[key] or false,
+                disabled=not script_path,sidebar_target="uninstall",meta={key=key},
+                on_change=function(value,meta)
+                    if meta and home_actions[meta.key] then selected_home[meta.key]=value end
+                end,
                 badge=missing~="" and kit.badge(L("Runtime missing","缺少 Runtime")) or nil,
             })
+        end
+        for key in pairs(selected_home) do
+            if not home_actions[key] then selected_home[key]=nil end
         end
         if #rows==0 then rows[1]=note(L("Status","状态"),can_manage_ports and
             L("No Port games are available to manage.","没有可管理的 Port 游戏。") or
             L("Game management is not available on this device.","当前设备暂不支持游戏管理。"),"home:empty") end
         local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
+        local primary_counts=primary_dir_counts()
         for _,port in ipairs(report.ports or {}) do
-            if port.dir~="" and ((report.refcount or {})[port.dir] or 0)>1 then
+            if port.dir~="" and (primary_counts[port.dir] or 0)>1 then
                 junk_count=junk_count+1
             end
         end
@@ -189,11 +256,15 @@ function Pages.new(model,operations)
 
     function self.build_runtime(preserve_focus)
         model.load_runtime_metadata()
-        local rows,details={},{}
+        local rows,details,available_runtime={},{},{}
         local required=model.required_runtimes()
         local repair_needed,installed={},{}
         for _,item in ipairs(required) do
+            available_runtime[item.name]=true
             if item.needs_repair then repair_needed[#repair_needed+1]=item else installed[#installed+1]=item end
+        end
+        for name in pairs(selected_runtime) do
+            if not available_runtime[name] then selected_runtime[name]=nil end
         end
         for _,item in ipairs(repair_needed) do
             if selected_runtime[item.name]==nil then selected_runtime[item.name]=true end
@@ -252,18 +323,24 @@ function Pages.new(model,operations)
     end
 
     local function select_all_junk(value)
-        for _,row in ipairs((kit._junk_rows or {})) do
-            if row.meta and row.meta.path then selected_junk[row.meta.path]=value end
-        end
+        for key in pairs(junk_actions) do selected_junk[key]=value end
         self.build_junk(true)
     end
 
     local function remove_junk()
-        local plan,labels={},{}
-        for path,value in pairs(selected_junk) do
-            if value then plan[#plan+1]={kind="TRASH",arg=path}; labels[#labels+1]=model.basename(path) end
+        local chosen={}
+        for key,action in pairs(junk_actions) do
+            if selected_junk[key] then chosen[#chosen+1]=action end
         end
-        table.sort(labels)
+        table.sort(chosen,function(a,b)
+            if a.label==b.label then return a.path<b.path end
+            return a.label<b.label
+        end)
+        local plan,labels={},{}
+        for _,action in ipairs(chosen) do
+            plan[#plan+1]={kind="TRASH",arg=action.path}
+            labels[#labels+1]=action.label
+        end
         if #plan>0 then operations.show_confirm(L("Move leftovers to Trash","将残留项移入回收站"),plan,labels,page.JUNK,
             {confirm=L("Move to Trash","移入回收站")}) end
     end
@@ -281,37 +358,54 @@ function Pages.new(model,operations)
     function self.build_junk(preserve_focus)
         model.ensure_report()
         if not preserve_focus then clear(selected_junk) end
+        clear(junk_actions)
         local rows,item_count={},0
         rows[#rows+1]=kit.textview(L("Cleanup rules","清理说明"),L(
             "Unmatched launchers and data folders are selected by default. Shared folders are not selected. Selected items are moved to Trash.",
             "未配套的启动项和数据目录会默认选中。多个启动项共用同一目录时不会默认选中，请确认后处理。选中内容会移入回收站。"),{
             id="leftovers:rules",focusable=false,expandable=false,max_lines=5,expanded_lines=5,
             label_px=18,value_px=20,surface=false})
-        local function add(label,detail,path,default_selected)
+        local paths=inventory_paths()
+        local data_paths,script_paths=paths["game-dirs"] or {},paths.scripts or {}
+        local function add(kind,label,detail,path,default_selected)
+            path=exact_path(path)
+            if not path then
+                item_count=item_count+1
+                rows[#rows+1]=kit.textview(label,L(
+                    "The exact path could not be verified, so this item will not be changed.",
+                    "无法验证准确路径，因此不会处理这个项目。"),{
+                    id="leftovers:unverified:"..kind..":"..label,focusable=false,expandable=false,
+                    max_lines=3,expanded_lines=3,label_px=18,value_px=20,surface=false})
+                return
+            end
+            local key="leftovers:"..kind..":"..path
             item_count=item_count+1
-            if selected_junk[path]==nil then selected_junk[path]=default_selected==true end
+            junk_actions[key]={key=key,path=path,label=label}
+            if selected_junk[key]==nil then selected_junk[key]=default_selected==true end
             rows[#rows+1]=kit.checkbox(label,{
-                id=path,detail=detail,checked=selected_junk[path],meta={path=path},
-                on_change=function(value) selected_junk[path]=value end,
+                id=key,detail=detail,checked=selected_junk[key],meta={key=key,path=path},
+                on_change=function(value,meta)
+                    if meta and junk_actions[meta.key] then selected_junk[meta.key]=value end
+                end,
             })
         end
-        for _,name in ipairs(report.orphan_dirs or {}) do add(name.."/",L(
+        for _,name in ipairs(report.orphan_dirs or {}) do add("dir",name.."/",L(
             "No launcher uses this data folder.",
-            "没有启动项使用这个数据目录。"),env.gamedirs_dir.."/"..name,true) end
-        for _,image in ipairs(report.orphan_images or {}) do add(image.name,L(
+            "没有启动项使用这个数据目录。"),data_paths[name],true) end
+        for _,image in ipairs(report.orphan_images or {}) do add("image",image.name,L(
             "No matching launcher was found.",
             "没有找到配套的启动项。"),image.path,false) end
         for _,item in ipairs(report.dead_scripts or {}) do
-            add(model.display_name(item.script),L("Missing data folder: ",
+            add("script",item.script,L("Missing data folder: ",
                 "缺少数据目录：")[kit.get_state().ui_lang]..item.missing_dir,
-                env.scripts_dir.."/"..item.script,true)
+                script_paths[item.script],true)
         end
 
-        local shared={}
+        local shared,primary_counts={},primary_dir_counts()
         for _,port in ipairs(report.ports or {}) do
-            if port.dir~="" and (report.refcount[port.dir] or 0)>1 then
+            if port.dir~="" and (primary_counts[port.dir] or 0)>1 then
                 shared[port.dir]=shared[port.dir] or {}
-                shared[port.dir][#shared[port.dir]+1]=port.script
+                shared[port.dir][#shared[port.dir]+1]=port
             end
         end
         local shared_names={}
@@ -320,19 +414,21 @@ function Pages.new(model,operations)
         if #shared_names>0 then
             rows[#rows+1]=kit.section(L("Duplicate folder references","重复目录引用"),{font_px=22})
             for _,name in ipairs(shared_names) do
-                table.sort(shared[name])
+                table.sort(shared[name],function(a,b) return a.script<b.script end)
                 rows[#rows+1]=kit.textview(name.."/",L(
                     string.format("%d launchers use this folder. None are selected by default.",#shared[name]),
                     string.format("%d 个启动项共用这个目录，默认不选。请确认后处理。",#shared[name])),{
                     id="leftovers:shared:"..name,focusable=false,expandable=false,max_lines=4,expanded_lines=4,
                     label_px=18,value_px=20,surface=false})
-                for _,script in ipairs(shared[name]) do
-                    local path=env.scripts_dir.."/"..script
-                    add(model.display_name(script),L(
+                for _,port in ipairs(shared[name]) do
+                    add("shared-script",port.script,L(
                         "Only this launcher will be moved to Trash. The shared folder will stay.",
-                        "只会把这个启动项移入回收站，共用目录会保留。"),path,false)
+                        "只会把这个启动项移入回收站，共用目录会保留。"),port.path,false)
                 end
             end
+        end
+        for key in pairs(selected_junk) do
+            if not junk_actions[key] then selected_junk[key]=nil end
         end
         if item_count==0 then rows[#rows+1]=note(L("Status","状态"),L("No removable leftovers were found.","没有发现可清理的残留内容。"),"leftovers:empty") end
         local sidebar={
@@ -359,7 +455,14 @@ function Pages.new(model,operations)
             elseif entry.bucket=="images" or entry.bucket=="script-images" then kind=L("Image","图片")
             elseif entry.bucket=="legacy" then kind=L("Other file","其他文件")
             else kind=L("Trash item","回收站项目") end
-            out[#out+1]={title=entry.name..(entry.is_dir and "/" or ""),detail=kind,paths={entry.path}}
+            local restorable=entry.bucket=="scripts" or entry.bucket=="data" or
+                entry.bucket=="images" or entry.bucket=="script-images"
+            local detail=kind
+            if not restorable then
+                detail=L("Old Trash item · Delete only","旧版回收站项目 · 仅可永久删除")
+            end
+            out[#out+1]={title=entry.name..(entry.is_dir and "/" or ""),detail=detail,
+                paths={entry.path},restorable=restorable}
         end
         return out
     end
@@ -373,8 +476,10 @@ function Pages.new(model,operations)
         local plan,labels={},{}
         for _,item in ipairs(self.collect_trash()) do
             local chosen=false
-            for _,path in ipairs(item.paths) do
-                if selected_trash[path] then chosen=true; plan[#plan+1]={kind=kind,arg=path} end
+            if kind~="RESTORE_ITEM" or item.restorable then
+                for _,path in ipairs(item.paths) do
+                    if selected_trash[path] then chosen=true; plan[#plan+1]={kind=kind,arg=path} end
+                end
             end
             if chosen then labels[#labels+1]=item.title end
         end
@@ -382,21 +487,46 @@ function Pages.new(model,operations)
             confirm=kind=="RESTORE_ITEM" and L("Restore","放回") or L("Delete forever","永久删除")}) end
     end
 
+    local function selected_trash_count(restorable_only)
+        local count=0
+        for _,item in ipairs(self.collect_trash()) do
+            if not restorable_only or item.restorable then
+                for _,path in ipairs(item.paths) do
+                    if selected_trash[path] then count=count+1 end
+                end
+            end
+        end
+        return count
+    end
+
+    local function trash_count_label(en,zh,restorable_only)
+        return function()
+            return string.format(kit.get_state().ui_lang=="zh" and zh or en,
+                selected_trash_count(restorable_only))
+        end
+    end
+
     function self.build_trash(preserve_focus)
-        local rows={}
+        local rows,available_trash={},{}
         for _,item in ipairs(self.collect_trash()) do
             local key=item.paths[1]; local bytes=model.path_size(item.paths); local detail=item.detail
+            for _,path in ipairs(item.paths) do available_trash[path]=true end
             if bytes>0 then detail=function() return kit.translate(item.detail).." · "..model.human(bytes) end end
             rows[#rows+1]=kit.checkbox(item.title,{
                 id=key,detail=detail,checked=selected_trash[key],meta={paths=item.paths},
                 on_change=function(value) for _,path in ipairs(item.paths) do selected_trash[path]=value end end,
             })
         end
+        for path in pairs(selected_trash) do
+            if not available_trash[path] then selected_trash[path]=nil end
+        end
         if #rows==0 then rows[1]=note(L("Status","状态"),L("Trash is empty.","回收站为空。"),"trash:empty") end
         kit.set_page(page.TRASH,L("Trash","回收站"),rows,{preserve_focus=preserve_focus,
             sidebar_title=L("Quick Tools","快捷工具"),sidebar={
-            button(model.dynamic_count("Restore (%d)","放回 (%d)",selected_trash),function() trash_action("RESTORE_ITEM",L("Restore selected items","放回所选项目")) end,{disabled=empty(selected_trash)}),
-            button(model.dynamic_count("Delete forever (%d)","永久删除 (%d)",selected_trash),function() trash_action("DELETE_ITEM",L("Permanently delete selected items","永久删除所选项目")) end,{disabled=empty(selected_trash)}),
+            button(trash_count_label("Restore (%d)","放回 (%d)",true),function() trash_action("RESTORE_ITEM",L("Restore selected items","放回所选项目")) end,
+                {disabled=function() return selected_trash_count(true)==0 end}),
+            button(trash_count_label("Delete forever (%d)","永久删除 (%d)",false),function() trash_action("DELETE_ITEM",L("Permanently delete selected items","永久删除所选项目")) end,
+                {disabled=empty(selected_trash)}),
             button(L("Select all","全选"),function() select_all_trash(true) end,{half=true}),
             button(L("Select none","全不选"),function() select_all_trash(false) end,{half=true}),
             button(L("Back","返回"),kit.back_page,{group="bottom"}),

@@ -540,7 +540,8 @@ lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute(f"package.path={str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path")
 lua.execute(r'''
     local snapshots=0
-    local inventory={schema=2,ports={{script="Game.sh",images={}}},refcount={},orphan_dirs={},
+    local inventory={schema=3,entries={},ports={{script="Game.sh",path="/scripts/Game.sh",
+        dir="",data_path="",images={}}},refcount={},orphan_dirs={},
         orphan_images={},dead_scripts={},trash={},runtimes={need={godot_4_5={"Game.sh"}},
         facts={{name="godot_4_5",health="healthy",bytes=42}}}}
     local native={snapshot=function()
@@ -599,11 +600,18 @@ with tempfile.TemporaryDirectory() as source:
         f"{str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path"
     )
     inventory = {
-        "schema": 2,
+        "schema": 3,
+        "entries": [
+            {"root": "scripts", "name": "Game.sh", "path": str(scripts / "Game.sh")},
+            {"root": "scripts", "name": "Installed.sh", "path": str(scripts / "Installed.sh")},
+            {"root": "game-dirs", "name": "GameData", "path": str(data / "GameData")},
+        ],
         "ports": [
-            {"script": "Game.sh", "dir": "GameData", "images": [
+            {"script": "Game.sh", "path": str(scripts / "Game.sh"), "dir": "GameData",
+                "data_path": str(data / "GameData"), "images": [
                 {"name": "Game.png", "path": str(scripts / "Game.png")}], "runtimes": ["godot_4.6.3"]},
-            {"script": "Installed.sh", "dir": "GameData", "images": [
+            {"script": "Installed.sh", "path": str(scripts / "Installed.sh"), "dir": "GameData",
+                "data_path": str(data / "GameData"), "images": [
                 {"name": "Installed.png", "path": str(base / "images" / "Installed.png")}], "runtimes": ["godot_4.5"]},
         ],
         "refcount": {"GameData": 2}, "orphan_dirs": [],

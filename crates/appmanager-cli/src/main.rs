@@ -114,8 +114,6 @@ enum Command {
         ignore_dirs: Vec<String>,
         #[arg(long = "ignore-script")]
         ignore_scripts: Vec<String>,
-        #[arg(long)]
-        self_port: Option<String>,
         #[arg(long, default_value = "")]
         directory: String,
         #[arg(long, default_value = "")]
@@ -147,8 +145,6 @@ enum Command {
         ignore_dirs: Vec<String>,
         #[arg(long = "ignore-script")]
         ignore_scripts: Vec<String>,
-        #[arg(long)]
-        self_port: Option<String>,
         #[arg(long, default_value = "")]
         directory: String,
         #[arg(long, default_value = "")]
@@ -450,7 +446,6 @@ fn run(
             scan_script_images,
             ignore_dirs,
             ignore_scripts,
-            self_port,
             directory,
             controlfolder,
             home,
@@ -461,7 +456,6 @@ fn run(
                 scan_script_images,
                 ignore_dirs,
                 ignore_scripts,
-                self_port,
                 directory,
                 controlfolder,
                 home,
@@ -497,7 +491,6 @@ fn run(
             scan_script_images,
             ignore_dirs,
             ignore_scripts,
-            self_port,
             directory,
             controlfolder,
             home,
@@ -514,7 +507,6 @@ fn run(
                 scan_script_images,
                 ignore_dirs,
                 ignore_scripts,
-                self_port,
                 directory,
                 controlfolder,
                 home,
@@ -877,7 +869,6 @@ fn inventory_options(
     scan_script_images: bool,
     ignore_dirs: Vec<String>,
     ignore_scripts: Vec<String>,
-    self_port: Option<String>,
     directory: String,
     controlfolder: String,
     home: String,
@@ -886,7 +877,6 @@ fn inventory_options(
         scan_script_images,
         ignore_dirs: ignore_dirs.into_iter().collect(),
         ignore_scripts: ignore_scripts.into_iter().collect(),
-        self_port,
         directory,
         controlfolder,
         home,
@@ -1891,7 +1881,6 @@ mod tests {
             false,
             vec!["PortMaster".to_owned()],
             vec!["PortMaster.sh".to_owned()],
-            None,
             "/mnt/SDCARD/Data".to_owned(),
             String::new(),
             "/root".to_owned(),

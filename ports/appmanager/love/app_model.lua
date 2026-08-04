@@ -48,10 +48,6 @@ function Model.new(kit,native)
 
     function self.L(en,zh) return {en=en,zh=zh} end
     function self.join(parts,sep) return table.concat(parts,sep or " · ") end
-    function self.basename(path)
-        return tostring(path or ""):gsub("/+$",""):match("([^/]+)$") or tostring(path or "")
-    end
-
     function self.apply_snapshot(snapshot)
         if type(snapshot)~="table" or type(snapshot.env)~="table" then
             return false,"APP Manager service returned no environment"

@@ -33,6 +33,6 @@ fi
 grep -Fq 'run_love_launcher_ui' "$LOVE/launcher.sh.template"
 grep -Fq 'local launcher = require("launcher")' "$LOVE/main.lua"
 grep -Fq 'launcher.define {' "$LOVE/main.lua"
-grep -Fq 'static_env = {{"VS_WIDTH", "auto"}, {"VS_HEIGHT", "auto"}}' "$LOVE/main.lua"
+grep -Fq 'launcher.resolution {env = {"VS_WIDTH", "VS_HEIGHT"}}' "$LOVE/main.lua"
 grep -Fq 'Vampire Survivors Launcher/launch_config.env' "$LOVE/main.lua"
 bash -n "$LOVE/launcher.sh.template"
