@@ -67,7 +67,7 @@ run_love_launcher_ui
 SDR_ENV="$LAUNCH_ENV"
 if [ -f "$SDR_ENV" ]; then
   source "$SDR_ENV"
-  echo "$LOG_PREFIX env: ${SDR_WIDTH}x${SDR_HEIGHT} swap_ab=$SDR_SWAP_AB swap_xy=$SDR_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${SDR_WIDTH}x${SDR_HEIGHT} render_percent=${SDR_RENDER_PERCENT:-100} swap_ab=$SDR_SWAP_AB swap_xy=$SDR_SWAP_XY"
 
   if [ "$SDR_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$SDR_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
@@ -78,6 +78,8 @@ fi
 
 resolve_display_resolution "${SDR_WIDTH:-auto}" "${SDR_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
+resolve_render_scale "${SDR_RENDER_PERCENT:-100}"
+apply_render_scale "$PORT_TOML"
 
 if ! sdr_core_files_ok; then
   echo "$LOG_PREFIX core files missing at launch time"

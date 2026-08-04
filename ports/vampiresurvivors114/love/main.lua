@@ -9,7 +9,7 @@ launcher.define {
     },
     fields = {
         launcher.output_resolution {env = {"VS_WIDTH", "VS_HEIGHT"}},
-        launcher.render_scale {env = "VS_RENDER_DIVISOR"},
+        launcher.render_scale {env = "VS_RENDER_PERCENT"},
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "VS_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "VS_SWAP_XY"},
     },

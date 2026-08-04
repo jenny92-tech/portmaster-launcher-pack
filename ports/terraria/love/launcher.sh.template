@@ -117,7 +117,7 @@ apply_terraria_language() {
 TER_ENV="$LAUNCH_ENV"
 if [ -f "$TER_ENV" ]; then
   source "$TER_ENV"
-  echo "$LOG_PREFIX env: ${TER_WIDTH}x${TER_HEIGHT} language=$TER_LANGUAGE swap_ab=$TER_SWAP_AB swap_xy=$TER_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${TER_WIDTH}x${TER_HEIGHT} render_percent=${TER_RENDER_PERCENT:-100} language=$TER_LANGUAGE swap_ab=$TER_SWAP_AB swap_xy=$TER_SWAP_XY"
 
   if [ "$TER_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$TER_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
@@ -130,6 +130,8 @@ fi
 # the resolution must still follow this device's panel.
 resolve_display_resolution "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
+resolve_render_scale "${TER_RENDER_PERCENT:-100}"
+apply_render_scale "$PORT_TOML"
 
 # Do NOT remap start -> ENTER here. Forcing start="ENTER" stole Start from
 # the in-game ☰ settings/pause menu, which only opens on KEYCODE_BUTTON_START,

@@ -49,7 +49,7 @@ state lives in `love_ui/state.txt`.
 | UI option | Runtime field |
 |---|---|
 | Output Resolution | `[device].displayWidth` / `displayHeight`; Auto follows the panel |
-| Render Resolution | `[gpu].renderScaleDivisor`; Hollow Knight graphics settings use the resolved render size |
+| Render Resolution | `[gpu].renderScalePercent`: Native / 75% / 50% with sharp upscale; Hollow Knight graphics settings use the resolved render size |
 | Graphics | `textureMaxDim`: 384 / 512 / 720 / 0 |
 | Swap A/B, Swap X/Y | `[input.remap]` absolute button values |
 

@@ -79,7 +79,7 @@ run_love_launcher_ui              # sets launcher_exit + LAUNCH_ENV (=love_ui/la
 HKL_ENV="$LAUNCH_ENV"
 if [ -f "$HKL_ENV" ]; then
   source "$HKL_ENV"
-  echo "$LOG_PREFIX env: output=${HKL_WIDTH}x${HKL_HEIGHT} render_divisor=${HKL_RENDER_DIVISOR:-1} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${HKL_WIDTH}x${HKL_HEIGHT} render_percent=${HKL_RENDER_PERCENT:-100} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
 
   # Quality → textureMaxDim: 384/512/720/0 (low/medium/high/ultra; same values
   # as the heishenhua port).
@@ -101,9 +101,8 @@ resolve_display_resolution "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
 HK_RUNTIME_WIDTH="$RES_W"
 HK_RUNTIME_HEIGHT="$RES_H"
-resolve_render_scale "${HKL_RENDER_DIVISOR:-1}"
+resolve_render_scale "${HKL_RENDER_PERCENT:-100}"
 apply_render_scale "$PORT_TOML"
-HK_RENDER_DIVISOR="$RENDER_SCALE_DIVISOR"
 HK_RENDER_WIDTH="$RENDER_W"
 HK_RENDER_HEIGHT="$RENDER_H"
 hk_sync_graphics_resolution "$HK_RENDER_HEIGHT"

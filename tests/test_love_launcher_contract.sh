@@ -49,6 +49,15 @@ for port in heishenhua hk sts2 terraria vampiresurvivors114; do
   }
 done
 
+# Every Unity settings launcher separates physical output from internal render
+# scale and applies the shared Native/75%/50% protocol.
+for port in heishenhua hk sunkendragon terraria vampiresurvivors114; do
+  grep -Fq 'launcher.output_resolution' "$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'launcher.render_scale' "$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'resolve_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
+  grep -Fq 'apply_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
+done
+
 # Build one representative port and assert the common files are materialized in dist.
 bash "$ROOT/_kit/dist_port.sh" hk >/dev/null
 for file in kit.lua launcher.lua conf.lua ui.gptk; do

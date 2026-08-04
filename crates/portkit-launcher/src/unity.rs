@@ -10,19 +10,19 @@ pub struct ConfigureRequest {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub buttons: Option<[String; 4]>,
-    /// Internal Unity render divisor. This always belongs to `[gpu]`,
+    /// Internal Unity render percentage. This always belongs to `[gpu]`,
     /// independently of the table selected for display or input settings.
-    pub render_scale_divisor: Option<u32>,
+    pub render_scale_percent: Option<u32>,
 }
 
 pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
     if request
-        .render_scale_divisor
-        .is_some_and(|value| !matches!(value, 1 | 2 | 4))
+        .render_scale_percent
+        .is_some_and(|value| !matches!(value, 100 | 75 | 50))
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "render scale divisor must be 1, 2 or 4",
+            "render scale percent must be 100, 75 or 50",
         ));
     }
     let contents = std::fs::read_to_string(&request.path)?;
@@ -58,12 +58,18 @@ pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
             ],
         );
     }
-    if let Some(divisor) = request.render_scale_divisor {
+    if let Some(percent) = request.render_scale_percent {
         upsert(
             &mut lines,
             Some("gpu"),
-            "renderScaleDivisor",
-            format!("renderScaleDivisor = {divisor}"),
+            "renderScalePercent",
+            format!("renderScalePercent = {percent}"),
+        );
+        upsert(
+            &mut lines,
+            Some("gpu"),
+            "renderScaleSharp",
+            "renderScaleSharp = true".to_owned(),
         );
         // An exact pair takes precedence in Bogodroid. Reset it whenever the
         // launcher selects a scale so stale manual values cannot win silently.
@@ -79,6 +85,8 @@ pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
             "renderHeight",
             "renderHeight = 0".to_owned(),
         );
+        remove_all(&mut lines, Some("gpu"), "renderScaleDivisor");
+        remove_all(&mut lines, Some("gpu"), "renderScaleLinear");
     }
     let mut output = lines.join("\n");
     output.push('\n');
@@ -136,6 +144,25 @@ fn rewrite_all(lines: &mut [String], start: usize, end: usize, key: &str, render
         }
     }
     found
+}
+
+fn remove_all(lines: &mut Vec<String>, section: Option<&str>, key: &str) {
+    let start = match section {
+        None => 0,
+        Some(name) => {
+            let header = format!("[{name}]");
+            let Some(index) = lines.iter().position(|line| line.trim() == header) else {
+                return;
+            };
+            index + 1
+        }
+    };
+    let end = first_section(lines, start);
+    for index in (start..end).rev() {
+        if line_key(lines[index].trim_start()) == Some(key) {
+            lines.remove(index);
+        }
+    }
 }
 
 fn upsert_section(lines: &mut Vec<String>, section: &str, values: &[(&str, String)]) {

@@ -8,11 +8,12 @@ launcher.define {
         {"credit_porter", "Bili 解腻Jenny"},
     },
     fields = {
-        launcher.resolution {env = {"SDR_WIDTH", "SDR_HEIGHT"}},
+        launcher.output_resolution {env = {"SDR_WIDTH", "SDR_HEIGHT"}},
+        launcher.render_scale {env = "SDR_RENDER_PERCENT"},
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "SDR_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "SDR_SWAP_XY"},
     },
-    field_order = {"resolution", "swap_ab", "swap_xy"},
+    field_order = {"resolution", "render_scale", "swap_ab", "swap_xy"},
     launch_count_env = "SDR_LAUNCH_COUNT",
     prelaunch = {
         core_files = {

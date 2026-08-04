@@ -19,8 +19,8 @@ portkit_launcher() {
 resolve_display_resolution auto auto
 [ "$RES_W:$RES_H" = "960:720" ]
 
-resolve_render_scale 2
-[ "$RENDER_SCALE_DIVISOR:$RENDER_W:$RENDER_H" = "2:480:360" ]
+resolve_render_scale 75
+[ "$RENDER_SCALE_PERCENT:$RENDER_W:$RENDER_H" = "75:720:540" ]
 
 printf '%s\n' \
   '[device]' \
@@ -29,6 +29,7 @@ printf '%s\n' \
   '' \
   '[gpu]' \
   'renderScaleDivisor = 4' \
+  'renderScaleLinear = false' \
   'renderWidth = 320' \
   'renderHeight = 180' \
   > "$TMP/config.toml"
@@ -38,9 +39,12 @@ apply_render_scale "$TMP/config.toml"
 
 grep -Fq 'displayWidth=960' "$TMP/config.toml"
 grep -Fq 'displayHeight=720' "$TMP/config.toml"
-grep -Fq 'renderScaleDivisor = 2' "$TMP/config.toml"
+grep -Fq 'renderScalePercent = 75' "$TMP/config.toml"
+grep -Fq 'renderScaleSharp = true' "$TMP/config.toml"
 grep -Fq 'renderWidth = 0' "$TMP/config.toml"
 grep -Fq 'renderHeight = 0' "$TMP/config.toml"
+! grep -Fq 'renderScaleDivisor' "$TMP/config.toml"
+! grep -Fq 'renderScaleLinear' "$TMP/config.toml"
 
 resolve_render_scale invalid
-[ "$RENDER_SCALE_DIVISOR:$RENDER_W:$RENDER_H" = "1:960:720" ]
+[ "$RENDER_SCALE_PERCENT:$RENDER_W:$RENDER_H" = "100:960:720" ]

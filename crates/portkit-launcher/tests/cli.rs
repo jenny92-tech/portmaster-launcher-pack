@@ -48,10 +48,10 @@ fn unity_command_requires_a_complete_button_mapping() {
 }
 
 #[test]
-fn unity_command_rejects_an_unsupported_render_divisor() {
+fn unity_command_rejects_an_unsupported_render_percent() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("config.toml");
-    fs::write(&path, "[gpu]\nrenderScaleDivisor = 1\n").unwrap();
+    fs::write(&path, "[gpu]\nrenderScalePercent = 100\n").unwrap();
 
     let status = Command::new(env!("CARGO_BIN_EXE_portkit-launcher"))
         .args([
@@ -59,8 +59,8 @@ fn unity_command_rejects_an_unsupported_render_divisor() {
             "configure",
             "--file",
             path.to_str().unwrap(),
-            "--render-divisor",
-            "3",
+            "--render-percent",
+            "60",
         ])
         .status()
         .unwrap();
@@ -68,6 +68,6 @@ fn unity_command_rejects_an_unsupported_render_divisor() {
     assert!(!status.success());
     assert_eq!(
         fs::read_to_string(path).unwrap(),
-        "[gpu]\nrenderScaleDivisor = 1\n"
+        "[gpu]\nrenderScalePercent = 100\n"
     );
 }

@@ -9,7 +9,7 @@ launcher.define {
     },
     fields = {
         launcher.output_resolution {env = {"HKL_WIDTH", "HKL_HEIGHT"}},
-        launcher.render_scale {env = "HKL_RENDER_DIVISOR"},
+        launcher.render_scale {env = "HKL_RENDER_PERCENT"},
         launcher.select {
             key = "texmax", label = {en = "Graphics:", zh = "画面质量:"}, default = "384", env = "HKL_TEXMAX",
             options = {

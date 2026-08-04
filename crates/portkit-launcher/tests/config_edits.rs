@@ -102,7 +102,7 @@ fn unity_configure_upserts_resolution_and_remap_without_losing_other_sections() 
         width: Some(640),
         height: Some(480),
         buttons: None,
-        render_scale_divisor: None,
+        render_scale_percent: None,
     })
     .unwrap();
     configure(&ConfigureRequest {
@@ -116,7 +116,7 @@ fn unity_configure_upserts_resolution_and_remap_without_losing_other_sections() 
             "BUTTON_Y".into(),
             "BUTTON_X".into(),
         ]),
-        render_scale_divisor: None,
+        render_scale_percent: None,
     })
     .unwrap();
 
@@ -173,7 +173,7 @@ fn unity_configure_writes_the_resolution_into_the_device_section() {
         width: Some(640),
         height: Some(480),
         buttons: None,
-        render_scale_divisor: None,
+        render_scale_percent: None,
     })
     .unwrap();
 
@@ -220,7 +220,7 @@ fn unity_configure_rewrites_every_duplicate_inside_the_device_section() {
         width: Some(960),
         height: Some(720),
         buttons: None,
-        render_scale_divisor: None,
+        render_scale_percent: None,
     })
     .unwrap();
 
@@ -261,7 +261,7 @@ fn unity_configure_targets_whatever_table_the_caller_names() {
         width: Some(800),
         height: None,
         buttons: None,
-        render_scale_divisor: None,
+        render_scale_percent: None,
     })
     .unwrap();
     assert_eq!(
@@ -277,7 +277,7 @@ fn unity_configure_targets_whatever_table_the_caller_names() {
         width: Some(640),
         height: None,
         buttons: None,
-        render_scale_divisor: None,
+        render_scale_percent: None,
     })
     .unwrap();
     assert_eq!(
@@ -298,6 +298,8 @@ fn unity_configure_sets_render_scale_and_clears_exact_overrides() {
             "displayHeight=720\n",
             "\n",
             "[gpu]\n",
+            "renderScaleDivisor = 4\n",
+            "renderScaleLinear = false\n",
             "textureMaxDim = 384\n",
             "renderWidth = 800\n",
             "renderHeight = 600\n",
@@ -311,7 +313,7 @@ fn unity_configure_sets_render_scale_and_clears_exact_overrides() {
         width: None,
         height: None,
         buttons: None,
-        render_scale_divisor: Some(2),
+        render_scale_percent: Some(75),
     })
     .unwrap();
 
@@ -323,7 +325,8 @@ fn unity_configure_sets_render_scale_and_clears_exact_overrides() {
             "displayHeight=720\n",
             "\n",
             "[gpu]\n",
-            "renderScaleDivisor = 2\n",
+            "renderScaleSharp = true\n",
+            "renderScalePercent = 75\n",
             "textureMaxDim = 384\n",
             "renderWidth = 0\n",
             "renderHeight = 0\n",
@@ -335,7 +338,7 @@ fn unity_configure_sets_render_scale_and_clears_exact_overrides() {
 fn unity_configure_rejects_an_invalid_render_scale_without_writing() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("config.toml");
-    fs::write(&path, "[gpu]\nrenderScaleDivisor = 1\n").unwrap();
+    fs::write(&path, "[gpu]\nrenderScalePercent = 100\n").unwrap();
 
     let result = configure(&ConfigureRequest {
         path: path.clone(),
@@ -343,12 +346,12 @@ fn unity_configure_rejects_an_invalid_render_scale_without_writing() {
         width: None,
         height: None,
         buttons: None,
-        render_scale_divisor: Some(3),
+        render_scale_percent: Some(60),
     });
 
     assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
     assert_eq!(
         fs::read_to_string(path).unwrap(),
-        "[gpu]\nrenderScaleDivisor = 1\n"
+        "[gpu]\nrenderScalePercent = 100\n"
     );
 }

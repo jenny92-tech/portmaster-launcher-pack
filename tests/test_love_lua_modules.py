@@ -47,11 +47,11 @@ love.event.quit=function(code) LAST_QUIT=code end
 '''
 
 expected_env = {
-    "heishenhua": (6, ("HSH_WIDTH='auto'", "HSH_RENDER_DIVISOR='1'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'")),
-    "hk": (5, ("HKL_WIDTH='auto'", "HKL_RENDER_DIVISOR='1'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'")),
+    "heishenhua": (6, ("HSH_WIDTH='auto'", "HSH_RENDER_PERCENT='100'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'")),
+    "hk": (5, ("HKL_WIDTH='auto'", "HKL_RENDER_PERCENT='100'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'")),
     "sts2": (4, ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_SWAP_AB='on'", "SLL_LAUNCH_COUNT='1'")),
-    "terraria": (4, ("TER_WIDTH='auto'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'")),
-    "vampiresurvivors114": (4, ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_DIVISOR='1'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'")),
+    "terraria": (5, ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='100'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'")),
+    "vampiresurvivors114": (4, ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='100'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'")),
 }
 
 for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):

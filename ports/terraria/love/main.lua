@@ -8,7 +8,8 @@ launcher.define {
         {"credit_porter", "Bili 解腻Jenny"},
     },
     fields = {
-        launcher.resolution {env = {"TER_WIDTH", "TER_HEIGHT"}},
+        launcher.output_resolution {env = {"TER_WIDTH", "TER_HEIGHT"}},
+        launcher.render_scale {env = "TER_RENDER_PERCENT"},
         launcher.select {
             key = "language", label = {en = "Game Language:", zh = "游戏语言:"}, default = "7", env = "TER_LANGUAGE",
             options = {
@@ -19,7 +20,7 @@ launcher.define {
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "TER_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "TER_SWAP_XY"},
     },
-    field_order = {"resolution", "language", "swap_ab", "swap_xy"},
+    field_order = {"resolution", "render_scale", "language", "swap_ab", "swap_xy"},
     legacy = {
         path = "../conf/godot/app_userdata/泰拉瑞亚启动器/launch_config.env",
         state_path = "../conf/godot/app_userdata/泰拉瑞亚启动器/terraria_launcher_state.json",

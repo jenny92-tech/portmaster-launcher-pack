@@ -53,7 +53,7 @@ grep -Fq 'LD_LIBRARY_PATH="$game_library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PA
 grep -Fq 'prepare_unityloader_private_libs || return 1' "$unity_common"
 grep -Fq 'resolve_render_scale()' "$unity_common"
 grep -Fq 'apply_render_scale()' "$unity_common"
-grep -Fq -- '--render-divisor "$RENDER_SCALE_DIVISOR"' "$unity_common"
+grep -Fq -- '--render-percent "$RENDER_SCALE_PERCENT"' "$unity_common"
 
 # Unity launchers expose physical output and internal rendering as independent
 # settings, then apply both through the same shared shell protocol.

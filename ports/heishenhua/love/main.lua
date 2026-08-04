@@ -14,7 +14,7 @@ launcher.define {
     },
     fields = {
         launcher.output_resolution {env = {"HSH_WIDTH", "HSH_HEIGHT"}},
-        launcher.render_scale {env = "HSH_RENDER_DIVISOR"},
+        launcher.render_scale {env = "HSH_RENDER_PERCENT"},
         launcher.select {
             key = "texmax", label = {en = "Graphics:", zh = "画面质量:"}, default = "480", env = "HSH_TEXMAX",
             options = {
