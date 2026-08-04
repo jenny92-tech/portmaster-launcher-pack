@@ -112,27 +112,7 @@ sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 0/" "$PORT_TOML"
 sed -i "s/^shaderGles2Rewrite *=.*/shaderGles2Rewrite = false/" "$PORT_TOML"
 sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
 
-# ── Library paths + glibc memory tuning for 1GB handhelds ────────────────
-export XDG_DATA_HOME="$CONFDIR" XDG_CONFIG_HOME="$CONFDIR"
-export LD_LIBRARY_PATH="$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-prepare_unityloader_private_libs || exit 1
-memory_tuning
-
-# Unity 6/PAD compatibility is handled by unityloader.d plugins.
-
-# ── Standard plugin loader ───────────────────────────────────────────────
-LOADER=unityloader
-[ -f "$GAMEDIR/$LOADER" ] || {
-  echo "$LOG_PREFIX missing standard loader: $GAMEDIR/$LOADER"
-  exit 1
-}
-chmod a+x "$GAMEDIR/$LOADER"
-echo "$LOG_PREFIX loader=$LOADER"
-audio_setup
-pm_platform_helper "$GAMEDIR/$LOADER"
-
-# ── run ──────────────────────────────────────────────────────────────────
-"$GAMEDIR/$LOADER" "$PORT_TOML"
-STATUS=$?
-echo "$LOG_PREFIX exited $STATUS"
-exit "$STATUS"
+# Unity 6/PAD compatibility is handled by unityloader.d plugins. The second
+# argument only supplies this game's packaged native-library directories;
+# process orchestration remains shared with every other Unity port.
+run_unity_game "$PORT_TOML" "$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a"

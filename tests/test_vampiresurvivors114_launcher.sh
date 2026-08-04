@@ -36,11 +36,11 @@ if grep -nE 'unityloader\.(gplay|prevgplay)' "$LOVE/launcher.sh.template"; then
 fi
 
 grep -Fq 'run_love_launcher_ui' "$LOVE/launcher.sh.template"
-grep -Fq 'LOADER=unityloader' "$LOVE/launcher.sh.template"
-grep -Fq 'missing standard loader:' "$LOVE/launcher.sh.template"
 grep -Fq 'SHADER_CACHE_DIR="/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"' "$LOVE/launcher.sh.template"
 grep -Fq 'missing paths.unity_shader_cache_redirect' "$LOVE/launcher.sh.template"
-grep -Fq 'prepare_unityloader_private_libs || exit 1' "$LOVE/launcher.sh.template"
+grep -Fq 'run_unity_game "$PORT_TOML" "$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a"' "$LOVE/launcher.sh.template"
+! grep -Fq 'prepare_unityloader_private_libs' "$LOVE/launcher.sh.template"
+! grep -Fq 'LOADER=unityloader' "$LOVE/launcher.sh.template"
 grep -Fq 'glVersionOverride        = \"OpenGL ES 3.0 Bogodroid\"' "$LOVE/launcher.sh.template"
 grep -Fq 'glMinorVersionOverride   = 0' "$LOVE/launcher.sh.template"
 grep -Fq 'shaderGles2Rewrite = false' "$LOVE/launcher.sh.template"

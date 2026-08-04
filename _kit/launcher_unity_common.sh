@@ -114,7 +114,10 @@ prepare_unityloader_private_libs() {
 }
 
 run_unity_game() {
-  local toml="$1"
+  local toml="$1" game_library_paths="${2:-}"
+  if [ -n "$game_library_paths" ]; then
+    export LD_LIBRARY_PATH="$game_library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
   prepare_unityloader_private_libs || return 1
   export XDG_DATA_HOME="$CONFDIR"
   export XDG_CONFIG_HOME="$CONFDIR"

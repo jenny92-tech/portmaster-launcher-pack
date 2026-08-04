@@ -46,6 +46,8 @@ unity_common="$ROOT/_kit/launcher_unity_common.sh"
 grep -Fq 'prepare_unityloader_private_libs()' "$unity_common"
 grep -Fq 'for library in libstdc++.so.6 libgcc_s.so.1' "$unity_common"
 grep -Fq 'LD_LIBRARY_PATH="$private_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' "$unity_common"
+grep -Fq 'local toml="$1" game_library_paths="${2:-}"' "$unity_common"
+grep -Fq 'LD_LIBRARY_PATH="$game_library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' "$unity_common"
 grep -Fq 'prepare_unityloader_private_libs || return 1' "$unity_common"
 
 # Every game uses the same explicit Chinese wording for controller swaps.

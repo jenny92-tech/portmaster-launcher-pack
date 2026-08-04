@@ -103,6 +103,8 @@ run_love_launcher_ui
 # ... apply_display_resolution "$GAMEDIR/x.toml"
 # ... apply_button_remap "$GAMEDIR/x.toml" BUTTON_A BUTTON_B BUTTON_X BUTTON_Y
 run_unity_game x.toml
+# Optional second argument: colon-separated game-owned native-library dirs.
+# run_unity_game x.toml "$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a"
 ```
 
 The KIT block runs as-is in the repo and gets inlined by `assemble.sh` for the
