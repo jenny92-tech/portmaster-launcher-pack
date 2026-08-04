@@ -92,6 +92,24 @@ impl<'a> GpuRenderer<'a> {
                         draw_polyline(canvas, points, *line_width, true)?;
                     }
                 }
+                GpuCommand::Ellipse {
+                    fill,
+                    x,
+                    y,
+                    radius_x,
+                    radius_y,
+                    line_width,
+                    color,
+                    clip,
+                } => {
+                    set_clip(canvas, *clip);
+                    canvas.set_draw_color(sdl_color(*color));
+                    if *fill {
+                        fill_ellipse(canvas, *x, *y, *radius_x, *radius_y)?;
+                    } else {
+                        stroke_ellipse(canvas, *x, *y, *radius_x, *radius_y, *line_width)?;
+                    }
+                }
                 GpuCommand::Image {
                     image_id,
                     source,
@@ -312,6 +330,77 @@ fn draw_thick_line(
                 FPoint::new(end.0 + nx * offset, end.1 + ny * offset),
             )
             .map_err(anyhow::Error::msg)?;
+    }
+    Ok(())
+}
+
+fn fill_ellipse(
+    canvas: &mut Canvas<Window>,
+    cx: f32,
+    cy: f32,
+    radius_x: f32,
+    radius_y: f32,
+) -> Result<()> {
+    let rx = radius_x.max(0.0);
+    let ry = radius_y.max(0.0);
+    if rx < 0.5 || ry < 0.5 {
+        return Ok(());
+    }
+    if rx < 1.0 && ry < 1.0 {
+        return canvas
+            .draw_fpoint(FPoint::new(cx, cy))
+            .map_err(anyhow::Error::msg);
+    }
+    let rows = ry.ceil() as i32;
+    for row in -rows..=rows {
+        let dy = row as f32 + if row >= 0 { 0.5 } else { -0.5 };
+        let norm = 1.0 - (dy * dy) / (ry * ry);
+        if norm < 0.0 {
+            continue;
+        }
+        let dx = rx * norm.sqrt();
+        canvas
+            .draw_fline(
+                FPoint::new(cx - dx, cy + dy),
+                FPoint::new(cx + dx, cy + dy),
+            )
+            .map_err(anyhow::Error::msg)?;
+    }
+    Ok(())
+}
+
+fn stroke_ellipse(
+    canvas: &mut Canvas<Window>,
+    cx: f32,
+    cy: f32,
+    radius_x: f32,
+    radius_y: f32,
+    line_width: f32,
+) -> Result<()> {
+    let rx = radius_x.max(0.0);
+    let ry = radius_y.max(0.0);
+    if rx < 0.5 || ry < 0.5 {
+        return Ok(());
+    }
+    let thickness = line_width.max(1.0);
+    // Approximate a thick outline as concentric ellipses; dense enough for UI dots.
+    let layers = thickness.round().max(1.0) as i32;
+    let segments = ((rx.max(ry) * 2.2).ceil() as i32).clamp(16, 96);
+    for layer in 0..layers {
+        let inset = layer as f32;
+        let orx = (rx - inset).max(0.5);
+        let ory = (ry - inset).max(0.5);
+        let mut previous = None;
+        for segment in 0..=segments {
+            let angle = std::f32::consts::TAU * segment as f32 / segments as f32;
+            let point = FPoint::new(cx + angle.cos() * orx, cy + angle.sin() * ory);
+            if let Some(start) = previous {
+                canvas
+                    .draw_fline(start, point)
+                    .map_err(anyhow::Error::msg)?;
+            }
+            previous = Some(point);
+        }
     }
     Ok(())
 }

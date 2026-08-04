@@ -142,9 +142,16 @@ function Model.new(kit,native)
                 indexing=L("Updating file list","正在更新文件列表"),
                 complete=L("Cleanup completed","清理完成"),
             }
-            return {progress=0,stage=stages[phase] or L("Cleaning ._Files","正在清理 ._Files"),
+            -- Unknown total: show an indeterminate bar, with the live file count in the footer.
+            local done=phase=="complete"
+            return {progress=done and 1 or 0,indeterminate=not done,
+                stage=stages[phase] or L("Cleaning ._Files","正在清理 ._Files"),
                 detail="",footer_left=L(string.format("%d files",current),string.format("%d 个文件",current)),
-                footer_right=phase=="complete" and L("Done","完成") or L("Scanning…","扫描中…"),phase=phase}
+                footer_right=done and L("Done","完成")
+                    or phase=="cleaning" and L("Cleaning…","清理中…")
+                    or phase=="indexing" and L("Updating…","更新中…")
+                    or L("Scanning…","扫描中…"),
+                phase=phase}
         end
         local stages=portmaster and {
             preparing=L("Preparing PortMaster","正在准备 PortMaster"),probing=L("Checking network","正在检查网络"),

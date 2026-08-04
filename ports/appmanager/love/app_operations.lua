@@ -166,14 +166,17 @@ function Operations.new(model)
             kit.set_busy(true,L("Installing PortMaster…","正在安装 PortMaster…"),{
                 progress=0,stage=L("Preparing PortMaster","正在准备 PortMaster"),detail="",
                 footer_left="0%",footer_right=L("Preparing…","准备中…"),
-                cancel=L("Cancel installation","取消安装"),on_cancel=self.request_portmaster_cancel})
+                cancel=L("Cancel installation","取消安装"),
+                cancel_label=L("Cancel installation","取消安装"),
+                on_cancel=self.request_portmaster_cancel})
         elseif self.confirm_return==pages.RUNTIME then
             kit.set_busy(true,L("Repairing Runtimes…","正在修复 Runtime…"),{
                 progress=0,stage=L("Starting repair","正在启动修复"),detail="",
                 footer_left=L("Preparing…","准备中…"),footer_right=L("Preparing…","准备中…")})
         elseif appledouble then
-            kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files……"),{
-                progress=0,stage=L("Scanning files","正在扫描文件"),detail="",
+            kit.set_busy(true,L("Cleaning ._Files…","正在清理 ._Files…"),{
+                progress=0,indeterminate=true,
+                stage=L("Scanning files","正在扫描文件"),detail="",
                 footer_left=L("0 files","0 个文件"),footer_right=L("Scanning…","扫描中…")})
         else
             kit.set_busy(true,L("Working…","处理中…"))

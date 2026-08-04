@@ -135,6 +135,37 @@ impl Engine {
         function.call::<bool>(()).context("love.isAnimating")
     }
 
+    pub fn needs_redraw(&self) -> Result<bool> {
+        let love: LuaTable = self.runtime.lua.globals().get("love")?;
+        let Ok(function) = love.get::<LuaFunction>("needsRedraw") else {
+            return Ok(false);
+        };
+        function.call::<bool>(()).context("love.needsRedraw")
+    }
+
+    pub fn take_dirty(&self) -> Result<bool> {
+        let love: LuaTable = self.runtime.lua.globals().get("love")?;
+        let Ok(function) = love.get::<LuaFunction>("takeDirty") else {
+            return Ok(false);
+        };
+        function.call::<bool>(()).context("love.takeDirty")
+    }
+
+    /// Seconds until the host should wake without input. `None` means block on events.
+    pub fn wake_interval(&self) -> Result<Option<f64>> {
+        let love: LuaTable = self.runtime.lua.globals().get("love")?;
+        let Ok(function) = love.get::<LuaFunction>("wakeInterval") else {
+            return Ok(None);
+        };
+        let value: LuaValue = function.call(()).context("love.wakeInterval")?;
+        match value {
+            LuaValue::Nil => Ok(None),
+            LuaValue::Integer(value) => Ok(Some(value as f64)),
+            LuaValue::Number(value) => Ok(Some(value)),
+            other => anyhow::bail!("love.wakeInterval must return number or nil, got {other:?}"),
+        }
+    }
+
     pub fn frame_rgba(&self) -> Vec<u8> {
         self.runtime.state.pixel_buffer.lock().pixels.clone()
     }

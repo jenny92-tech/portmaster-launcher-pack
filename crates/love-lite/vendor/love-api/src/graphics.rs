@@ -1047,23 +1047,7 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
         g.set(
             "circle",
             lua.create_function(move |_, (mode, cx, cy, radius, _segments): (String, f32, f32, f32, Option<u32>)| {
-                let color = color_f32_to_u8(*s.current_color.lock());
-                let t = current_transform(&s);
-                let (px_f, py_f) = t.apply(cx, cy);
-                let px = px_f as i32;
-                let py = py_f as i32;
-                let (sfx, sfy) = t.scale_factor();
-                let rx = (radius * sfx) as i32;
-                let ry = (radius * sfy) as i32;
-
-                s.with_active_buffer(|pb| {
-                    if mode == "fill" {
-                        draw_filled_ellipse(pb, px, py, rx, ry, color);
-                    } else {
-                        draw_stroke_ellipse(pb, px, py, rx, ry, color);
-                    }
-                });
-                Ok(())
+                record_or_draw_ellipse(&s, &mode, cx, cy, radius, radius)
             })?,
         )?;
     }
@@ -1074,20 +1058,7 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
         g.set(
             "ellipse",
             lua.create_function(move |_, (mode, cx, cy, rx, ry, _seg): (String, f32, f32, f32, f32, Option<u32>)| {
-                let color = color_f32_to_u8(*s.current_color.lock());
-                let t = current_transform(&s);
-                let (px, py) = t.apply(cx, cy);
-                let (sfx, sfy) = t.scale_factor();
-                let irx = (rx * sfx) as i32;
-                let iry = (ry * sfy) as i32;
-                s.with_active_buffer(|pb| {
-                    if mode == "fill" {
-                        draw_filled_ellipse(pb, px as i32, py as i32, irx, iry, color);
-                    } else {
-                        draw_stroke_ellipse(pb, px as i32, py as i32, irx, iry, color);
-                    }
-                });
-                Ok(())
+                record_or_draw_ellipse(&s, &mode, cx, cy, rx, ry)
             })?,
         )?;
     }
@@ -1108,22 +1079,10 @@ pub fn register(lua: &Lua, love: &LuaTable, state: Arc<SharedState>) -> LuaResul
                     f32,
                     Option<u32>,
                 )| {
-                    let color = color_f32_to_u8(*s.current_color.lock());
-                    let t = current_transform(&s);
-                    let (px, py) = t.apply(cx, cy);
-                    let (sfx, sfy) = t.scale_factor();
-                    let irx = (radius * sfx) as i32;
-                    let iry = (radius * sfy) as i32;
-                    // Approximate arc by drawing full ellipse (acceptable for terminal resolution)
-                    s.with_active_buffer(|pb| {
-                        if mode == "fill" {
-                            draw_filled_ellipse(pb, px as i32, py as i32, irx, iry, color);
-                        } else {
-                            draw_stroke_ellipse(pb, px as i32, py as i32, irx, iry, color);
-                        }
-                    });
-                    let _ = (a1, a2); // angles ignored in terminal approximation
-                    Ok(())
+                    // Angles are ignored: same full-ellipse approximation as the
+                    // software path. GPU recording stays on the ellipse subset.
+                    let _ = (a1, a2);
+                    record_or_draw_ellipse(&s, &mode, cx, cy, radius, radius)
                 },
             )?,
         )?;
@@ -3476,6 +3435,58 @@ fn current_transform(state: &SharedState) -> Transform {
         .last()
         .cloned()
         .unwrap_or_default()
+}
+
+/// Shared path for `circle`, `ellipse`, and the arc approximation.
+fn record_or_draw_ellipse(
+    state: &SharedState,
+    mode: &str,
+    cx: f32,
+    cy: f32,
+    radius_x: f32,
+    radius_y: f32,
+) -> mlua::Result<()> {
+    let color = color_f32_to_u8(*state.current_color.lock());
+    let t = current_transform(state);
+    let has_rotation = t.b.abs() > 0.001 || t.c.abs() > 0.001;
+    let (px_f, py_f) = t.apply(cx, cy);
+    let (sfx, sfy) = t.scale_factor();
+    let rx = (radius_x * sfx).abs();
+    let ry = (radius_y * sfy).abs();
+    let (scale_x, scale_y) = t.scale_factor();
+    let line_width = ((*state.line_width.lock()) * scale_x.max(scale_y)).max(1.0);
+
+    if state.is_gpu_recording() {
+        if has_rotation {
+            // Rotated ellipses are outside the axis-aligned GPU subset.
+            state.reject_gpu_frame();
+            return Ok(());
+        }
+        state.record_gpu(GpuCommand::Ellipse {
+            fill: mode == "fill",
+            x: px_f,
+            y: py_f,
+            radius_x: rx,
+            radius_y: ry,
+            line_width,
+            color,
+            clip: *state.scissor.lock(),
+        });
+        return Ok(());
+    }
+
+    let px = px_f.round() as i32;
+    let py = py_f.round() as i32;
+    let irx = rx.round().max(0.0) as i32;
+    let iry = ry.round().max(0.0) as i32;
+    state.with_active_buffer(|pb| {
+        if mode == "fill" {
+            draw_filled_ellipse(pb, px, py, irx, iry, color);
+        } else {
+            draw_stroke_ellipse(pb, px, py, irx, iry, color);
+        }
+    });
+    Ok(())
 }
 
 const TEXT_CACHE_MAX_ENTRIES: usize = 512;

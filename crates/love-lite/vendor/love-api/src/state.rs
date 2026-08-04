@@ -41,6 +41,17 @@ pub enum GpuCommand {
         color: [u8; 4],
         clip: GpuClip,
     },
+    /// Axis-aligned ellipse. `circle` records equal radii; rotation is rejected.
+    Ellipse {
+        fill: bool,
+        x: f32,
+        y: f32,
+        radius_x: f32,
+        radius_y: f32,
+        line_width: f32,
+        color: [u8; 4],
+        clip: GpuClip,
+    },
     Image {
         image_id: u64,
         source: (i32, i32, u32, u32),

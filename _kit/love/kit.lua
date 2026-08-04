@@ -56,6 +56,7 @@ local navigation_stack = {}
 local zone, focus_i, sidebar_i, bar_i = "rows", 1, 1, 1
 local scroll_top, scroll_y = 1, 0
 local busy, busy_message, busy_info, busy_elapsed = false, nil, nil, 0
+local busy_display_progress = 0
 local toast_state = nil
 local dialog_state, dialog_focus = nil, 2
 local guide_state = nil
@@ -63,6 +64,8 @@ local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
 local measurement_cache = setmetatable({}, {__mode="k"})
 local layout_cache_stats = {hits=0,misses=0,invalidations=0}
+-- love-lite host reads this for true event-driven redraws. Stock LÖVE ignores it.
+local needs_redraw = true
 
 local DEFAULT_INPUT_MAP = {
     up="up", down="down", left="left", right="right",
@@ -357,14 +360,26 @@ function kit.section(l,opts)
     return apply_options({kind="section",label=l,focusable=false},opts)
 end
 function kit.badge(text_,color) return {text=text_,color=color} end
+function kit.mark_dirty()
+    needs_redraw=true
+end
+function kit.take_dirty()
+    local dirty=needs_redraw
+    needs_redraw=false
+    return dirty
+end
+function kit.needs_redraw()
+    return needs_redraw==true
+end
 function kit.add_page(title,rows,opts)
     local page=opts or {}; page.title=title; page.rows=rows or {}; page.sidebar=page.sidebar or {}
-    pages[#pages+1]=page; return #pages
+    pages[#pages+1]=page; kit.mark_dirty(); return #pages
 end
 function kit.invalidate_layout(page)
     if page then measurement_cache[page]=nil
     else measurement_cache=setmetatable({}, {__mode="k"}) end
     layout_cache_stats.invalidations=layout_cache_stats.invalidations+1
+    kit.mark_dirty()
 end
 function kit.set_page(index,title,rows,opts)
     local old_page=pages[index]
@@ -381,6 +396,7 @@ function kit.set_page(index,title,rows,opts)
             zone="rows"; focus_i=default_focus_index(page.rows); sidebar_i=first_focusable(page.sidebar); bar_i=1; scroll_top=1; scroll_y=0
         end
     end
+    kit.mark_dirty()
     return index
 end
 function kit.set_busy(value,message,info)
@@ -388,7 +404,15 @@ function kit.set_busy(value,message,info)
     busy=value and true or false
     busy_message=message
     busy_info=busy and type(info)=="table" and info or nil
-    if not busy or not was_busy then busy_elapsed=0 end
+    if not busy then
+        busy_elapsed=0
+        busy_display_progress=0
+    else
+        if not was_busy then busy_elapsed=0 end
+        -- Snap to the latest reported value. Host polls ~10 Hz; no 60 FPS easing.
+        busy_display_progress=math.max(0,math.min(1,tonumber(busy_info and busy_info.progress) or 0))
+    end
+    kit.mark_dirty()
 end
 function kit.debug_busy()
     return {busy=busy,message=t(busy_message or ""),stage=busy_info and t(busy_info.stage or "") or "",
@@ -405,11 +429,13 @@ function kit.toast(message,opts)
     local kind=opts.kind or "info"
     if kind~="success" and kind~="error" and kind~="warning" then kind="info" end
     toast_state={message=message or "",kind=kind,duration=math.max(0.1,tonumber(opts.duration) or 5),elapsed=0}
+    kit.mark_dirty()
     return true
 end
 function kit.dismiss_toast()
     if not toast_state then return false end
     toast_state=nil
+    kit.mark_dirty()
     return true
 end
 function kit.debug_toast()
@@ -447,6 +473,7 @@ function kit.dialog(opts)
     dialog_state=opts
     dialog_state._checkbox_checked=opts.checkbox and opts.checkbox.checked==true or false
     dialog_focus=opts.default_focus=="confirm" and 1 or 2
+    kit.mark_dirty()
     return true
 end
 function kit.close_dialog()
@@ -454,6 +481,7 @@ function kit.close_dialog()
     dialog_state=nil; dialog_focus=2
     local snapshot=table.remove(focus_stack)
     restore_focus(snapshot)
+    kit.mark_dirty()
     return true
 end
 function kit.debug_dialog()
@@ -473,11 +501,13 @@ function kit.guide(opts)
     if #opts.callouts==0 then return false end
     opts._index=1
     guide_state=opts
+    kit.mark_dirty()
     return true
 end
 function kit.close_guide()
     if not guide_state then return false end
     guide_state=nil
+    kit.mark_dirty()
     return true
 end
 function kit.debug_guide()
@@ -868,6 +898,7 @@ end
 local function goto_page(n)
     if not pages[n] then return end
     page_i=n; zone="rows"; focus_i=default_focus_index(cur()); sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
+    kit.mark_dirty()
 end
 function kit.goto_page(n)
     if n==1 then navigation_stack={} end
@@ -883,6 +914,7 @@ function kit.back_page()
     local snapshot=table.remove(navigation_stack)
     if snapshot and pages[snapshot.page_i] then
         restore_focus(snapshot)
+        kit.mark_dirty()
         return true
     end
     navigation_stack={}
@@ -989,6 +1021,9 @@ end
 function kit.run(cfg)
     port=cfg; love.load=kit.load; love.draw=kit.draw; love.update=kit.update; love.keypressed=kit.keypressed
     love.isAnimating=kit.is_animating
+    love.needsRedraw=kit.needs_redraw
+    love.takeDirty=kit.take_dirty
+    love.wakeInterval=kit.wake_interval
 end
 function kit.load()
     realW, realH = love.graphics.getDimensions()
@@ -996,7 +1031,9 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2; guide_state=nil; focus_stack={}; navigation_stack={}; toast_state=nil; busy_elapsed=0
+    dialog_state,dialog_focus=nil,2; guide_state=nil; focus_stack={}; navigation_stack={}; toast_state=nil
+    busy_elapsed=0; busy_display_progress=0
+    needs_redraw=true
     input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
     for key,action in pairs(port.input_map or {}) do input_map[key]=action end
     measurement_cache=setmetatable({}, {__mode="k"})
@@ -1007,24 +1044,48 @@ function kit.load()
     if love.filesystem.getInfo("launcher_bg.png") then bg_img=love.graphics.newImage("launcher_bg.png") end
     pages={}; port.build_pages(kit,state); validate_component_state(); goto_page(1)
     if port.on_load then port.on_load(kit,state) end
+    kit.mark_dirty()
 end
 
 function kit.update(dt)
-    if busy then busy_elapsed=busy_elapsed+(tonumber(dt) or 0) end
+    dt=tonumber(dt) or 0
+    if busy then busy_elapsed=busy_elapsed+dt end
     if toast_state then
-        toast_state.elapsed=toast_state.elapsed+(tonumber(dt) or 0)
-        if toast_state.elapsed>=toast_state.duration then toast_state=nil end
+        toast_state.elapsed=toast_state.elapsed+dt
+        if toast_state.elapsed>=toast_state.duration then
+            toast_state=nil
+            kit.mark_dirty()
+        end
     end
     if port and port.update then port.update(dt,kit,state) end
 end
 
 function kit.is_animating()
+    -- Determinate progress redraws only when set_busy publishes a new value (~10 Hz).
     if busy and busy_info and busy_info.indeterminate==true then return true end
     if toast_state then
         local edge=0.22
         return toast_state.elapsed<edge or toast_state.duration-toast_state.elapsed<edge
     end
     return false
+end
+
+-- Host wake deadline in seconds. nil means "block on input only".
+-- 0 means "wake as soon as the animation FPS budget allows".
+function kit.wake_interval()
+    if kit.is_animating() then return 0 end
+    if busy then return 0.1 end
+    if toast_state then
+        local edge=0.22
+        local remaining=math.max(0,toast_state.duration-toast_state.elapsed)
+        if remaining<=edge then return 0 end
+        return remaining-edge
+    end
+    if port and type(port.wake_interval)=="function" then
+        local ok,value=pcall(port.wake_interval,kit,state)
+        if ok and type(value)=="number" and value>=0 then return value end
+    end
+    return nil
 end
 
 
@@ -1551,6 +1612,57 @@ local function draw_guide(L)
     plain(t(button_label),dx+pad,button_y+vcen(20*cs,button_h),20*cs,{1,1,1},"center",inner_w)
 end
 
+-- Simple busy overlay: same layout as before, rounded progress track only.
+local function draw_busy_overlay(L)
+    love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,W,H)
+    local detailed=busy_info~=nil
+    local cancellable=detailed and type(busy_info.on_cancel)=="function"
+    local bw=math.min(W*0.78,600); local bh=(detailed and (cancellable and 272 or 210) or 110)*L.cs
+    local bx,by=(W-bw)/2,(H-bh)/2
+    panel(bx,by,bw,bh,true,false,L.app)
+    if not detailed then
+        plain(t(busy_message or "working"),bx,by+vcen(22*L.cs,bh),22*L.cs,{1,1,1},"center",bw)
+        return
+    end
+    local pad=24*L.cs
+    plain(t(busy_message or "working"),bx+pad,by+20*L.cs,23*L.cs,{1,1,1},"left",bw-pad*2)
+    plain(t(busy_info.stage or ""),bx+pad,by+55*L.cs,19*L.cs,{0.88,0.82,1},"left",bw-pad*2)
+    plain(t(busy_info.detail or ""),bx+pad,by+83*L.cs,18*L.cs,{0.76,0.76,0.84},"left",bw-pad*2)
+    local indeterminate=busy_info.indeterminate==true
+    local progress=math.max(0,math.min(1,tonumber(busy_info.progress) or busy_display_progress or 0))
+    local track_x,track_y,track_w,track_h=bx+pad,by+116*L.cs,bw-pad*2,20*L.cs
+    local radius=math.max(6,8*L.cs)
+    love.graphics.setColor(0.12,0.09,0.18,1)
+    love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,radius,radius)
+    if indeterminate then
+        local segment=track_w*0.28
+        local offset=(busy_elapsed*0.38%1)*(track_w+segment)-segment
+        local fill_x=math.max(track_x,track_x+offset)
+        local fill_right=math.min(track_x+track_w,track_x+offset+segment)
+        if fill_right>fill_x then
+            love.graphics.setColor(0.48,0.28,0.75,1)
+            love.graphics.rectangle("fill",fill_x,track_y,fill_right-fill_x,track_h,radius,radius)
+        end
+    elseif progress>0 then
+        love.graphics.setColor(0.48,0.28,0.75,1)
+        love.graphics.rectangle("fill",track_x,track_y,track_w*progress,track_h,radius,radius)
+    end
+    love.graphics.setColor(1,1,1,0.5); love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line",track_x,track_y,track_w,track_h,radius,radius)
+    plain(indeterminate and "…" or string.format("%d%%",math.floor(progress*100+0.5)),
+        track_x,track_y+vcen(16*L.cs,track_h),16*L.cs,{1,1,1},"center",track_w)
+    plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,18*L.cs,{0.84,0.84,0.90},"left",track_w)
+    plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,18*L.cs,{0.84,0.84,0.90},"right",track_w)
+    if cancellable then
+        local cy=by+190*L.cs; local ch=48*L.cs
+        panel(track_x,cy,track_w,ch,true,busy_info.cancel_disabled==true,L.app)
+        plain(t(busy_info.cancel_requested and (busy_info.cancelling_label or "Cancelling…") or
+            (busy_info.cancel_label or busy_info.cancel or "Cancel")),
+            track_x,cy+vcen(19*L.cs,ch),19*L.cs,
+            busy_info.cancel_disabled and {0.55,0.55,0.57} or {1,1,1},"center",track_w)
+    end
+end
+
 
 function kit.draw()
     if letterbox then love.graphics.push(); love.graphics.translate(offX,offY); love.graphics.setScissor(offX,offY,W,H) end
@@ -1779,52 +1891,7 @@ function kit.draw()
 
     if guide_state then draw_guide(L) end
     if dialog_state and dialog_state.over_busy~=true then draw_dialog(L) end
-
-    if busy then
-        love.graphics.setColor(0,0,0,0.72); love.graphics.rectangle("fill",0,0,W,H)
-        local detailed=busy_info~=nil
-        local cancellable=detailed and type(busy_info.on_cancel)=="function"
-        local bw=math.min(W*0.78,600); local bh=(detailed and (cancellable and 272 or 210) or 110)*L.cs
-        local bx,by=(W-bw)/2,(H-bh)/2
-        panel(bx,by,bw,bh,true,false,L.app)
-        if not detailed then
-            plain(t(busy_message or "working"),bx,by+vcen(22*L.cs,bh),22*L.cs,{1,1,1},"center",bw)
-        else
-            local pad=24*L.cs
-            plain(t(busy_message or "working"),bx+pad,by+20*L.cs,23*L.cs,{1,1,1},"left",bw-pad*2)
-            plain(t(busy_info.stage or ""),bx+pad,by+55*L.cs,19*L.cs,{0.88,0.82,1},"left",bw-pad*2)
-            plain(t(busy_info.detail or ""),bx+pad,by+83*L.cs,18*L.cs,{0.76,0.76,0.84},"left",bw-pad*2)
-            local indeterminate=busy_info.indeterminate==true
-            local progress=math.max(0,math.min(1,tonumber(busy_info.progress) or 0))
-            local track_x,track_y,track_w,track_h=bx+pad,by+116*L.cs,bw-pad*2,20*L.cs
-            love.graphics.setColor(0.12,0.09,0.18,1); love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,6,6)
-            if indeterminate then
-                local segment=track_w*0.28
-                local offset=(busy_elapsed*0.38%1)*(track_w+segment)-segment
-                local fill_x=math.max(track_x,track_x+offset)
-                local fill_right=math.min(track_x+track_w,track_x+offset+segment)
-                if fill_right>fill_x then
-                    love.graphics.setColor(0.48,0.28,0.75,1)
-                    love.graphics.rectangle("fill",fill_x,track_y,fill_right-fill_x,track_h,6,6)
-                end
-            elseif progress>0 then
-                love.graphics.setColor(0.48,0.28,0.75,1)
-                love.graphics.rectangle("fill",track_x,track_y,track_w*progress,track_h,6,6)
-            end
-            love.graphics.setColor(1,1,1,0.5); love.graphics.rectangle("line",track_x,track_y,track_w,track_h,6,6)
-            plain(indeterminate and "…" or string.format("%d%%",math.floor(progress*100+0.5)),
-                track_x,track_y+vcen(16*L.cs,track_h),16*L.cs,{1,1,1},"center",track_w)
-            plain(t(busy_info.footer_left or ""),track_x,by+154*L.cs,18*L.cs,{0.84,0.84,0.90},"left",track_w)
-            plain(t(busy_info.footer_right or ""),track_x,by+154*L.cs,18*L.cs,{0.84,0.84,0.90},"right",track_w)
-            if cancellable then
-                local cy=by+190*L.cs; local ch=48*L.cs
-                panel(track_x,cy,track_w,ch,true,busy_info.cancel_disabled==true,L.app)
-                plain(t(busy_info.cancel_requested and (busy_info.cancelling_label or "Cancelling…") or
-                    busy_info.cancel_label or "Cancel"),track_x,cy+vcen(19*L.cs,ch),19*L.cs,
-                    busy_info.cancel_disabled and {0.55,0.55,0.57} or {1,1,1},"center",track_w)
-            end
-        end
-    end
+    if busy then draw_busy_overlay(L) end
     if dialog_state and dialog_state.over_busy==true then draw_dialog(L) end
 
     -- Toasts report short-lived outcomes without changing page content or
@@ -1893,30 +1960,30 @@ local function dialog_input(action)
 end
 
 function kit.input(action)
-    if dialog_state and dialog_state.over_busy==true then return dialog_input(action) end
-    if busy then
+    local handled
+    if dialog_state and dialog_state.over_busy==true then
+        handled=dialog_input(action)
+    elseif busy then
         if action=="confirm" and busy_info and type(busy_info.on_cancel)=="function" and
            not busy_info.cancel_disabled and not busy_info.cancel_requested then
             busy_info.cancel_requested=true
             busy_info.on_cancel()
-            return true
+            handled=true
+        else
+            handled=false
         end
-        return false
-    end
-    if guide_state then
+    elseif guide_state then
         -- Handhelds disagree about the physical A/B order. Both buttons safely
         -- advance the non-destructive guide; D-pad left/right also allows review.
         if action=="confirm" or action=="cancel" or action=="right" then advance_guide(1)
         elseif action=="left" then advance_guide(-1) end
-        return true
-    end
-    if dialog_state then
-        return dialog_input(action)
-    end
-    if action=="up" then move_v(-1)
-    elseif action=="down" then move_v(1)
-    elseif action=="left" then move_h(-1)
-    elseif action=="right" then move_h(1)
+        handled=true
+    elseif dialog_state then
+        handled=dialog_input(action)
+    elseif action=="up" then move_v(-1); handled=true
+    elseif action=="down" then move_v(1); handled=true
+    elseif action=="left" then move_h(-1); handled=true
+    elseif action=="right" then move_h(1); handled=true
     elseif action=="confirm" then
         if zone=="bar" then
             local it=bar_items()[bar_i]
@@ -1945,12 +2012,17 @@ function kit.input(action)
                 kit.invalidate_layout(pages[page_i])
             end
         end
+        handled=true
     elseif action=="cancel" then
         if page_i~=1 then kit.back_page()
         elseif port.on_home_cancel then port.on_home_cancel(kit,state)
         else kit.quit() end
-    else return false end
-    return true
+        handled=true
+    else
+        handled=false
+    end
+    if handled then kit.mark_dirty() end
+    return handled
 end
 
 function kit.keypressed(key)

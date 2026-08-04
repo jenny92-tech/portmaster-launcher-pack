@@ -30,6 +30,36 @@ fn lua_can_request_smooth_redraws_only_while_animating() {
 }
 
 #[test]
+fn lua_can_request_event_driven_redraws_and_wake_intervals() {
+    let directory = game(
+        r#"
+        dirty = true
+        wake = nil
+        function love.needsRedraw() return dirty end
+        function love.takeDirty()
+            local value = dirty
+            dirty = false
+            return value
+        end
+        function love.wakeInterval() return wake end
+        "#,
+    );
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    assert!(engine.needs_redraw().expect("read dirty flag"));
+    assert!(engine.take_dirty().expect("consume dirty flag"));
+    assert!(!engine.needs_redraw().expect("dirty flag cleared"));
+    assert!(!engine.take_dirty().expect("second take is clean"));
+    assert_eq!(engine.wake_interval().expect("idle wake"), None);
+    engine
+        .runtime
+        .lua
+        .load("wake = 0.1")
+        .exec()
+        .expect("set wake interval");
+    assert_eq!(engine.wake_interval().expect("task wake"), Some(0.1));
+}
+
+#[test]
 fn app_graphics_can_record_a_gpu_command_frame() {
     let directory = game(
         r#"
@@ -39,6 +69,8 @@ fn app_graphics_can_record_a_gpu_command_frame() {
             love.graphics.setLineWidth(2)
             love.graphics.line(1, 2, 20, 22)
             love.graphics.polygon("fill", 3, 4, 9, 10, 2, 12)
+            love.graphics.circle("fill", 40, 20, 8)
+            love.graphics.ellipse("line", 70, 24, 12, 7)
             love.graphics.print("GPU", 8, 9)
         end
         "#,
@@ -67,7 +99,35 @@ fn app_graphics_can_record_a_gpu_command_frame() {
     assert!(
         commands
             .iter()
+            .any(|command| matches!(command, GpuCommand::Ellipse { fill: true, .. }))
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| matches!(command, GpuCommand::Ellipse { fill: false, .. }))
+    );
+    assert!(
+        commands
+            .iter()
             .any(|command| matches!(command, GpuCommand::Image { .. }))
+    );
+}
+
+#[test]
+fn rotated_circle_rejects_the_gpu_frame() {
+    let directory = game(
+        r#"
+        function love.draw()
+            love.graphics.translate(40, 30)
+            love.graphics.rotate(0.4)
+            love.graphics.circle("fill", 0, 0, 10)
+        end
+        "#,
+    );
+    let engine = Engine::load(directory.path(), 96, 72).expect("load runtime");
+    assert!(
+        engine.draw_gpu().expect("record GPU frame").is_none(),
+        "rotated circles must fall back to the CPU renderer"
     );
 }
 

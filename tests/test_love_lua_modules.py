@@ -186,17 +186,25 @@ with tempfile.TemporaryDirectory() as source:
         assert(not k.debug_busy().busy)
         k.toast({en="Saved",zh="已保存"},{kind="success",duration=0.3})
         assert(love.isAnimating())
+        assert(love.needsRedraw() and love.takeDirty())
         local toast=k.debug_toast()
         assert(toast.open and toast.message=="Saved" and toast.kind=="success")
         local focus_before=k.debug_focus().focus_i
         k.input("up")
         assert(k.debug_focus().focus_i~=focus_before and k.debug_toast().open)
+        assert(love.takeDirty())
         love.update(0.2); assert(k.debug_toast().open)
         assert(love.isAnimating())
         love.draw(); love.update(0.11)
         assert(not k.debug_toast().open)
+        assert(love.takeDirty())
         k.input("up")
         assert(k.debug_focus().focus_i==2)
+        -- Idle UI blocks on input; busy/task paths publish a short wake interval.
+        assert(love.wakeInterval()==nil)
+        k.set_busy(true,"Working",{progress=0.2})
+        assert(love.wakeInterval()==0.1)
+        k.set_busy(false)
 
         -- User navigation keeps a real history stack. Back/cancel restores the
         -- previous page and its focused control instead of always jumping Home.

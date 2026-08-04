@@ -1312,7 +1312,7 @@ impl Session {
             "PAM_LAUNCHER".into(),
             self.paths.launcher.display().to_string(),
         );
-        resolved.insert("LOVE_LITE_FPS".into(), "6".into());
+        // Static pages are event-driven (no idle FPS). Animation still requests 60 FPS.
         resolved.insert("LOVE_LITE_ANIMATION_FPS".into(), "60".into());
         resolved.insert("LOVE_LITE_RENDERER".into(), "auto".into());
         let runtime_dir = resolved

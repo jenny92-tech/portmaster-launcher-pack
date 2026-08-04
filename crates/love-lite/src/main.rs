@@ -136,14 +136,12 @@ fn run() -> Result<i32> {
         .create_texture_streaming(PixelFormatEnum::RGBA32, render_width, render_height)
         .context("create SDL2 frame texture")?;
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
-    let update_interval = Duration::from_secs_f64(1.0 / animation_render_fps() as f64);
-    let idle_render_interval = Duration::from_secs_f64(1.0 / idle_render_fps() as f64);
+    let animation_interval = Duration::from_secs_f64(1.0 / animation_render_fps() as f64);
     let mut previous = Instant::now();
-    let mut last_render = previous
-        .checked_sub(idle_render_interval)
-        .unwrap_or(previous);
     let mut exit_code = 0;
     let mut gpu_failures = 0_u8;
+    // First frame after load must present immediately for handheld frontend handoff.
+    let mut wait_for_events = false;
     let process_name = env::current_exe()
         .ok()
         .and_then(|path| {
@@ -159,30 +157,21 @@ fn run() -> Result<i32> {
 
     'running: loop {
         let update_started = Instant::now();
-        let mut redraw = last_render.elapsed() >= idle_render_interval;
+        let mut redraw = false;
+
+        if wait_for_events {
+            let timeout_ms = event_wait_timeout_ms(&engine, animation_interval)?;
+            if let Some(event) = events.wait_event_timeout(timeout_ms) {
+                if handle_sdl_event(&engine, event, &mut redraw)? {
+                    break 'running;
+                }
+            }
+        }
+        wait_for_events = true;
+
         for event in events.poll_iter() {
-            match event {
-                Event::Quit { .. } => break 'running,
-                Event::KeyDown {
-                    keycode: Some(key),
-                    repeat,
-                    ..
-                } => {
-                    if let Some(key) = love_key(key) {
-                        engine.key_pressed(key, repeat)?;
-                        redraw = true;
-                    }
-                }
-                Event::KeyUp {
-                    keycode: Some(key), ..
-                } => {
-                    if let Some(key) = love_key(key) {
-                        engine.key_released(key)?;
-                        redraw = true;
-                    }
-                }
-                Event::Window { .. } => redraw = true,
-                _ => {}
+            if handle_sdl_event(&engine, event, &mut redraw)? {
+                break 'running;
             }
         }
 
@@ -190,11 +179,10 @@ fn run() -> Result<i32> {
         let dt = now.duration_since(previous).as_secs_f64().min(0.25);
         previous = now;
         engine.update(dt)?;
-        if !redraw && engine.is_animating()? {
+        if engine.take_dirty()? || engine.is_animating()? {
             redraw = true;
         }
         if redraw {
-            last_render = Instant::now();
             let mut rendered_on_gpu = false;
             if gpu_enabled && let Some(commands) = engine.draw_gpu()? {
                 match gpu_renderer.render(&mut canvas, &engine, &commands) {
@@ -232,12 +220,65 @@ fn run() -> Result<i32> {
         if engine.should_quit() {
             break;
         }
-        if let Some(remaining) = update_interval.checked_sub(update_started.elapsed()) {
+        // Cap animation-frame spin so a busy spinner cannot peg a core.
+        if engine.is_animating()?
+            && let Some(remaining) = animation_interval.checked_sub(update_started.elapsed())
+        {
             thread::sleep(remaining);
         }
     }
 
     Ok(exit_code)
+}
+
+fn handle_sdl_event(engine: &Engine, event: Event, redraw: &mut bool) -> Result<bool> {
+    match event {
+        Event::Quit { .. } => Ok(true),
+        Event::KeyDown {
+            keycode: Some(key),
+            repeat,
+            ..
+        } => {
+            if let Some(key) = love_key(key) {
+                engine.key_pressed(key, repeat)?;
+                *redraw = true;
+            }
+            Ok(false)
+        }
+        Event::KeyUp {
+            keycode: Some(key), ..
+        } => {
+            if let Some(key) = love_key(key) {
+                engine.key_released(key)?;
+            }
+            Ok(false)
+        }
+        Event::Window { .. } => {
+            *redraw = true;
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn event_wait_timeout_ms(engine: &Engine, animation_interval: Duration) -> Result<u32> {
+    if engine.is_animating()? {
+        return Ok(duration_to_timeout_ms(animation_interval));
+    }
+    match engine.wake_interval()? {
+        Some(seconds) if seconds <= 0.0 => Ok(duration_to_timeout_ms(animation_interval)),
+        Some(seconds) => {
+            let millis = (seconds * 1000.0).ceil();
+            Ok(millis.clamp(1.0, 600_000.0) as u32)
+        }
+        // Fully idle: block until input. One-minute heartbeat keeps the process
+        // responsive to external signals without periodic redraw.
+        None => Ok(60_000),
+    }
+}
+
+fn duration_to_timeout_ms(duration: Duration) -> u32 {
+    duration.as_millis().clamp(1, 600_000) as u32
 }
 
 struct InputHelperGuard(EmbeddedService);
@@ -388,19 +429,11 @@ fn parse_dimension(value: Option<String>, fallback: u32, name: &str) -> Result<u
     Ok(parsed)
 }
 
-fn idle_render_fps() -> u32 {
-    render_fps("LOVE_LITE_FPS", 30)
-}
-
 fn animation_render_fps() -> u32 {
-    render_fps("LOVE_LITE_ANIMATION_FPS", 30)
-}
-
-fn render_fps(name: &str, fallback: u32) -> u32 {
-    env::var(name)
+    env::var("LOVE_LITE_ANIMATION_FPS")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(fallback)
+        .unwrap_or(30)
         .clamp(1, 120)
 }
 

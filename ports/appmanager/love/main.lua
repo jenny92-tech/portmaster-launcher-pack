@@ -68,6 +68,7 @@ local function poll_task(dt)
             if progress then
                 if task.kind=="portmaster" then
                     progress.cancel=L("Cancel installation","取消安装")
+                    progress.cancel_label=progress.cancel
                     progress.on_cancel=operations.request_portmaster_cancel
                     progress.cancel_requested=task.cancel_requested==true
                     progress.cancelling_label=L("Cancelling…","正在取消…")
@@ -169,6 +170,11 @@ local port={
         finish_initial_load()
     end,
     update=poll_task,
+    -- Keep the host waking while native tasks need polling; otherwise block on input.
+    wake_interval=function()
+        if operations.task or operations.background_task then return 0.1 end
+        return nil
+    end,
 }
 
 kit.run(port)
