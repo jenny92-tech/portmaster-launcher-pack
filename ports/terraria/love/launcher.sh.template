@@ -131,18 +131,18 @@ fi
 resolve_display_resolution "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
 
-# Start must act as Enter so the naming dialog can be confirmed.
-if grep -q '^start=' "$PORT_TOML"; then
-  sed -i 's/^start=.*/start="ENTER"/' "$PORT_TOML"
-fi
+# Do NOT remap start -> ENTER here. Forcing start="ENTER" stole Start from
+# the in-game ☰ settings/pause menu, which only opens on KEYCODE_BUTTON_START,
+# so the menu could never be opened. Naming does not need it: the player types
+# the name on the soft-input keyboard and BD_SOFT_INPUT_CONFIRM_KEYS accepts
+# ENTER and BUTTON_START alike.
 
 apply_terraria_language
 
-export TER_AUTONAME=1
-export TER_AUTONAME_VALUE="${TER_AUTONAME_VALUE:-Jenny}"
-export TER_AUTOCREATE_PLAYER=0
-export BD_SOFT_INPUT_DEFAULT="${BD_SOFT_INPUT_DEFAULT:-$TER_AUTONAME_VALUE}"
-export BD_SOFT_INPUT_FORCE_DEFAULT="${BD_SOFT_INPUT_FORCE_DEFAULT:-0}"
+# No BD_SOFT_INPUT_DEFAULT: the name is typed, not prefilled. A default here
+# used to hand the loader a fixed name because the keyboard could not produce
+# every character; the loader now types x/y from the X/Y buttons, so the field
+# starts empty like the game intends.
 export BD_SOFT_INPUT_CONFIRM_KEYS="${BD_SOFT_INPUT_CONFIRM_KEYS:-ENTER,NUMPAD_ENTER,DPAD_CENTER,BUTTON_A,BUTTON_START,BUTTON_R1,BUTTON_THUMBR}"
 export BD_SOFT_INPUT_CANCEL_KEYS="${BD_SOFT_INPUT_CANCEL_KEYS:-BACK,ESCAPE,BUTTON_B,BUTTON_SELECT}"
 
