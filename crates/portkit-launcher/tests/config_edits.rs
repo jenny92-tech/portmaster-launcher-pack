@@ -95,10 +95,20 @@ fn unity_configure_upserts_resolution_and_remap_without_losing_other_sections() 
     )
     .unwrap();
 
+    // One invocation per table, exactly how the launcher calls it.
     configure(&ConfigureRequest {
         path: path.clone(),
+        section: Some("device".into()),
         width: Some(640),
         height: Some(480),
+        buttons: None,
+    })
+    .unwrap();
+    configure(&ConfigureRequest {
+        path: path.clone(),
+        section: Some("input.remap".into()),
+        width: None,
+        height: None,
         buttons: Some([
             "BUTTON_B".into(),
             "BUTTON_A".into(),
@@ -109,11 +119,163 @@ fn unity_configure_upserts_resolution_and_remap_without_losing_other_sections() 
     .unwrap();
 
     let contents = fs::read_to_string(path).unwrap();
+    // A missing [device] is created rather than written at root, where the
+    // loader would not read it. Existing root lines stay as they were.
+    assert!(contents.contains("[device]\n"));
     assert!(contents.contains("displayWidth=640\n"));
     assert!(contents.contains("displayHeight=480\n"));
+    assert!(contents.starts_with("displayWidth=1\ndisplayHeight=2\nkeep=3\n"));
+    let root = contents.split("\n[").next().unwrap();
+    assert!(
+        !root.contains("displayWidth=640") && !root.contains("displayHeight=480"),
+        "resolution leaked into the root table: {root:?}"
+    );
     assert!(contents.contains("keep=3\n"));
     assert!(contents.contains(
         "[input.remap]\na       = \"BUTTON_B\"\nb       = \"BUTTON_A\"\nx       = \"BUTTON_Y\"\ny       = \"BUTTON_X\"\n"
     ));
     assert!(contents.contains("[other]\nx=1\n"));
+}
+
+#[test]
+fn unity_configure_writes_the_resolution_into_the_device_section() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    // Shape of a real port config: the loader's keys are in [device] and the
+    // root-level pair is an orphan an earlier helper version prepended.
+    fs::write(
+        &path,
+        concat!(
+            "displayWidth=1280\n",
+            "displayHeight=720\n",
+            "[paths]\n",
+            "game_files=\"./gamedata/\"\n",
+            "\n",
+            "[device]\n",
+            "language=\"zh\"\n",
+            "\n",
+            "# Was: 960x720\n",
+            "displayWidth=1280\n",
+            "displayHeight=720\n",
+            "displayRotation=0\n",
+            "\n",
+            "[gpu]\n",
+            "textureMaxDim = 0\n",
+        ),
+    )
+    .unwrap();
+
+    configure(&ConfigureRequest {
+        path: path.clone(),
+        section: Some("device".into()),
+        width: Some(640),
+        height: Some(480),
+        buttons: None,
+    })
+    .unwrap();
+
+    let contents = fs::read_to_string(path).unwrap();
+    assert!(
+        contents
+            .contains("# Was: 960x720\ndisplayWidth=640\ndisplayHeight=480\ndisplayRotation=0\n")
+    );
+    // The root orphan is a key the loader never reads: left untouched.
+    assert!(contents.starts_with("displayWidth=1280\ndisplayHeight=720\n[paths]\n"));
+    assert!(contents.contains("[gpu]\ntextureMaxDim = 0\n"));
+}
+
+#[test]
+fn unity_configure_rewrites_every_duplicate_inside_the_device_section() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    // Two [device] copies: rewriting only the first would leave a stale value
+    // behind. Everything outside [device] must survive byte for byte.
+    fs::write(
+        &path,
+        concat!(
+            "displayWidth=1280\n",
+            "displayHeight=720\n",
+            "[paths]\n",
+            "displayWidth=1280\n",
+            "\n",
+            "[device]\n",
+            "displayWidth=1280\n",
+            "displayHeight=720\n",
+            "language=\"zh\"\n",
+            "displayWidth=1024\n",
+            "displayHeight=768\n",
+            "\n",
+            "[gpu]\n",
+            "textureMaxDim = 0\n",
+        ),
+    )
+    .unwrap();
+
+    configure(&ConfigureRequest {
+        path: path.clone(),
+        section: Some("device".into()),
+        width: Some(960),
+        height: Some(720),
+        buttons: None,
+    })
+    .unwrap();
+
+    let contents = fs::read_to_string(path).unwrap();
+    assert_eq!(
+        contents,
+        concat!(
+            "displayWidth=1280\n",
+            "displayHeight=720\n",
+            "[paths]\n",
+            "displayWidth=1280\n",
+            "\n",
+            "[device]\n",
+            "displayWidth=960\n",
+            "displayHeight=720\n",
+            "language=\"zh\"\n",
+            "displayWidth=960\n",
+            "displayHeight=720\n",
+            "\n",
+            "[gpu]\n",
+            "textureMaxDim = 0\n",
+        ),
+        "expected every [device] copy rewritten in place, with root orphans and \
+         same-named keys in unrelated sections left untouched"
+    );
+}
+
+#[test]
+fn unity_configure_targets_whatever_table_the_caller_names() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    fs::write(&path, "displayWidth=1\n[device]\ndisplayWidth=2\n").unwrap();
+
+    // No section: the root table, i.e. the keys above the first header.
+    configure(&ConfigureRequest {
+        path: path.clone(),
+        section: None,
+        width: Some(800),
+        height: None,
+        buttons: None,
+    })
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "displayWidth=800\n[device]\ndisplayWidth=2\n",
+        "the root write must not touch [device]"
+    );
+
+    // A section that does not exist yet is created, not written at root.
+    configure(&ConfigureRequest {
+        path: path.clone(),
+        section: Some("gpu".into()),
+        width: Some(640),
+        height: None,
+        buttons: None,
+    })
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "displayWidth=800\n[device]\ndisplayWidth=2\n\n[gpu]\ndisplayWidth=640\n"
+    );
 }

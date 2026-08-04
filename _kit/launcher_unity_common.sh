@@ -58,10 +58,13 @@ resolve_display_resolution() {
 }
 
 # Write the resolved size into the loader's toml. Arg: $1 = toml file.
+# --section device: the loader reads config["device"]["displayWidth"] and falls
+# back to 640x480 if it is missing. The table is named here, not baked into the
+# helper, which only knows "set these keys in this table".
 apply_display_resolution() {
   local toml="$1"
   portkit_launcher unity configure \
-    --file "$toml" --width "$RES_W" --height "$RES_H"
+    --file "$toml" --section device --width "$RES_W" --height "$RES_H"
 }
 
 # ── [input.remap] upsert a/b/x/y without depending on device awk/sed.
@@ -69,7 +72,7 @@ apply_display_resolution() {
 apply_button_remap() {
   local toml="$1" a="$2" b="$3" x="$4" y="$5"
   portkit_launcher unity configure \
-    --file "$toml" --a "$a" --b "$b" --x "$x" --y "$y"
+    --file "$toml" --section input.remap --a "$a" --b "$b" --x "$x" --y "$y"
 }
 
 # ── Stage-2: run a unityloader game with all the handheld defenses. Identical

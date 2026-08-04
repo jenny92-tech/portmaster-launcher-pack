@@ -3,6 +3,10 @@ use std::path::PathBuf;
 
 pub struct ConfigureRequest {
     pub path: PathBuf,
+    /// Table to write into, e.g. `device`. `None` is the root table (the keys
+    /// above the first header). Which table a key belongs to is the reader's
+    /// contract, so the caller names it.
+    pub section: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub buttons: Option<[String; 4]>,
@@ -11,16 +15,29 @@ pub struct ConfigureRequest {
 pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
     let contents = std::fs::read_to_string(&request.path)?;
     let mut lines: Vec<String> = contents.lines().map(str::to_owned).collect();
+    let section = request.section.as_deref();
     if let Some(width) = request.width {
-        upsert_root(&mut lines, "displayWidth", &width.to_string());
+        let value = width.to_string();
+        upsert(
+            &mut lines,
+            section,
+            "displayWidth",
+            format!("displayWidth={value}"),
+        );
     }
     if let Some(height) = request.height {
-        upsert_root(&mut lines, "displayHeight", &height.to_string());
+        let value = height.to_string();
+        upsert(
+            &mut lines,
+            section,
+            "displayHeight",
+            format!("displayHeight={value}"),
+        );
     }
     if let Some(buttons) = &request.buttons {
         upsert_section(
             &mut lines,
-            "input.remap",
+            section.unwrap_or_default(),
             &[
                 ("a", format!("\"{}\"", buttons[0])),
                 ("b", format!("\"{}\"", buttons[1])),
@@ -34,23 +51,57 @@ pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
     crate::atomic::atomic_write(&request.path, output.as_bytes())
 }
 
-fn upsert_root(lines: &mut Vec<String>, key: &str, value: &str) {
-    let mut section_seen = false;
-    for line in lines.iter_mut() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('[') {
-            section_seen = true;
+/// Sets `key` in `section`, creating the section if absent. Inserts only when
+/// the table holds no copy, so it can never define a key twice — which the
+/// loader's toml++ rejects outright, aborting on startup. Other tables are left
+/// alone: the same name under another header is a different toml key.
+fn upsert(lines: &mut Vec<String>, section: Option<&str>, key: &str, rendered: String) {
+    let (start, insert_at) = match section {
+        None => (0, first_section(lines, 0)),
+        Some(name) => {
+            let header = format!("[{name}]");
+            let index = match lines.iter().position(|line| line.trim() == header) {
+                Some(index) => index,
+                None => {
+                    if lines.last().is_some_and(|line| !line.is_empty()) {
+                        lines.push(String::new());
+                    }
+                    lines.push(header);
+                    lines.len() - 1
+                }
+            };
+            (index + 1, index + 1)
         }
-        if !section_seen && line_key(trimmed) == Some(key) {
-            *line = format!("{key}={value}");
-            return;
-        }
+    };
+    let end = match section {
+        None => insert_at,
+        Some(_) => first_section(lines, start),
+    };
+    if !rewrite_all(lines, start, end, key, &rendered) {
+        lines.insert(insert_at, rendered);
     }
-    let index = lines
+}
+
+/// Index of the first section header at or after `from`, else the line count.
+fn first_section(lines: &[String], from: usize) -> usize {
+    lines[from..]
         .iter()
         .position(|line| line.trim_start().starts_with('['))
-        .unwrap_or(lines.len());
-    lines.insert(index, format!("{key}={value}"));
+        .map_or(lines.len(), |offset| from + offset)
+}
+
+/// Rewrites every match in the range, not just the first, so no copy is left
+/// holding a stale value. In place only — a line keeps its position next to
+/// whatever comment documents it. Returns whether the key was there at all.
+fn rewrite_all(lines: &mut [String], start: usize, end: usize, key: &str, rendered: &str) -> bool {
+    let mut found = false;
+    for line in &mut lines[start..end] {
+        if line_key(line.trim_start()) == Some(key) {
+            *line = rendered.to_owned();
+            found = true;
+        }
+    }
+    found
 }
 
 fn upsert_section(lines: &mut Vec<String>, section: &str, values: &[(&str, String)]) {
