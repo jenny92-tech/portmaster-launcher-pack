@@ -198,7 +198,10 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     }
     install_staged(&request.plan, &staged_core, &staged_frontend)?;
     set_executables(&request.plan)?;
-    progress(request, "complete", 100, "PortMaster core installed")?;
+    // The replacement above is the commit point. A removable filesystem may
+    // reject this final UI-only write; never report a committed install as
+    // failed because its completion message could not be persisted.
+    let _ = progress(request, "complete", 100, "PortMaster core installed");
     Ok(InstallOutcome {
         device: request.plan.device.clone(),
         target: request.plan.target.clone(),

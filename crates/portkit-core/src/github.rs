@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::ExclusiveFileLock;
+
 const DEFAULT_BATCH_SIZE: usize = 5;
 const MAX_BATCH_SIZE: usize = 10;
 // Applied by `fetch` when the caller gives no explicit timeout. Without a
@@ -1131,72 +1133,21 @@ fn reject_symlink(path: &Path) -> io::Result<()> {
 
 #[derive(Debug)]
 struct TransferLock {
-    #[cfg(not(unix))]
-    path: PathBuf,
-    _file: fs::File,
+    _lock: ExclusiveFileLock,
 }
 
 impl TransferLock {
     fn acquire(output: &Path) -> io::Result<Self> {
         let path = suffixed_path(output, ".part.lock");
-        reject_symlink(&path)?;
-        #[cfg(unix)]
-        let file = {
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(&path)?;
-            try_lock_file(&file, "download is already in progress")?;
-            file
-        };
-        #[cfg(not(unix))]
-        let file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
+        ExclusiveFileLock::try_acquire(&path)
+            .map(|lock| Self { _lock: lock })
             .map_err(|error| {
-                if error.kind() == io::ErrorKind::AlreadyExists {
+                if error.kind() == io::ErrorKind::WouldBlock {
                     io::Error::new(io::ErrorKind::WouldBlock, "download is already in progress")
                 } else {
                     error
                 }
-            })?;
-        Ok(Self {
-            #[cfg(not(unix))]
-            path,
-            _file: file,
-        })
-    }
-}
-
-impl Drop for TransferLock {
-    fn drop(&mut self) {
-        #[cfg(not(unix))]
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-#[cfg(unix)]
-fn try_lock_file(file: &fs::File, busy: &'static str) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-
-    unsafe extern "C" {
-        fn flock(file_descriptor: i32, operation: i32) -> i32;
-    }
-    const LOCK_EXCLUSIVE: i32 = 2;
-    const LOCK_NONBLOCKING: i32 = 4;
-    // SAFETY: `file` owns a live descriptor for the duration of this call.
-    if unsafe { flock(file.as_raw_fd(), LOCK_EXCLUSIVE | LOCK_NONBLOCKING) } == 0 {
-        Ok(())
-    } else {
-        let error = io::Error::last_os_error();
-        if error.kind() == io::ErrorKind::WouldBlock {
-            Err(io::Error::new(io::ErrorKind::WouldBlock, busy))
-        } else {
-            Err(error)
-        }
+            })
     }
 }
 
@@ -1416,6 +1367,40 @@ mod tests {
             Some("second")
         );
         transport.clear_preferred(Capability::Release);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn transfer_limit_rejects_an_oversized_response_and_partial_file() {
+        let root = test_directory("transfer-limit");
+        let port = local_server(b"too-large");
+        let registry = GitHubRegistry::new(vec![
+            Route::new(
+                "local",
+                RouteFormatter::Full,
+                [Capability::Release],
+                format!("http://127.0.0.1:{port}"),
+            )
+            .unwrap(),
+        ])
+        .unwrap();
+        let output = root.join("artifact");
+        let error = GitHubTransport::with_registry(registry)
+            .fetch(
+                Capability::Release,
+                "https://github.com/o/r/releases/download/v/f",
+                &output,
+                |_| true,
+                None,
+                Some(4),
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("all GitHub transport routes failed"),
+            "unexpected error: {error}"
+        );
+        assert!(!output.exists());
+        assert!(!suffixed_path(&output, ".part").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

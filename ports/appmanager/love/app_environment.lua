@@ -110,6 +110,17 @@ function Environment.new(model,operations,pages_ui)
         build_gate(false); kit.goto_page(page.MANAGE)
     end
 
+    function self.start_forced_update_check()
+        local ok,task_id=pcall(model.native.start,"update-check",{})
+        if not ok then
+            env.update_status="error"
+            kit.toast(L("Cannot check right now. Try again later.","暂时无法检查，请稍后再试。"),{kind="error"})
+            return false
+        end
+        operations.task={id=task_id,kind="update-check",elapsed=0,poll=0,timeout=35}
+        return true
+    end
+
     function self.start_update_check()
         if operations.task then
             kit.toast(L("Another task is still running. Please wait.",
@@ -125,19 +136,12 @@ function Environment.new(model,operations,pages_ui)
         env.update_status="checking"; env.portmaster_latest=""
         kit.toast(L("Checking for updates…","正在检查更新……"),{kind="info"})
         if operations.background_task then
-            local task=operations.background_task
-            operations.background_task=nil
-            task.kind="update-check"
-            task.timeout=35
-            operations.task=task
+            -- The automatic check may legally return a cached result. Keep it
+            -- in its own lane and run a real forced check as soon as it exits.
+            operations.request_forced_update()
             return
         end
-        local ok,task_id=pcall(model.native.start,"update-check",{})
-        if not ok then
-            env.update_status="error"
-            kit.toast(L("Cannot check right now. Try again later.","暂时无法检查，请稍后再试。"),{kind="error"}); return
-        end
-        operations.task={id=task_id,kind="update-check",elapsed=0,poll=0,timeout=35}
+        self.start_forced_update_check()
     end
 
     function self.build_manage(preserve)

@@ -238,32 +238,21 @@ pub fn fetch_stable_release(
 pub fn refresh_stable_cache(
     request: &StableCacheRequest,
 ) -> Result<StableCacheOutcome, ArtifactError> {
-    if !request.force && stable_cache_row_valid(&request.cache) {
-        let (_, status, latest) = read_stable_cache(&request.cache).ok_or_else(|| {
-            ArtifactError::InvalidStable("fresh stable cache is malformed".into())
-        })?;
-        let max_age = if status == "ok" {
-            CACHE_MAX_AGE
-        } else {
-            ERROR_CACHE_RETRY_AGE
-        };
-        if cache_is_fresh_for(&request.cache, max_age) {
-            return Ok(StableCacheOutcome {
-                status: if status == "ok" {
-                    CacheRefreshStatus::Cached
-                } else {
-                    CacheRefreshStatus::CachedStale
-                },
-                latest: (status == "ok").then_some(latest),
-                route: None,
-            });
-        }
+    if let Some(outcome) = fresh_stable_cache(request)? {
+        return Ok(outcome);
     }
     let parent = request
         .cache
         .parent()
         .ok_or_else(|| ArtifactError::InvalidPath("update cache has no parent".into()))?;
     fs::create_dir_all(parent)?;
+    let _refresh_lock =
+        acquire_refresh_lock(&parent.join(".stable-cache-refresh.lock"))?;
+    // Another process may have completed the same automatic refresh between
+    // the optimistic cache read and this lock acquisition.
+    if let Some(outcome) = fresh_stable_cache(request)? {
+        return Ok(outcome);
+    }
     let manifest = parent.join(format!(".stable-manifest-{}.json", std::process::id()));
     let _download = DownloadGuard(manifest.clone());
     let fetch = GitHubTransport::new().fetch_with_timeout(
@@ -298,6 +287,33 @@ pub fn refresh_stable_cache(
     }
 }
 
+fn fresh_stable_cache(
+    request: &StableCacheRequest,
+) -> Result<Option<StableCacheOutcome>, ArtifactError> {
+    if request.force || !stable_cache_row_valid(&request.cache) {
+        return Ok(None);
+    }
+    let (_, status, latest) = read_stable_cache(&request.cache)
+        .ok_or_else(|| ArtifactError::InvalidStable("fresh stable cache is malformed".into()))?;
+    let max_age = if status == "ok" {
+        CACHE_MAX_AGE
+    } else {
+        ERROR_CACHE_RETRY_AGE
+    };
+    if !cache_is_fresh_for(&request.cache, max_age) {
+        return Ok(None);
+    }
+    Ok(Some(StableCacheOutcome {
+        status: if status == "ok" {
+            CacheRefreshStatus::Cached
+        } else {
+            CacheRefreshStatus::CachedStale
+        },
+        latest: (status == "ok").then_some(latest),
+        route: None,
+    }))
+}
+
 pub fn refresh_runtime_metadata(
     request: &RuntimeMetadataRequest,
 ) -> Result<RuntimeMetadataOutcome, ArtifactError> {
@@ -316,8 +332,7 @@ pub fn refresh_runtime_metadata(
         .ok_or_else(|| ArtifactError::InvalidPath("Runtime cache has no parent".into()))?;
     fs::create_dir_all(parent)?;
     let _refresh_lock =
-        ExclusiveFileLock::try_acquire(&parent.join(".runtime-metadata-refresh.lock"))
-            .map_err(ArtifactError::Busy)?;
+        acquire_refresh_lock(&parent.join(".runtime-metadata-refresh.lock"))?;
     if repair_runtime_cache(&request.json_cache, request.tsv_cache.as_deref())?
         && !request.force
         && cache_is_fresh(&request.json_cache)
@@ -460,6 +475,16 @@ fn epoch_seconds() -> u64 {
         .as_secs()
 }
 
+fn acquire_refresh_lock(path: &Path) -> Result<ExclusiveFileLock, ArtifactError> {
+    ExclusiveFileLock::try_acquire(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            ArtifactError::Busy(error)
+        } else {
+            ArtifactError::Io(error)
+        }
+    })
+}
+
 struct DownloadGuard(PathBuf);
 
 impl Drop for DownloadGuard {
@@ -525,5 +550,21 @@ mod tests {
             .unwrap();
         assert!(!cache_is_fresh_for(&cache, ERROR_CACHE_RETRY_AGE));
         assert!(cache_is_fresh(&cache));
+    }
+
+    #[test]
+    fn stable_cache_refresh_rejects_a_concurrent_writer() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = temp.path().join("update.tsv");
+        let _lock = ExclusiveFileLock::try_acquire(&temp.path().join(".stable-cache-refresh.lock"))
+            .unwrap();
+        let error = refresh_stable_cache(&StableCacheRequest {
+            manifest_url: "https://github.com/example/repo/releases/latest/download/version.json"
+                .into(),
+            cache,
+            force: true,
+        })
+        .unwrap_err();
+        assert!(matches!(error, ArtifactError::Busy(_)));
     }
 }

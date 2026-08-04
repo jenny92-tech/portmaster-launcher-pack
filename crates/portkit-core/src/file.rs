@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 use sha2::{Digest as _, Sha256};
 
@@ -26,17 +28,44 @@ pub struct ExclusiveFileLock {
 impl ExclusiveFileLock {
     #[cfg(unix)]
     pub fn try_acquire(path: &Path) -> std::io::Result<Self> {
+        reject_lock_symlink(path)?;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(path)?;
+        let file_metadata = file.metadata()?;
+        let path_metadata = fs::symlink_metadata(path)?;
+        if !file_metadata.is_file()
+            || path_metadata.file_type().is_symlink()
+            || file_metadata.dev() != path_metadata.dev()
+            || file_metadata.ino() != path_metadata.ino()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("lock path changed while opening: {}", path.display()),
+            ));
+        }
         let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if result != 0 {
             return Err(std::io::Error::last_os_error());
         }
         Ok(Self { file })
+    }
+}
+
+#[cfg(unix)]
+fn reject_lock_symlink(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("lock path is a symlink: {}", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -197,6 +226,23 @@ mod tests {
         );
         drop(first);
         drop(ExclusiveFileLock::try_acquire(temp.path()).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_file_lock_rejects_symlink_paths() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target.lock");
+        let link = temp.path().join("linked.lock");
+        std::fs::write(&target, "").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            ExclusiveFileLock::try_acquire(&link).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
     }
 
     #[test]

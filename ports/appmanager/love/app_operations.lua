@@ -3,7 +3,8 @@ local Operations = {}
 function Operations.new(model)
     local kit,L=model.kit,model.L
     local env,pages=model.env,model.pages
-    local self={confirm_plan=nil,confirm_return=pages.HOME,task=nil,background_task=nil,pending_update=nil}
+    local self={confirm_plan=nil,confirm_return=pages.HOME,task=nil,background_task=nil,
+        pending_update=nil,forced_update_pending=false}
     local page_builders,environment
 
     function self.bind(builders,environment_pages)
@@ -31,6 +32,35 @@ function Operations.new(model)
             self.refresh_home()
             if environment then environment.build_manage(true) end
         end
+    end
+
+    function self.request_forced_update()
+        self.forced_update_pending=true
+        -- Reserve the foreground lane while the automatic check drains. This
+        -- prevents an install or file mutation from overtaking the explicit
+        -- update request before its forced check can start.
+        if not self.task then
+            self.task={id=0,kind="update-check-wait",elapsed=0,poll=0,timeout=35}
+        end
+    end
+
+    function self.try_start_forced_update()
+        if not self.forced_update_pending or self.task or self.background_task or not environment then
+            return false
+        end
+        self.forced_update_pending=false
+        environment.start_forced_update_check()
+        return true
+    end
+
+    function self.finish_background_update(update)
+        self.background_task=nil
+        if self.forced_update_pending then
+            if self.task and self.task.kind=="update-check-wait" then self.task=nil end
+            self.try_start_forced_update()
+            return
+        end
+        self.accept_background_update(update)
     end
 
     local function rebuild_return_page(return_page)
@@ -92,9 +122,11 @@ function Operations.new(model)
                     message=L("PortMaster is ready to use.","PortMaster 已可以使用。"),
                     confirm=L("OK","知道了"),cancel=L("Back","返回"),danger=false})
             end
+            self.try_start_forced_update()
             return
         end
         rebuild_return_page(self.confirm_return)
+        self.try_start_forced_update()
     end
 
     function self.request_portmaster_cancel()
@@ -104,6 +136,11 @@ function Operations.new(model)
 
     function self.start_apply()
         if not self.confirm_plan or #self.confirm_plan==0 then return end
+        if self.task then
+            kit.toast(L("Another task is still running. Please wait.",
+                "其他任务仍在进行，请稍候。"),{kind="info"})
+            return
+        end
         local portmaster,appledouble=false,false
         for _,item in ipairs(self.confirm_plan) do
             if item.kind=="INSTALL_PORTMASTER" then portmaster=true; break end
@@ -141,6 +178,11 @@ function Operations.new(model)
     end
 
     function self.refresh_inventory(return_page)
+        if self.task then
+            kit.toast(L("Another task is still running. Please wait.",
+                "其他任务仍在进行，请稍候。"),{kind="info"})
+            return
+        end
         self.confirm_plan={}
         self.confirm_return=return_page or pages.HOME
         kit.set_busy(true,L("Scanning files…","正在扫描文件……"))

@@ -30,9 +30,8 @@ local function poll_task(dt)
         return
     end
     if type(event)=="table" and background and event.task_id==background.id then
-        operations.background_task=nil
         local data=event.data or {}
-        operations.accept_background_update(data.update)
+        operations.finish_background_update(data.update)
         return
     end
     task=operations.task
@@ -86,7 +85,7 @@ local function poll_task(dt)
         elseif task.kind=="config-refresh" then
             kit.toast(L("Device information is still loading. Please keep waiting.",
                 "设备信息仍在加载，请继续等待。"),{kind="info"})
-        elseif task.kind=="update-check" then
+        elseif task.kind=="update-check" or task.kind=="update-check-wait" then
             kit.toast(L("The update check is taking longer than usual.",
                 "更新检查耗时较长，请继续等待。"),{kind="info"})
         elseif task.kind=="inventory-refresh" then

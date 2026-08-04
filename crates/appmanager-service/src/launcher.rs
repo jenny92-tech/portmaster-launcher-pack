@@ -26,6 +26,9 @@ use serde_json::{Value, json};
 use crate::resolution::{ConfigDirectories, DeviceResolution};
 
 const PORT_NAME: &str = "jenny92-appmanager";
+// Keep a corrupt or unbounded proxy response from filling the SD card. The
+// installer independently enforces the same 512 MiB ceiling after extraction.
+const PORTMASTER_ARCHIVE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct Request {
@@ -456,12 +459,13 @@ impl EmbeddedService {
                 };
                 let _ = fs::remove_file(&progress);
                 let _ = fs::remove_file(&cancel);
-                events
-                    .lock()
-                    .unwrap_or_else(|value| value.into_inner())
-                    .push_back(event);
+                let mut events = events.lock().unwrap_or_else(|value| value.into_inner());
+                // Publish completion only after releasing the task lane. A
+                // consumer may start its next queued task immediately after
+                // observing this event.
                 active_task.store(0, Ordering::Release);
                 busy.store(false, Ordering::Release);
+                events.push_back(event);
             })
             .map_err(|error| {
                 self.active_task.store(0, Ordering::Release);
@@ -509,11 +513,11 @@ impl EmbeddedService {
                         data: json!({"message": message, "update": update}),
                     },
                 };
-                events
-                    .lock()
-                    .unwrap_or_else(|value| value.into_inner())
-                    .push_back(event);
+                let mut events = events.lock().unwrap_or_else(|value| value.into_inner());
+                // An event is the public completion boundary: once visible,
+                // a forced check must be able to acquire this lane.
                 background_busy.store(false, Ordering::Release);
+                events.push_back(event);
             })
             .map_err(|error| {
                 self.background_busy.store(false, Ordering::Release);
@@ -1897,7 +1901,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
                 &archive,
                 |candidate| stable_archive_valid(candidate, &expected_md5),
                 Some(&progress),
-                None,
+                Some(PORTMASTER_ARCHIVE_MAX_BYTES),
                 std::time::Duration::from_secs(15 * 60),
             )
             .map_err(display_error)?;
@@ -1919,7 +1923,9 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         "Installing PortMaster",
     )?;
     install_archive(session, archive)?;
-    write_progress(
+    // Installation has committed. Completion progress is best-effort so a
+    // full or briefly unavailable SD card cannot turn success into failure.
+    let _ = write_progress(
         &session.paths.progress,
         session.progress_channel.as_ref(),
         "complete",
@@ -1927,7 +1933,7 @@ fn install_stable_release(session: &Session, source: &ReleaseSource) -> Result<(
         100,
         0,
         &format!("PortMaster {version} installed"),
-    )?;
+    );
     Ok(())
 }
 
@@ -2368,6 +2374,8 @@ mod tests {
                 .poll()
                 .is_some_and(|event| event.task_id == task_id && event.status != "progress")
             {
+                assert!(!service.busy.load(Ordering::Acquire));
+                assert_eq!(service.active_task.load(Ordering::Acquire), 0);
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -2384,10 +2392,6 @@ mod tests {
 
         let value = parse_operation_result("FAIL\toperation\tunknown-action\n");
         assert_eq!(value["failed"], true);
-    }
-
-    #[test]
-    fn validation_and_refresh_rows_are_published_as_structured_data() {
     }
 
     #[test]

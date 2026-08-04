@@ -728,6 +728,65 @@ fn background_update_result_survives_a_concurrent_foreground_snapshot() {
 }
 
 #[test]
+fn manual_update_waits_for_background_check_then_forces_a_new_request() {
+    let lua = mlua::Lua::new();
+    let app_lua =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/love");
+    lua.globals()
+        .set("APP_LUA", app_lua.to_string_lossy().as_ref())
+        .expect("publish App Manager Lua directory");
+    lua.load(
+        r#"
+        package.path=APP_LUA.."/?.lua;"..package.path
+        local starts={}
+        local kit={
+            toast=function() end,
+            button=function() end,
+            textview=function() end,
+        }
+        local native={
+            start=function(kind)
+                starts[#starts+1]=kind
+                return 99
+            end,
+        }
+        local model=require("app_model").new(kit,native)
+        model.env={
+            portmaster_management="app",
+            capability_manage_portmaster=true,
+            capability_install_portmaster=true,
+            capability_update_portmaster=true,
+            portmaster_release_install_allowed=true,
+            update_status="unknown",
+        }
+        local operations=require("app_operations").new(model)
+        local environment=require("app_environment").new(model,operations,{})
+        operations.bind({build_home=function() end},environment)
+        operations.background_task={id=7,kind="update-check-background"}
+
+        environment.start_update_check()
+        assert(operations.task.kind=="update-check-wait")
+        assert(operations.background_task.id==7)
+        assert(operations.forced_update_pending==true)
+        assert(#starts==0)
+        operations.confirm_plan={{kind="CLEAN_APPLEDOUBLE",arg=""}}
+        operations.start_apply()
+        assert(#starts==0)
+
+        operations.finish_background_update({
+            update_checked=1,update_status="ok",portmaster_latest="cached",
+        })
+        assert(#starts==1 and starts[1]=="update-check")
+        assert(operations.task.id==99 and operations.task.kind=="update-check")
+        assert(operations.forced_update_pending==false)
+        assert(model.env.portmaster_latest=="")
+        "#,
+    )
+    .exec()
+    .expect("defer a manual forced check until the automatic check exits");
+}
+
+#[test]
 fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
     let lua = mlua::Lua::new();
     let app_lua =

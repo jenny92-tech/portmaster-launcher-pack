@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use portkit_core::ExclusiveFileLock;
 use portkit_core::github::{Capability, GitHubError, GitHubTransport, Progress};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -687,9 +688,7 @@ struct ProgressWriter {
     count: usize,
     total: u64,
     channel: Option<ProgressChannel>,
-    #[cfg(not(unix))]
-    lock_path: PathBuf,
-    _lock: File,
+    _lock: ExclusiveFileLock,
 }
 
 impl ProgressWriter {
@@ -718,39 +717,21 @@ impl ProgressWriter {
                 lock_path,
             )));
         }
-        #[cfg(unix)]
-        let lock = {
-            let lock = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(&lock_path)?;
-            try_lock_progress(&lock)?;
-            lock
-        };
-        #[cfg(not(unix))]
-        let lock = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-            .map_err(|error| {
-                if error.kind() == io::ErrorKind::AlreadyExists {
-                    io::Error::new(
-                        io::ErrorKind::WouldBlock,
-                        "Runtime repair is already active",
-                    )
-                } else {
-                    error
-                }
-            })?;
+        let lock = ExclusiveFileLock::try_acquire(&lock_path).map_err(|error| {
+            if error.kind() == io::ErrorKind::WouldBlock {
+                io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "Runtime repair is already active",
+                )
+            } else {
+                error
+            }
+        })?;
         Ok(Self {
             path: path.to_path_buf(),
             count,
             total,
             channel,
-            #[cfg(not(unix))]
-            lock_path,
             _lock: lock,
         })
     }
@@ -816,36 +797,6 @@ impl ProgressWriter {
         }
         fs::rename(temp, &self.path)?;
         Ok(())
-    }
-}
-
-impl Drop for ProgressWriter {
-    fn drop(&mut self) {
-        #[cfg(not(unix))]
-        let _ = fs::remove_file(&self.lock_path);
-    }
-}
-
-#[cfg(unix)]
-fn try_lock_progress(file: &File) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-
-    unsafe extern "C" {
-        fn flock(file_descriptor: i32, operation: i32) -> i32;
-    }
-    // SAFETY: `file` owns a live descriptor for the duration of this call.
-    if unsafe { flock(file.as_raw_fd(), 2 | 4) } == 0 {
-        Ok(())
-    } else {
-        let error = io::Error::last_os_error();
-        if error.kind() == io::ErrorKind::WouldBlock {
-            Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "Runtime repair is already active",
-            ))
-        } else {
-            Err(error)
-        }
     }
 }
 
