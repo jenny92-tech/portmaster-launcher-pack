@@ -289,7 +289,6 @@ where
 {
     check_cancel(request)?;
     let libs = prepare_root(&request.libs_root)?;
-    fs::create_dir_all(&request.state_dir)?;
     let state = ManagedRoot::new(&request.state_dir)?;
     let cache_path = state.join_child("runtime-cache")?;
     let cache = prepare_root(&cache_path)?;
@@ -683,10 +682,6 @@ impl ProgressWriter {
         total: u64,
         channel: Option<ProgressChannel>,
     ) -> Result<Self, RuntimeRepairError> {
-        if !state_dir.is_absolute() {
-            return Err(RuntimeRepairError::UnsafePath(PathSafetyError::NotAbsolute));
-        }
-        fs::create_dir_all(state_dir)?;
         let root = ManagedRoot::new(state_dir)?;
         fs::create_dir_all(root.path())?;
         let lock_path = root.join_child("runtime-repair.lock")?;
@@ -900,5 +895,20 @@ mod tests {
         );
         drop(first);
         drop(ProgressWriter::new(&state, 1, 8, None).unwrap());
+    }
+
+    #[test]
+    fn progress_writer_rejects_traversal_before_creating_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let unsafe_state = temp.path().join("state/new/../outside");
+        let Err(error) = ProgressWriter::new(&unsafe_state, 1, 8, None) else {
+            panic!("a traversal path must be rejected")
+        };
+
+        assert!(matches!(
+            error,
+            RuntimeRepairError::UnsafePath(PathSafetyError::Traversal)
+        ));
+        assert!(!temp.path().join("state").exists());
     }
 }
