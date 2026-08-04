@@ -9,10 +9,22 @@ texture cap, and ABXY layout before running `unityloader`.
 ```text
 ports/hollowknight/
 ├── love_ui/                       ← this repository's dist
-├── unityloader, config.toml       ← Bogodroid build
+├── unityloader, unityloader.libs/ ← one Bogodroid build unit
+├── unityloader.d/
+│   ├── android_base.so
+│   ├── unity_2021_3.so
+│   ├── platform_sdl_runtime.so
+│   ├── sdk_fmod.so
+│   └── hollow_knight_viewport.so
+├── config.toml                    ← Bogodroid port configuration
 ├── gamecontrollerdb.txt, conf/ …  ← runtime/generated
 └── gamedata/                      ← user-supplied game data
 ```
+
+`sdk_fmod.so` supplies the Android FMOD/AudioTrack bridge; without it the game
+runs silently. `hollow_knight_viewport.so` owns the 4:3 camera and tk2d hooks.
+The loader, private libraries and all selected plugins must come from the same
+Bogodroid build because the loader rejects mixed runtime fingerprints.
 
 The settings runtime is supplied by PortMaster at
 `runtimes/love_11.5`; this port no longer ships or mounts a Godot/frt runtime,
