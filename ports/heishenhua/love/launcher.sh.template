@@ -49,7 +49,7 @@ run_love_launcher_ui              # sets launcher_exit + LAUNCH_ENV (=love_ui/la
 HSH_ENV="$LAUNCH_ENV"
 if [ -f "$HSH_ENV" ]; then
   source "$HSH_ENV"
-  echo "$LOG_PREFIX env: ${HSH_WIDTH}x${HSH_HEIGHT} texmax=$HSH_TEXMAX dmg=$HSH_DMG swap_ab=$HSH_SWAP_AB swap_xy=$HSH_SWAP_XY inf_mp=$HSH_INF_MP inf_sta=$HSH_INF_STA inf_wine=$HSH_INF_WINE skill_cd=$HSH_SKILL_CD"
+  echo "$LOG_PREFIX env: output=${HSH_WIDTH}x${HSH_HEIGHT} render_divisor=${HSH_RENDER_DIVISOR:-1} texmax=$HSH_TEXMAX dmg=$HSH_DMG swap_ab=$HSH_SWAP_AB swap_xy=$HSH_SWAP_XY inf_mp=$HSH_INF_MP inf_sta=$HSH_INF_STA inf_wine=$HSH_INF_WINE skill_cd=$HSH_SKILL_CD"
 
   case "$HSH_TEXMAX" in
     0|384|480|512|720) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${HSH_TEXMAX}/" "$PORT_TOML" ;;
@@ -88,6 +88,8 @@ fi
 
 resolve_display_resolution "${HSH_WIDTH:-auto}" "${HSH_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
+resolve_render_scale "${HSH_RENDER_DIVISOR:-1}"
+apply_render_scale "$PORT_TOML"
 
 # ══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game "$PORT_TOML"

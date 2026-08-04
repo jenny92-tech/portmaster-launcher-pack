@@ -81,7 +81,7 @@ run_love_launcher_ui
 VS_ENV="$LAUNCH_ENV"
 if [ -f "$VS_ENV" ]; then
   source "$VS_ENV"
-  echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${VS_WIDTH}x${VS_HEIGHT} render_divisor=${VS_RENDER_DIVISOR:-1} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
 
   if [ "$VS_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$VS_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
@@ -94,6 +94,8 @@ fi
 # the resolution must still follow this device's panel.
 resolve_display_resolution "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
+resolve_render_scale "${VS_RENDER_DIVISOR:-1}"
+apply_render_scale "$PORT_TOML"
 
 # Unity Loader now resolves Android base assets and Play Asset Delivery pack
 # assets internally. Keep the launcher focused on UI/config; do not bind

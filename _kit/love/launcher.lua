@@ -14,6 +14,11 @@ local DEFAULT_RESOLUTION_LABELS = {
     ["960x720"] = "960×720",
     ["1280x720"] = "1280×720",
 }
+local DEFAULT_RENDER_SCALE_OPTIONS = {
+    {"1", {en = "Native (100%)", zh = "原生 (100%)"}},
+    {"2", {en = "Half (50%)", zh = "一半 (50%)"}},
+    {"4", {en = "Quarter (25%)", zh = "四分之一 (25%)"}},
+}
 
 local function copy(value)
     local out = {}
@@ -48,6 +53,21 @@ function launcher.resolution(spec)
     spec.labels = spec.labels or DEFAULT_RESOLUTION_LABELS
     spec.default = spec.default or "auto"
     spec.env_kind = "resolution"
+    return field("select", spec)
+end
+
+function launcher.output_resolution(spec)
+    spec = copy(spec)
+    spec.label = spec.label or {en = "Output Resolution:", zh = "输出分辨率:"}
+    return launcher.resolution(spec)
+end
+
+function launcher.render_scale(spec)
+    spec = copy(spec)
+    spec.key = spec.key or "render_scale"
+    spec.label = spec.label or {en = "Render Resolution:", zh = "渲染分辨率:"}
+    spec.options = spec.options or DEFAULT_RENDER_SCALE_OPTIONS
+    spec.default = spec.default or "1"
     return field("select", spec)
 end
 

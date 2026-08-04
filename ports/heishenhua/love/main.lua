@@ -13,7 +13,8 @@ launcher.define {
         {"credit_porter", "Bili 解腻Jenny"},
     },
     fields = {
-        launcher.resolution {env = {"HSH_WIDTH", "HSH_HEIGHT"}},
+        launcher.output_resolution {env = {"HSH_WIDTH", "HSH_HEIGHT"}},
+        launcher.render_scale {env = "HSH_RENDER_DIVISOR"},
         launcher.select {
             key = "texmax", label = {en = "Graphics:", zh = "画面质量:"}, default = "480", env = "HSH_TEXMAX",
             options = {
@@ -41,7 +42,7 @@ launcher.define {
         launcher.toggle {key = "skill_cd", label = {en = "No Immob. CD:", zh = "定身无冷却:"}, env = "HSH_SKILL_CD"},
     },
     pages = {
-        {title = "title", rows = {"resolution", "texmax", "swap_ab", "swap_xy", launcher.button("cheats", "page:2")}, actions = {"start", "quit"}},
+        {title = "title", rows = {"resolution", "render_scale", "texmax", "swap_ab", "swap_xy", launcher.button("cheats", "page:2")}, actions = {"start", "quit"}},
         {title = "cheat_title", fields = {"reduce", "inf_mp", "inf_sta", "inf_wine", "skill_cd"}, actions = {"start", "back"}},
     },
     legacy = {

@@ -103,8 +103,18 @@ fn run(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             };
             let width = optional_u32(&options, "width")?;
             let height = optional_u32(&options, "height")?;
-            if width.is_none() && height.is_none() && buttons.is_none() {
-                return Err("unity configure requires dimensions or button mappings".into());
+            let render_scale_divisor = optional_u32(&options, "render-divisor")?;
+            if render_scale_divisor.is_some_and(|value| !matches!(value, 1 | 2 | 4)) {
+                return Err("--render-divisor must be 1, 2 or 4".into());
+            }
+            if width.is_none()
+                && height.is_none()
+                && buttons.is_none()
+                && render_scale_divisor.is_none()
+            {
+                return Err(
+                    "unity configure requires dimensions, render scale or button mappings".into(),
+                );
             }
             // Which table a key belongs to is the reader's contract, so the
             // caller names it; omitting it targets the root table.
@@ -118,6 +128,7 @@ fn run(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 width,
                 height,
                 buttons,
+                render_scale_divisor,
             })?;
             Ok(())
         }
@@ -209,5 +220,5 @@ fn safe_button(value: &str) -> bool {
 fn usage() -> String {
     "usage: portkit-launcher artwork sync --script-dir DIR --launcher FILE --source-dir DIR
        portkit-launcher artwork probe --script-dir DIR
-       portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--section NAME] [--width N --height N] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
+       portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--section NAME] [--width N --height N] [--render-divisor 1|2|4] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
 }

@@ -8,7 +8,8 @@ launcher.define {
         {"credit_porter", "Bili 解腻Jenny"},
     },
     fields = {
-        launcher.resolution {env = {"HKL_WIDTH", "HKL_HEIGHT"}},
+        launcher.output_resolution {env = {"HKL_WIDTH", "HKL_HEIGHT"}},
+        launcher.render_scale {env = "HKL_RENDER_DIVISOR"},
         launcher.select {
             key = "texmax", label = {en = "Graphics:", zh = "画面质量:"}, default = "384", env = "HKL_TEXMAX",
             options = {
@@ -21,7 +22,7 @@ launcher.define {
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "HKL_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "HKL_SWAP_XY"},
     },
-    field_order = {"resolution", "texmax", "swap_ab", "swap_xy"},
+    field_order = {"resolution", "render_scale", "texmax", "swap_ab", "swap_xy"},
     legacy = {
         path = "../conf/godot/app_userdata/Hollow Knight Launcher/launch_config.env",
         state_path = "../conf/godot/app_userdata/Hollow Knight Launcher/hk_launcher_state.json",

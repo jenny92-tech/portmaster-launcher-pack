@@ -67,6 +67,32 @@ apply_display_resolution() {
     --file "$toml" --section device --width "$RES_W" --height "$RES_H"
 }
 
+# Resolve the Unity render size independently from the physical output. The
+# divisor applies to both axes: 2 means 50% width/height, 4 means 25%.
+# Requires resolve_display_resolution first. Sets RENDER_SCALE_DIVISOR and
+# RENDER_W / RENDER_H. Args: $1=1|2|4. Invalid/missing values use native. ───
+resolve_render_scale() {
+  local want="${1:-1}"
+  case "$want" in
+    1|2|4) RENDER_SCALE_DIVISOR="$want" ;;
+    *)
+      RENDER_SCALE_DIVISOR=1
+      echo "$LOG_PREFIX bad render divisor '$want' — using native resolution"
+      ;;
+  esac
+  RENDER_W=$((RES_W / RENDER_SCALE_DIVISOR))
+  RENDER_H=$((RES_H / RENDER_SCALE_DIVISOR))
+  echo "$LOG_PREFIX output=${RES_W}x${RES_H} render=${RENDER_W}x${RENDER_H} divisor=${RENDER_SCALE_DIVISOR}"
+}
+
+# Write the render divisor into [gpu]. The helper also clears an old explicit
+# renderWidth/renderHeight pair, because exact dimensions override the divisor.
+apply_render_scale() {
+  local toml="$1"
+  portkit_launcher unity configure \
+    --file "$toml" --render-divisor "$RENDER_SCALE_DIVISOR"
+}
+
 # ── [input.remap] upsert a/b/x/y without depending on device awk/sed.
 # Args: $1=toml file, $2=a $3=b $4=x $5=y values. ───────────────────────
 apply_button_remap() {

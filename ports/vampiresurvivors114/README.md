@@ -124,6 +124,10 @@ On the first migrated launch, existing ABXY choices are imported from the old
 Godot userdata env file. If the UI payload is absent, the script starts with the
 current `vs.toml`.
 
+Output resolution defaults to the detected panel size. Render resolution is a
+separate Native/50%/25% choice backed by `[gpu].renderScaleDivisor`; the loader
+always presents the result across the full physical output.
+
 The game stage intentionally does not run `gptokeyb`; Unity receives the
 handheld buttons as Android gamepad events.
 

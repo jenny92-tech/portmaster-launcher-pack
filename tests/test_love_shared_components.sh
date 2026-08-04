@@ -35,6 +35,8 @@ done
 
 grep -Fq 'function launcher.define' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'function launcher.resolution' "$ROOT/_kit/love/launcher.lua"
+grep -Fq 'function launcher.output_resolution' "$ROOT/_kit/love/launcher.lua"
+grep -Fq 'function launcher.render_scale' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'function launcher.toggle' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'function launcher.select' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'k.switch(f.label_key' "$ROOT/_kit/love/launcher.lua"
@@ -49,6 +51,18 @@ grep -Fq 'LD_LIBRARY_PATH="$private_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' 
 grep -Fq 'local toml="$1" game_library_paths="${2:-}"' "$unity_common"
 grep -Fq 'LD_LIBRARY_PATH="$game_library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' "$unity_common"
 grep -Fq 'prepare_unityloader_private_libs || return 1' "$unity_common"
+grep -Fq 'resolve_render_scale()' "$unity_common"
+grep -Fq 'apply_render_scale()' "$unity_common"
+grep -Fq -- '--render-divisor "$RENDER_SCALE_DIVISOR"' "$unity_common"
+
+# Unity launchers expose physical output and internal rendering as independent
+# settings, then apply both through the same shared shell protocol.
+for port in hk heishenhua vampiresurvivors114; do
+  grep -Fq 'launcher.output_resolution' "$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'launcher.render_scale' "$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'resolve_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
+  grep -Fq 'apply_render_scale "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template"
+done
 
 # Every game uses the same explicit Chinese wording for controller swaps.
 for main in "$ROOT"/ports/*/love/main.lua; do

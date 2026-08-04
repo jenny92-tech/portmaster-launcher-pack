@@ -10,9 +10,21 @@ pub struct ConfigureRequest {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub buttons: Option<[String; 4]>,
+    /// Internal Unity render divisor. This always belongs to `[gpu]`,
+    /// independently of the table selected for display or input settings.
+    pub render_scale_divisor: Option<u32>,
 }
 
 pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
+    if request
+        .render_scale_divisor
+        .is_some_and(|value| !matches!(value, 1 | 2 | 4))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "render scale divisor must be 1, 2 or 4",
+        ));
+    }
     let contents = std::fs::read_to_string(&request.path)?;
     let mut lines: Vec<String> = contents.lines().map(str::to_owned).collect();
     let section = request.section.as_deref();
@@ -44,6 +56,28 @@ pub fn configure(request: &ConfigureRequest) -> io::Result<()> {
                 ("x", format!("\"{}\"", buttons[2])),
                 ("y", format!("\"{}\"", buttons[3])),
             ],
+        );
+    }
+    if let Some(divisor) = request.render_scale_divisor {
+        upsert(
+            &mut lines,
+            Some("gpu"),
+            "renderScaleDivisor",
+            format!("renderScaleDivisor = {divisor}"),
+        );
+        // An exact pair takes precedence in Bogodroid. Reset it whenever the
+        // launcher selects a scale so stale manual values cannot win silently.
+        upsert(
+            &mut lines,
+            Some("gpu"),
+            "renderWidth",
+            "renderWidth = 0".to_owned(),
+        );
+        upsert(
+            &mut lines,
+            Some("gpu"),
+            "renderHeight",
+            "renderHeight = 0".to_owned(),
         );
     }
     let mut output = lines.join("\n");

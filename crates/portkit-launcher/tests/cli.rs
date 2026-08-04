@@ -46,3 +46,28 @@ fn unity_command_requires_a_complete_button_mapping() {
     assert!(!status.success());
     assert_eq!(fs::read_to_string(path).unwrap(), "displayWidth=1\n");
 }
+
+#[test]
+fn unity_command_rejects_an_unsupported_render_divisor() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.toml");
+    fs::write(&path, "[gpu]\nrenderScaleDivisor = 1\n").unwrap();
+
+    let status = Command::new(env!("CARGO_BIN_EXE_portkit-launcher"))
+        .args([
+            "unity",
+            "configure",
+            "--file",
+            path.to_str().unwrap(),
+            "--render-divisor",
+            "3",
+        ])
+        .status()
+        .unwrap();
+
+    assert!(!status.success());
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "[gpu]\nrenderScaleDivisor = 1\n"
+    );
+}

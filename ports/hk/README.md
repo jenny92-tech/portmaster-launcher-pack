@@ -1,8 +1,8 @@
 # Hollow Knight launcher
 
 Two-stage PortMaster launcher for the Bogodroid Hollow Knight port. Stage 1 is
-the shared LÖVE 11.5 settings UI; stage 2 applies the selected resolution,
-texture cap, and ABXY layout before running `unityloader`.
+the shared LÖVE 11.5 settings UI; stage 2 applies the selected output and render
+resolutions, texture cap, and ABXY layout before running `unityloader`.
 
 ## Distribution model
 
@@ -48,7 +48,8 @@ state lives in `love_ui/state.txt`.
 
 | UI option | Runtime field |
 |---|---|
-| Resolution | `displayWidth` / `displayHeight` and Hollow Knight graphics settings |
+| Output Resolution | `[device].displayWidth` / `displayHeight`; Auto follows the panel |
+| Render Resolution | `[gpu].renderScaleDivisor`; Hollow Knight graphics settings use the resolved render size |
 | Graphics | `textureMaxDim`: 384 / 512 / 720 / 0 |
 | Swap A/B, Swap X/Y | `[input.remap]` absolute button values |
 

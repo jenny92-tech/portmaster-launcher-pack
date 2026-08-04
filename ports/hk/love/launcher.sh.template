@@ -79,7 +79,7 @@ run_love_launcher_ui              # sets launcher_exit + LAUNCH_ENV (=love_ui/la
 HKL_ENV="$LAUNCH_ENV"
 if [ -f "$HKL_ENV" ]; then
   source "$HKL_ENV"
-  echo "$LOG_PREFIX env: ${HKL_WIDTH}x${HKL_HEIGHT} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${HKL_WIDTH}x${HKL_HEIGHT} render_divisor=${HKL_RENDER_DIVISOR:-1} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
 
   # Quality → textureMaxDim: 384/512/720/0 (low/medium/high/ultra; same values
   # as the heishenhua port).
@@ -101,7 +101,12 @@ resolve_display_resolution "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}"
 apply_display_resolution "$PORT_TOML"
 HK_RUNTIME_WIDTH="$RES_W"
 HK_RUNTIME_HEIGHT="$RES_H"
-hk_sync_graphics_resolution "$HK_RUNTIME_HEIGHT"
+resolve_render_scale "${HKL_RENDER_DIVISOR:-1}"
+apply_render_scale "$PORT_TOML"
+HK_RENDER_DIVISOR="$RENDER_SCALE_DIVISOR"
+HK_RENDER_WIDTH="$RENDER_W"
+HK_RENDER_HEIGHT="$RENDER_H"
+hk_sync_graphics_resolution "$HK_RENDER_HEIGHT"
 
 # ── Seed/repair only the PlayerPrefs keys this port owns.
 # Video onboarding hangs on this Android port, so we mark that page configured.
@@ -112,9 +117,9 @@ hk_merge_playerprefs() {
   mkdir -p "$CONFDIR/shared_prefs"
   local patch
   patch=$(printf '{"bools":{},"floats":{"VidBrightValue":20.0,"VidOSValue":0.0},"ints":{"VidBrightSet":1,"VidOSSet":1,"Screenmanager Resolution Height":%s,"Screenmanager Resolution Width":%s,"__UNITY_PLAYERPREFS_VERSION__":1},"longs":{},"strings":{},"version":1}' \
-    "$HK_RUNTIME_HEIGHT" "$HK_RUNTIME_WIDTH")
+    "$HK_RENDER_HEIGHT" "$HK_RENDER_WIDTH")
   if portkit_launcher json merge --file "$HK_PREFS" --patch "$patch"; then
-    echo "$LOG_PREFIX merged PlayerPrefs onboarding gates (${HK_RUNTIME_WIDTH}x${HK_RUNTIME_HEIGHT})"
+    echo "$LOG_PREFIX merged PlayerPrefs onboarding gates (${HK_RENDER_WIDTH}x${HK_RENDER_HEIGHT})"
   else
     echo "$LOG_PREFIX PlayerPrefs invalid or unwritable; left untouched"
     return 1
