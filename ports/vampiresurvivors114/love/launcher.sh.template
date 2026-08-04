@@ -21,6 +21,7 @@ source "$KIT/launcher_artwork.sh"
 portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
 source $controlfolder/control.txt
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+get_controls
 
 GAMEDIR="/$directory/ports/$PORT_NAME"
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
@@ -75,8 +76,6 @@ run_love_launcher_ui
 VS_ENV="$LAUNCH_ENV"
 if [ -f "$VS_ENV" ]; then
   source "$VS_ENV"
-  VS_WIDTH=auto
-  VS_HEIGHT=auto
   echo "$LOG_PREFIX env: ${VS_WIDTH}x${VS_HEIGHT} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
 
   if [ "$VS_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
