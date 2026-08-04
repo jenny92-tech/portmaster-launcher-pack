@@ -8,7 +8,23 @@ IMAGE="${PORTKIT_LAUNCHER_BUILD_IMAGE:-rust:1.88-alpine}"
 OUT="$ROOT/_kit/runtime/portkit-launcher.aarch64"
 REVISION_FILE="$ROOT/_kit/portkit-launcher-revision.txt"
 STAGING="$ROOT/.tmp/portkit-launcher-build"
-REVISION="$(python3 "$ROOT/_kit/portkit_launcher_revision.py" "$ROOT")"
+
+PYTHON="${PYTHON:-python3}"
+if ! "$PYTHON" -c 'import tomllib' >/dev/null 2>&1; then
+  for candidate in python3.13 python3.12 python3.11; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+       "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+      PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+"$PYTHON" -c 'import tomllib' >/dev/null 2>&1 || {
+  echo "Python 3.11 or newer is required to build the PortKit launcher helper." >&2
+  exit 69
+}
+
+REVISION="$("$PYTHON" "$ROOT/_kit/portkit_launcher_revision.py" "$ROOT")"
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker is required to build the portable PortKit launcher helper." >&2

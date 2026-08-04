@@ -7,7 +7,23 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${1:?Usage: _kit/stage_portkit_launcher.sh <generated-data-dir>}"
 RUNTIME="$ROOT/_kit/runtime/portkit-launcher.aarch64"
 REVISION_FILE="$ROOT/_kit/portkit-launcher-revision.txt"
-EXPECTED="$(python3 "$ROOT/_kit/portkit_launcher_revision.py" "$ROOT")"
+
+PYTHON="${PYTHON:-python3}"
+if ! "$PYTHON" -c 'import tomllib' >/dev/null 2>&1; then
+  for candidate in python3.13 python3.12 python3.11; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+       "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+      PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+"$PYTHON" -c 'import tomllib' >/dev/null 2>&1 || {
+  echo "Python 3.11 or newer is required to stage the PortKit launcher helper." >&2
+  exit 69
+}
+
+EXPECTED="$("$PYTHON" "$ROOT/_kit/portkit_launcher_revision.py" "$ROOT")"
 PACKAGED="$(sed -n '1p' "$REVISION_FILE" 2>/dev/null || true)"
 
 if [ -z "$PACKAGED" ] || [ "$PACKAGED" != "$EXPECTED" ]; then
