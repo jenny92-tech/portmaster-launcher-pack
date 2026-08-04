@@ -30,7 +30,19 @@ if grep -R -nE 'VS_GAME_LANG|vs114_apply_language|I2 Language|SaveDataUnity|game
   exit 1
 fi
 
+if grep -nE 'unityloader\.(gplay|prevgplay)' "$LOVE/launcher.sh.template"; then
+  echo "vampiresurvivors114 must use the standard plugin-based unityloader" >&2
+  exit 1
+fi
+
 grep -Fq 'run_love_launcher_ui' "$LOVE/launcher.sh.template"
+grep -Fq 'LOADER=unityloader' "$LOVE/launcher.sh.template"
+grep -Fq 'missing standard loader:' "$LOVE/launcher.sh.template"
+grep -Fq 'SHADER_CACHE_DIR="/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"' "$LOVE/launcher.sh.template"
+grep -Fq 'missing paths.unity_shader_cache_redirect' "$LOVE/launcher.sh.template"
+grep -Fq 'glVersionOverride        = \"OpenGL ES 3.0 Bogodroid\"' "$LOVE/launcher.sh.template"
+grep -Fq 'glMinorVersionOverride   = 0' "$LOVE/launcher.sh.template"
+grep -Fq 'shaderGles2Rewrite = false' "$LOVE/launcher.sh.template"
 grep -Fq 'local launcher = require("launcher")' "$LOVE/main.lua"
 grep -Fq 'launcher.define {' "$LOVE/main.lua"
 grep -Fq 'launcher.resolution {env = {"VS_WIDTH", "VS_HEIGHT"}}' "$LOVE/main.lua"

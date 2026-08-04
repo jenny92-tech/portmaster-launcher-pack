@@ -2,8 +2,8 @@
 # PORTMASTER: vampiresurvivors114, V_吸血鬼幸存者_114.sh
 #
 # Stage-1: shared love settings UI writes launch_config.env.
-# Stage-2: rewrite vs.toml, then run the game through this port's own .gplay
-# loader (VS does not use run_unity_game).
+# Stage-2: rewrite config.toml, then run the standard plugin-based unityloader.
+# Google Play/GMS behavior is selected independently by unityloader.d plugins.
 #
 # Critical isolation: love's display env must stay confined to the
 # run_love_launcher_ui subshell and never leak into stage-2.
@@ -26,10 +26,11 @@ get_controls
 GAMEDIR="/$directory/ports/$PORT_NAME"
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
+SHADER_CACHE_DIR="/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"
 cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
-mkdir -p "$CONFDIR" "$GAMEDIR/cache/UnityShaderCache"
+mkdir -p "$CONFDIR" "$SHADER_CACHE_DIR"
 
 TRIMUI_RUNNER_PID=""
 
@@ -67,6 +68,10 @@ trap release_frontend EXIT INT TERM
 acquire_display
 
 resolve_port_toml
+grep -Eq '^[[:space:]]*unity_shader_cache_redirect[[:space:]]*=' "$PORT_TOML" || {
+  echo "$LOG_PREFIX missing paths.unity_shader_cache_redirect in $PORT_TOML"
+  exit 1
+}
 
 # ═══════════════ STAGE 1: love settings UI → writes launch_config.env ════
 # Shared logic lives in _kit (fonts / display / gptokeyb / exit-code gating);
@@ -95,9 +100,16 @@ apply_display_resolution "$PORT_TOML"
 # gamedata/assets or Addressables aa here.
 
 # ── Safe GL defaults ─────────────────────────────────────────────────────
-sed -i "s/^glVersionOverride.*/glVersionOverride        = \"OpenGL ES 3.2 Bogodroid\"/" "$PORT_TOML"
+# Keep the real Mali context intact, but advertise ES 3.0 to Unity. Unity 6's
+# ES 3.2 world-rendering path only fills a small lower-left region on the
+# MiniLoong Mali-G52, while its ES 3.0 path renders the complete frame.
+sed -i "s/^glVersionOverride.*/glVersionOverride        = \"OpenGL ES 3.0 Bogodroid\"/" "$PORT_TOML"
 sed -i "s/^glMajorVersionOverride.*/glMajorVersionOverride   = 3/" "$PORT_TOML"
-sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 2/" "$PORT_TOML"
+sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 0/" "$PORT_TOML"
+# Rewriting Unity's live ES 3 blit pair as ES 2 produces an opaque black
+# backbuffer on the MiniLoong Mali driver. Driver workarounds remain active;
+# only the destructive source translation is disabled for this port.
+sed -i "s/^shaderGles2Rewrite *=.*/shaderGles2Rewrite = false/" "$PORT_TOML"
 sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
 
 # ── Library paths + glibc memory tuning for 1GB handhelds ────────────────
@@ -105,13 +117,14 @@ export XDG_DATA_HOME="$CONFDIR" XDG_CONFIG_HOME="$CONFDIR"
 export LD_LIBRARY_PATH="$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a:$LD_LIBRARY_PATH"
 memory_tuning
 
-# Unity 6/PAD compatibility is handled in the loader.
+# Unity 6/PAD compatibility is handled by unityloader.d plugins.
 
-# ── Pick loader: prefer .gplay (Google Play on), fall back to .prevgplay / unityloader ──
+# ── Standard plugin loader ───────────────────────────────────────────────
 LOADER=unityloader
-for c in unityloader.gplay unityloader.prevgplay; do
-  [ -x "$GAMEDIR/$c" ] && { LOADER="$c"; break; }
-done
+[ -f "$GAMEDIR/$LOADER" ] || {
+  echo "$LOG_PREFIX missing standard loader: $GAMEDIR/$LOADER"
+  exit 1
+}
 chmod a+x "$GAMEDIR/$LOADER"
 echo "$LOG_PREFIX loader=$LOADER"
 audio_setup
