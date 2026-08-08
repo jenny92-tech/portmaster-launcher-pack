@@ -11,7 +11,7 @@ md5 = "0.7"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
-ureq = { version = "3", features = ["rustls"] }
+ureq = { version = "3", features = ["rustls", "socks-proxy"] }
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]

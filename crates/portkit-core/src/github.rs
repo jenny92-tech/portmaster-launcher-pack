@@ -25,11 +25,27 @@ const MAX_BATCH_SIZE: usize = 10;
 // holds) until the process is killed.
 const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+// Runtime SOCKS fallback pool. When every bundled mirror route fails, the
+// transport pulls a live proxy list (cached per process) and retries the
+// download through those SOCKS proxies. The list lives on GitHub itself, so a
+// single source would share the same outage as the mirrors it is meant to
+// rescue; multiple CDN channels are tried in order and the first reachable
+// source wins. Operators can override the whole set (one URL per line) with
+// PORTKIT_GITHUB_SOCKS_FALLBACK_URL. Only the first MAX entries are used so a
+// slow batch of dead proxies cannot consume the whole fetch deadline.
+const SOCKS_FALLBACK_URLS: [&str; 3] = [
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.json",
+    "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.json",
+    "https://fastly.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.json",
+];
+const SOCKS_FALLBACK_TTL: Duration = Duration::from_secs(60 * 60);
+const MAX_SOCKS_FALLBACK_CANDIDATES: usize = 50;
+
 // GitHub acceleration mirror registry. Keep the bundled route data lightweight
 // and non-plain so endpoint strings are not exposed by source/UI inspection.
 // Proxy-list maintenance source: https://github.com/NapNeko/NapCat-Mac-Installer/blob/c30e49595d7ce1887edc9e8eb5d020b6846ef137/NapCatInstaller/Utils.swift#L174
-const CUSTOM_ROUTES: &str = "7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb5180219393571951dd293185bf48d406d50d104be338d9608d1753d48cd8";
-const FULL_ROUTES: &str = "7435399fda45e4ec1c2da0b5b43f9fc6d57fae55f02894af47195b82776ed6b1612f6d964d0346a274d264a03621d4de8b1daaab7529f6adca0392cb9b69f410ea27f698191d48855b3589bb742802d909015ebd6ace63bd1d57da95c67dbbaf073df51f915bc784c63cff5aa7379490431c0d86273efba34cd34c89184d05f172d76d960e189784d546a7a51831c30fdd0ac7f6c462e0460541cddc58094f9f362d8c9955d73a964a0a5eeb289bdb9a0505d58adb41b9bc205c9040d919b690d46ee0794850c1904b504b933229b09d5eca40e8520e56ec1db2dfde0f1d8f91d410b0413554dc4e8404dd82ae76987a0e00d0c4081e5fcb0cc2a3d35bd90685591b2cc81ef88c864e468a91d014974c2a499856cd6edc842c529b38555891865f1d46fb4bdda3de4cc2029e5d02d0cc12f4889a4a428695e46982502655c61fce10c3b838088b7401619a975b017ca7468aa2ce58db558c602bbac60df2859e5219d47583779f572b569412890ba4ae39468534050a9b8c76ff7ff0028fadcc50b54ca63e3aa19651b78789084bfa6ee976965e3e0fc156375aa0b0205e8f24414c9df339ea6fff18d3bc8147d4b5dc2e32a2c009a6c3ca2371e57ff8399b4c3a43dc6b3731aeee3c5d88180213b2ef68bf2ca616ddbf853bf5bda92a2fa99a15ff85132869ed73ee31d8183040ae2f2b21aca462419d785cf3b6e76ff225a256d2bce32cf1bfa62770a3ca1afeac332f7f9777ed7b8b40913af16a3e2caeb73843de092af4bee56cb36fee0dbb41e724ffa7f87575a5d46090a87e277aaf78f309977bdb61a133656fbfbd3056b90c70ffa3e668eb62ec73f844b137e4a5cc3e22b23039d6f33a3361ab7ef566fa6ed133b57a234ebca40cb2bb5875b8b1e725f97fd26ea742f842ffb8be2221c06b6987b0273e75e77c1a15f368d713a2653638a39653e9a30e68f1a5fa21fe81d803ed51f33ce0fae141499638308bbc74726ce241025af271da7ce0732338e6c004beb00978a0f1e01b8393c934b40bb46efcaa38025e863c2dc2ef2e3f6d974a1647a16bd071c8710ec498d74ee1f30929e6ae951bc8eddd65e94dfc7eb4d75e0d089138778cbe6adc40db481350";
+const CUSTOM_ROUTES: &str = "7632298ac516bdb10737bfa1ee78d898c330af15e42eedb35f14059b3e259caf692976dc440f46a379d00aa26d36c584c80fbded0329f6adca0392cb9b76fb5bfa6de2921a1152db3c38d2a86c515e834a0a4ae229c064b11009c6dd8e58b0b4013ea84ccd00c185cc3cfb51";
+const FULL_ROUTES: &str = "7435399fda45e4ec1c2da3adf463d4919e65f25d8827eab3431e11de62229dad2e386cdf5a185df467966fb37f4fd99fd103bce5506ee7bddd15c78ad120fb56a333e8944f10099a233af7a7702f48851c4919f772cc7eaa1c009b8ed57dbbaf073df51f915bc389dc7aed50a4258994524b4e86305399bf4cd74fc00d4d4dfc38da698a0f13c386d30cf9b3123fb049c60cd08f9639bb50170896945615118e3a5f9dc348d343c4115149f074dd98984216d89ad20aa9a72a5a9059d90cb690d46ee0794850c1904b0d158a383dacca51ce1a81551728f41afc8082525a8e9cdd4dbc472558dc488403d799ae76987a0e00d0c4081a538b4fcebfde47c34585181549cd60e48881041a9fd89e008a5f6d44cf59d64ac399362880760e0785d5045a54f011d9b3d450ce0287401ab0dc48e396e31819dd83fe21c8082051da43cd10c9e23f5e8f761404dc97400105f51dd1b5d4169c0f892660a6d00deb8bc31f07a767fd6b9b50610a815ace42a5ac315385684c0c918a19e57fe51dd2e38c0fd84cfc2432bcc309b6948e086ff97ff1639c05700ec551742abfbd7a41927b640b8eef67fa3dba5edab5df56d4a0af682bb9de11f995972560bb69e463f9532759d676647beba7205499611e49b2f06b8f6bfd01c9a29177a8abbd2736e4d8179a806d346dea39b2249f5c794eb22c222aafa435189b643191aae76bf16cb7569ab2ff72b1b9f0392dc4d006e0a46e763eb278f07b9346c93bbd633b3fb0b93352de0e37aae0f966e911e909c559e06aa0fba5322ab0d33691fe7f2d61";
 
 fn read(encoded: &str) -> Option<String> {
     let mut output = Vec::with_capacity(encoded.len() / 2);
@@ -102,6 +118,14 @@ pub enum RouteFormatter {
     Mirror,
     Jsdelivr,
     GitClone,
+    /// Routes traffic through an explicit SOCKS forward proxy (`socks5://`,
+    /// `socks5h://`, `socks4://`). The base is the proxy address; the source
+    /// URL is left untouched. Only SOCKS proxies are accepted: TLS-wrapped
+    /// proxies cannot be verified by rustls without disabling certificate
+    /// checks for the target too, so `https://` forward proxies are rejected
+    /// outright. TLS end-to-end guarantees stay enforced by the transport, so
+    /// a malicious/intercepting proxy fails validation instead of decrypting.
+    Forward,
 }
 
 #[derive(Clone, Debug)]
@@ -132,6 +156,11 @@ impl Route {
             return Err(GitHubError::InvalidRoute);
         }
         Ok(route)
+    }
+
+    /// The forward-proxy address for `Forward` routes; `None` otherwise.
+    fn forward_proxy(&self) -> Option<String> {
+        (self.formatter == RouteFormatter::Forward).then(|| self.base.clone())
     }
 }
 
@@ -222,16 +251,36 @@ impl GitHubRegistry {
             .filter(|line| !line.is_empty())
             .enumerate()
         {
+            let (formatter, capabilities): (_, Vec<Capability>) =
+                if base.starts_with("socks5://")
+                    || base.starts_with("socks5h://")
+                    || base.starts_with("socks4://")
+                {
+                    (
+                        RouteFormatter::Forward,
+                        vec![
+                            Capability::Release,
+                            Capability::Raw,
+                            Capability::Archive,
+                            Capability::Gist,
+                        ],
+                    )
+                } else {
+                    (
+                        RouteFormatter::Full,
+                        vec![
+                            Capability::Release,
+                            Capability::Raw,
+                            Capability::Archive,
+                            Capability::Clone,
+                            Capability::Gist,
+                        ],
+                    )
+                };
             if let Ok(route) = Route::new(
                 format!("r{}", index + 1),
-                RouteFormatter::Full,
-                [
-                    Capability::Release,
-                    Capability::Raw,
-                    Capability::Archive,
-                    Capability::Clone,
-                    Capability::Gist,
-                ],
+                formatter,
+                capabilities,
                 base,
             ) {
                 routes.push(route);
@@ -266,6 +315,7 @@ impl GitHubRegistry {
                 format_endpoint(route, capability, source).map(|endpoint| GitHubCandidate {
                     route_id: route.id.clone(),
                     endpoint,
+                    proxy: route.forward_proxy(),
                 })
             })
             .collect::<Vec<_>>();
@@ -281,6 +331,7 @@ impl GitHubRegistry {
 pub struct GitHubTransport {
     registry: GitHubRegistry,
     batch_size: usize,
+    socks_fallback_urls: Vec<String>,
 }
 
 /// Streamed progress during a file fetch. `received`/`total` are bytes; `total`
@@ -311,9 +362,19 @@ impl GitHubTransport {
     }
 
     pub fn with_registry(registry: GitHubRegistry) -> Self {
+        let socks_fallback_urls = match std::env::var("PORTKIT_GITHUB_SOCKS_FALLBACK_URL") {
+            Ok(raw) => raw
+                .lines()
+                .map(str::trim)
+                .filter(|url| !url.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>(),
+            Err(_) => SOCKS_FALLBACK_URLS.iter().map(|url| (*url).to_owned()).collect(),
+        };
         Self {
             registry,
             batch_size: DEFAULT_BATCH_SIZE,
+            socks_fallback_urls,
         }
     }
 
@@ -403,7 +464,72 @@ impl GitHubTransport {
         if capability == Capability::Clone {
             return Err(GitHubError::UnsupportedFileFetch { capability });
         }
-        let mut candidates = self.registry.candidates(capability, source)?;
+        let candidates = match self.registry.candidates(capability, source) {
+            Ok(candidates) => candidates,
+            // An empty registry for this capability must still fall through to
+            // the dynamic SOCKS pool instead of failing immediately.
+            Err(GitHubError::NoCandidates) => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        let mut validation_failed = false;
+        match self.attempt_candidates(
+            candidates,
+            capability,
+            output,
+            &validator,
+            progress,
+            max_bytes,
+            deadline,
+            &mut validation_failed,
+            true,
+        ) {
+            Ok(outcome) => return Ok(outcome),
+            Err(GitHubError::Exhausted { .. }) => {}
+            Err(error) => return Err(error),
+        }
+        // Every bundled route failed. Pull the dynamic SOCKS pool once and
+        // retry through those forward proxies; a fresh list (or an empty one)
+        // fails fast and keeps the original exhaustion result.
+        let fallback = self.socks_fallback_candidates(capability, source, deadline)?;
+        if !fallback.is_empty() {
+            match self.attempt_candidates(
+                fallback,
+                capability,
+                output,
+                &validator,
+                progress,
+                max_bytes,
+                deadline,
+                &mut validation_failed,
+                false,
+            ) {
+                Ok(outcome) => return Ok(outcome),
+                Err(GitHubError::Exhausted { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err(GitHubError::Exhausted { validation_failed })
+    }
+
+    /// Probes and transfers one batch plan. `remember_preferred` is false for
+    /// dynamic SOCKS candidates: a one-shot proxy that happened to work for one
+    /// file must not shadow the bundled mirrors for later fetches.
+    #[allow(clippy::too_many_arguments)]
+    fn attempt_candidates<F>(
+        &self,
+        mut candidates: Vec<GitHubCandidate>,
+        capability: Capability,
+        output: &Path,
+        validator: &F,
+        progress: Option<&dyn Progress>,
+        max_bytes: Option<u64>,
+        deadline: Option<Instant>,
+        validation_failed: &mut bool,
+        remember_preferred: bool,
+    ) -> Result<FetchOutcome, GitHubError>
+    where
+        F: Fn(&Path) -> bool,
+    {
         let preferred = self.preferred_route(capability);
         if let Some(index) = preferred.as_ref().and_then(|id| {
             candidates
@@ -415,7 +541,6 @@ impl GitHubTransport {
             self.clear_preferred(capability);
         }
 
-        let mut validation_failed = false;
         for batch in candidates.chunks(self.batch_size) {
             remaining(deadline)?;
             let mut responsive = self.probe_batch(batch, deadline)?;
@@ -432,16 +557,18 @@ impl GitHubTransport {
             for candidate in responsive {
                 remaining(deadline)?;
                 match self.transfer(
-                    &candidate, output, &validator, progress, max_bytes, deadline,
+                    &candidate, output, validator, progress, max_bytes, deadline,
                 ) {
                     Ok(()) => {
-                        self.set_preferred(capability, &candidate.route_id);
+                        if remember_preferred {
+                            self.set_preferred(capability, &candidate.route_id);
+                        }
                         return Ok(FetchOutcome {
                             route_id: candidate.route_id,
                         });
                     }
                     Err(AttemptError::Validation) => {
-                        validation_failed = true;
+                        *validation_failed = true;
                         self.clear_if_preferred(capability, &candidate.route_id);
                     }
                     Err(AttemptError::Transfer) => {
@@ -452,7 +579,40 @@ impl GitHubTransport {
                 }
             }
         }
-        Err(GitHubError::Exhausted { validation_failed })
+        Err(GitHubError::Exhausted {
+            validation_failed: *validation_failed,
+        })
+    }
+
+    /// Builds forward-proxy candidates from the cached dynamic SOCKS list.
+    /// Failures to fetch or parse the list are silent: the fallback is a
+    /// best-effort layer and must never turn a plain exhaustion into a hard
+    /// error.
+    fn socks_fallback_candidates(
+        &self,
+        capability: Capability,
+        source: &str,
+        deadline: Option<Instant>,
+    ) -> Result<Vec<GitHubCandidate>, GitHubError> {
+        if self.socks_fallback_urls.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !matches!(
+            capability,
+            Capability::Release | Capability::Raw | Capability::Archive | Capability::Gist
+        ) {
+            return Ok(Vec::new());
+        }
+        let proxies = cached_socks_proxies(&self.socks_fallback_urls, deadline);
+        Ok(proxies
+            .into_iter()
+            .enumerate()
+            .map(|(index, proxy)| GitHubCandidate {
+                route_id: format!("socks{}", index + 1),
+                endpoint: source.to_owned(),
+                proxy: Some(proxy),
+            })
+            .collect())
     }
 
     fn probe_batch(
@@ -481,12 +641,17 @@ impl GitHubTransport {
         let Ok(timeout) = remaining(deadline) else {
             return false;
         };
-        let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder()
-                .timeout_connect(Some(Duration::from_secs(3)))
-                .timeout_global(Some(timeout.min(Duration::from_secs(5))))
-                .build(),
-        );
+        let mut config = ureq::config::Config::builder()
+            .timeout_connect(Some(Duration::from_secs(3)))
+            .timeout_global(Some(timeout.min(Duration::from_secs(5))));
+        if let Some(proxy) = candidate
+            .proxy
+            .as_deref()
+            .and_then(|address| ureq::Proxy::new(address).ok())
+        {
+            config = config.proxy(Some(proxy));
+        }
+        let agent = ureq::Agent::new_with_config(config.build());
         // A 2xx response (including 206 to the Range probe) means the route is
         // reachable; whether it actually delivers usable content is confirmed
         // by the transfer validator. Non-2xx or transport errors skip it.
@@ -516,6 +681,7 @@ impl GitHubTransport {
 
         if let Err(error) = self.run_transfer(
             &candidate.endpoint,
+            candidate.proxy.as_deref(),
             &part,
             &sidecar,
             progress,
@@ -540,9 +706,11 @@ impl GitHubTransport {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_transfer(
         &self,
         endpoint: &str,
+        proxy: Option<&str>,
         part: &Path,
         sidecar: &Path,
         progress: Option<&dyn Progress>,
@@ -561,7 +729,9 @@ impl GitHubTransport {
                 }
                 std::thread::sleep(Duration::from_secs(1));
             }
-            match self.single_transfer(endpoint, part, sidecar, progress, max_bytes, deadline) {
+            match self.single_transfer(
+                endpoint, proxy, part, sidecar, progress, max_bytes, deadline,
+            ) {
                 Ok(()) => return Ok(()),
                 Err(AttemptError::Io(error)) => return Err(AttemptError::Io(error)),
                 Err(AttemptError::Validation) => return Err(AttemptError::Validation),
@@ -572,9 +742,11 @@ impl GitHubTransport {
         Err(AttemptError::Transfer)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn single_transfer(
         &self,
         endpoint: &str,
+        proxy: Option<&str>,
         part: &Path,
         sidecar: &Path,
         progress: Option<&dyn Progress>,
@@ -587,6 +759,9 @@ impl GitHubTransport {
             config = config.timeout_global(Some(
                 remaining(deadline).map_err(|_| AttemptError::Deadline)?,
             ));
+        }
+        if let Some(proxy) = proxy.and_then(|address| ureq::Proxy::new(address).ok()) {
+            config = config.proxy(Some(proxy));
         }
         let agent = ureq::Agent::new_with_config(config.build());
         reject_symlink(part).map_err(AttemptError::Io)?;
@@ -824,6 +999,7 @@ impl From<io::Error> for GitHubError {
 pub struct GitHubCandidate {
     route_id: String,
     endpoint: String,
+    proxy: Option<String>,
 }
 
 impl GitHubCandidate {
@@ -938,7 +1114,7 @@ fn has_four_path_parts(path: &str) -> bool {
 
 fn format_endpoint(route: &Route, capability: Capability, source: &str) -> Option<String> {
     match route.formatter {
-        RouteFormatter::Direct => Some(source.to_owned()),
+        RouteFormatter::Direct | RouteFormatter::Forward => Some(source.to_owned()),
         RouteFormatter::Full => Some(format!("{}/{}", route.base, source)),
         RouteFormatter::Mirror => {
             let path = if capability == Capability::Raw {
@@ -999,6 +1175,8 @@ fn valid_route_id(id: &str) -> bool {
 fn valid_route_base(formatter: RouteFormatter, base: &str) -> bool {
     if formatter == RouteFormatter::Direct {
         base.is_empty()
+    } else if formatter == RouteFormatter::Forward {
+        valid_forward_base(base)
     } else {
         let https = base.strip_prefix("https://");
         let http = base.strip_prefix("http://");
@@ -1014,6 +1192,29 @@ fn valid_route_base(formatter: RouteFormatter, base: &str) -> bool {
             && !base.chars().any(char::is_whitespace)
             && (https.is_some() || loopback)
     }
+}
+
+/// A forward-proxy base is an explicit SOCKS address (`socks4://`, `socks5://`,
+/// `socks5h://`) with a host and a port. HTTP and TLS-wrapped proxies are
+/// rejected: plaintext HTTP proxies cannot be verified, and TLS-wrapped
+/// proxies cannot be verified by rustls without also disabling target
+/// certificate checks. SOCKS tunnels keep TLS strictly end-to-end.
+fn valid_forward_base(base: &str) -> bool {
+    if base.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let rest = base
+        .strip_prefix("socks5://")
+        .or_else(|| base.strip_prefix("socks5h://"))
+        .or_else(|| base.strip_prefix("socks4://"));
+    let Some(rest) = rest else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() || !authority.contains(':') {
+        return false;
+    }
+    authority_host(authority).is_some()
 }
 
 fn authority_host(authority: &str) -> Option<&str> {
@@ -1149,6 +1350,65 @@ impl TransferLock {
                 }
             })
     }
+}
+
+type SocksCache = OnceLock<Mutex<HashMap<String, (Instant, Vec<String>)>>>;
+
+/// Returns the first cached or freshly fetched SOCKS list across all fallback
+/// sources. Sources are tried in order so a dead GitHub channel does not block
+/// a reachable CDN channel.
+fn cached_socks_proxies(urls: &[String], deadline: Option<Instant>) -> Vec<String> {
+    for url in urls {
+        if let Some(list) = cached_socks_proxies_from(url, deadline) {
+            return list;
+        }
+    }
+    Vec::new()
+}
+
+fn cached_socks_proxies_from(url: &str, deadline: Option<Instant>) -> Option<Vec<String>> {
+    static CACHE: SocksCache = OnceLock::new();
+    {
+        let cache = CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((fetched_at, list)) = cache.get(url) {
+            if fetched_at.elapsed() < SOCKS_FALLBACK_TTL && !list.is_empty() {
+                return Some(list.clone());
+            }
+        }
+    }
+    let fresh = fetch_socks_list(url, deadline)?;
+    if let Ok(mut cache) = CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        cache.insert(url.to_owned(), (Instant::now(), fresh.clone()));
+    }
+    Some(fresh)
+}
+
+/// Pulls a SOCKS proxy list and keeps only usable-looking entries. Any fetch,
+/// parse, or shape error returns `None` so the caller can treat the fallback
+/// as absent rather than failed.
+fn fetch_socks_list(url: &str, deadline: Option<Instant>) -> Option<Vec<String>> {
+    let timeout = remaining(deadline).ok()?.min(Duration::from_secs(15));
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_connect(Some(Duration::from_secs(5)))
+            .timeout_global(Some(timeout))
+            .build(),
+    );
+    let body = agent.get(url).call().ok()?.into_body().read_to_vec().ok()?;
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
+    let proxies = entries
+        .into_iter()
+        .filter_map(|entry| entry.get("proxy")?.as_str().map(str::to_owned))
+        .filter(|proxy| proxy.starts_with("socks5://") || proxy.starts_with("socks4://"))
+        .take(MAX_SOCKS_FALLBACK_CANDIDATES)
+        .collect::<Vec<_>>();
+    (!proxies.is_empty()).then_some(proxies)
 }
 
 fn route_fingerprint(endpoint: &str) -> String {
@@ -1385,7 +1645,10 @@ mod tests {
         ])
         .unwrap();
         let output = root.join("artifact");
-        let error = GitHubTransport::with_registry(registry)
+        let mut transport = GitHubTransport::with_registry(registry);
+        // Do not hit the network for the dynamic SOCKS pool in unit tests.
+        transport.socks_fallback_urls = Vec::new();
+        let error = transport
             .fetch(
                 Capability::Release,
                 "https://github.com/o/r/releases/download/v/f",
@@ -1424,6 +1687,183 @@ mod tests {
             }
         });
         port
+    }
+
+    // Minimal SOCKS5 forward proxy: answers the greeting and CONNECT handshake,
+    // then serves the tunneled request from the proxy socket itself. Used to
+    // prove that Forward routes send traffic through the configured SOCKS
+    // address.
+    fn local_socks5_proxy(body: &'static [u8]) -> u16 {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        fn read_exact(stream: &mut TcpStream, n: usize) -> Vec<u8> {
+            let mut out = Vec::with_capacity(n);
+            while out.len() < n {
+                let mut chunk = [0_u8; 64];
+                let count = stream.read(&mut chunk).unwrap_or(0);
+                if count == 0 {
+                    break;
+                }
+                out.extend_from_slice(&chunk[..count]);
+            }
+            out
+        }
+        fn read_headers(stream: &mut TcpStream) {
+            let mut chunk = [0_u8; 1024];
+            let mut buffered = Vec::with_capacity(1024);
+            while !buffered.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = stream.read(&mut chunk).unwrap_or(0);
+                if count == 0 {
+                    return;
+                }
+                buffered.extend_from_slice(&chunk[..count]);
+                if buffered.len() > 8192 {
+                    return;
+                }
+            }
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                // greeting: version 5, one auth method, no-auth
+                let _ = read_exact(&mut stream, 3);
+                let _ = stream.write_all(b"\x05\x00");
+                // connect request: ver/cmd/rsv/atyp + ipv4 + port
+                let _ = read_exact(&mut stream, 10);
+                let _ = stream
+                    .write_all(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00");
+                // tunneled request served by this socket as the origin
+                read_headers(&mut stream);
+                let header =
+                    format!("HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn forward_route_validation_accepts_only_socks_proxy_addresses() {
+        for ok in [
+            "socks5://1.2.3.4:1080",
+            "socks5h://proxy.example.com:1080",
+            "socks4://1.2.3.4:1080",
+            "socks5://127.0.0.1:8080",
+        ] {
+            assert!(valid_forward_base(ok), "{ok} should be valid");
+            assert!(
+                Route::new("f", RouteFormatter::Forward, [Capability::Release], ok).is_ok(),
+                "{ok} should construct"
+            );
+        }
+        for bad in [
+            "socks5://1.2.3.4",
+            "http://8.8.8.8:3128",
+            "https://proxy.example.com:443",
+            "http://127.0.0.1:8080",
+            "socks5://a b:1080",
+            "ftp://1.2.3.4:21",
+            "socks5://user:pass@1.2.3.4:1080",
+            "",
+        ] {
+            assert!(!valid_forward_base(bad), "{bad} should be invalid");
+            assert!(
+                Route::new("f", RouteFormatter::Forward, [Capability::Release], bad).is_err(),
+                "{bad} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn forward_routes_keep_the_source_url_and_carry_the_proxy_address() {
+        let route = Route::new(
+            "proxy1",
+            RouteFormatter::Forward,
+            [Capability::Release, Capability::Raw],
+            "socks5://1.2.3.4:1080",
+        )
+        .unwrap();
+        let source = "https://github.com/o/r/releases/download/v/f";
+        assert_eq!(
+            format_endpoint(&route, Capability::Release, source).unwrap(),
+            source
+        );
+        assert_eq!(
+            route.forward_proxy().as_deref(),
+            Some("socks5://1.2.3.4:1080")
+        );
+        let mirror = Route::new(
+            "m",
+            RouteFormatter::Full,
+            [Capability::Release],
+            "https://mirror.example",
+        )
+        .unwrap();
+        assert_eq!(mirror.forward_proxy(), None);
+    }
+
+    #[test]
+    fn candidates_expose_forward_proxies_without_rewriting_the_source() {
+        let registry = GitHubRegistry::new(vec![Route::new(
+            "fwd",
+            RouteFormatter::Forward,
+            [Capability::Release],
+            "socks5://1.2.3.4:1080",
+        )
+        .unwrap()])
+        .unwrap();
+        let candidates = registry
+            .candidates(
+                Capability::Release,
+                "https://github.com/o/r/releases/download/v/f",
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].route_id(), "fwd");
+        assert_eq!(
+            candidates[0].endpoint(),
+            "https://github.com/o/r/releases/download/v/f"
+        );
+        assert_eq!(
+            candidates[0].proxy.as_deref(),
+            Some("socks5://1.2.3.4:1080")
+        );
+    }
+
+    #[test]
+    fn probe_reaches_unreachable_origins_through_the_forward_proxy() {
+        let port = local_socks5_proxy(b"x");
+        let transport = GitHubTransport::new();
+        let candidate = GitHubCandidate {
+            route_id: "f".to_owned(),
+            endpoint: "http://127.0.0.1:9/artifact".to_owned(),
+            proxy: Some(format!("socks5://127.0.0.1:{port}")),
+        };
+        assert!(transport.probe(&candidate, None));
+    }
+
+    #[test]
+    fn single_transfer_fetches_through_the_configured_forward_proxy() {
+        let root = test_directory("forward-transfer");
+        let port = local_socks5_proxy(b"via-proxy");
+        let part = root.join("artifact.part");
+        let sidecar = root.join("artifact.part.route");
+        GitHubTransport::new()
+            .single_transfer(
+                "http://127.0.0.1:9/artifact",
+                Some(&format!("socks5://127.0.0.1:{port}")),
+                &part,
+                &sidecar,
+                None,
+                Some(64),
+                None,
+            )
+            .unwrap();
+        assert_eq!(fs::read(&part).unwrap(), b"via-proxy");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1550,7 +1990,7 @@ mod tests {
         fs::write(&part, b"bad").unwrap();
         write_partial_state(&sidecar, &endpoint, Some("\"entity-1\"")).unwrap();
         GitHubTransport::new()
-            .single_transfer(&endpoint, &part, &sidecar, None, Some(4), None)
+            .single_transfer(&endpoint, None, &part, &sidecar, None, Some(4), None)
             .unwrap();
         server.join().unwrap();
         assert_eq!(fs::read(&part).unwrap(), b"good");
@@ -1588,10 +2028,133 @@ mod tests {
         fs::write(&part, b"goo").unwrap();
         write_partial_state(&sidecar, &endpoint, Some("\"entity-1\"")).unwrap();
         GitHubTransport::new()
-            .single_transfer(&endpoint, &part, &sidecar, None, Some(4), None)
+            .single_transfer(&endpoint, None, &part, &sidecar, None, Some(4), None)
             .unwrap();
         server.join().unwrap();
         assert_eq!(fs::read(&part).unwrap(), b"good");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fetch_socks_list_filters_and_limits_entries() {
+        // 60 socks5 entries (over the 50 cap) plus one http and one socks4.
+        let mut body = String::from("[");
+        for index in 0..60 {
+            body.push_str(&format!(
+                r#"{{"proxy":"socks5://10.0.0.{index}:1080"}},"#
+            ));
+        }
+        body.push_str(r#"{"proxy":"http://8.8.8.8:80"},"#);
+        body.push_str(r#"{"proxy":"socks4://9.9.9.9:1080"}]"#);
+        let list = Box::leak(body.into_boxed_str());
+        let port = local_server(list.as_bytes());
+        let url = format!("http://127.0.0.1:{port}/list.json");
+        let proxies = fetch_socks_list(&url, None).unwrap();
+        assert_eq!(proxies.len(), MAX_SOCKS_FALLBACK_CANDIDATES);
+        assert!(proxies.iter().all(|p| p.starts_with("socks5://10.0.0.")));
+        assert_eq!(proxies[0], "socks5://10.0.0.0:1080");
+        assert_eq!(proxies[49], "socks5://10.0.0.49:1080");
+    }
+
+    #[test]
+    fn socks_fallback_tries_sources_in_order_until_one_responds() {
+        let socks_port = local_socks5_proxy(b"probe-ok");
+        let list_body = format!(
+            r#"[{{"proxy":"socks5://127.0.0.1:{socks_port}"}}]"#
+        );
+        let list_url = Box::leak(list_body.into_boxed_str());
+        let list_port = local_server(list_url.as_bytes());
+        let mut transport = GitHubTransport::new();
+        // First source refuses to connect; the second must be used.
+        transport.socks_fallback_urls = vec![
+            "http://127.0.0.1:1/list.json".to_owned(),
+            format!("http://127.0.0.1:{list_port}/list.json"),
+        ];
+        let candidates = transport
+            .socks_fallback_candidates(
+                Capability::Raw,
+                "https://github.com/o/r/raw/main/f",
+                None,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].route_id(), "socks1");
+        assert!(candidates[0]
+            .proxy
+            .as_deref()
+            .unwrap()
+            .starts_with("socks5://"));
+    }
+
+    #[test]
+    fn socks_fallback_builds_candidates_from_the_remote_list() {
+        let socks_port = local_socks5_proxy(b"probe-ok");
+        let list_body = format!(
+            r#"[{{"proxy":"socks5://127.0.0.1:{socks_port}"}},{{"proxy":"socks5://10.9.9.9:1080"}}]"#
+        );
+        let list_url = Box::leak(list_body.into_boxed_str());
+        let list_port = local_server(list_url.as_bytes());
+        let mut transport = GitHubTransport::new();
+        transport.socks_fallback_urls =
+            vec![format!("http://127.0.0.1:{list_port}/list.json")];
+        let candidates = transport
+            .socks_fallback_candidates(
+                Capability::Raw,
+                "https://github.com/o/r/raw/main/f",
+                None,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].route_id(), "socks1");
+        assert_eq!(
+            candidates[0].endpoint(),
+            "https://github.com/o/r/raw/main/f"
+        );
+        assert!(candidates[0]
+            .proxy
+            .as_deref()
+            .unwrap()
+            .starts_with("socks5://"));
+        // The live local proxy answers a probe through the SOCKS tunnel; the
+        // unreachable origin host proves the request went through the proxy.
+        let probed = GitHubCandidate {
+            route_id: "p".to_owned(),
+            endpoint: "http://127.0.0.1:9/artifact".to_owned(),
+            proxy: candidates[0].proxy.clone(),
+        };
+        assert!(transport.probe(&probed, None));
+    }
+
+    #[test]
+    fn socks_fallback_stays_silent_when_the_list_cannot_be_fetched() {
+        let registry = GitHubRegistry::new(vec![Route::new(
+            "dead",
+            RouteFormatter::Mirror,
+            [Capability::Release],
+            "http://127.0.0.1:1",
+        )
+        .unwrap()])
+        .unwrap();
+        let mut transport = GitHubTransport::with_registry(registry);
+        transport.socks_fallback_urls =
+            vec!["http://127.0.0.1:1/list.json".to_owned()];
+        let root = test_directory("socks-fallback-silent");
+        let error = transport
+            .fetch(
+                Capability::Release,
+                "https://github.com/o/r/releases/download/v/f",
+                &root.join("artifact"),
+                |_| true,
+                None,
+                Some(64),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("all GitHub transport routes failed"),
+            "unexpected error: {error}"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
