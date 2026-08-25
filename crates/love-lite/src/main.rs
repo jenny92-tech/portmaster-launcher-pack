@@ -11,6 +11,7 @@ use love_lite::{DEFAULT_HEIGHT, DEFAULT_WIDTH, Engine};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::{FullscreenType, Window, WindowBuilder};
 
@@ -21,6 +22,16 @@ const BUILD_REVISION: &str = match option_env!("LOVE_LITE_SOURCE_REVISION") {
     Some(revision) => revision,
     None => "development",
 };
+
+struct WebShutdownGuard(EmbeddedService);
+
+impl Drop for WebShutdownGuard {
+    fn drop(&mut self) {
+        if let Err(error) = self.0.disable_web() {
+            eprintln!("love-lite: remote management is draining during exit: {error}");
+        }
+    }
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -34,14 +45,14 @@ fn main() -> ExitCode {
 
 fn run() -> Result<i32> {
     let mut args = env::args().skip(1);
-    if matches!(args.next().as_deref(), Some("--version")) {
-        println!("love-lite {} {BUILD_REVISION}", env!("CARGO_PKG_VERSION"));
-        return Ok(0);
-    }
-    let mut args = env::args().skip(1);
     let source = args
         .next()
         .context("APP Manager UI directory argument is required")?;
+    if source == "--version" {
+        println!("love-lite {} {BUILD_REVISION}", env!("CARGO_PKG_VERSION"));
+        return Ok(0);
+    }
+    let startup_started = Instant::now();
     let requested_width = parse_dimension(args.next(), DEFAULT_WIDTH, "width")?;
     let requested_height = parse_dimension(args.next(), DEFAULT_HEIGHT, "height")?;
 
@@ -70,6 +81,10 @@ fn run() -> Result<i32> {
     };
     let service_bootstrap =
         EmbeddedService::prepare(service_request).map_err(anyhow::Error::msg)?;
+    eprintln!(
+        "[PAM] startup.phase=prepared elapsed_ms={}",
+        startup_started.elapsed().as_millis()
+    );
     apply_process_environment(service_bootstrap.environment().clone());
     log_display_environment();
 
@@ -104,9 +119,24 @@ fn run() -> Result<i32> {
         .set_fullscreen(FullscreenType::Desktop)
         .map_err(anyhow::Error::msg)
         .context("set SDL2 desktop fullscreen")?;
-    canvas.set_draw_color(Color::BLACK);
+    // Present a dependency-free splash before transaction recovery, inventory
+    // scanning, Lua or the large CJK font are loaded. A slow SD card must show
+    // visible progress instead of looking like a crashed black screen.
+    canvas.set_draw_color(Color::RGB(14, 23, 40));
     canvas.clear();
+    let splash_width = (window_width / 3).clamp(120, 420);
+    let splash_x = ((window_width - splash_width) / 2) as i32;
+    let splash_y = (window_height / 2).saturating_sub(3) as i32;
+    canvas.set_draw_color(Color::RGB(74, 144, 226));
+    canvas
+        .fill_rect(Rect::new(splash_x, splash_y, splash_width, 6))
+        .map_err(anyhow::Error::msg)
+        .context("draw APP Manager startup splash")?;
     canvas.present();
+    eprintln!(
+        "[PAM] startup.phase=window-visible elapsed_ms={}",
+        startup_started.elapsed().as_millis()
+    );
     let (render_width, render_height) = canvas
         .output_size()
         .map_err(anyhow::Error::msg)
@@ -114,7 +144,17 @@ fn run() -> Result<i32> {
     let service = EmbeddedService::activate(service_bootstrap)
         .map_err(anyhow::Error::msg)
         .context("initialize APP Manager service")?;
+    eprintln!(
+        "[PAM] startup.phase=service-ready elapsed_ms={}",
+        startup_started.elapsed().as_millis()
+    );
+    let _web_shutdown = WebShutdownGuard(service.clone());
+    // The web switch (top-left checkbox) turns the LAN admin UI on/off.
     let engine = Engine::load_appmanager(&source, render_width, render_height, service.clone())?;
+    eprintln!(
+        "[PAM] startup.phase=lua-ready elapsed_ms={}",
+        startup_started.elapsed().as_millis()
+    );
     let title = engine.runtime.state.window_title.lock().clone();
     canvas
         .window_mut()
@@ -140,6 +180,7 @@ fn run() -> Result<i32> {
     let mut previous = Instant::now();
     let mut exit_code = 0;
     let mut gpu_failures = 0_u8;
+    let mut first_frame_presented = false;
     // First frame after load must present immediately for handheld frontend handoff.
     let mut wait_for_events = false;
     let process_name = env::current_exe()
@@ -212,6 +253,13 @@ fn run() -> Result<i32> {
                     .map_err(anyhow::Error::msg)?;
             }
             canvas.present();
+            if !first_frame_presented {
+                first_frame_presented = true;
+                eprintln!(
+                    "[PAM] startup.phase=first-frame elapsed_ms={}",
+                    startup_started.elapsed().as_millis()
+                );
+            }
         }
 
         if let Some(code) = engine.take_quit_code() {

@@ -88,7 +88,7 @@ pub fn refresh_config(request: &ConfigRefreshRequest) -> Result<ConfigRefreshSta
         .get(&platform)
         .ok_or_else(|| Error::Resolution("selected platform detail is missing".into()))?;
     let expected_ref = format!("./platforms/{platform}.json");
-    if entry.detail != expected_ref {
+    if entry.detail.ref_path != expected_ref {
         return Err(Error::InvalidConfig(
             "selected platform detail ref is not canonical".into(),
         ));
@@ -98,7 +98,10 @@ pub fn refresh_config(request: &ConfigRefreshRequest) -> Result<ConfigRefreshSta
         .rsplit_once('/')
         .map(|(base, _)| base)
         .ok_or_else(|| Error::InvalidConfig("config source has no filename".into()))?;
-    let detail_source = format!("{source_base}/{}", entry.detail.trim_start_matches("./"));
+    let detail_source = format!(
+        "{source_base}/{}",
+        entry.detail.ref_path.trim_start_matches("./")
+    );
     let staged_detail = stage.join("platforms").join(format!("{platform}.json"));
     transport
         .fetch_with_timeout(
@@ -121,17 +124,16 @@ pub fn refresh_config(request: &ConfigRefreshRequest) -> Result<ConfigRefreshSta
         &request.detection,
     )?;
     let mut baseline = packaged_version;
-    if request.cached_root.is_file() {
-        if let Ok(version) = validated_version(
+    if request.cached_root.is_file()
+        && let Ok(version) = validated_version(
             &loader,
             &request.cached_root,
             &request.cache_dir,
             &request.detection,
-        ) {
-            if compare_versions(&version, &baseline)?.is_gt() {
-                baseline = version;
-            }
-        }
+        )
+        && compare_versions(&version, &baseline)?.is_gt()
+    {
+        baseline = version;
     }
     if !compare_versions(&candidate.config_version, &baseline)?.is_gt() {
         return Ok(ConfigRefreshStatus::Unchanged);

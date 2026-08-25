@@ -78,22 +78,19 @@ impl CandidateSelector {
                     &embedded_config.config_version,
                 )
                 .is_ok_and(|ordering| ordering.is_gt());
-                if newer {
-                    if let Ok(config) =
+                if newer
+                    && let Ok(config) =
                         self.loader
                             .load_platform(remote_root, platform_id, remote_details)
-                    {
-                        if self
-                            .loader
-                            .validate_resolved_closure(&config, platform_id)
-                            .is_ok()
-                        {
-                            return Ok(SelectedConfig {
-                                origin: ConfigOrigin::Remote,
-                                config,
-                            });
-                        }
-                    }
+                    && self
+                        .loader
+                        .validate_resolved_closure(&config, platform_id)
+                        .is_ok()
+                {
+                    return Ok(SelectedConfig {
+                        origin: ConfigOrigin::Remote,
+                        config,
+                    });
                 }
             }
         }
@@ -136,23 +133,20 @@ impl CandidateSelector {
                     &embedded_root.config_version,
                 )
                 .is_ok_and(|ordering| ordering.is_gt());
-                if newer {
-                    if let Ok(remote_config) =
+                if newer
+                    && let Ok(remote_config) =
                         self.loader
                             .load_for_context(&remote.bytes, remote_details, context)
-                    {
-                        if let Ok(remote_resolution) =
-                            remote_config.detect_and_resolve(&self.loader, context)
-                        {
-                            return Ok(ResolvedSelection {
-                                selected: SelectedConfig {
-                                    origin: ConfigOrigin::Remote,
-                                    config: remote_config,
-                                },
-                                resolution: remote_resolution,
-                            });
-                        }
-                    }
+                    && let Ok(remote_resolution) =
+                        remote_config.detect_and_resolve(&self.loader, context)
+                {
+                    return Ok(ResolvedSelection {
+                        selected: SelectedConfig {
+                            origin: ConfigOrigin::Remote,
+                            config: remote_config,
+                        },
+                        resolution: remote_resolution,
+                    });
                 }
             }
         }

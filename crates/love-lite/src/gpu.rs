@@ -360,10 +360,7 @@ fn fill_ellipse(
         }
         let dx = rx * norm.sqrt();
         canvas
-            .draw_fline(
-                FPoint::new(cx - dx, cy + dy),
-                FPoint::new(cx + dx, cy + dy),
-            )
+            .draw_fline(FPoint::new(cx - dx, cy + dy), FPoint::new(cx + dx, cy + dy))
             .map_err(anyhow::Error::msg)?;
     }
     Ok(())

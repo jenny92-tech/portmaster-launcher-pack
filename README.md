@@ -17,6 +17,7 @@ the UI writes a small env file and the wrapper shell patches the game config.
 | [`sts2`](ports/sts2) | Slay the Spire 2 | C# Godot 4.5 | LÖVE 11.5 | TrimUI, MiniLoong |
 | [`appmanager`](ports/appmanager) | Port and environment manager | Bundled production LOVE-lite 1.x Rust process | Shared LÖVE UI kit | TrimUI, MiniLoong, muOS, ROCKNIX family, Knulli, Batocera, Miyoo |
 | [`batomon`](ports/batomon) | Batomon Showdown Demo | Godot 4.3 | None (direct game runner) | TrimUI, MiniLoong |
+| [`recorder`](ports/recorder) | Screen Recorder (录屏助手) | Standalone tool: LÖVE UI + shell engine + static ffmpeg | LÖVE 11.5 | TrimUI (standalone App) |
 
 Migrated launchers keep stage-1 inputs in `love/`; game-specific runtime and
 build sources remain in `src/`. Generated deploy files live in `dist/`, the only

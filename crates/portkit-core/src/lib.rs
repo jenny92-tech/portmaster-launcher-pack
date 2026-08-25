@@ -19,7 +19,10 @@ pub use file::{
     DigestAlgorithm, ExclusiveFileLock, atomic_copy, atomic_write, digest_file, zip_readable,
 };
 pub use health::{HealthCheck, HealthReport, HealthStatus, evaluate_health};
-pub use platform::{DetectionContext, Resolution};
+pub use platform::{
+    BundleFormat, DetectionContext, Location, LocationKind, LocationRole, Resolution,
+    ResolvedLocation, required_location_format, required_location_roles,
+};
 pub use refresh::{ConfigRefreshRequest, ConfigRefreshStatus, refresh_config};
 pub use source::{
     CandidateSelector, ConfigCandidate, ConfigOrigin, ResolvedSelection, SelectedConfig,

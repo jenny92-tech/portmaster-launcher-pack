@@ -109,6 +109,16 @@ local function default_focus_index(items)
             return i
         end
     end
+    -- Switches are auxiliary controls: never land on one by default, or a
+    -- confirm press would flip it (e.g. the home-page remote switch).
+    local first = first_focusable(items)
+    if first and items[first] and items[first].kind == "switch" then
+        for i = first + 1, #(items or {}) do
+            local row = items[i]
+            if row and row.focusable and not disabled(row) then return i end
+        end
+        return first
+    end
     return first_focusable(items)
 end
 local function valid_focus(items,index)
@@ -373,7 +383,15 @@ function kit.needs_redraw()
 end
 function kit.add_page(title,rows,opts)
     local page=opts or {}; page.title=title; page.rows=rows or {}; page.sidebar=page.sidebar or {}
-    pages[#pages+1]=page; kit.mark_dirty(); return #pages
+    -- App-specific pages may reserve sparse numeric IDs. Lua's length operator
+    -- is undefined for sparse tables, so #pages + 1 can overwrite a reserved
+    -- page or return an existing index. Always append after the largest ID.
+    local index=0
+    for key in pairs(pages) do
+        if type(key)=="number" and key%1==0 and key>index then index=key end
+    end
+    index=index+1
+    pages[index]=page; kit.mark_dirty(); return index
 end
 function kit.invalidate_layout(page)
     if page then measurement_cache[page]=nil
@@ -524,6 +542,7 @@ end
 function kit.debug_page()
     local page=pages[page_i] or {}; local rows=page.rows or {}; local sections=0
     local section_labels,row_kinds,row_font_px,row_label_px,row_value_px={},{},{},{},{}
+    local row_labels,row_values={},{}
     local footer_lines={}
     local footer=page.sidebar_footer
     for index,line in ipairs(footer and (footer.lines or footer) or {}) do footer_lines[index]=t(line) end
@@ -532,17 +551,37 @@ function kit.debug_page()
         row_font_px[index]=row.font_px
         row_label_px[index]=row.label_px
         row_value_px[index]=row.value_px
+        row_labels[index]=t(row.label or "")
+        row_values[index]=t(row.value or "")
         if row.kind=="section" then
             sections=sections+1
             section_labels[sections]=t(row.label)
         end
     end
+    local header_action=page.header_action
+    local sidebar_labels={}
+    for index,row in ipairs(page.sidebar or {}) do sidebar_labels[index]=t(row.label or "") end
     return {index=page_i,title=t(page.title or ""),row_count=#rows,section_count=sections,
         section_labels=section_labels,row_kinds=row_kinds,row_font_px=row_font_px,
-        row_label_px=row_label_px,row_value_px=row_value_px,sidebar_count=#(page.sidebar or {}),
+        row_label_px=row_label_px,row_value_px=row_value_px,row_labels=row_labels,row_values=row_values,
+        header_label=header_action and t(header_action.label or "") or nil,
+        header_badge=header_action and header_action.badge and t(header_action.badge.text) or nil,
+        sidebar_count=#(page.sidebar or {}),
+        sidebar_labels=sidebar_labels,
         sidebar_footer_lines=footer_lines}
 end
 function kit.debug_navigation() return {depth=#navigation_stack} end
+function kit.debug_sidebar_geometry()
+    if not layout or not sidebar_geometry then return nil end
+    local L=layout(); local g=sidebar_geometry(L)
+    local out={scroll=g.scroll,first=g.scroll_first,per=g.per,bar=g.scroll_bar,
+        total=g.scroll_total,bottom=g.scroll_bottom}
+    out.band_top=L.band_top; out.band=L.band; out.cs=L.cs
+    local side=pages[page_i].sidebar or {}
+    for i=1,#side do if g[i] then out["y"..i]=g[i].y end end
+    return out
+end
+
 function kit.debug_sidebar_detail()
     local detail,key
     if current_sidebar_detail then detail,key=current_sidebar_detail() end
@@ -679,6 +718,13 @@ local function move_v(d)
         elseif d<0 then zone="bar"; bar_i=1 end
         return
     elseif zone=="rows" and pages[page_i].row_layout then
+        local rows=focusables(cur())
+        if #rows==0 then
+            local side=focusables(sidebar())
+            if d>0 and #side>0 then zone="sidebar"; sidebar_i=side[1]
+            else zone="bar"; bar_i=1 end
+            return
+        end
         local next_index=spatial_row(0,d)
         if next_index then focus_i=next_index
         elseif d<0 then zone="bar"; bar_i=1 end
@@ -720,17 +766,18 @@ local function move_h(d)
         if next_index then sidebar_i=next_index
         elseif d<0 and #focusables(cur())>0 then
             local fs=focusables(cur()); local nearest=fs[1]
-            if pages[page_i].row_layout and layout and sidebar_geometry then
+            if layout and sidebar_geometry then
                 local L=layout(); local sg=sidebar_geometry(L)[sidebar_i]
                 if sg then
+                    -- Return to the row nearest the sidebar button in Y, so a
+                    -- left press on a long list goes back near where you were
+                    -- instead of always jumping to the first row.
                     local tx,ty=sg.x,sg.y+sg.h/2; local best_score
                     for _,index in ipairs(fs) do
                         local g=L.geometry and L.geometry[index]
-                        if g then
-                            local dx_=(g.x+g.w/2)-tx; local dy_=(g.y+g.h/2)-ty
-                            local score=dx_*dx_+dy_*dy_
-                            if not best_score or score<best_score then nearest,best_score=index,score end
-                        end
+                        local cy=g and (g.content_y+g.h/2) or L.top+(index-L.first)*(L.rh+L.gap)+L.rh/2
+                        local score=math.abs(cy-ty)
+                        if not best_score or score<best_score then nearest,best_score=index,score end
                     end
                 end
             end
@@ -738,7 +785,9 @@ local function move_h(d)
         end
     else
         local r = cur()[focus_i]
-        if r and r.kind=="switch" then
+        -- On flow-layout pages (launchers, matrices) left/right must navigate
+        -- rows and the sidebar; switches there are toggled with confirm only.
+        if r and r.kind=="switch" and not pages[page_i].row_layout then
             set_switch(r,d>0)
         elseif r and r.kind=="picker" then
             local v=r.values; local idx=1
@@ -926,7 +975,10 @@ local function toggle_lang()
     kit.invalidate_layout()
     save_state()
 end
-function kit.quit() save_state(); love.event.quit(kit.EXIT_QUIT) end
+function kit.quit(code)
+    save_state()
+    love.event.quit(code == nil and kit.EXIT_QUIT or code)
+end
 -- ── Prelaunch gate ────────────────────────────────────────────────
 -- A port may declare core_files (all must exist to run) plus a source_glob
 -- (a player-supplied package the shell-side patcher will extract). If core
@@ -1269,11 +1321,36 @@ local function draw_bar(L)
         local left=secondary and kit.button("back") or page.header_action
         if left then
             local bw,bh_button=145*cs,54*cs
+            if left.kind=="switch" and not secondary then bw=math.max(bw,215*cs) end
             local focused=zone=="bar" and (items[bar_i]=="back" or items[bar_i]=="header")
             panel(pad,18*cs,bw,bh_button,focused,disabled(left),true)
             local label=secondary and t("back") or t(left.label)
-            plain((secondary and "‹ " or "")..label,pad,18*cs+vcen(26*cs,bh_button),26*cs,
-                disabled(left) and {0.58,0.58,0.60} or {1,1,1},"center",bw)
+            local badge=not secondary and left.badge or nil
+            local label_px=badge and 22 or 26
+            local label_y=18*cs+(badge and 6*cs or vcen(26*cs,bh_button))
+            if left.kind=="switch" and not secondary then
+                local track_w,track_h=44*cs,26*cs
+                local track_x=pad+bw-track_w-12*cs
+                local track_y=18*cs+(bh_button-track_h)/2
+                local on=left.checked==true
+                love.graphics.setColor(on and 0.48 or 0.24,on and 0.25 or 0.24,on and 0.72 or 0.28,1)
+                love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,track_h/2,track_h/2)
+                local knob=20*cs
+                local knob_x=on and track_x+track_w-knob-3*cs or track_x+3*cs
+                love.graphics.setColor(0.98,0.98,1,1)
+                love.graphics.rectangle("fill",knob_x,track_y+3*cs,knob,knob,knob/2,knob/2)
+                local max_w=math.max(1,track_x-(pad+12*cs)-8*cs)
+                local lbl=clip_ellipsis(tostring(label),body_fnt(label_px*cs),max_w)
+                plain(lbl,pad+12*cs,label_y,label_px*cs,
+                    disabled(left) and {0.58,0.58,0.60} or {1,1,1},"left",max_w)
+            else
+                plain((secondary and "‹ " or "")..label,pad,label_y,label_px*cs,
+                    disabled(left) and {0.58,0.58,0.60} or {1,1,1},"center",bw)
+            end
+            if badge then
+                local color=badge.color or {1,0.78,0.35}
+                plain(t(badge.text),pad,label_y+label_px*cs+2*cs,14*cs,color,"center",bw)
+            end
         end
         local lw,lh=90*cs,54*cs; local lx=W-lw-pad
         panel(lx,18*cs,lw,lh,zone=="bar" and items[bar_i]=="lang",false,true)
@@ -1333,7 +1410,8 @@ sidebar_geometry=function(L)
         return geometry
     end
     rh=50*L.cs
-    local bottom_y=L.band_top+L.band
+    -- Pinned bottom group (e.g. Quit) keeps a small margin off the screen edge.
+    local bottom_y=L.band_top+L.band-24*L.cs
     for i=#side,1,-1 do
         if side[i].group=="bottom" then
             bottom_y=bottom_y-rh
@@ -1341,7 +1419,12 @@ sidebar_geometry=function(L)
             bottom_y=bottom_y-gap
         end
     end
-    local y=L.band_top+45*L.cs; local i=1
+    -- Ordinary items pack from the top. On short screens the toolbar may not
+    -- fit above the footer, so the list scrolls: the focused item is kept
+    -- visible and everything else shifts up by whole steps.
+    local y=L.band_top+45*L.cs
+    local ordinary={}
+    local i=1
     while i<=#side do
         local row=side[i]
         if row.group=="bottom" then i=i+1
@@ -1349,11 +1432,44 @@ sidebar_geometry=function(L)
             local half=(L.side_w-gap)/2
             geometry[i]={x=L.side_x,y=y,w=half,h=rh}
             geometry[i+1]={x=L.side_x+half+gap,y=y,w=half,h=rh}
+            ordinary[#ordinary+1]=i; ordinary[#ordinary+1]=i+1
             y=y+rh+gap; i=i+2
         else
             geometry[i]={x=L.side_x,y=y,w=L.side_w,h=rh}
-            y=y+rh+gap; i=i+1
+            ordinary[#ordinary+1]=i; y=y+rh+gap; i=i+1
         end
+    end
+    local page=pages[page_i]
+    local footer_lines=page.sidebar_footer and (page.sidebar_footer.lines or page.sidebar_footer) or nil
+    local footer_h=footer_lines and #footer_lines>0 and
+        (#footer_lines*SIDEBAR_FOOTER_LINE_H+SIDEBAR_FOOTER_PAD)*L.cs or 0
+    local top_limit=bottom_y-(footer_h>0 and footer_h+L.gap or 0)
+    local avail=top_limit-(L.band_top+45*L.cs)
+    local total=#ordinary*rh+math.max(0,#ordinary-1)*gap
+    if total>avail and #ordinary>0 then
+        local step=rh+gap
+        -- Scroll affordance bars (18px each) at the top and bottom of the
+        -- button area hold the up/down chevrons; the buttons scroll between.
+        local scroll_bar=18*L.cs
+        -- Top bar sits above the buttons (they start at +scroll_bar); the
+        -- bottom bar uses the leftover space below the last visible button.
+        local per=math.max(1,math.floor((avail+gap)/step))
+        per=math.min(per,#ordinary)
+        local k=1
+        for idx,v in ipairs(ordinary) do if v==sidebar_i then k=idx end end
+        local scroll_first=math.max(1,math.min(k-per+1,#ordinary-per+1))
+        local dy=(scroll_first-1)*step
+        for idx=1,#ordinary do
+            local g=geometry[ordinary[idx]]; g.y=g.y-dy+scroll_bar
+        end
+        geometry.scroll=step; geometry.per=per
+        geometry.scroll_first=scroll_first
+        geometry.scroll_bar=scroll_bar
+        geometry.scroll_total=#ordinary
+        geometry.scroll_bottom=top_limit
+        local last_vis=math.min(scroll_first+per-1,#ordinary)
+        local lg=geometry[ordinary[last_vis]]
+        if lg then geometry.scroll_last_y=lg.y+lg.h end
     end
     return geometry
 end
@@ -1738,10 +1854,21 @@ function kit.draw()
             local track_w,track_h=68*L.cs,30*L.cs
             local track_x=x+rw-track_w-18*L.cs
             local track_y=y+(row_h-track_h)/2
-            local optical_y=0
-            local label_px=ROW_PX*L.cs
-            local label_y=centred_text_y(label_px,y,row_h,optical_y)
-            plain(t(r.label),x+18*L.cs,label_y,label_px,{1,1,1})
+            local label_px=(r.label_px or ROW_PX)*L.cs
+            if r.detail then
+                -- One combined row: label + live detail on the left, the
+                -- switch on the right (e.g. remote management address).
+                local detail_px=(r.detail_px or 17)*L.cs
+                local tx=x+18*L.cs
+                local inner_w=math.max(1,track_x-tx-12*L.cs)
+                local label=clip_ellipsis(tostring(t(r.label) or ""),body_fnt(label_px),inner_w)
+                local detail=clip_ellipsis(tostring(t(r.detail) or ""),body_fnt(detail_px),inner_w)
+                plain(label,tx,y+8*L.cs,label_px,{1,1,1},"left",inner_w)
+                plain(detail,tx,y+8*L.cs+label_px*L.cs+3*L.cs,detail_px,{0.72,0.72,0.82},"left",inner_w)
+            else
+                local label_y=centred_text_y(label_px,y,row_h,0)
+                plain(t(r.label),x+18*L.cs,label_y,label_px,{1,1,1})
+            end
             love.graphics.setColor(on and 0.48 or 0.24,on and 0.25 or 0.24,on and 0.72 or 0.28,1)
             love.graphics.rectangle("fill",track_x,track_y,track_w,track_h,track_h/2,track_h/2)
             local knob=24*L.cs
@@ -1757,6 +1884,10 @@ function kit.draw()
             plain(value,x+16*L.cs,centred_text_y(px,y,row_h,0.5*L.cs),px,
                 disabled(r) and {0.55,0.55,0.57} or {0.96,0.94,1},"left",inner_w)
         elseif r.kind=="textview" then
+            if r.bg then
+                love.graphics.setColor(r.bg[1],r.bg[2],r.bg[3],r.bg[4] or 0.92)
+                love.graphics.rectangle("fill",x,y,rw,row_h,8,8)
+            end
             local pad=12*L.cs
             local label_px=(r.label_px or 17)*L.cs
             local value_px=(r.value_px or 19)*L.cs
@@ -1768,8 +1899,26 @@ function kit.draw()
             local value=wrapped_text(r.value,value_font,inner_w,math.min(requested,max_fit))
             plain(label,x+pad,y+pad,label_px,{0.72,0.72,0.82},"left",inner_w)
             plain(value,x+pad,y+pad+label_h+5*L.cs,value_px,{1,1,1},"left",inner_w)
+        elseif r.kind=="button" and r.detail then
+            -- Two-line action card (home feature matrix): label on top,
+            -- status line below, optional badge top-right.
+            local pad=16*L.cs
+            local label_px=(r.label_px or (L.app and 22 or 20))*L.cs
+            local detail_px=(r.detail_px or (L.app and 18 or 15))*L.cs
+            local inner_w=math.max(1,rw-pad*2)
+            local badge=meta_badge(r); local label_w=inner_w-(badge and 76*L.cs or 0)
+            local label=clip_ellipsis(tostring(t(r.label) or ""),body_fnt(label_px),math.max(1,label_w))
+            local detail=wrapped_text(t(r.detail),body_fnt(detail_px),inner_w,1)
+            plain(label,x+pad,y+(L.app and 10 or 7)*L.cs,label_px,{1,1,1},"left",math.max(1,label_w))
+            plain(detail,x+pad,y+(L.app and 39 or 31)*L.cs,detail_px,{0.78,0.78,0.84},"left",inner_w)
         else
-            plain(t(r.label),x,ty,ROW_PX*L.cs,{1,1,1},"center",rw)
+            -- Single-line plain buttons. Keep left-aligned like the detailed
+            -- variant: love-lite's printf does not support centered text, so
+            -- "center" would silently drop every plain button label.
+            local pad=16*L.cs
+            local px=(L.app and 22 or ROW_PX)*L.cs
+            local label=clip_ellipsis(tostring(t(r.label) or ""),body_fnt(px),math.max(1,rw-pad*2))
+            plain(label,x+pad,y+vcen(px,row_h),px,{1,1,1},"left",math.max(1,rw-pad*2))
         end
         local badge=meta_badge(r)
         if badge then
@@ -1803,6 +1952,7 @@ function kit.draw()
         end
     end
 
+    local footer_top=nil
     if L.has_sidebar then
         local side=sidebar(); local geometry=sidebar_geometry(L)
         if L.app then
@@ -1812,13 +1962,14 @@ function kit.draw()
             love.graphics.setColor(1,1,1,0.42); love.graphics.setLineWidth(1)
             love.graphics.line(L.side_x,L.band_top+37*L.cs,L.side_x+L.side_w,L.band_top+37*L.cs)
 
-            local footer_top=nil
             local footer=page.sidebar_footer
             local footer_lines=footer and (footer.lines or footer) or nil
             if footer_lines and #footer_lines>0 then
                 local footer_bottom=L.band_top+L.band
                 for index,g in pairs(geometry) do
-                    if side[index].group=="bottom" then footer_bottom=math.min(footer_bottom,g.y-L.gap) end
+                    if type(index)=="number" and side[index].group=="bottom" then
+                        footer_bottom=math.min(footer_bottom,g.y-L.gap)
+                    end
                 end
                 local line_h=SIDEBAR_FOOTER_LINE_H*L.cs
                 local footer_h=(#footer_lines*SIDEBAR_FOOTER_LINE_H+SIDEBAR_FOOTER_PAD)*L.cs
@@ -1837,8 +1988,11 @@ function kit.draw()
                 local detail_top=L.band_top+48*L.cs
                 local detail_bottom=L.band_top+L.band
                 for index,g in pairs(geometry) do
-                    if side[index].group=="bottom" then detail_bottom=math.min(detail_bottom,g.y-L.gap)
-                    else detail_top=math.max(detail_top,g.y+g.h+L.gap) end
+                    if type(index)=="number" and side[index].group=="bottom" then
+                        detail_bottom=math.min(detail_bottom,g.y-L.gap)
+                    elseif type(index)=="number" then
+                        detail_top=math.max(detail_top,g.y+g.h+L.gap)
+                    end
                 end
                 if footer_top then detail_bottom=math.min(detail_bottom,footer_top-L.gap) end
                 local detail_h=detail_bottom-detail_top
@@ -1862,20 +2016,65 @@ function kit.draw()
                 end
             end
         end
+        -- Scroll affordance: when the toolbar scrolls, an up chevron above the
+        -- first button hints that more items hide above, and a down chevron
+        -- below the last button hints at more below. They vanish at the ends.
+        if L.app and geometry.scroll then
+            local bar=geometry.scroll_bar or 18*L.cs
+            local cs=L.cs
+            local bar_y=L.band_top+45*cs
+            if geometry.scroll_first and geometry.scroll_first>1 then
+                love.graphics.setColor(0.10,0.06,0.17,0.95)
+                love.graphics.rectangle("fill",L.side_x,bar_y,L.side_w,bar,6,6)
+                love.graphics.setColor(0.72,0.66,0.84,1)
+                local cx=L.side_x+L.side_w/2
+                love.graphics.polygon("fill",cx-7*cs,bar_y+bar-5*cs,cx+7*cs,bar_y+bar-5*cs,cx,bar_y+5*cs)
+            end
+            local first=geometry.scroll_first or 1
+            local last=first+(geometry.per or 1)-1
+            if last<(geometry.scroll_total or 0) then
+                local bottom=geometry.scroll_bottom or (L.band_top+L.band)
+                local last_y=geometry["scroll_last_y"] or (bottom-bar)
+                love.graphics.setColor(0.10,0.06,0.17,0.95)
+                love.graphics.rectangle("fill",L.side_x,last_y,L.side_w,bottom-last_y,6,6)
+                love.graphics.setColor(0.72,0.66,0.84,1)
+                local cx=L.side_x+L.side_w/2
+                local cy=last_y+(bottom-last_y)/2
+                love.graphics.polygon("fill",cx-7*cs,cy-4*cs,cx+7*cs,cy-4*cs,cx,cy+4*cs)
+            end
+        end
+
         for i,r in ipairs(side) do
             local g=geometry[i]
-            panel(g.x,g.y,g.w,g.h,zone=="sidebar" and i==sidebar_i,disabled(r),L.app)
-            if r.kind=="checkbox" then
-                local check_size=(L.app and 26 or 24)*L.cs
-                local check_x=g.x+14*L.cs; local check_y=g.y+(g.h-check_size)/2
-                draw_checkbox(check_x,check_y,check_size,r.checked,zone=="sidebar" and i==sidebar_i,disabled(r))
-                local color=disabled(r) and {0.55,0.55,0.57} or
-                    (r.danger and r.checked and {1,0.58,0.58} or {1,1,1})
-                plain(t(r.label),g.x+50*L.cs,g.y+vcen((L.app and 19 or 18)*L.cs,g.h),
-                    (L.app and 19 or 18)*L.cs,color,"left",g.w-62*L.cs)
-            else
-                plain(t(r.label),g.x,g.y+vcen((L.app and 20 or 19)*L.cs,g.h),(L.app and 20 or 19)*L.cs,
-                    disabled(r) and {0.55,0.55,0.57} or {1,1,1},"center",g.w)
+            -- Short screens scroll the toolbar: skip items pushed off the band.
+            local visible=not (L.app and (g.y+g.h<L.band_top or g.y>L.band_top+L.band))
+            -- Toolbar items must also stop above the sidebar footer, even when
+            -- the band is short (footer_top is nil when there is no footer).
+            -- The pinned bottom group (e.g. Quit) sits *below* the footer and
+            -- must never be filtered by this check.
+            if visible and L.app and footer_top and side[i].group~="bottom"
+                and g.y+g.h>footer_top-L.gap then visible=false end
+            -- When the toolbar scrolls, items outside the scroll window must
+            -- not paint over the title or the chevron bars (a partially
+            -- visible stray item above the window used to cover the title).
+            if visible and L.app and geometry.scroll and side[i].group~="bottom" then
+                local top_edge=L.band_top+45*L.cs+(geometry.scroll_bar or 18*L.cs)
+                if g.y<top_edge-1 then visible=false end
+            end
+            if visible then
+                panel(g.x,g.y,g.w,g.h,zone=="sidebar" and i==sidebar_i,disabled(r),L.app)
+                if r.kind=="checkbox" then
+                    local check_size=(L.app and 26 or 24)*L.cs
+                    local check_x=g.x+14*L.cs; local check_y=g.y+(g.h-check_size)/2
+                    draw_checkbox(check_x,check_y,check_size,r.checked,zone=="sidebar" and i==sidebar_i,disabled(r))
+                    local color=disabled(r) and {0.55,0.55,0.57} or
+                        (r.danger and r.checked and {1,0.58,0.58} or {1,1,1})
+                    plain(t(r.label),g.x+50*L.cs,g.y+vcen((L.app and 19 or 18)*L.cs,g.h),
+                        (L.app and 19 or 18)*L.cs,color,"left",g.w-62*L.cs)
+                else
+                    plain(t(r.label),g.x,g.y+vcen((L.app and 20 or 19)*L.cs,g.h),(L.app and 20 or 19)*L.cs,
+                        disabled(r) and {0.55,0.55,0.57} or {1,1,1},"center",g.w)
+                end
             end
         end
     end
@@ -1970,12 +2169,18 @@ function kit.input(action)
             busy_info.on_cancel()
             handled=true
         else
+            -- Everything else is swallowed while a task runs. Exiting the app
+            -- is a deliberate, separate action available only from the Home
+            -- Quit entry; it must never be reachable from inside a task.
             handled=false
         end
     elseif guide_state then
-        -- Handhelds disagree about the physical A/B order. Both buttons safely
-        -- advance the non-destructive guide; D-pad left/right also allows review.
-        if action=="confirm" or action=="cancel" or action=="right" then advance_guide(1)
+        -- confirm/right advance; cancel on the first step skips the tour.
+        if action=="cancel" and (guide_state._index or 1)<=1 then
+            local guide=guide_state
+            kit.close_guide()
+            if guide.on_skip then guide.on_skip(kit) end
+        elseif action=="confirm" or action=="cancel" or action=="right" then advance_guide(1)
         elseif action=="left" then advance_guide(-1) end
         handled=true
     elseif dialog_state then
@@ -1990,7 +2195,15 @@ function kit.input(action)
             if it=="back" then kit.back_page()
             elseif it=="header" then
                 local action=pages[page_i].header_action
-                if action and not disabled(action) then do_action(action.action) end
+                if action and not disabled(action) then
+                    if action.kind=="checkbox" or action.kind=="switch" then
+                        local on=not (action.checked==true)
+                        action.checked=on
+                        if action.on_toggle then action.on_toggle(on,action.meta,action) end
+                    else
+                        do_action(action.action)
+                    end
+                end
             elseif it=="lang" then toggle_lang() end
         elseif zone=="sidebar" then
             local r=sidebar()[sidebar_i]

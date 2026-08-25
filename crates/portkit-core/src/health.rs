@@ -1,6 +1,6 @@
 use crate::{Error, Resolution, Result, zip_readable};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 pub const HEALTH_CONTRACT: &str = "portkit.health.v1";
@@ -12,6 +12,138 @@ pub const HEALTH_CONTRACT: &str = "portkit.health.v1";
 /// keeping the schema enum and this implementation in sync.
 pub const HEALTH_REQUIRED_KINDS: &str =
     "required_file,executable_file,one_of_files,archive_or_nonempty_directory";
+
+pub(crate) fn validate_health_rules<'a>(
+    rules: &[serde_json::Value],
+    path_keys: impl Iterator<Item = &'a String>,
+) -> Result<()> {
+    let path_keys = path_keys.map(String::as_str).collect::<BTreeSet<_>>();
+    for (index, rule) in rules.iter().enumerate() {
+        let object = rule
+            .as_object()
+            .ok_or_else(|| Error::InvalidConfig(format!("health rule {index} is not an object")))?;
+        let kind = object
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                Error::InvalidConfig(format!("health rule {index} has no string kind"))
+            })?;
+        let allowed: &[&str] = match kind {
+            "required_file" | "executable_file" => {
+                validate_health_template(object, "path", &path_keys, index)?;
+                &["kind", "path"]
+            }
+            "one_of_files" => {
+                let paths = object
+                    .get("paths")
+                    .and_then(serde_json::Value::as_array)
+                    .filter(|paths| !paths.is_empty())
+                    .ok_or_else(|| {
+                        Error::InvalidConfig(format!(
+                            "health rule {index} requires non-empty paths"
+                        ))
+                    })?;
+                for path in paths {
+                    validate_health_template_value(path, &path_keys, index)?;
+                }
+                &["kind", "paths"]
+            }
+            "archive_or_nonempty_directory" => {
+                validate_health_template(object, "archive", &path_keys, index)?;
+                validate_health_template(object, "directory", &path_keys, index)?;
+                &["kind", "archive", "directory"]
+            }
+            "python_imports_or_runtime" => {
+                let imports = object.get("imports");
+                let runtime = object.get("runtime");
+                if imports.is_none() && runtime.is_none() {
+                    return Err(Error::InvalidConfig(format!(
+                        "health rule {index} requires imports or runtime"
+                    )));
+                }
+                if let Some(imports) = imports {
+                    let imports = imports
+                        .as_array()
+                        .filter(|values| !values.is_empty())
+                        .ok_or_else(|| {
+                            Error::InvalidConfig(format!(
+                                "health rule {index} imports must be a non-empty array"
+                            ))
+                        })?;
+                    parse_python_imports(imports, "health python imports")?;
+                }
+                if let Some(runtime) = runtime {
+                    let runtime = runtime.as_str().ok_or_else(|| {
+                        Error::InvalidConfig(format!("health rule {index} runtime is not a string"))
+                    })?;
+                    validate_runtime_name(runtime)?;
+                }
+                &["kind", "imports", "runtime"]
+            }
+            other => {
+                return Err(Error::InvalidConfig(format!(
+                    "unsupported health rule kind {other:?}"
+                )));
+            }
+        };
+        if let Some(unknown) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+            return Err(Error::InvalidConfig(format!(
+                "health rule {index} contains unsupported field {unknown:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_health_template(
+    object: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+    path_keys: &BTreeSet<&str>,
+    index: usize,
+) -> Result<()> {
+    let value = object.get(name).ok_or_else(|| {
+        Error::InvalidConfig(format!("health rule {index} requires string {name:?}"))
+    })?;
+    validate_health_template_value(value, path_keys, index)
+}
+
+fn validate_health_template_value(
+    value: &serde_json::Value,
+    path_keys: &BTreeSet<&str>,
+    index: usize,
+) -> Result<()> {
+    let template = value
+        .as_str()
+        .ok_or_else(|| Error::InvalidConfig(format!("health rule {index} path is not a string")))?;
+    let rest = template.strip_prefix('{').ok_or_else(|| {
+        Error::InvalidConfig(format!(
+            "health path {template:?} must start with a placeholder"
+        ))
+    })?;
+    let close = rest.find('}').ok_or_else(|| {
+        Error::InvalidConfig(format!("health path {template:?} has no path placeholder"))
+    })?;
+    if !path_keys.contains(&rest[..close]) {
+        return Err(Error::InvalidConfig(format!(
+            "health path references unknown path {:?}",
+            &rest[..close]
+        )));
+    }
+    let suffix = &rest[close + 1..];
+    let relative = Path::new(suffix.trim_start_matches('/'));
+    if relative.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) || suffix.contains(['{', '}'])
+    {
+        return Err(Error::InvalidConfig(format!(
+            "unsafe health path {template:?}"
+        )));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Dependency-free structural and semantic validator for the config contract."""
+"""Structural validator for App Manager Config v1.
+
+Rust remains the executable authority.  This validator protects the source and
+generation pipeline from malformed JSON without duplicating per-platform
+snapshots or device-specific business policy.
+"""
 
 from __future__ import annotations
 
@@ -7,71 +12,70 @@ import argparse
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import PurePosixPath, Path
 from typing import Any
 
 
-PLATFORMS = {
-    "miniloong",
-    "trimui",
-    "muos",
-    "rocknix",
-    "jelos",
-    "unofficialos",
-    "knulli",
-    "batocera",
-    "miyoo",
-    "generic",
-}
+FORMAT = "jenny92.appmanager-config"
+SCHEMA_VERSION = 1
+SAFE_ID = re.compile(r"^[a-z][a-z0-9._-]{0,127}$")
+SAFE_ARCH = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 PREDICATES = {
     "always",
     "all",
     "any",
     "directory_exists",
-    "env_equals",
     "file_exists",
+    "env_equals",
     "launcher_path_prefix",
     "os_release_equals",
+    "os_release_version_at_least",
 }
 PATH_STRATEGIES = {
+    "literal",
     "first_existing",
     "launcher_dir",
-    "literal",
-    "literal_by_launcher_prefix",
-    "parent",
     "platform_core",
-    "relative_to",
     "rom_root_from_launcher",
     "xdg_data_home",
+    "literal_by_launcher_prefix",
+    "parent",
+    "relative_to",
+}
+LOCATION_KINDS = {"port_scripts", "port_data", "port_images", "apps"}
+LOCATION_ROLES = {
+    "inventory",
+    "install",
+    "manage",
+    "trash",
+    "trash_restore",
+    "cleanup_apple_double",
+}
+BUNDLE_FORMATS = {"port", "trimui_app"}
+PORT_LOCATION_KINDS = ("port_scripts", "port_data", "port_images")
+REQUIRED_CAPABILITIES = {
+    "install_portmaster",
+    "update_portmaster",
+    "repair_runtimes",
+    "manage_portmaster",
+    "manage_ports",
+    "inventory_ports",
+    "install_ports",
+    "inventory_apps",
+    "manage_apps",
+    "install_apps",
+    "manage_artwork",
+    "manage_frontend",
+    "manage_images",
+    "trash",
+    "leftovers",
+    "cleanup_appledouble",
+    "scan_script_images",
 }
 SUPPORTED_ADAPTER_KINDS = {"predicate", "path", "frontend", "library", "python"}
-HEALTH_RULES = {
-    "archive_or_nonempty_directory",
-    "executable_file",
-    "one_of_files",
-    "python_imports_or_runtime",
-    "required_file",
-}
 FORBIDDEN_KEYS = {"run_shell", "eval", "exec", "command", "shell"}
-SAFE_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
-SAFE_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-
-# Top-level keys that live in the root config.json; per-platform detail is split
-# into platforms/<id>.json.
-ROOT_KEYS = {
-    "format",
-    "schema_version",
-    "config_version",
-    "metadata",
-    "parser_limits",
-    "bootstrap",
-    "sources",
-    "environment",
-    "adapters",
-    "platforms",
-}
-RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 class ConfigError(ValueError):
@@ -82,546 +86,574 @@ def fail(path: str, message: str) -> None:
     raise ConfigError(f"{path}: {message}")
 
 
-def require_type(value: Any, expected: type, path: str) -> None:
-    if not isinstance(value, expected) or (expected is int and isinstance(value, bool)):
-        fail(path, f"expected {expected.__name__}")
+def object_at(value: Any, path: str) -> dict:
+    if not isinstance(value, dict):
+        fail(path, "must be an object")
+    return value
+
+
+def array_at(value: Any, path: str) -> list:
+    if not isinstance(value, list):
+        fail(path, "must be an array")
+    return value
 
 
 def require_keys(value: dict, keys: set[str], path: str) -> None:
     missing = keys.difference(value)
     if missing:
-        fail(path, f"missing keys {sorted(missing)}")
+        fail(path, f"missing required keys {sorted(missing)}")
 
 
-def allow_keys(value: dict, keys: set[str], path: str) -> None:
-    extra = set(value).difference(keys)
-    if extra:
-        fail(path, f"unsupported keys {sorted(extra)}")
+def exact_keys(value: dict, keys: set[str], path: str) -> None:
+    if set(value) != keys:
+        fail(path, f"must contain exactly {sorted(keys)}")
 
 
-def walk_no_code(value: Any, path: str = "$") -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if key.lower() in FORBIDDEN_KEYS:
-                fail(f"{path}.{key}", "executable escape hatch is forbidden")
-            walk_no_code(child, f"{path}.{key}")
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            walk_no_code(child, f"{path}[{index}]")
+def validate_id(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not SAFE_ID.fullmatch(value):
+        fail(path, "invalid stable id")
+    return value
 
 
-def validate_predicate(value: Any, path: str) -> None:
-    require_type(value, dict, path)
-    kind = value.get("kind")
+def validate_literal(value: Any, path: str, *, absolute: bool | None = None) -> str:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        fail(path, "must be a non-empty path string")
+    parsed = PurePosixPath(value)
+    if ".." in parsed.parts or "." in parsed.parts:
+        fail(path, "path must be normalized and must not contain . or ..")
+    if absolute is True and not parsed.is_absolute():
+        fail(path, "must be absolute")
+    if absolute is False and parsed.is_absolute():
+        fail(path, "must be relative")
+    return value
+
+
+def validate_predicate(value: Any, path: str, depth: int = 1) -> None:
+    if depth > 32:
+        fail(path, "predicate nesting is too deep")
+    obj = object_at(value, path)
+    kind = obj.get("kind")
     if kind not in PREDICATES:
-        fail(f"{path}.kind", f"unsupported predicate {kind!r}")
+        fail(f"{path}.kind", "unsupported predicate")
     if kind in {"all", "any"}:
-        allow_keys(value, {"kind", "predicates"}, path)
-        children = value.get("predicates")
-        require_type(children, list, f"{path}.predicates")
+        children = array_at(obj.get("predicates"), f"{path}.predicates")
         if not children:
             fail(f"{path}.predicates", "must not be empty")
         for index, child in enumerate(children):
-            validate_predicate(child, f"{path}.predicates[{index}]")
-    elif kind in {"file_exists", "directory_exists"}:
-        allow_keys(value, {"kind", "path"}, path)
-        validate_absolute_path(value.get("path"), f"{path}.path")
-    elif kind == "os_release_equals":
-        allow_keys(value, {"kind", "field", "value", "case_insensitive"}, path)
-        require_type(value.get("field"), str, f"{path}.field")
-        require_type(value.get("value"), str, f"{path}.value")
-    elif kind == "env_equals":
-        allow_keys(value, {"kind", "name", "value", "case_insensitive"}, path)
-        require_type(value.get("name"), str, f"{path}.name")
-        require_type(value.get("value"), str, f"{path}.value")
+            validate_predicate(child, f"{path}.predicates[{index}]", depth + 1)
+    elif kind in {"directory_exists", "file_exists"}:
+        validate_literal(obj.get("path"), f"{path}.path", absolute=True)
     elif kind == "launcher_path_prefix":
-        allow_keys(value, {"kind", "prefix"}, path)
-        validate_absolute_path(value.get("prefix"), f"{path}.prefix")
-    else:
-        allow_keys(value, {"kind"}, path)
-
-
-def validate_absolute_path(value: Any, path: str) -> None:
-    require_type(value, str, path)
-    if not value.startswith("/") or "\x00" in value or "\n" in value or "\r" in value:
-        fail(path, "must be an absolute, single-line path")
-    if any(part in {"", ".", ".."} for part in value.split("/")[1:]):
-        fail(path, "must be normalized")
+        validate_literal(obj.get("prefix"), f"{path}.prefix", absolute=True)
+    elif kind == "env_equals":
+        if not isinstance(obj.get("name"), str) or not isinstance(obj.get("value"), str):
+            fail(path, "env_equals requires string name and value")
+    elif kind == "os_release_equals":
+        if not isinstance(obj.get("field"), str) or not isinstance(obj.get("value"), str):
+            fail(path, "os_release_equals requires string field and value")
+    elif kind == "os_release_version_at_least":
+        if not isinstance(obj.get("field"), str) or not isinstance(obj.get("value"), str):
+            fail(path, "os_release_version_at_least requires string field and value")
+        parts = obj["value"].split(".")
+        if not 1 <= len(parts) <= 8 or any(not part.isdigit() for part in parts):
+            fail(f"{path}.value", "must contain 1 to 8 dot-separated integers")
 
 
 def validate_path_strategy(value: Any, path: str) -> None:
-    require_type(value, dict, path)
-    strategy = value.get("strategy")
+    obj = object_at(value, path)
+    strategy = obj.get("strategy")
     if strategy not in PATH_STRATEGIES:
-        fail(f"{path}.strategy", f"unsupported path strategy {strategy!r}")
-    allowed = {
-        "literal": {"strategy", "value"},
-        "first_existing": {"strategy", "candidates", "on_missing"},
-        "launcher_dir": {"strategy"},
-        "literal_by_launcher_prefix": {"strategy", "prefix", "matched", "fallback"},
-        "parent": {"strategy", "of"},
-        "platform_core": {"strategy"},
-        "relative_to": {"strategy", "base", "suffix"},
-        "rom_root_from_launcher": {"strategy", "levels", "suffix"},
-        "xdg_data_home": {"strategy", "suffix"},
-    }[strategy]
-    allow_keys(value, allowed, path)
+        fail(f"{path}.strategy", "unsupported path strategy")
     if strategy == "literal":
-        validate_absolute_path(value.get("value"), f"{path}.value")
-    for key in ("candidates", "fallback"):
-        if key in value:
-            require_type(value[key], list, f"{path}.{key}")
-            for index, candidate in enumerate(value[key]):
-                validate_absolute_path(candidate, f"{path}.{key}[{index}]")
-            if not value[key]:
-                fail(f"{path}.{key}", "must not be empty")
-    for key in ("prefix", "matched"):
-        if key in value:
-            validate_absolute_path(value[key], f"{path}.{key}")
-    for key in ("base", "of"):
-        if key in value and (not isinstance(value[key], str) or not SAFE_ID.fullmatch(value[key])):
-            fail(f"{path}.{key}", "must reference a named resolved path")
-    if "suffix" in value:
-        suffix = value["suffix"]
-        if not isinstance(suffix, str) or not suffix or suffix.startswith("/") or any(
-            part in {"", ".", ".."} for part in suffix.split("/")
+        validate_literal(obj.get("value"), f"{path}.value", absolute=True)
+    elif strategy == "first_existing":
+        if obj.get("expected_type") not in {"directory", "file"}:
+            fail(f"{path}.expected_type", "must be directory or file")
+        candidates = array_at(obj.get("candidates"), f"{path}.candidates")
+        if not candidates:
+            fail(f"{path}.candidates", "must not be empty")
+        for index, candidate in enumerate(candidates):
+            validate_literal(candidate, f"{path}.candidates[{index}]", absolute=True)
+    elif strategy == "literal_by_launcher_prefix":
+        for key in ("prefix", "matched"):
+            validate_literal(obj.get(key), f"{path}.{key}", absolute=True)
+        for index, candidate in enumerate(array_at(obj.get("fallback"), f"{path}.fallback")):
+            validate_literal(candidate, f"{path}.fallback[{index}]", absolute=True)
+    elif strategy in {"relative_to", "rom_root_from_launcher"}:
+        key = next((name for name in ("relative", "suffix", "value") if name in obj), None)
+        if key is None:
+            fail(path, "relative path strategy has no suffix")
+        validate_literal(obj[key], f"{path}.{key}", absolute=False)
+        if "canonicalize_existing" in obj and not isinstance(
+            obj["canonicalize_existing"], bool
         ):
-            fail(f"{path}.suffix", "must be a normalized relative path")
-    if "on_missing" in value and value["on_missing"] != "unresolved":
-        fail(f"{path}.on_missing", "must leave the path unresolved")
+            fail(f"{path}.canonicalize_existing", "must be a boolean")
 
 
-def validate_environment(environment: dict) -> None:
-    scopes = environment.get("scopes")
-    require_type(scopes, dict, "$.environment.scopes")
-    expected_scopes = {"love_ui"}
-    if set(scopes) != expected_scopes:
-        fail("$.environment.scopes", f"must contain exactly {sorted(expected_scopes)}")
-    profiles = environment.get("profiles")
-    require_type(profiles, dict, "$.environment.profiles")
-    operation_kinds = environment.get("operation_kinds")
-    if operation_kinds != ["set", "prepend", "append", "unset"]:
-        fail("$.environment.operation_kinds", "unexpected operation contract")
+def validate_locations(platform: dict, path: str) -> None:
+    locations = array_at(platform.get("locations"), f"{path}.locations")
+    if len(locations) < 2:
+        fail(f"{path}.locations", "must contain at least two locations")
+    ids: set[str] = set()
+    install_targets: dict[str, list[str]] = {"port": [], "trimui_app": []}
+    for index, value in enumerate(locations):
+        item_path = f"{path}.locations[{index}]"
+        item = object_at(value, item_path)
+        exact_keys(item, {"id", "kind", "path", "roles", "formats", "priority"}, item_path)
+        item_id = validate_id(item["id"], f"{item_path}.id")
+        if item_id in ids:
+            fail(f"{item_path}.id", "duplicate location id")
+        ids.add(item_id)
+        if item["kind"] not in LOCATION_KINDS:
+            fail(f"{item_path}.kind", "unsupported location kind")
+        if not isinstance(item["path"], str) or item["path"] not in platform["paths"]:
+            fail(f"{item_path}.path", "must reference a named path")
+        roles = array_at(item["roles"], f"{item_path}.roles")
+        formats = array_at(item["formats"], f"{item_path}.formats")
+        if not roles or len(roles) != len(set(roles)) or not set(roles).issubset(LOCATION_ROLES):
+            fail(f"{item_path}.roles", "roles must be non-empty, unique, and supported")
+        if len(formats) != len(set(formats)) or not set(formats).issubset(BUNDLE_FORMATS):
+            fail(f"{item_path}.formats", "formats must be unique and supported")
+        if not isinstance(item["priority"], int) or isinstance(item["priority"], bool):
+            fail(f"{item_path}.priority", "must be an integer")
+        if item["kind"] == "apps" and "install" in roles and "trimui_app" not in formats:
+            fail(item_path, "APP locations must accept trimui_app")
+        if item["kind"] in {"port_scripts", "port_data"} and "install" in roles and "port" not in formats:
+            fail(item_path, "Port script/data locations must accept port")
+        if "install" in roles:
+            for bundle_format in formats:
+                install_targets[bundle_format].append(item_id)
 
-    def validate_operations(operations: Any, path: str) -> None:
-        require_type(operations, list, path)
-        for index, operation in enumerate(operations):
-            item_path = f"{path}[{index}]"
-            require_type(operation, dict, item_path)
-            allow_keys(operation, {"operation", "name", "value", "separator"}, item_path)
-            op = operation.get("operation")
-            if op not in operation_kinds:
-                fail(f"{item_path}.operation", "unsupported environment operation")
-            name = operation.get("name")
-            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-                fail(f"{item_path}.name", "invalid environment name")
-            if op == "unset":
-                if "value" in operation or "separator" in operation:
-                    fail(item_path, "unset does not accept a value or separator")
-            elif not isinstance(operation.get("value"), str):
-                fail(f"{item_path}.value", "must be a literal string")
+    for kind in PORT_LOCATION_KINDS:
+        candidates = [item for item in locations if item["kind"] == kind]
+        if kind in {"port_scripts", "port_data"} and not candidates:
+            fail(f"{path}.locations", f"missing {kind} location")
+        if candidates:
+            highest = max(item["priority"] for item in candidates)
+            if sum(item["priority"] == highest for item in candidates) != 1:
+                fail(f"{path}.locations", f"ambiguous {kind} location at priority {highest}")
 
-    for profile_name, operations in profiles.items():
-        if not SAFE_ID.fullmatch(profile_name):
-            fail(f"$.environment.profiles.{profile_name}", "invalid profile id")
-        validate_operations(operations, f"$.environment.profiles.{profile_name}")
-    for scope_name, scope in scopes.items():
-        scope_path = f"$.environment.scopes.{scope_name}"
-        require_type(scope, dict, scope_path)
-        require_keys(scope, {"profiles", "operations"}, scope_path)
-        allow_keys(scope, {"profiles", "operations"}, scope_path)
-        require_type(scope["profiles"], list, f"{scope_path}.profiles")
-        for profile in scope["profiles"]:
-            if profile not in profiles:
-                fail(f"{scope_path}.profiles", f"undefined profile {profile!r}")
-        validate_operations(scope["operations"], f"{scope_path}.operations")
+    capabilities = platform.get("capabilities") if isinstance(platform.get("capabilities"), dict) else {}
+    required_port_roles = {
+        role
+        for capability, role in (
+            ("inventory_ports", "inventory"),
+            ("install_ports", "install"),
+            ("manage_ports", "manage"),
+            ("trash", "trash"),
+            ("trash", "trash_restore"),
+            ("cleanup_appledouble", "cleanup_apple_double"),
+        )
+        if capabilities.get(capability) is True
+    }
+    for kind in ("port_scripts", "port_data"):
+        candidates = [
+            item for item in locations
+            if item["kind"] == kind
+            and required_port_roles.issubset(item["roles"])
+            and (capabilities.get("install_ports") is not True or "port" in item["formats"])
+        ]
+        if not candidates:
+            fail(f"{path}.locations", f"no {kind} location supports enabled roles")
+        highest = max(item["priority"] for item in candidates)
+        if sum(item["priority"] == highest for item in candidates) != 1:
+            fail(f"{path}.locations", f"ambiguous eligible {kind} location at priority {highest}")
+    domain_requirements = [
+        (
+            "port_images",
+            any(capabilities.get(name) is True for name in ("scan_script_images", "manage_artwork", "manage_images")),
+            {
+                role for capability, role in (
+                    ("scan_script_images", "inventory"),
+                    ("manage_artwork", "manage"),
+                    ("manage_images", "manage"),
+                    ("trash", "trash"),
+                    ("trash", "trash_restore"),
+                    ("cleanup_appledouble", "cleanup_apple_double"),
+                ) if capabilities.get(capability) is True
+            },
+            None,
+        ),
+        (
+            "apps",
+            any(capabilities.get(name) is True for name in ("inventory_apps", "manage_apps", "install_apps")),
+            {
+                role for capability, role in (
+                    ("inventory_apps", "inventory"),
+                    ("install_apps", "install"),
+                    ("manage_apps", "manage"),
+                    ("trash", "trash"),
+                    ("trash", "trash_restore"),
+                    ("cleanup_appledouble", "cleanup_apple_double"),
+                ) if capabilities.get(capability) is True
+            },
+            "trimui_app" if capabilities.get("install_apps") is True else None,
+        ),
+    ]
+    for kind, required, roles, bundle_format in domain_requirements:
+        if not required:
+            continue
+        candidates = [
+            item for item in locations
+            if item["kind"] == kind and roles.issubset(item["roles"])
+            and (bundle_format is None or bundle_format in item["formats"])
+        ]
+        if not candidates:
+            fail(f"{path}.locations", f"no {kind} location supports enabled roles")
+        highest = max(item["priority"] for item in candidates)
+        if sum(item["priority"] == highest for item in candidates) != 1:
+            fail(f"{path}.locations", f"ambiguous eligible {kind} location at priority {highest}")
+    if platform.get("capabilities", {}).get("install_apps"):
+        targets = [item for item in locations if item["id"] in install_targets["trimui_app"]]
+        if not targets:
+            fail(f"{path}.locations", "install_apps requires an APP install target")
+        highest = max(item["priority"] for item in targets)
+        if sum(item["priority"] == highest for item in targets) != 1:
+            fail(f"{path}.locations", "highest-priority APP install target is ambiguous")
+
+
+def validate_models(platform: dict, path: str) -> None:
+    models = array_at(platform.get("models", []), f"{path}.models")
+    ids: set[str] = set()
+    for index, value in enumerate(models):
+        model_path = f"{path}.models[{index}]"
+        model = object_at(value, model_path)
+        required = {"id", "priority", "display_name", "recognition", "display"}
+        allowed = required | {"device_manufacturer", "overrides"}
+        require_keys(model, required, model_path)
+        if not set(model).issubset(allowed):
+            fail(model_path, "contains unknown Config v1 model fields")
+        model_id = validate_id(model["id"], f"{model_path}.id")
+        if model_id in ids:
+            fail(f"{model_path}.id", "duplicate model id")
+        ids.add(model_id)
+        if not isinstance(model["priority"], int) or isinstance(model["priority"], bool):
+            fail(f"{model_path}.priority", "must be an integer")
+        validate_predicate(model["recognition"], f"{model_path}.recognition")
+        object_at(model["display"], f"{model_path}.display")
+        overrides = object_at(model.get("overrides", {}), f"{model_path}.overrides")
+        if not set(overrides).issubset({"display", "input"}):
+            fail(f"{model_path}.overrides", "unsupported override field")
+        for name, override in overrides.items():
+            object_at(override, f"{model_path}.overrides.{name}")
 
 
 def validate_platform(platform: Any, path: str) -> None:
-    require_type(platform, dict, path)
-    require_keys(
-        platform,
-        {
-            "display_name",
-            "priority",
-            "support",
-            "recognition",
-            "required_adapters",
-            "paths",
-            "source_route",
-            "frontend",
-            "libraries",
-            "python",
-            "health",
-            "preserved_dirs",
-            "capabilities",
-            "environment_scopes",
-            "display",
-            "input",
-        },
-        path,
-    )
-    if "device_manufacturer" in platform and (
-        not isinstance(platform["device_manufacturer"], str) or not platform["device_manufacturer"]
-    ):
-        fail(f"{path}.device_manufacturer", "must be a non-empty string")
-    validate_predicate(platform["recognition"], f"{path}.recognition")
-    support = platform["support"]
-    require_type(support, dict, f"{path}.support")
-    require_keys(support, {"device_class", "target_confirmation"}, f"{path}.support")
-    allow_keys(support, {"device_class", "target_confirmation"}, f"{path}.support")
-    if support["device_class"] not in {"tested", "official-untested", "unsupported-known"}:
-        fail(f"{path}.support.device_class", "unsupported device class")
-    if support["target_confirmation"] not in {"detected", "existing_core_or_override"}:
-        fail(f"{path}.support.target_confirmation", "unsupported target confirmation policy")
-    require_type(platform["required_adapters"], list, f"{path}.required_adapters")
-    for index, adapter in enumerate(platform["required_adapters"]):
-        if not isinstance(adapter, str) or not SAFE_ID.fullmatch(adapter):
-            fail(f"{path}.required_adapters[{index}]", "invalid adapter id")
-    require_type(platform["paths"], dict, f"{path}.paths")
-    if "launcher_directory" not in platform["paths"]:
-        fail(f"{path}.paths", "missing launcher_directory")
-    for name, strategy in platform["paths"].items():
+    value = object_at(platform, path)
+    required = {
+        "display_name", "priority", "recognition", "required_adapters", "paths",
+        "source_route", "support", "frontend", "libraries", "python", "health",
+        "preserved_dirs", "locations", "capabilities", "environment_scopes", "display", "input",
+    }
+    require_keys(value, required, path)
+    allowed = required | {"device_manufacturer", "models"}
+    if set(value) != allowed.intersection(value):
+        fail(path, "contains unknown Config v1 platform fields")
+    if not isinstance(value["priority"], int) or isinstance(value["priority"], bool):
+        fail(f"{path}.priority", "must be an integer")
+    validate_predicate(value["recognition"], f"{path}.recognition")
+    paths = object_at(value["paths"], f"{path}.paths")
+    for name, strategy in paths.items():
+        validate_id(name, f"{path}.paths.{name}")
         validate_path_strategy(strategy, f"{path}.paths.{name}")
-    require_type(platform["health"], list, f"{path}.health")
-    for index, rule in enumerate(platform["health"]):
-        require_type(rule, dict, f"{path}.health[{index}]")
-        if rule.get("kind") not in HEALTH_RULES:
-            fail(f"{path}.health[{index}].kind", "unsupported health rule")
-    entrypoint_rules = [rule for rule in platform["health"] if rule.get("kind") == "one_of_files"]
-    expected_entrypoints = ["{portmaster_core}/pugwash", "{portmaster_core}/harbourmaster"]
-    if len(entrypoint_rules) != 1 or entrypoint_rules[0].get("paths") != expected_entrypoints:
-        fail(f"{path}.health", "must require pugwash or harbourmaster")
-    for key in ("preserved_dirs", "environment_scopes"):
-        require_type(platform[key], list, f"{path}.{key}")
-    for key in ("frontend", "libraries", "python", "capabilities", "display", "input"):
-        require_type(platform[key], dict, f"{path}.{key}")
-    frontend = platform["frontend"]
-    frontend_keys = {
-        "management",
-        "kind",
-        "names",
-        "primary",
-        "control_source",
-        "core_launcher_source",
-        "remove_core_launcher",
-        "empty_tasksetter",
-        "core_executable",
-        "frontend_executable",
-        "install_map",
-    }
-    require_keys(frontend, frontend_keys, f"{path}.frontend")
-    allow_keys(frontend, frontend_keys | {"transforms"}, f"{path}.frontend")
-    for key in ("remove_core_launcher", "empty_tasksetter"):
-        if not isinstance(frontend[key], bool):
-            fail(f"{path}.frontend.{key}", "must be boolean")
-    for key in ("control_source", "core_launcher_source", "core_executable", "frontend_executable"):
-        if frontend[key] is not None and not isinstance(frontend[key], str):
-            fail(f"{path}.frontend.{key}", "must be string or null")
-    transforms = frontend.get("transforms", [])
-    require_type(transforms, list, f"{path}.frontend.transforms")
-    mapped_targets = {item.get("target") for item in frontend["install_map"]}
-    for index, transform in enumerate(transforms):
-        transform_path = f"{path}.frontend.transforms[{index}]"
-        require_type(transform, dict, transform_path)
-        require_keys(transform, {"kind", "target", "variable", "library_group"}, transform_path)
-        allow_keys(transform, {"kind", "target", "variable", "library_group"}, transform_path)
-        if transform["kind"] != "export_library_group":
-            fail(f"{transform_path}.kind", "unsupported frontend transform")
-        if transform["target"] not in mapped_targets:
-            fail(f"{transform_path}.target", "must reference an installed frontend target")
-        if not isinstance(transform["variable"], str) or not SAFE_ENV_NAME.fullmatch(transform["variable"]):
-            fail(f"{transform_path}.variable", "invalid environment variable name")
-    capability_names = {
-        "install_portmaster",
-        "update_portmaster",
-        "repair_runtimes",
-        "manage_ports",
-        "manage_artwork",
-        "trash",
-        "leftovers",
-        "cleanup_appledouble",
-        "scan_script_images",
-    }
-    missing_capabilities = capability_names.difference(platform["capabilities"])
-    if missing_capabilities:
-        fail(f"{path}.capabilities", f"missing explicit capabilities {sorted(missing_capabilities)}")
-    libraries = platform["libraries"]
-    groups = libraries.get("groups")
-    require_type(groups, dict, f"{path}.libraries.groups")
-    if not groups:
-        fail(f"{path}.libraries.groups", "must not be empty")
-    for group_name, group in groups.items():
-        group_path = f"{path}.libraries.groups.{group_name}"
-        require_type(group, dict, group_path)
-        require_type(group.get("required_sonames"), list, f"{group_path}.required_sonames")
-        require_type(group.get("candidates"), list, f"{group_path}.candidates")
-        if not group["required_sonames"] or not group["candidates"]:
-            fail(group_path, "SONAMEs and candidates must not be empty")
-    for index, transform in enumerate(transforms):
-        if transform["library_group"] not in groups:
-            fail(f"{path}.frontend.transforms[{index}].library_group", "undefined library group")
-    if set(platform["environment_scopes"]) != {"love_ui"}:
-        fail(f"{path}.environment_scopes", "must name every concrete execution scope")
-
-
+    for required in ("scripts", "game_data", "frontend", "launcher_directory"):
+        if required not in paths:
+            fail(f"{path}.paths", f"missing {required}")
+    health = array_at(value["health"], f"{path}.health")
+    for index, rule_value in enumerate(health):
+        rule_path = f"{path}.health[{index}]"
+        rule = object_at(rule_value, rule_path)
+        kind = rule.get("kind")
+        if kind in {"required_file", "executable_file"}:
+            exact_keys(rule, {"kind", "path"}, rule_path)
+            templates = [rule["path"]]
+        elif kind == "one_of_files":
+            exact_keys(rule, {"kind", "paths"}, rule_path)
+            templates = array_at(rule["paths"], f"{rule_path}.paths")
+            if not templates:
+                fail(f"{rule_path}.paths", "must not be empty")
+        elif kind == "archive_or_nonempty_directory":
+            exact_keys(rule, {"kind", "archive", "directory"}, rule_path)
+            templates = [rule["archive"], rule["directory"]]
+        elif kind == "python_imports_or_runtime":
+            if not set(rule).issubset({"kind", "imports", "runtime"}) or not ({"imports", "runtime"} & set(rule)):
+                fail(rule_path, "requires only imports and/or runtime")
+            templates = []
+            if "imports" in rule:
+                imports = array_at(rule["imports"], f"{rule_path}.imports")
+                if not imports or any(not isinstance(name, str) or not name for name in imports):
+                    fail(f"{rule_path}.imports", "must be a non-empty string array")
+            if "runtime" in rule and (not isinstance(rule["runtime"], str) or not rule["runtime"]):
+                fail(f"{rule_path}.runtime", "must be a non-empty string")
+        else:
+            fail(f"{rule_path}.kind", "unsupported health rule")
+        for template in templates:
+            if not isinstance(template, str) or not template.startswith("{") or "}" not in template:
+                fail(rule_path, "health paths must start with a path placeholder")
+            key, suffix = template[1:].split("}", 1)
+            if key not in paths or "{" in suffix or "}" in suffix or ".." in Path(suffix.lstrip("/")).parts:
+                fail(rule_path, "health path is unsafe or references an unknown path")
+    validate_locations(value, path)
+    validate_models(value, path)
+    capabilities = object_at(value["capabilities"], f"{path}.capabilities")
+    missing = REQUIRED_CAPABILITIES.difference(capabilities)
+    if missing:
+        fail(f"{path}.capabilities", f"missing explicit capabilities {sorted(missing)}")
+    for name, enabled in capabilities.items():
+        validate_id(name, f"{path}.capabilities.{name}")
+        if type(enabled) is not bool:
+            fail(f"{path}.capabilities.{name}", "must be boolean")
+    if capabilities["install_portmaster"] and not capabilities["manage_portmaster"]:
+        fail(f"{path}.capabilities", "install_portmaster requires manage_portmaster")
+    if capabilities["update_portmaster"] and not capabilities["manage_portmaster"]:
+        fail(f"{path}.capabilities", "update_portmaster requires manage_portmaster")
+    if capabilities["install_ports"] and not capabilities["manage_ports"]:
+        fail(f"{path}.capabilities", "install_ports requires manage_ports")
+    if capabilities["install_apps"] and not capabilities["manage_apps"]:
+        fail(f"{path}.capabilities", "install_apps requires manage_apps")
+    has_apps = any(location["kind"] == "apps" for location in value["locations"])
+    if any(capabilities[name] for name in ("inventory_apps", "manage_apps", "install_apps")) != has_apps:
+        fail(f"{path}.capabilities", "APP capabilities must match configured APP locations")
+    display = object_at(value["display"], f"{path}.display")
+    for field in ("default_width", "default_height"):
+        if type(display.get(field)) is not int or display[field] <= 0:
+            fail(f"{path}.display.{field}", "must be a positive integer")
+    input_config = object_at(value["input"], f"{path}.input")
+    if type(input_config.get("analog_sticks")) is not int or input_config["analog_sticks"] < 0:
+        fail(f"{path}.input.analog_sticks", "must be a non-negative integer")
+    validate_literal(input_config.get("tty"), f"{path}.input.tty", absolute=True)
+    frontend = object_at(value["frontend"], f"{path}.frontend")
+    names = array_at(frontend.get("names"), f"{path}.frontend.names")
+    if len(names) != len(set(names)):
+        fail(f"{path}.frontend.names", "must be unique")
+    primary = frontend.get("primary")
+    if not isinstance(primary, str):
+        fail(f"{path}.frontend.primary", "must be a string")
+    if frontend.get("management") == "app" and primary not in names:
+        fail(f"{path}.frontend.primary", "must be present in names for app-managed frontend")
+    destinations: set[str] = set()
+    sources: set[str] = set()
+    for index, mapping in enumerate(array_at(frontend.get("install_map"), f"{path}.frontend.install_map")):
+        mapping_path = f"{path}.frontend.install_map[{index}]"
+        item = object_at(mapping, mapping_path)
+        if item.get("source") in sources or item.get("target") in destinations:
+            fail(mapping_path, "install source and destination must be unique")
+        sources.add(item.get("source")); destinations.add(item.get("target"))
 def validate(config: Any) -> None:
-    require_type(config, dict, "$")
-    require_keys(
-        config,
-        {
-            "format",
-            "schema_version",
-            "config_version",
-            "metadata",
-            "parser_limits",
-            "bootstrap",
-            "sources",
-            "environment",
-            "adapters",
-            "platforms",
-        },
-        "$",
-    )
-    if config["format"] != "jenny92.appmanager-config":
-        fail("$.format", "unsupported format")
-    if config["schema_version"] != 1:
-        fail("$.schema_version", "unsupported schema version")
-    if not isinstance(config["config_version"], str) or not SEMVER.fullmatch(config["config_version"]):
-        fail("$.config_version", "must be semantic version")
-    metadata = config["metadata"]
-    require_type(metadata, dict, "$.metadata")
-    require_keys(metadata, {"generated_at", "source_revision"}, "$.metadata")
-    if not isinstance(metadata["generated_at"], str) or not RFC3339_UTC.fullmatch(metadata["generated_at"]):
-        fail("$.metadata.generated_at", "must be RFC3339 UTC")
-    if not isinstance(metadata["source_revision"], str) or not metadata["source_revision"]:
-        fail("$.metadata.source_revision", "must not be empty")
-    limits = config["parser_limits"]
-    require_type(limits, dict, "$.parser_limits")
-    if "max_file_bytes" in limits:
-        fail("$.parser_limits.max_file_bytes", "total file size must not be capped")
-    for key in ("max_depth", "max_path_bytes", "max_string_bytes", "max_collection_items"):
-        require_type(limits.get(key), int, f"$.parser_limits.{key}")
-        if limits[key] < 1:
-            fail(f"$.parser_limits.{key}", "must be positive")
-    environment = config["environment"]
-    require_type(environment, dict, "$.environment")
-    if environment.get("inherit") != "all_except_blocked" or environment.get("value_handling") != "literal":
-        fail("$.environment", "must inherit default-open and keep literal values")
-    expected_names = {"LD_PRELOAD", "LD_AUDIT", "GCONV_PATH", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "IFS", "PS4"}
-    if set(environment.get("blocked_names", [])) != expected_names:
-        fail("$.environment.blocked_names", "must match the contract denylist exactly")
-    if environment.get("blocked_prefixes") != ["BASH_FUNC_"]:
-        fail("$.environment.blocked_prefixes", "must only block BASH_FUNC_*")
-    validate_environment(environment)
-    sources = config["sources"]
-    require_type(sources, dict, "$.sources")
-    transport = sources.get("transport")
-    require_type(transport, dict, "$.sources.transport")
-    if transport.get("proxy_registry_ref") != "embedded://github-proxy-registry/v1":
-        fail("$.sources.transport.proxy_registry_ref", "must reference the bundled proxy registry")
-    if transport.get("probe_batch_limit") != 5:
-        fail("$.sources.transport.probe_batch_limit", "must preserve the five-route probe boundary")
-    expected_routes = {
-        "jenny92_portmaster": "release",
-        "official_portmaster": "release",
-        "runtime_metadata": "release",
-    }
-    if transport.get("routes") != expected_routes:
-        fail("$.sources.transport.routes", "source capability routes do not match the endpoint contract")
-    adapters = config["adapters"]
-    require_type(adapters, dict, "$.adapters")
-    for name, adapter in adapters.items():
-        if not SAFE_ID.fullmatch(name):
-            fail(f"$.adapters.{name}", "invalid adapter id")
-        require_type(adapter, dict, f"$.adapters.{name}")
-        require_type(adapter.get("kind"), str, f"$.adapters.{name}.kind")
-        require_type(adapter.get("contract_version"), int, f"$.adapters.{name}.contract_version")
-    platforms = config["platforms"]
-    require_type(platforms, dict, "$.platforms")
-    if not PLATFORMS.issubset(platforms):
-        fail("$.platforms", f"missing required platforms {sorted(PLATFORMS.difference(platforms))}")
-    for name, platform in platforms.items():
-        if not SAFE_ID.fullmatch(name):
-            fail(f"$.platforms.{name}", "invalid platform id")
-        validate_platform(platform, f"$.platforms.{name}")
-        for adapter in platform["required_adapters"]:
-            if adapter not in adapters:
-                fail(f"$.platforms.{name}.required_adapters", f"undefined adapter {adapter}")
-    expected_frontend_policy = {
-        "miniloong": (None, None, False, False, "PortMaster.sh", "PortMaster.sh"),
-        "trimui": ("trimui/control.txt", None, True, True, None, "launch.sh"),
-        "muos": ("muos/control.txt", "muos/PortMaster.txt", False, True, "PortMaster.sh", None),
-        "rocknix": (None, None, False, False, "PortMaster.sh", None),
-        "jelos": (None, None, False, False, "PortMaster.sh", None),
-        "unofficialos": (None, None, False, False, "PortMaster.sh", None),
-        "knulli": ("knulli/control.txt", None, True, True, None, "PortMaster.sh"),
-        "batocera": ("batocera/control.txt", None, True, True, None, "PortMaster.sh"),
-        "miyoo": ("miyoo/control.txt", "miyoo/PortMaster.txt", False, False, "PortMaster.sh", None),
-        "generic": (None, None, False, False, "PortMaster.sh", "PortMaster.sh"),
-    }
-    installer_keys = ("control_source", "core_launcher_source", "remove_core_launcher", "empty_tasksetter", "core_executable", "frontend_executable")
-    for name, expected in expected_frontend_policy.items():
-        actual = tuple(platforms[name]["frontend"][key] for key in installer_keys)
-        if actual != expected:
-            fail(f"$.platforms.{name}.frontend", "installer policy does not match the launcher contract")
-    expected_support = {
-        "miniloong": ("tested", "detected"),
-        "trimui": ("tested", "detected"),
-        "muos": ("official-untested", "detected"),
-        "rocknix": ("official-untested", "detected"),
-        "jelos": ("official-untested", "detected"),
-        "unofficialos": ("official-untested", "detected"),
-        "knulli": ("official-untested", "detected"),
-        "batocera": ("official-untested", "detected"),
-        "miyoo": ("official-untested", "detected"),
-        "generic": ("unsupported-known", "existing_core_or_override"),
-    }
-    for name, expected in expected_support.items():
-        support = platforms[name]["support"]
-        if (support["device_class"], support["target_confirmation"]) != expected:
-            fail(f"$.platforms.{name}.support", "support policy does not match the device contract")
-    generic_core = platforms["generic"]["paths"].get("portmaster_core", {})
-    if generic_core.get("strategy") != "first_existing" or generic_core.get("on_missing") != "unresolved" or "fallback" in generic_core:
-        fail("$.platforms.generic.paths.portmaster_core", "must not authorize a nonexistent fallback target")
-    expected_launcher_directories = {
-        "miniloong": {"strategy": "literal", "value": "/mnt/sdcard/roms"},
-        "trimui": {"strategy": "literal", "value": "/mnt/SDCARD/Data"},
-        "muos": {"strategy": "parent", "of": "game_data"},
-        "rocknix": {"strategy": "parent", "of": "game_data"},
-        "jelos": {"strategy": "parent", "of": "game_data"},
-        "unofficialos": {"strategy": "parent", "of": "game_data"},
-        "knulli": {"strategy": "literal", "value": "/userdata/roms"},
-        "batocera": {"strategy": "literal", "value": "/userdata/roms"},
-        "miyoo": {"strategy": "literal", "value": "/mnt/sdcard/Roms/PORTS64"},
-        "generic": {"strategy": "parent", "of": "game_data"},
-    }
-    for name, expected in expected_launcher_directories.items():
-        if platforms[name]["paths"]["launcher_directory"] != expected:
-            fail(f"$.platforms.{name}.paths.launcher_directory", "does not match PortMaster $directory")
-    if platforms["miniloong"]["python"].get("mode") != "runtime_mount":
-        fail("$.platforms.miniloong.python", "must use the runtime_mount Python mode")
-    for name in ("rocknix", "jelos"):
-        if platforms[name]["frontend"].get("management") != "system" or platforms[name]["capabilities"].get("install_portmaster") is not False or platforms[name]["capabilities"].get("update_portmaster") is not False:
-            fail(f"$.platforms.{name}", "must remain system-managed")
-    # Models are scoped by containment under platforms.<id>.models.
-    for name, platform in platforms.items():
-        models = platform.get("models", {})
-        if not models:
-            continue
-        require_type(models, dict, f"$.platforms.{name}.models")
-        for model_name, model in models.items():
-            model_path = f"$.platforms.{name}.models.{model_name}"
-            require_type(model, dict, model_path)
-            allow_keys(
-                model,
-                {"display_name", "device_manufacturer", "recognition", "display", "overrides"},
-                model_path,
-            )
-            require_keys(model, {"display_name", "recognition", "display"}, model_path)
-            if "device_manufacturer" in model and (
-                not isinstance(model["device_manufacturer"], str)
-                or not model["device_manufacturer"]
-            ):
-                fail(f"{model_path}.device_manufacturer", "must be a non-empty string")
-            validate_predicate(model["recognition"], f"{model_path}.recognition")
-            if "overrides" in model:
-                require_type(model["overrides"], dict, f"{model_path}.overrides")
-                allow_keys(model["overrides"], {"display", "input"}, f"{model_path}.overrides")
-    for required in ("brick", "brick_pro", "smart_pro"):
-        if required not in platforms["trimui"].get("models", {}):
-            fail("$.platforms.trimui.models", f"missing required model {required}")
-    walk_no_code(config)
-
-
-def is_root_config(config: Any) -> bool:
-    # The root config carries thin platform entries that point at detail files;
-    # the merged/full config carries complete platform objects.
-    platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
-    return isinstance(platforms, dict) and any(
-        isinstance(entry, dict) and "detail" in entry for entry in platforms.values()
-    )
+    value = object_at(config, "$")
+    root_keys = {"format", "schema_version", "config_version", "metadata", "parser_limits", "bootstrap", "sources", "environment", "adapters", "platforms"}
+    exact_keys(value, root_keys, "$")
+    if value["format"] != FORMAT or value["schema_version"] != SCHEMA_VERSION:
+        fail("$", "unsupported Config contract")
+    if not isinstance(value["config_version"], str) or not SEMVER.fullmatch(value["config_version"]):
+        fail("$.config_version", "must be numeric semantic versioning")
+    validate_root_common(value)
+    validate_bootstrap_and_sources(value)
+    adapters = object_at(value["adapters"], "$.adapters")
+    for adapter_id, adapter in adapters.items():
+        validate_id(adapter_id, f"$.adapters.{adapter_id}")
+        object_at(adapter, f"$.adapters.{adapter_id}")
+    platforms = object_at(value["platforms"], "$.platforms")
+    if not platforms:
+        fail("$.platforms", "must not be empty")
+    for platform_id, platform in platforms.items():
+        validate_id(platform_id, f"$.platforms.{platform_id}")
+        validate_platform(platform, f"$.platforms.{platform_id}")
+        for adapter_id in platform["required_adapters"]:
+            if adapter_id not in adapters:
+                fail(f"$.platforms.{platform_id}.required_adapters", f"undefined adapter {adapter_id}")
+    walk_no_code(value)
 
 
 def validate_root(config: dict) -> None:
-    require_type(config, dict, "$")
-    require_keys(config, ROOT_KEYS, "$")
-    platforms = config.get("platforms", {})
-    require_type(platforms, dict, "$.platforms")
-    for name, entry in platforms.items():
-        path = f"$.platforms.{name}"
-        require_type(entry, dict, path)
-        require_keys(entry, {"priority", "recognition", "detail"}, path)
-        allow_keys(entry, {"priority", "recognition", "detail"}, path)
-        if not isinstance(entry["priority"], int):
+    root_keys = {"format", "schema_version", "config_version", "metadata", "parser_limits", "bootstrap", "sources", "environment", "adapters", "platforms"}
+    exact_keys(config, root_keys, "$")
+    if config.get("format") != FORMAT or config.get("schema_version") != SCHEMA_VERSION:
+        fail("$", "unsupported root Config contract")
+    if not isinstance(config.get("config_version"), str) or not SEMVER.fullmatch(config["config_version"]):
+        fail("$.config_version", "must be numeric semantic versioning")
+    validate_root_common(config)
+    validate_bootstrap_and_sources(config)
+    platforms = object_at(config.get("platforms"), "$.platforms")
+    for platform_id, entry in platforms.items():
+        path = f"$.platforms.{platform_id}"
+        validate_id(platform_id, path)
+        entry = object_at(entry, path)
+        exact_keys(entry, {"priority", "recognition", "detail"}, path)
+        if type(entry["priority"]) is not int:
             fail(f"{path}.priority", "must be an integer")
-        detail = entry["detail"]
-        if not isinstance(detail, str) or not detail:
-            fail(f"{path}.detail", "must be a non-empty string")
         validate_predicate(entry["recognition"], f"{path}.recognition")
-    if "models" in config:
-        fail("$.models", "must not appear in the root config (models live in platform detail)")
+        detail = object_at(entry["detail"], f"{path}.detail")
+        if set(detail) != {"ref", "sha256", "bytes"}:
+            fail(f"{path}.detail", "must contain only ref, sha256, and bytes")
+        validate_literal(detail["ref"], f"{path}.detail.ref", absolute=False)
+        if not isinstance(detail["sha256"], str) or not SHA256.fullmatch(detail["sha256"]):
+            fail(f"{path}.detail.sha256", "must be lowercase SHA-256")
+        if type(detail["bytes"]) is not int or detail["bytes"] <= 0:
+            fail(f"{path}.detail.bytes", "must be a positive integer")
+    walk_no_code(config)
+
+
+def validate_bootstrap_and_sources(config: dict) -> None:
+    bootstrap = object_at(config.get("bootstrap"), "$.bootstrap")
+    exact_keys(bootstrap, {"policy", "config_url", "fallback", "transport", "required_format"}, "$.bootstrap")
+    expected = {
+        "policy": "remote_then_embedded",
+        "fallback": "embedded_root_then_local_dir",
+        "transport": "github_https",
+        "required_format": FORMAT,
+    }
+    for key, value in expected.items():
+        if bootstrap.get(key) != value:
+            fail(f"$.bootstrap.{key}", "unsupported bootstrap contract")
+    url = bootstrap.get("config_url")
+    if not isinstance(url, str) or not url.startswith("https://raw.githubusercontent.com/") or any(ch.isspace() for ch in url):
+        fail("$.bootstrap.config_url", "must be a GitHub raw HTTPS URL")
+
+    sources = object_at(config.get("sources"), "$.sources")
+    exact_keys(sources, {"endpoints", "release_routes", "runtime", "transport"}, "$.sources")
+    endpoints = object_at(sources.get("endpoints"), "$.sources.endpoints")
+    if not endpoints:
+        fail("$.sources.endpoints", "must not be empty")
+    for endpoint_id, endpoint in endpoints.items():
+        validate_id(endpoint_id, f"$.sources.endpoints.{endpoint_id}")
+        if not isinstance(endpoint, str) or not endpoint.startswith("https://github.com/") or any(ch.isspace() for ch in endpoint):
+            fail(f"$.sources.endpoints.{endpoint_id}", "must be a GitHub HTTPS URL")
+    routes = object_at(sources.get("release_routes"), "$.sources.release_routes")
+    if not routes:
+        fail("$.sources.release_routes", "must not be empty")
+    for route_id, route_value in routes.items():
+        validate_id(route_id, f"$.sources.release_routes.{route_id}")
+        route = object_at(route_value, f"$.sources.release_routes.{route_id}")
+        allowed_route_keys = {"manifest", "channel", "archive_name", "checksum"}
+        if "install_allowed" in route:
+            allowed_route_keys.add("install_allowed")
+        exact_keys(route, allowed_route_keys, f"$.sources.release_routes.{route_id}")
+        if route.get("manifest") not in endpoints:
+            fail(f"$.sources.release_routes.{route_id}.manifest", "unknown endpoint")
+        if route.get("channel") != "stable" or route.get("checksum") != "md5_from_manifest":
+            fail(f"$.sources.release_routes.{route_id}", "unsupported release contract")
+        archive = route.get("archive_name")
+        if not isinstance(archive, str) or not archive or archive in {".", ".."} or any(ch in archive for ch in "/\\\t\r\n"):
+            fail(f"$.sources.release_routes.{route_id}.archive_name", "unsafe archive name")
+        if "install_allowed" in route and type(route["install_allowed"]) is not bool:
+            fail(f"$.sources.release_routes.{route_id}.install_allowed", "must be boolean")
+    runtime = object_at(sources.get("runtime"), "$.sources.runtime")
+    exact_keys(runtime, {"metadata", "architectures", "verification"}, "$.sources.runtime")
+    if runtime.get("metadata") not in endpoints:
+        fail("$.sources.runtime.metadata", "unknown endpoint")
+    architectures = array_at(runtime.get("architectures"), "$.sources.runtime.architectures")
+    if not architectures:
+        fail("$.sources.runtime.architectures", "must not be empty")
+    architecture_ids: set[str] = set()
+    system_names: set[str] = set()
+    for index, architecture_value in enumerate(architectures):
+        path = f"$.sources.runtime.architectures[{index}]"
+        architecture = object_at(architecture_value, path)
+        exact_keys(architecture, {"id", "system_names"}, path)
+        architecture_id = validate_id(architecture.get("id"), f"{path}.id")
+        if architecture_id in architecture_ids:
+            fail(f"{path}.id", "duplicate Runtime architecture")
+        architecture_ids.add(architecture_id)
+        aliases = array_at(architecture.get("system_names"), f"{path}.system_names")
+        if not aliases:
+            fail(f"{path}.system_names", "must not be empty")
+        for alias in aliases:
+            if not isinstance(alias, str) or not SAFE_ARCH.fullmatch(alias):
+                fail(f"{path}.system_names", "contains an unsafe architecture name")
+            if alias in system_names:
+                fail(f"{path}.system_names", "architecture name is mapped more than once")
+            system_names.add(alias)
+    verification = array_at(runtime.get("verification"), "$.sources.runtime.verification")
+    if len(verification) != len(set(verification)) or set(verification) != {"url", "size", "md5", "squashfs_magic"}:
+        fail("$.sources.runtime.verification", "does not match implemented security contract")
+    transport = object_at(sources.get("transport"), "$.sources.transport")
+    exact_keys(transport, {"proxy_registry_ref", "probe_batch_limit", "capabilities", "routes", "cache_scope", "resume_requires_same_formatted_endpoint"}, "$.sources.transport")
+    if transport.get("proxy_registry_ref") != "embedded://github-proxy-registry/v1" or transport.get("cache_scope") != "process" or transport.get("resume_requires_same_formatted_endpoint") is not True:
+        fail("$.sources.transport", "unsupported transport security contract")
+    batch = transport.get("probe_batch_limit")
+    if type(batch) is not int or not 1 <= batch <= 32:
+        fail("$.sources.transport.probe_batch_limit", "must be from 1 to 32")
+    capabilities = array_at(transport.get("capabilities"), "$.sources.transport.capabilities")
+    required_capabilities = {"release", "raw", "archive", "api", "gist", "clone"}
+    if len(capabilities) != len(set(capabilities)) or set(capabilities) != required_capabilities:
+        fail("$.sources.transport.capabilities", "does not match the engine transport")
+    transport_routes = object_at(transport.get("routes"), "$.sources.transport.routes")
+    if set(transport_routes) != set(endpoints):
+        fail("$.sources.transport.routes", "must map every endpoint exactly once")
+    for endpoint_id in endpoints:
+        if transport_routes.get(endpoint_id) != "release":
+            fail(f"$.sources.transport.routes.{endpoint_id}", "must use release transport")
+
+
+def validate_platform_detail(config: dict) -> None:
+    if config.get("format") != FORMAT or config.get("schema_version") != SCHEMA_VERSION:
+        fail("$", "unsupported detail Config contract")
+    if not isinstance(config.get("config_version"), str) or not SEMVER.fullmatch(config["config_version"]):
+        fail("$.config_version", "must be numeric semantic versioning")
+    validate_id(config.get("platform_id"), "$.platform_id")
+    platform = {key: value for key, value in config.items() if key not in {"format", "schema_version", "config_version", "platform_id"}}
+    platform["priority"] = 0
+    platform["recognition"] = {"kind": "always"}
+    validate_platform(platform, "$")
+    walk_no_code(config)
+
+
+def validate_root_common(config: dict) -> None:
+    metadata = object_at(config.get("metadata"), "$.metadata")
+    exact_keys(metadata, {"generated_at", "source_revision"}, "$.metadata")
+    if not isinstance(metadata["generated_at"], str) or not metadata["generated_at"].endswith("Z"):
+        fail("$.metadata.generated_at", "must be a UTC timestamp")
+    if not isinstance(metadata["source_revision"], str) or not metadata["source_revision"]:
+        fail("$.metadata.source_revision", "must not be empty")
+    limits = object_at(config.get("parser_limits"), "$.parser_limits")
+    limit_keys = {"max_depth", "max_path_bytes", "max_string_bytes", "max_collection_items"}
+    exact_keys(limits, limit_keys, "$.parser_limits")
+    for name in limit_keys:
+        if type(limits[name]) is not int or limits[name] <= 0:
+            fail(f"$.parser_limits.{name}", "must be a positive integer")
+    object_at(config.get("environment"), "$.environment")
+    adapters = object_at(config.get("adapters"), "$.adapters")
+    for adapter_id, adapter_value in adapters.items():
+        validate_id(adapter_id, f"$.adapters.{adapter_id}")
+        adapter = object_at(adapter_value, f"$.adapters.{adapter_id}")
+        require_keys(adapter, {"kind", "contract_version"}, f"$.adapters.{adapter_id}")
+        if not isinstance(adapter["kind"], str) or not adapter["kind"]:
+            fail(f"$.adapters.{adapter_id}.kind", "must not be empty")
+        if type(adapter["contract_version"]) is not int or adapter["contract_version"] <= 0:
+            fail(f"$.adapters.{adapter_id}.contract_version", "must be positive")
+
+
+def validate_resolved_closure(config: dict, platform: str, model: str | None = None) -> None:
+    entry = config["platforms"].get(platform)
+    if entry is None:
+        fail("$.platforms", f"unknown resolved platform {platform}")
+    if model is not None and model not in {item["id"] for item in entry.get("models", [])}:
+        fail(f"$.platforms.{platform}.models", f"unknown resolved model {model}")
+    for adapter_id in entry["required_adapters"]:
+        adapter = config["adapters"][adapter_id]
+        if adapter.get("kind") not in SUPPORTED_ADAPTER_KINDS or adapter.get("contract_version") != 1:
+            fail(f"$.adapters.{adapter_id}", "selected adapter is unsupported")
+
+
+def walk_no_code(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key.lower() in FORBIDDEN_KEYS:
+                fail("$", f"forbidden executable field {key}")
+            walk_no_code(child)
+    elif isinstance(value, list):
+        for child in value:
+            walk_no_code(child)
+
+
+def is_root_config(config: Any) -> bool:
+    platforms = config.get("platforms", {}) if isinstance(config, dict) else {}
+    return isinstance(platforms, dict) and any(isinstance(item, dict) and "detail" in item for item in platforms.values())
 
 
 def is_platform_detail(config: Any) -> bool:
     return isinstance(config, dict) and "platform_id" in config and "platforms" not in config
-
-
-def validate_platform_detail(config: dict) -> None:
-    require_type(config, dict, "$")
-    require_keys(config, {"format", "schema_version", "config_version", "platform_id"}, "$")
-    if config["format"] != "jenny92.appmanager-config":
-        fail("$.format", "unsupported format")
-    if config["schema_version"] != 1:
-        fail("$.schema_version", "unsupported schema version")
-    if not isinstance(config["config_version"], str) or not SEMVER.fullmatch(config["config_version"]):
-        fail("$.config_version", "must be semantic version")
-    if not isinstance(config["platform_id"], str) or not SAFE_ID.fullmatch(config["platform_id"]):
-        fail("$.platform_id", "invalid platform id")
-    if "priority" in config or "recognition" in config:
-        fail("$", "platform detail must not duplicate root detection fields")
-    platform = {
-        key: value
-        for key, value in config.items()
-        if key not in {"format", "schema_version", "config_version", "platform_id"}
-    }
-    platform["priority"] = 0
-    platform["recognition"] = {"kind": "always"}
-    validate_platform(platform, "$")
-    for model_id, model in platform.get("models", {}).items():
-        model_path = f"$.models.{model_id}"
-        if not SAFE_ID.fullmatch(model_id):
-            fail(model_path, "invalid model id")
-        require_type(model, dict, model_path)
-        allow_keys(
-            model,
-            {"display_name", "device_manufacturer", "recognition", "display", "overrides"},
-            model_path,
-        )
-        require_keys(model, {"display_name", "recognition", "display"}, model_path)
-        if "device_manufacturer" in model and (
-            not isinstance(model["device_manufacturer"], str) or not model["device_manufacturer"]
-        ):
-            fail(f"{model_path}.device_manufacturer", "must be a non-empty string")
-        validate_predicate(model["recognition"], f"{model_path}.recognition")
-    walk_no_code(config)
-
-
-def validate_resolved_closure(config: dict, platform: str, model: str | None = None) -> None:
-    if platform not in config["platforms"]:
-        fail("$.platforms", f"unknown resolved platform {platform}")
-    if model is not None:
-        models = config["platforms"][platform].get("models", {})
-        entry = models.get(model)
-        if entry is None:
-            fail(f"$.platforms.{platform}.models", f"unknown resolved model {model}")
-    for adapter_id in config["platforms"][platform]["required_adapters"]:
-        adapter = config["adapters"][adapter_id]
-        if adapter["kind"] not in SUPPORTED_ADAPTER_KINDS or adapter["contract_version"] != 1:
-            fail(
-                f"$.adapters.{adapter_id}",
-                "adapter in resolved device closure is not understood by this engine",
-            )
 
 
 def main() -> int:
@@ -640,8 +672,6 @@ def main() -> int:
             validate(config)
             if args.platform:
                 validate_resolved_closure(config, args.platform, args.model)
-            elif args.model:
-                fail("--model", "requires --platform")
     except (OSError, json.JSONDecodeError, ConfigError) as error:
         print(f"invalid appmanager config: {error}", file=sys.stderr)
         return 1

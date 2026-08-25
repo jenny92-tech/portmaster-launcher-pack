@@ -7,7 +7,7 @@
   "required": [
     "format", "schema_version", "config_version", "platform_id", "display_name",
     "support", "required_adapters", "paths", "source_route", "frontend", "libraries",
-    "python", "health", "preserved_dirs", "capabilities",
+    "python", "health", "preserved_dirs", "locations", "capabilities",
     "environment_scopes", "display", "input"
   ],
   "properties": {
@@ -16,6 +16,7 @@
     "config_version": {"$ref": "appmanager-config.schema.json#/$defs/semver"},
     "platform_id": {"$ref": "appmanager-config.schema.json#/$defs/id"},
     "display_name": {"type": "string", "minLength": 1},
+    "device_manufacturer": {"type": "string", "minLength": 1},
     "support": {"$ref": "appmanager-config.schema.json#/$defs/support"},
     "required_adapters": {"type": "array", "uniqueItems": true, "items": {"$ref": "appmanager-config.schema.json#/$defs/id"}},
     "paths": {"type": "object", "required": ["launcher_directory"], "additionalProperties": {"$ref": "appmanager-config.schema.json#/$defs/pathStrategy"}},
@@ -25,14 +26,14 @@
     "python": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
     "health": {"type": "array", "items": {"$ref": "appmanager-config.schema.json#/$defs/healthRule"}},
     "preserved_dirs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/]+$"}},
-    "capabilities": {"type": "object", "additionalProperties": {"type": "boolean"}},
+    "capabilities": {"$ref":"appmanager-config.schema.json#/$defs/capabilities"},
     "environment_scopes": {"type": "array", "uniqueItems": true, "items": {"enum": ["love_ui"]}},
     "display": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
     "input": {"$ref": "appmanager-config.schema.json#/$defs/openObject"},
+    "locations": {"$ref":"appmanager-config.schema.json#/$defs/locations"},
     "models": {
-      "type": "object",
-      "propertyNames": {"$ref": "appmanager-config.schema.json#/$defs/id"},
-      "additionalProperties": {"$ref": "appmanager-config.schema.json#/$defs/model"}
+      "type": "array",
+      "items": {"$ref": "appmanager-config.schema.json#/$defs/model"}
     }
   }
 }

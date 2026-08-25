@@ -47,27 +47,37 @@ love.event.quit=function(code) LAST_QUIT=code end
 '''
 
 expected_env = {
-    "heishenhua": (6, ("HSH_WIDTH='auto'", "HSH_RENDER_PERCENT='100'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'")),
-    "hk": (5, ("HKL_WIDTH='auto'", "HKL_RENDER_PERCENT='100'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'")),
-    "sts2": (4, ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_SWAP_AB='on'", "SLL_LAUNCH_COUNT='1'")),
-    "terraria": (5, ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='100'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'")),
-    "vampiresurvivors114": (4, ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='100'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'")),
+    "heishenhua": ("HSH_WIDTH='auto'", "HSH_RENDER_PERCENT='100'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'"),
+    "hk": ("HKL_WIDTH='auto'", "HKL_RENDER_PERCENT='100'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'"),
+    "sts2": ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_SWAP_AB='on'", "SLL_LAUNCH_COUNT='1'"),
+    "terraria": ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='100'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'"),
+    "vampiresurvivors114": ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='100'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'"),
 }
 
 for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):
-    with tempfile.TemporaryDirectory() as source:
+    with tempfile.TemporaryDirectory() as temp:
+        source = Path(temp) / "love"
+        source.mkdir()
+        if port == "terraria":
+            for relative in (
+                "gamedata/lib/arm64-v8a/libil2cpp.so",
+                "gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat",
+                "gamedata/assets/bin/Data/data.unity3d",
+            ):
+                target = Path(temp) / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.touch()
         lua = LuaRuntime(unpack_returned_tuples=True)
-        lua.globals().SOURCE = source
+        lua.globals().SOURCE = str(source)
         lua.execute(mock)
         lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
         lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
         lua.execute("love.load(); love.draw()")
-        downs, required = expected_env[port]
-        for _ in range(downs):
-            lua.execute("love.keypressed('down')")
+        required = expected_env[port]
+        # Fresh launcher pages focus Start Game by default.
         lua.execute("love.keypressed('return')")
         assert lua.globals().LAST_QUIT == 42, port
-        text = (Path(source) / "launch_config.env").read_text(encoding="utf-8")
+        text = (source / "launch_config.env").read_text(encoding="utf-8")
         for line in required:
             assert line in text, (port, line, text)
 
@@ -90,7 +100,7 @@ with tempfile.TemporaryDirectory() as source:
         love.load()
         local state=require("kit").get_state()
         assert(state.ui_lang=="zh" and state.quality=="safe")
-        love.keypressed("down"); love.keypressed("return")
+        love.keypressed("return")
     ''')
     text = (Path(source) / "launch_config.env").read_text(encoding="utf-8")
     assert "QUALITY='safe'" in text and "TEXT='it'\"'\"'s safe'" in text, text
@@ -344,7 +354,7 @@ with tempfile.TemporaryDirectory() as source:
         assert(#(draws.Manager or {})==2)
         assert(draws.Manager[2].size==40)
         assert(draws.Installed[1].size==23)
-        assert(draws["frt_3.6"][1].size==19)
+        assert(draws["frt_3.6"][1].size==21)
         assert(draws.Feature[1].size==26 and draws.Port[1].size==26)
         for _,value in ipairs({"Installed","frt_3.6","godot_4.5","Feature","Port"}) do
             local items=draws[value] or {}
@@ -548,14 +558,14 @@ lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute(f"package.path={str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path")
 lua.execute(r'''
     local snapshots=0
-    local inventory={schema=3,entries={},ports={{script="Game.sh",path="/scripts/Game.sh",
-        dir="",data_path="",images={}}},refcount={},orphan_dirs={},
+    local inventory={schema=1,entries={},ports={{script="Game.sh",path="/scripts/Game.sh",
+        dir="",data_path="",images={}}},data_refcount={},orphan_dirs={},
         orphan_images={},dead_scripts={},trash={},runtimes={need={godot_4_5={"Game.sh"}},
         facts={{name="godot_4_5",health="healthy",bytes=42}}}}
     local native={snapshot=function()
         snapshots=snapshots+1
         return {env={scripts_dir="/scripts",gamedirs_dir="/data",images_dir="/images",libs_dir="/libs",
-            gamedir=""},inventory=inventory,sizes={},runtime_metadata={}}
+            gamedir=""},inventory=inventory,runtime_metadata={}}
     end}
     local model=require("app_model").new({get_state=function() return {ui_lang="en"} end},native)
     assert(model.load_env())
@@ -594,7 +604,16 @@ with tempfile.TemporaryDirectory() as source:
         "display_width": "960", "display_height": "720", "device_arch": "aarch64",
         "device": "test",
         "portmaster_health": "healthy", "portmaster_version": "2026.07",
-        "size_cache_ready": False,
+        "portmaster_latest": "2026.08", "update_status": "ok",
+        "portmaster_target": str(base / "PortMaster"), "target_confirmed": "1",
+        "device_class": "tested", "portmaster_release_channel": "official",
+        "capability_inventory_ports": True, "capability_inventory_apps": False,
+        "capability_manage_ports": True, "capability_manage_apps": False,
+        "capability_install_ports": True, "capability_install_apps": False,
+        "capability_trash": True, "capability_leftovers": True,
+        "capability_repair_runtimes": True, "capability_cleanup_appledouble": True,
+        "capability_manage_portmaster": True, "capability_install_portmaster": True,
+        "capability_update_portmaster": True,
         "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
         "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "jenny92-appmanager"
     }), encoding="utf-8")
@@ -608,7 +627,7 @@ with tempfile.TemporaryDirectory() as source:
         f"{str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path"
     )
     inventory = {
-        "schema": 3,
+        "schema": 1,
         "entries": [
             {"root": "scripts", "name": "Game.sh", "path": str(scripts / "Game.sh")},
             {"root": "scripts", "name": "Installed.sh", "path": str(scripts / "Installed.sh")},
@@ -622,11 +641,12 @@ with tempfile.TemporaryDirectory() as source:
                 "data_path": str(data / "GameData"), "images": [
                 {"name": "Installed.png", "path": str(base / "images" / "Installed.png")}], "runtimes": ["godot_4.5"]},
         ],
-        "refcount": {"GameData": 2}, "orphan_dirs": [],
+        "data_refcount": {str(data / "GameData"): 2}, "orphan_dirs": [],
         "orphan_images": [{"name": "Orphan.png", "path": str(base / "images" / "Orphan.png")}],
         "dead_scripts": [], "trash": [],
         "runtimes": {"need": {"godot_4.6.3": ["Game.sh"], "godot_4.5": ["Installed.sh"]},
             "facts": [
+                {"name": "frt_3.6", "health": "healthy", "bytes": 4},
                 {"name": "godot_4.6.3", "health": "missing", "bytes": 0},
                 {"name": "godot_4.5", "health": "healthy", "bytes": 20},
             ]},
@@ -651,9 +671,18 @@ with tempfile.TemporaryDirectory() as source:
                     if payload.kind=="config-refresh-if-newer" then
                         return {ok=false,error={code="offline",message="offline fixture"}}
                     end
-                    return {ok=true,value=1}
+                    TASK_ID=(TASK_ID or 0)+1
+                    if payload.kind=="initial-snapshot" then
+                        POLL_EVENT={task_id=TASK_ID,kind="initial-snapshot",status="complete",
+                            data={snapshot=APP_SNAPSHOT}}
+                    end
+                    return {ok=true,value=TASK_ID}
                 end
-                if method=="poll" then return {ok=true} end
+                if method=="poll" then
+                    local event=POLL_EVENT
+                    if event then POLL_EVENT=nil; return {ok=true,value=event} end
+                    return {ok=true}
+                end
                 if method=="cancel" then return {ok=true,value=true} end
                 return {ok=false,error={code="unsupported_method",message="unsupported method"}}
             end,
@@ -661,7 +690,7 @@ with tempfile.TemporaryDirectory() as source:
     ''')
     lua.execute(f"dofile({str(root / 'ports/appmanager/love/main.lua')!r})")
     lua.execute(
-        "love.load(); local L=require('kit').debug_layout(); "
+        "love.load(); love.update(0.2); local L=require('kit').debug_layout(); "
         "assert(L.app and L.x <= 20 and L.w > L.side_w * 2 and L.rh >= 70 and L.dim >= 0.90)"
     )
     lua.execute(r'''
@@ -675,6 +704,7 @@ with tempfile.TemporaryDirectory() as source:
     # calling either callback. Escape/B always follows the cancel path.
     lua.execute(r'''
         local k=require("kit")
+        k.close_guide()
         DIALOG_CONFIRM,DIALOG_CANCEL=0,0
         k.dialog({title={en="Confirm",zh="确认"},message="Review this action",
             items={"One","Two","A very long selected item name that must stay on one line","Four","Five"},
@@ -701,6 +731,13 @@ with tempfile.TemporaryDirectory() as source:
     # stable sidebar focus when the dynamic page rebuilds.
     lua.execute(r'''
         local k=require("kit")
+        love.keypressed("right")
+        assert(k.debug_focus().zone=="sidebar" and k.debug_focus().sidebar_i==1)
+        love.keypressed("down")
+        assert(k.debug_page().sidebar_labels[2]=="卸载管理")
+        love.keypressed("return")
+        assert(k.debug_page().index==8)
+        k.close_guide()
         love.keypressed("return"); love.keypressed("right")
         assert(k.debug_focus().sidebar_i==1)
         love.keypressed("return")
@@ -712,7 +749,7 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("return"); love.draw()
         local direct=k.debug_dialog()
         assert(direct.open and direct.danger and direct.checkbox_checked and direct.title=="永久删除所选游戏")
-        assert(direct.message:find("无法恢复",1,true))
+        assert(direct.message:find("无法还原",1,true))
         -- Closing and reopening the Dialog restores the safe unchecked default.
         love.keypressed("escape"); love.keypressed("return")
         reversible=k.debug_dialog()
@@ -731,14 +768,17 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("left"); love.keypressed("left")
         assert(k.debug_focus().zone=="rows")
     ''')
-    # Environment details use four sections: 4 key paths, 5 device fields,
-    # 16 environment values, then a counted compact list of installed runtimes.
+    # Environment details cover readiness, key paths, device data, environment
+    # values, and a counted compact list of installed runtimes.
     lua.execute(r'''
         local k=require("kit")
-        -- Open Environment Management from the Home header, then choose its
-        -- Environment Details action. The details page is intentionally no
-        -- longer a direct Home destination.
-        love.keypressed("up"); love.keypressed("return")
+        -- Return to Home, open PortMaster Management from Quick Tools, then
+        -- choose Environment Details.
+        love.keypressed("escape")
+        assert(k.debug_page().index==1)
+        for _=1,4 do love.keypressed("down") end
+        assert(k.debug_focus().zone=="sidebar" and k.debug_focus().sidebar_i==6)
+        love.keypressed("return")
         assert(k.debug_page().index==6)
         love.keypressed("right"); love.keypressed("right")
         assert(k.debug_focus().zone=="sidebar")
@@ -746,28 +786,33 @@ with tempfile.TemporaryDirectory() as source:
         assert(k.debug_focus().sidebar_i==4)
         love.keypressed("return")
         local page=k.debug_page()
-        assert(page.index==4 and page.section_count==4 and page.row_count==31)
-        assert(page.section_labels[4]=="已安装 Runtime（2）")
-        assert(page.row_kinds[30]=="list_item" and page.row_kinds[31]=="list_item")
-        assert(page.row_font_px[1]==22 and page.row_label_px[2]==16 and page.row_value_px[2]==18)
-        assert(page.row_font_px[30]==19)
+        assert(page.index==4 and page.section_count==5 and page.row_count==41,
+            string.format("page=%s sections=%s rows=%s",page.index,page.section_count,page.row_count))
+        assert(page.section_labels[5]=="已安装 Runtime（2）")
+        assert(page.row_kinds[40]=="list_item" and page.row_kinds[41]=="list_item")
+        assert(page.row_font_px[1]==22 and page.row_label_px[2]==18 and page.row_value_px[2]==20)
+        assert(page.row_font_px[40]==19)
         assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==2)
+        for _=1,12 do
+            if k.debug_sidebar_detail().key=="path:scripts" then break end
+            love.keypressed("down")
+        end
         local detail=k.debug_sidebar_detail()
-        assert(detail.key=="path:scripts" and detail.title=="SH 启动脚本目录")
+        assert(k.debug_focus().focus_i==12 and detail.key=="path:scripts" and detail.title=="SH 启动脚本目录")
         assert(detail.body:find("启动脚本",1,true))
         local layout=k.debug_layout()
         assert(layout.row_layout_mode=="grid" and layout.columns==2)
         assert(layout.geometry[2].x < layout.geometry[3].x)
         assert(layout.geometry[2].y == layout.geometry[3].y)
         assert(layout.geometry[2].h == layout.geometry[3].h)
-        assert(layout.geometry[30].h < layout.rh and layout.geometry[31].h < layout.rh)
+        assert(layout.geometry[40].h < layout.rh and layout.geometry[41].h < layout.rh)
         love.keypressed("right")
-        assert(k.debug_focus().focus_i==3)
+        assert(k.debug_focus().focus_i==13)
         detail=k.debug_sidebar_detail()
         assert(detail.key=="path:data" and detail.title=="游戏数据目录")
-        assert(detail.body:find("游戏数据",1,true))
+        assert(detail.body:find("游戏文件",1,true))
         love.keypressed("down")
-        assert(k.debug_focus().focus_i==5)
+        assert(k.debug_focus().focus_i==15)
         love.draw(); love.keypressed("escape")
     ''')
     # Missing Runtimes have their own selectable repair page. Current official
@@ -777,10 +822,10 @@ with tempfile.TemporaryDirectory() as source:
         k.goto_page(1); love.keypressed("right")
         for _=1,12 do
             local focus=k.debug_focus()
-            if focus.zone=="sidebar" and focus.sidebar_i==6 then break end
+            if focus.zone=="sidebar" and focus.sidebar_i==5 then break end
             love.keypressed("down")
         end
-        assert(k.debug_focus().sidebar_i==6)
+        assert(k.debug_focus().sidebar_i==5)
         love.keypressed("return")
         local page=k.debug_page()
         assert(page.index==5 and page.title=="Runtime 修复" and page.row_count==4)
@@ -822,7 +867,8 @@ with tempfile.TemporaryDirectory() as source:
         },{row_layout={mode="flow",min_width=250}})
         k.goto_page(flow)
         local L=k.debug_layout()
-        assert(L.row_layout_mode=="flow" and L.columns==2)
+        assert(L.row_layout_mode=="flow" and L.columns==2,
+            string.format("mode=%s columns=%s",L.row_layout_mode,L.columns))
         assert(L.geometry[1].y==L.geometry[2].y and L.geometry[1].h==L.geometry[2].h)
         assert(L.geometry[1].h>L.rh)
         love.keypressed("right"); assert(k.debug_focus().focus_i==2)
@@ -901,16 +947,16 @@ with tempfile.TemporaryDirectory() as source:
         love.keypressed("return"); assert(k.debug_layout().geometry[1].h==compact.geometry[1].h)
         k.goto_page(1)
     ''')
-    # Toggle a real scanned port, move into the shared sidebar, open the
-    # confirmation dialog, then cancel without leaving the dynamic home page.
-    lua.execute(
-        "love.draw(); love.keypressed('return'); "
-        "love.keypressed('right'); love.keypressed('return'); "
-        "assert(require('kit').debug_dialog().open); love.draw(); "
-        "love.keypressed('escape'); love.draw(); "
-        "love.keypressed('up'); love.keypressed('return'); love.draw(); "
-        "love.keypressed('escape'); love.draw()"
-    )
+    # Home is the launcher: selecting a real scanned port opens a safe launch
+    # confirmation, and cancelling keeps the user on Home.
+    lua.execute(r'''
+        local k=require("kit")
+        love.draw(); love.keypressed("return")
+        local launch=k.debug_dialog()
+        assert(launch.open and launch.focus=="cancel" and not launch.danger)
+        love.keypressed("escape"); love.draw()
+        assert(not k.debug_dialog().open and k.debug_page().index==1)
+    ''')
     # APP Manager never exits directly from the home B/Escape action. It opens
     # a non-dangerous dialog, defaults to Cancel, and exits only after Confirm.
     lua.execute(r'''

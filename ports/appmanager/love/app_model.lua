@@ -12,9 +12,9 @@ end
 function Model.new(kit,native)
     local self={
         kit=kit,native=native,
-        env={},report={},size_map={},runtime_metadata={},missing_by_script={},native_inventory=nil,
+        env={},report={},runtime_metadata={},missing_by_script={},native_inventory=nil,
         cache={},report_version=0,
-        pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6},
+        pages={HOME=1,JUNK=2,TRASH=3,ENV=4,RUNTIME=5,MANAGE=6,ZIP=7,GAMES=8,LAUNCHER=9},
     }
 
     local function cached(key,token,loader,force)
@@ -48,13 +48,109 @@ function Model.new(kit,native)
 
     function self.L(en,zh) return {en=en,zh=zh} end
     function self.join(parts,sep) return table.concat(parts,sep or " · ") end
+
+    -- Support model shared by Environment Management and Environment Details.
+    local function enabled(name) return self.env[name]==true end
+    function self.system_managed() return self.env.portmaster_management=="system" end
+    function self.can_install()
+        if self.system_managed() then return false end
+        if not enabled("capability_manage_portmaster") or not enabled("capability_install_portmaster") then return false end
+        if self.env.portmaster_release_install_allowed==false then return false end
+        -- An install needs a place to go. Devices whose PortMaster location is
+        -- unknown (unknown-path / unconfirmed) cannot install: hide the entry
+        -- instead of letting the user hit a guaranteed-fail dialog.
+        if self.env.target_confirmed~="1" or not self.env.portmaster_target or self.env.portmaster_target=="" then
+            return false
+        end
+        return true
+    end
+    function self.can_update()
+        return self.can_install() and enabled("capability_update_portmaster")
+    end
+
+    function self.health_label()
+        local L=self.L
+        if self.system_managed() then
+            if self.env.portmaster_health=="healthy" then return L("Managed by system · Available","系统管理 · 当前可用") end
+            if self.env.portmaster_health=="damaged" then return L("Managed by system · Needs repair","系统管理 · 需要修复") end
+            return L("Managed by system · Not available","系统管理 · 当前不可用")
+        end
+        if self.env.portmaster_health=="healthy" and self.env.portmaster_python_ok~=false then return L("Healthy","正常") end
+        if self.env.portmaster_health=="healthy" then return L("Healthy · Python issue","正常 · Python 问题") end
+        if self.env.portmaster_health=="damaged" then return L("Needs repair","需要修复") end
+        return L("Not installed","未安装")
+    end
+
+    -- Only prompt about a damaged core when the problem is certain: a file the
+    -- installer itself requires is missing. Permissions, the pugwash/
+    -- harbourmaster launchers (absent from pre-2024 cores) and Python imports
+    -- can fail while PortMaster still happens to work, so those stay visible
+    -- in the details pages instead of nagging at startup.
+    function self.severe_health_issue()
+        if self.env.portmaster_health~="damaged" then return false end
+        for _,check in ipairs(self.env.portmaster_health_checks or {}) do
+            if check.passed==false and tostring(check.kind or "")=="required_file" then
+                return true
+            end
+        end
+        return false
+    end
+
+    function self.support_label()
+        local L=self.L
+        local env=self.env
+        if self.system_managed() then return L("Managed by system","由系统管理") end
+        if env.target_confirmed~="1" or not env.portmaster_target or env.portmaster_target=="" then
+            return L("Cannot determine","无法确定")
+        end
+        if not self.can_install() then return L("Not enabled","配置未启用") end
+        local channel=tostring(env.portmaster_release_channel or "")
+        local class=tostring(env.device_class or "unknown-path")
+        -- A custom release channel (e.g. miniloong-custom) means this device is
+        -- supported by our own build, not by the official PortMaster release.
+        if channel~="" and channel~="official" and channel~="system" then
+            return L("Custom build (Jenny92)","定制版（Jenny92）")
+        end
+        if class=="tested" then
+            if channel=="official" then return L("Officially supported","官方支持") end
+            return L("Supported","支持")
+        end
+        if class=="official-untested" then return L("Not officially tested · can try","官方未实测（可尝试）") end
+        if class=="unsupported-known" then return L("Unknown device · needs confirmation","未知设备（需确认）") end
+        return L("Unknown","未知")
+    end
+
+    function self.support_explanation()
+        local L=self.L
+        local env=self.env
+        if self.system_managed() then return nil end
+        if env.target_confirmed~="1" or not env.portmaster_target or env.portmaster_target=="" then
+            return L("The PortMaster install location could not be determined, so it cannot be installed.",
+                "无法确定 PortMaster 安装位置，暂不能安装。")
+        end
+        if not self.can_install() then
+            return L("PortMaster installation is not supported on this device.",
+                "当前设备暂不支持安装 PortMaster。")
+        end
+        local class=tostring(env.device_class or "unknown-path")
+        if class=="tested" then return nil end
+        if class=="official-untested" then
+            return L("This device has not been tested by the official release yet. You can try installing after confirming the risk.",
+                "官方版本尚未实测这台设备。确认风险后可以尝试安装。")
+        end
+        if class=="unsupported-known" then
+            return L("This device is not in the official support list. Install after confirming the location; the app self-checks whether PortMaster works when the install finishes, and an existing PortMaster is checked directly.",
+                "这台设备不在官方支持列表中。确认安装位置后可以安装；安装完成会自动检查能否正常使用，已有 PortMaster 会直接检测当前状态。")
+        end
+        return nil
+    end
     function self.apply_snapshot(snapshot)
         if type(snapshot)~="table" or type(snapshot.env)~="table" then
             return false,"APP Manager service returned no environment"
         end
         replace(self.env,snapshot.env)
         self.native_inventory=type(snapshot.inventory)=="table" and snapshot.inventory or nil
-        replace(self.size_map,type(snapshot.sizes)=="table" and snapshot.sizes or {})
+        self.inventory_revision=type(snapshot.revision)=="string" and snapshot.revision or ""
         replace(self.runtime_metadata,type(snapshot.runtime_metadata)=="table" and snapshot.runtime_metadata or {})
         self.invalidate_all()
         return true
@@ -67,6 +163,25 @@ function Model.new(kit,native)
         self.env.update_checked=tonumber(update.update_checked) or 0
         self.env.update_status=status
         self.env.portmaster_latest=tostring(update.portmaster_latest or "")
+        return true
+    end
+
+    function self.apply_zip_bundles(bundles)
+        if type(bundles)~="table" then self.zip_bundles={} return true end
+        local out={}
+        for _,bundle in ipairs(bundles) do
+            out[#out+1]={
+                path=tostring(bundle.path or ""),
+                size=tonumber(bundle.size) or 0,
+                source_identity=tostring(bundle.source_identity or ""),
+                kind=tostring(bundle.kind or "unknown"),
+                entry_script=tostring(bundle.entry_script or ""),
+                entry_data=tostring(bundle.entry_data or ""),
+                app_name=tostring(bundle.app_name or ""),
+                diagnostic=tostring(bundle.diagnostic or ""),
+            }
+        end
+        self.zip_bundles=out
         return true
     end
 
@@ -200,15 +315,29 @@ function Model.new(kit,native)
         return tostring(value)
     end
 
-    function self.path_size(paths)
-        self.load_sizes()
-        local total=0
-        for _,path in ipairs(paths or {}) do total=total+(self.size_map[path] or 0) end
-        return total
+    function self.display_name(name)
+        -- Port launchers are user-owned filenames. Prefixes such as `Z_`,
+        -- region tags and every other character remain exactly as they appear
+        -- on the storage card; only the launcher extension is hidden.
+        return (tostring(name or ""):gsub("%.sh$",""))
     end
 
-    function self.display_name(name)
-        return (name:gsub("%.[^.]+$",""):gsub("^%[[^]]+%]",""):gsub("^[A-Z]_",""))
+    -- Localized display name for a standalone app: prefer config.json
+    -- label/label.ch.lang (TrimUI convention), falling back to the folder
+    -- name. Follows the current UI language live.
+    function self.app_label(app)
+        local zh = kit.get_state().ui_lang=="zh"
+        if zh and app.label_zh and app.label_zh~="" then return app.label_zh end
+        if app.label and app.label~="" then return app.label end
+        return tostring(app.name or "")
+    end
+
+    function self.app_manageable(app)
+        local name=tostring(app and app.name or "")
+        for _,protected in ipairs(self.env.protected_app_names or {}) do
+            if name==protected then return false end
+        end
+        return true
     end
 
     function self.selected_count(values)
@@ -220,10 +349,6 @@ function Model.new(kit,native)
             local n=self.selected_count(values)
             return kit.get_state().ui_lang=="zh" and string.format(zh,n) or string.format(en,n)
         end
-    end
-
-    function self.load_sizes(force)
-        return self.size_map
     end
 
     function self.load_runtime_metadata(force)
@@ -245,7 +370,7 @@ function Model.new(kit,native)
             self.env.directory or "",self.env.controlfolder or ""},"\0")
         return cached("ports",token,function()
             local native=self.load_native_inventory(force)
-            replace(self.report,native or {ports={},refcount={},orphan_dirs={},orphan_images={},dead_scripts={},runtimes={need={},facts={}}})
+            replace(self.report,native or {ports={},data_refcount={},orphan_dirs={},orphan_images={},dead_scripts={},runtimes={need={},facts={}}})
             self.report_version=self.report_version+1
             return self.report
         end,force)
@@ -292,13 +417,34 @@ function Model.new(kit,native)
         return self.env.update_status,self.env.portmaster_latest
     end
 
+    local function version_tokens(value)
+        local out={}
+        for token in tostring(value):gmatch("%d+") do out[#out+1]=tonumber(token) end
+        return out
+    end
+    local function compare_versions(left,right)
+        local a,b=version_tokens(left),version_tokens(right)
+        if #a==0 or #b==0 then
+            return tostring(left)==tostring(right) and 0 or nil
+        end
+        for i=1,math.max(#a,#b) do
+            local x,y=a[i] or 0,b[i] or 0
+            if x~=y then return x<y and -1 or 1 end
+        end
+        return 0
+    end
+
     function self.update_state()
         local current=tostring(self.env.portmaster_version or "")
         local latest=tostring(self.env.portmaster_latest or "")
         if self.env.update_status~="ok" or latest=="" then return "unknown" end
         if current==latest then return "current" end
-        if current:match("^20%d%d[%.%-]%d%d[%.%-]%d%d%-%d%d%d%d$") and
-           latest:match("^20%d%d[%.%-]%d%d[%.%-]%d%d%-%d%d%d%d$") and current<latest then return "update" end
+        -- Numeric-token comparison, tolerant of version format changes by the
+        -- official project. Unparseable versions fall back to reinstall rather
+        -- than guessing an update.
+        local cmp=compare_versions(current,latest)
+        if cmp==0 then return "current" end
+        if cmp==-1 then return "update" end
         return "reinstall"
     end
 

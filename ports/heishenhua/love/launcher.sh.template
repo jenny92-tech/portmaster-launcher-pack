@@ -55,6 +55,12 @@ if [ -f "$HSH_ENV" ]; then
     0|384|480|512|720) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${HSH_TEXMAX}/" "$PORT_TOML" ;;
   esac
 
+  if grep -q '^textureDownsampleFilter *=' "$PORT_TOML"; then
+    sed -i 's/^textureDownsampleFilter *=.*/textureDownsampleFilter = "nearest"/' "$PORT_TOML"
+  else
+    sed -i '/^\[gpu\]/a textureDownsampleFilter = "nearest"' "$PORT_TOML"
+  fi
+
   sed -i -e '/^\[ui_layout\]/,$d' -e '/^\[\[il2cpp_patch\]\]/,$d' "$PORT_TOML"
 
   printf '\n[ui_layout]\nclass = "UI_InGame_Main"\nmethod = "Start"\nhide = [0xB8, 0xC0, 0xC8, 0xD8, 0xE0, 0xE8, 0xF8, 0x100]\nmove_from = 0xC8\nmove_to = 0xD0\nright_margin = 70\n' >> "$PORT_TOML"

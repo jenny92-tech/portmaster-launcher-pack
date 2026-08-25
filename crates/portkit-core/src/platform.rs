@@ -5,6 +5,28 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
+pub const REQUIRED_CAPABILITIES: &[&str] = &[
+    "install_portmaster",
+    "update_portmaster",
+    "repair_runtimes",
+    "manage_portmaster",
+    "manage_ports",
+    "inventory_ports",
+    "install_ports",
+    "inventory_apps",
+    "manage_apps",
+    "install_apps",
+    "manage_artwork",
+    "manage_frontend",
+    "manage_images",
+    "trash",
+    "leftovers",
+    "cleanup_appledouble",
+    "scan_script_images",
+];
+
+pub const PORT_LOCATION_KINDS: &[&str] = &["port_scripts", "port_data", "port_images"];
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PathStrategy {
     pub strategy: String,
@@ -15,8 +37,12 @@ pub struct PathStrategy {
 impl PathStrategy {
     pub fn validate(&self, limits: &ParserLimits) -> Result<()> {
         match self.strategy.as_str() {
-            "literal" => validate_literal_path(self.string("value")?, limits),
+            "literal" => {
+                self.require_arguments(&["value"])?;
+                validate_absolute_path(self.string("value")?, limits, "literal path")
+            }
             "first_existing" => {
+                self.require_arguments(&["candidates", "expected_type", "on_missing"])?;
                 let candidates = self.strings("candidates")?;
                 if candidates.is_empty() {
                     return Err(Error::InvalidConfig(
@@ -24,16 +50,27 @@ impl PathStrategy {
                     ));
                 }
                 for candidate in candidates {
-                    validate_literal_path(candidate, limits)?;
+                    validate_absolute_path(candidate, limits, "first_existing candidate")?;
                 }
-                Ok(())
+                if self
+                    .arguments
+                    .get("on_missing")
+                    .is_some_and(|value| value.as_str() != Some("unresolved"))
+                {
+                    return Err(Error::InvalidConfig(
+                        "first_existing on_missing must be \"unresolved\"".into(),
+                    ));
+                }
+                self.expected_type().map(|_| ())
             }
-            "launcher_dir" | "platform_core" => Ok(()),
+            "launcher_dir" | "platform_core" => self.require_arguments(&[]),
             "rom_root_from_launcher" => {
+                self.require_arguments(&["levels", "suffix", "value"])?;
                 self.validate_levels(limits)?;
                 validate_literal_path(self.string_any(&["suffix", "value"])?, limits)
             }
             "xdg_data_home" => {
+                self.require_arguments(&["suffix"])?;
                 if let Some(suffix) = self
                     .arguments
                     .get("suffix")
@@ -44,8 +81,9 @@ impl PathStrategy {
                 Ok(())
             }
             "literal_by_launcher_prefix" => {
-                validate_literal_path(self.string("prefix")?, limits)?;
-                validate_literal_path(self.string("matched")?, limits)?;
+                self.require_arguments(&["prefix", "matched", "fallback"])?;
+                validate_absolute_path(self.string("prefix")?, limits, "launcher prefix")?;
+                validate_absolute_path(self.string("matched")?, limits, "matched path")?;
                 let fallback = self.strings("fallback")?;
                 if fallback.is_empty() {
                     return Err(Error::InvalidConfig(
@@ -53,19 +91,38 @@ impl PathStrategy {
                     ));
                 }
                 for value in fallback {
-                    validate_literal_path(value, limits)?;
+                    validate_absolute_path(value, limits, "launcher prefix fallback")?;
                 }
                 Ok(())
             }
             "parent" => {
+                self.require_arguments(&["path", "of", "base", "levels"])?;
                 self.string_any(&["path", "of", "base"])?;
                 self.validate_levels(limits)?;
                 Ok(())
             }
             "relative_to" => {
+                self.require_arguments(&[
+                    "base",
+                    "path",
+                    "relative",
+                    "value",
+                    "suffix",
+                    "canonicalize_existing",
+                ])?;
                 self.string_any(&["base", "path"])?;
                 let relative = self.string_any(&["relative", "value", "suffix"])?;
-                validate_literal_path(relative, limits)
+                validate_literal_path(relative, limits)?;
+                if self
+                    .arguments
+                    .get("canonicalize_existing")
+                    .is_some_and(|value| !value.is_boolean())
+                {
+                    return Err(Error::InvalidConfig(
+                        "relative_to canonicalize_existing must be a boolean".into(),
+                    ));
+                }
+                Ok(())
             }
             other => Err(Error::InvalidConfig(format!(
                 "unsupported path strategy {other:?}"
@@ -79,117 +136,134 @@ impl PathStrategy {
         context: &DetectionContext,
         already_resolved: &BTreeMap<String, PathBuf>,
     ) -> Result<PathBuf> {
-        let result = match self.strategy.as_str() {
-            "literal" => context.rooted_path(self.string("value")?)?,
-            "first_existing" => {
-                let candidates = self.strings("candidates")?;
-                let mut resolved = candidates.iter().map(|value| context.rooted_path(value));
-                let mut fallback = None;
-                let mut existing = None;
-                for candidate in resolved.by_ref() {
-                    let candidate = candidate?;
-                    fallback.get_or_insert_with(|| candidate.clone());
-                    if candidate.exists() {
-                        existing = Some(candidate);
-                        break;
+        let result =
+            match self.strategy.as_str() {
+                "literal" => context.rooted_path(self.string("value")?)?,
+                "first_existing" => {
+                    let candidates = self.strings("candidates")?;
+                    let mut resolved = candidates.iter().map(|value| context.rooted_path(value));
+                    let mut fallback = None;
+                    let mut existing = None;
+                    for candidate in resolved.by_ref() {
+                        let candidate = candidate?;
+                        fallback.get_or_insert_with(|| candidate.clone());
+                        if self.matches_expected_type(&candidate)? {
+                            existing = Some(candidate);
+                            break;
+                        }
                     }
-                }
-                existing
-                    .or(fallback)
-                    .ok_or_else(|| Error::Resolution(format!("path {name:?} has no candidates")))?
-            }
-            "launcher_dir" => context
-                .launcher_path
-                .parent()
-                .ok_or_else(|| Error::Resolution("launcher has no parent directory".into()))?
-                .to_path_buf(),
-            "literal_by_launcher_prefix" => {
-                let value = if context.launcher_path.starts_with(self.string("prefix")?) {
-                    self.string("matched")?
-                } else {
-                    *self.strings("fallback")?.first().ok_or_else(|| {
-                        Error::Resolution(format!("path {name:?} has no fallback"))
+                    existing.or(fallback).ok_or_else(|| {
+                        Error::Resolution(format!("path {name:?} has no candidates"))
                     })?
-                };
-                context.rooted_path(value)?
-            }
-            "parent" => {
-                let base_name = self.string_any(&["path", "of", "base"])?;
-                let base = already_resolved.get(base_name).ok_or_else(|| {
-                    Error::Resolution(format!(
-                        "path {name:?} references unresolved path {base_name:?}"
-                    ))
-                })?;
-                let levels = self
-                    .arguments
-                    .get("levels")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(1);
-                let mut value = base.as_path();
-                for _ in 0..levels {
-                    value = value.parent().ok_or_else(|| {
-                        Error::Resolution(format!("path {name:?} walks above its root"))
-                    })?;
                 }
-                value.to_path_buf()
-            }
-            "platform_core" => already_resolved
-                .get("portmaster_core")
-                .or_else(|| already_resolved.get("platform_core"))
-                .cloned()
-                .ok_or_else(|| Error::Resolution("platform core path is unresolved".into()))?,
-            "relative_to" => {
-                let base_name = self.string_any(&["base", "path"])?;
-                let base = already_resolved.get(base_name).ok_or_else(|| {
-                    Error::Resolution(format!(
-                        "path {name:?} references unresolved path {base_name:?}"
-                    ))
-                })?;
-                safe_join(base, self.string_any(&["relative", "value", "suffix"])?)?
-            }
-            "rom_root_from_launcher" => {
-                let levels = self
-                    .arguments
-                    .get("levels")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(1);
-                let mut value = context
-                    .launcher_path
-                    .parent()
-                    .ok_or_else(|| Error::Resolution("launcher has no parent directory".into()))?;
-                for _ in 0..levels {
-                    value = value.parent().ok_or_else(|| {
-                        Error::Resolution("launcher path is too shallow for ROM root".into())
+                "launcher_dir" => {
+                    let parent = context.launcher_path.parent().ok_or_else(|| {
+                        Error::Resolution("launcher has no parent directory".into())
                     })?;
+                    context.rooted_path(&parent.to_string_lossy())?
                 }
-                safe_join(value, self.string_any(&["suffix", "value"])?)?
+                "literal_by_launcher_prefix" => {
+                    let value = if context.launcher_path.starts_with(self.string("prefix")?) {
+                        self.string("matched")?
+                    } else {
+                        *self.strings("fallback")?.first().ok_or_else(|| {
+                            Error::Resolution(format!("path {name:?} has no fallback"))
+                        })?
+                    };
+                    context.rooted_path(value)?
+                }
+                "parent" => {
+                    let base_name = self.string_any(&["path", "of", "base"])?;
+                    let base = already_resolved.get(base_name).ok_or_else(|| {
+                        Error::Resolution(format!(
+                            "path {name:?} references unresolved path {base_name:?}"
+                        ))
+                    })?;
+                    let levels = self
+                        .arguments
+                        .get("levels")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(1);
+                    let mut value = base.as_path();
+                    for _ in 0..levels {
+                        value = value.parent().ok_or_else(|| {
+                            Error::Resolution(format!("path {name:?} walks above its root"))
+                        })?;
+                    }
+                    value.to_path_buf()
+                }
+                "platform_core" => already_resolved
+                    .get("portmaster_core")
+                    .or_else(|| already_resolved.get("platform_core"))
+                    .cloned()
+                    .ok_or_else(|| Error::Resolution("platform core path is unresolved".into()))?,
+                "relative_to" => {
+                    let base_name = self.string_any(&["base", "path"])?;
+                    let base = already_resolved.get(base_name).ok_or_else(|| {
+                        Error::Resolution(format!(
+                            "path {name:?} references unresolved path {base_name:?}"
+                        ))
+                    })?;
+                    safe_join(base, self.string_any(&["relative", "value", "suffix"])?)?
+                }
+                "rom_root_from_launcher" => {
+                    let levels = self
+                        .arguments
+                        .get("levels")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(1);
+                    let mut value = context.launcher_path.parent().ok_or_else(|| {
+                        Error::Resolution("launcher has no parent directory".into())
+                    })?;
+                    for _ in 0..levels {
+                        value = value.parent().ok_or_else(|| {
+                            Error::Resolution("launcher path is too shallow for ROM root".into())
+                        })?;
+                    }
+                    let value = context.rooted_path(&value.to_string_lossy())?;
+                    safe_join(&value, self.string_any(&["suffix", "value"])?)?
+                }
+                "xdg_data_home" => context
+                    .environment
+                    .get("XDG_DATA_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        context
+                            .environment
+                            .get("HOME")
+                            .map(|home| Path::new(home).join(".local/share"))
+                    })
+                    .map(|base| {
+                        self.arguments
+                            .get("suffix")
+                            .and_then(serde_json::Value::as_str)
+                            .map(|suffix| safe_join(&base, suffix))
+                            .unwrap_or(Ok(base))
+                    })
+                    .transpose()?
+                    .ok_or_else(|| Error::Resolution("XDG data home is unavailable".into()))?,
+                other => {
+                    return Err(Error::Resolution(format!(
+                        "unsupported path strategy {other:?}"
+                    )));
+                }
+            };
+        if self
+            .arguments
+            .get("canonicalize_existing")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            match std::fs::canonicalize(&result) {
+                Ok(canonical) => Ok(canonical),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(result),
+                Err(error) => Err(Error::Resolution(format!(
+                    "cannot resolve existing path {result:?}: {error}"
+                ))),
             }
-            "xdg_data_home" => context
-                .environment
-                .get("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    context
-                        .environment
-                        .get("HOME")
-                        .map(|home| Path::new(home).join(".local/share"))
-                })
-                .map(|base| {
-                    self.arguments
-                        .get("suffix")
-                        .and_then(serde_json::Value::as_str)
-                        .map(|suffix| safe_join(&base, suffix))
-                        .unwrap_or(Ok(base))
-                })
-                .transpose()?
-                .ok_or_else(|| Error::Resolution("XDG data home is unavailable".into()))?,
-            other => {
-                return Err(Error::Resolution(format!(
-                    "unsupported path strategy {other:?}"
-                )));
-            }
-        };
-        Ok(result)
+        } else {
+            Ok(result)
+        }
     }
 
     fn string(&self, name: &str) -> Result<&str> {
@@ -239,16 +313,59 @@ impl PathStrategy {
             .collect()
     }
 
+    fn expected_type(&self) -> Result<&str> {
+        let value = self.string("expected_type")?;
+        if matches!(value, "directory" | "file") {
+            Ok(value)
+        } else {
+            Err(Error::InvalidConfig(format!(
+                "first_existing path has unsupported expected_type {value:?}"
+            )))
+        }
+    }
+
+    fn matches_expected_type(&self, path: &Path) -> Result<bool> {
+        let Ok(metadata) = std::fs::symlink_metadata(path) else {
+            return Ok(false);
+        };
+        if metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+        Ok(match self.expected_type()? {
+            "directory" => metadata.file_type().is_dir(),
+            "file" => metadata.file_type().is_file(),
+            _ => unreachable!("validated expected_type"),
+        })
+    }
+
     fn validate_levels(&self, limits: &ParserLimits) -> Result<()> {
-        if self
-            .arguments
-            .get("levels")
-            .and_then(serde_json::Value::as_u64)
-            .is_some_and(|levels| levels as u128 > limits.max_depth as u128)
-        {
+        let Some(value) = self.arguments.get("levels") else {
+            return Ok(());
+        };
+        let levels = value.as_u64().filter(|levels| *levels > 0).ok_or_else(|| {
+            Error::InvalidConfig(format!(
+                "{} path levels must be a positive integer",
+                self.strategy
+            ))
+        })?;
+        if levels as u128 > limits.max_depth as u128 {
             return Err(Error::InvalidConfig(format!(
                 "{} path levels exceed max_depth {}",
                 self.strategy, limits.max_depth
+            )));
+        }
+        Ok(())
+    }
+
+    fn require_arguments(&self, allowed: &[&str]) -> Result<()> {
+        if let Some(name) = self
+            .arguments
+            .keys()
+            .find(|name| !allowed.contains(&name.as_str()))
+        {
+            return Err(Error::InvalidConfig(format!(
+                "{} path strategy contains unsupported field {name:?}",
+                self.strategy
             )));
         }
         Ok(())
@@ -270,6 +387,24 @@ fn safe_join(base: &Path, relative: &str) -> Result<PathBuf> {
         )));
     }
     Ok(base.join(relative))
+}
+
+fn validate_absolute_path(value: &str, limits: &ParserLimits, kind: &str) -> Result<()> {
+    validate_literal_path(value, limits)?;
+    let path = Path::new(value);
+    if !path.is_absolute()
+        || path.components().any(|part| {
+            matches!(
+                part,
+                Component::ParentDir | Component::CurDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(Error::InvalidConfig(format!(
+            "{kind} must be a normalized absolute path"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -294,15 +429,56 @@ pub struct Platform {
     #[serde(default)]
     pub preserved_dirs: Vec<String>,
     #[serde(default)]
+    pub locations: Vec<Location>,
+    #[serde(default)]
     pub capabilities: BTreeMap<String, bool>,
     #[serde(default)]
     pub environment_scopes: Vec<String>,
     pub display: serde_json::Value,
     pub input: serde_json::Value,
     #[serde(default)]
-    pub models: BTreeMap<String, Model>,
+    pub models: Vec<Model>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocationKind {
+    PortScripts,
+    PortData,
+    PortImages,
+    Apps,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocationRole {
+    Inventory,
+    Install,
+    Manage,
+    Trash,
+    TrashRestore,
+    CleanupAppleDouble,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleFormat {
+    Port,
+    TrimuiApp,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Location {
+    pub id: String,
+    pub kind: LocationKind,
+    /// Stable key into the platform's named path strategy graph.
+    pub path: String,
+    pub roles: Vec<LocationRole>,
+    pub formats: Vec<BundleFormat>,
+    pub priority: i32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -334,6 +510,11 @@ impl Default for SupportPolicy {
 
 impl Platform {
     pub fn validate(&self, limits: &ParserLimits) -> Result<()> {
+        if !self.extra.is_empty() || !self.support.extra.is_empty() {
+            return Err(Error::InvalidConfig(
+                "platform contains unknown Config v1 fields".into(),
+            ));
+        }
         if self
             .device_manufacturer
             .as_deref()
@@ -343,17 +524,201 @@ impl Platform {
                 "device manufacturer must not be empty".into(),
             ));
         }
+        let missing_capabilities = REQUIRED_CAPABILITIES
+            .iter()
+            .filter(|name| !self.capabilities.contains_key(**name))
+            .copied()
+            .collect::<Vec<_>>();
+        if !missing_capabilities.is_empty() {
+            return Err(Error::InvalidConfig(format!(
+                "missing explicit capabilities {missing_capabilities:?}"
+            )));
+        }
+        if self.locations.len() < 2 {
+            return Err(Error::InvalidConfig(
+                "platform requires at least two locations".into(),
+            ));
+        }
         self.recognition.validate(1, limits.max_depth)?;
-        for (id, model) in &self.models {
+        let mut model_ids = std::collections::BTreeSet::new();
+        for model in &self.models {
+            let id = &model.id;
+            crate::config::validate_identifier("model", id)?;
+            if !model_ids.insert(id.as_str()) {
+                return Err(Error::InvalidConfig(format!("duplicate model id {id:?}")));
+            }
             model.validate(limits).map_err(|error| match error {
                 Error::InvalidConfig(message) => {
                     Error::InvalidConfig(format!("model {id:?}: {message}"))
                 }
                 other => other,
             })?;
+            if !model.extra.is_empty() || !model.overrides.extra.is_empty() {
+                return Err(Error::InvalidConfig(format!(
+                    "model {id:?} contains unknown Config v1 fields"
+                )));
+            }
         }
         for path in self.paths.values() {
             path.validate(limits)?;
+        }
+        crate::health::validate_health_rules(&self.health, self.paths.keys())?;
+        let mut location_ids = std::collections::BTreeSet::new();
+        for location in &self.locations {
+            crate::config::validate_identifier("location", &location.id)?;
+            if !location_ids.insert(location.id.as_str()) {
+                return Err(Error::InvalidConfig(format!(
+                    "duplicate location id {:?}",
+                    location.id
+                )));
+            }
+            if !self.paths.contains_key(&location.path) {
+                return Err(Error::InvalidConfig(format!(
+                    "location {:?} references unknown path {:?}",
+                    location.id, location.path
+                )));
+            }
+            if location.roles.is_empty() {
+                return Err(Error::InvalidConfig(format!(
+                    "location {:?} has no roles",
+                    location.id
+                )));
+            }
+            let unique_roles = location
+                .roles
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            if unique_roles.len() != location.roles.len() {
+                return Err(Error::InvalidConfig(format!(
+                    "location {:?} has duplicate roles",
+                    location.id
+                )));
+            }
+            let unique_formats = location
+                .formats
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            if unique_formats.len() != location.formats.len() {
+                return Err(Error::InvalidConfig(format!(
+                    "location {:?} has duplicate formats",
+                    location.id
+                )));
+            }
+            match location.kind {
+                LocationKind::Apps => {
+                    if location.roles.contains(&LocationRole::Install)
+                        && !location.formats.contains(&BundleFormat::TrimuiApp)
+                    {
+                        return Err(Error::InvalidConfig(format!(
+                            "APP location {:?} must accept trimui_app",
+                            location.id
+                        )));
+                    }
+                }
+                LocationKind::PortScripts | LocationKind::PortData => {
+                    if location.roles.contains(&LocationRole::Install)
+                        && !location.formats.contains(&BundleFormat::Port)
+                    {
+                        return Err(Error::InvalidConfig(format!(
+                            "Port location {:?} must accept port",
+                            location.id
+                        )));
+                    }
+                }
+                LocationKind::PortImages => {}
+            }
+        }
+        for kind in [
+            LocationKind::PortScripts,
+            LocationKind::PortData,
+            LocationKind::PortImages,
+            LocationKind::Apps,
+        ] {
+            let candidates = self
+                .locations
+                .iter()
+                .filter(|location| location.kind == kind)
+                .collect::<Vec<_>>();
+            let kind_required = match kind {
+                LocationKind::PortScripts | LocationKind::PortData => true,
+                LocationKind::PortImages => {
+                    ["scan_script_images", "manage_artwork", "manage_images"]
+                        .into_iter()
+                        .any(|name| self.capabilities.get(name) == Some(&true))
+                }
+                LocationKind::Apps => ["inventory_apps", "manage_apps", "install_apps"]
+                    .into_iter()
+                    .any(|name| self.capabilities.get(name) == Some(&true)),
+            };
+            if kind_required && candidates.is_empty() {
+                return Err(Error::InvalidConfig(format!(
+                    "platform is missing a {kind:?} location"
+                )));
+            }
+            unique_highest_location(&candidates, kind, false)?;
+
+            let required_roles = required_location_roles(kind, &self.capabilities);
+            let required_format = required_location_format(kind, &self.capabilities);
+            let eligible = candidates
+                .into_iter()
+                .filter(|location| {
+                    required_roles
+                        .iter()
+                        .all(|role| location.roles.contains(role))
+                        && required_format.is_none_or(|format| location.formats.contains(&format))
+                })
+                .collect::<Vec<_>>();
+            if kind_required && eligible.is_empty() {
+                return Err(Error::InvalidConfig(format!(
+                    "no {kind:?} location supports enabled roles"
+                )));
+            }
+            if !eligible.is_empty() {
+                unique_highest_location(&eligible, kind, true)?;
+            }
+        }
+        let has_apps = self
+            .locations
+            .iter()
+            .any(|location| location.kind == LocationKind::Apps);
+        let app_capabilities_enabled = ["inventory_apps", "manage_apps", "install_apps"]
+            .into_iter()
+            .any(|name| self.capabilities.get(name) == Some(&true));
+        if has_apps != app_capabilities_enabled {
+            return Err(Error::InvalidConfig(
+                "APP capabilities must match configured APP locations".into(),
+            ));
+        }
+        if self.capabilities.get("install_apps") == Some(&true) {
+            let eligible = self
+                .locations
+                .iter()
+                .filter(|location| {
+                    location.kind == LocationKind::Apps
+                        && location.roles.contains(&LocationRole::Install)
+                        && location.formats.contains(&BundleFormat::TrimuiApp)
+                })
+                .collect::<Vec<_>>();
+            if eligible.is_empty() {
+                return Err(Error::InvalidConfig(
+                    "install_apps requires an APP install location".into(),
+                ));
+            }
+            unique_highest_location(&eligible, LocationKind::Apps, true)?;
+        }
+        for (child, parent) in [
+            ("install_portmaster", "manage_portmaster"),
+            ("update_portmaster", "manage_portmaster"),
+            ("install_ports", "manage_ports"),
+            ("install_apps", "manage_apps"),
+        ] {
+            if self.capabilities.get(child) == Some(&true)
+                && self.capabilities.get(parent) != Some(&true)
+            {
+                return Err(Error::InvalidConfig(format!(
+                    "capability {child:?} requires {parent:?}"
+                )));
+            }
         }
         for directory in &self.preserved_dirs {
             validate_literal_path(directory, limits)?;
@@ -382,11 +747,13 @@ impl Platform {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Model {
+    pub id: String,
+    #[serde(default)]
+    pub priority: i32,
     pub display_name: String,
     #[serde(default)]
     pub device_manufacturer: Option<String>,
     pub recognition: Predicate,
-    #[serde(default)]
     pub display: serde_json::Value,
     #[serde(default)]
     pub overrides: ModelOverrides,
@@ -415,8 +782,93 @@ impl Model {
                 "model device manufacturer must not be empty".into(),
             ));
         }
+        if !self.display.is_object() {
+            return Err(Error::InvalidConfig(
+                "model display must be an object".into(),
+            ));
+        }
+        for (name, value) in [
+            ("display", self.overrides.display.as_ref()),
+            ("input", self.overrides.input.as_ref()),
+        ] {
+            if value.is_some_and(|value| !value.is_object()) {
+                return Err(Error::InvalidConfig(format!(
+                    "model {name} override must be an object"
+                )));
+            }
+        }
         self.recognition.validate(1, limits.max_depth)
     }
+}
+
+pub fn required_location_roles(
+    kind: LocationKind,
+    capabilities: &BTreeMap<String, bool>,
+) -> Vec<LocationRole> {
+    let mut roles = Vec::new();
+    let mut push = |capability: &str, role: LocationRole| {
+        if capabilities.get(capability) == Some(&true) && !roles.contains(&role) {
+            roles.push(role);
+        }
+    };
+    match kind {
+        LocationKind::PortScripts | LocationKind::PortData => {
+            push("inventory_ports", LocationRole::Inventory);
+            push("install_ports", LocationRole::Install);
+            push("manage_ports", LocationRole::Manage);
+        }
+        LocationKind::PortImages => {
+            push("scan_script_images", LocationRole::Inventory);
+            push("manage_artwork", LocationRole::Manage);
+            push("manage_images", LocationRole::Manage);
+        }
+        LocationKind::Apps => {
+            push("inventory_apps", LocationRole::Inventory);
+            push("install_apps", LocationRole::Install);
+            push("manage_apps", LocationRole::Manage);
+        }
+    }
+    push("trash", LocationRole::Trash);
+    push("trash", LocationRole::TrashRestore);
+    push("cleanup_appledouble", LocationRole::CleanupAppleDouble);
+    roles
+}
+
+pub fn required_location_format(
+    kind: LocationKind,
+    capabilities: &BTreeMap<String, bool>,
+) -> Option<BundleFormat> {
+    if matches!(kind, LocationKind::PortScripts | LocationKind::PortData)
+        && capabilities.get("install_ports") == Some(&true)
+    {
+        Some(BundleFormat::Port)
+    } else if kind == LocationKind::Apps && capabilities.get("install_apps") == Some(&true) {
+        Some(BundleFormat::TrimuiApp)
+    } else {
+        None
+    }
+}
+
+fn unique_highest_location(
+    candidates: &[&Location],
+    kind: LocationKind,
+    eligible: bool,
+) -> Result<()> {
+    let Some(highest) = candidates.iter().map(|location| location.priority).max() else {
+        return Ok(());
+    };
+    if candidates
+        .iter()
+        .filter(|location| location.priority == highest)
+        .count()
+        != 1
+    {
+        let qualifier = if eligible { "eligible " } else { "" };
+        return Err(Error::InvalidConfig(format!(
+            "ambiguous {qualifier}{kind:?} location at priority {highest}"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -556,7 +1008,7 @@ fn read_os_release(path: &Path) -> BTreeMap<String, String> {
         .collect()
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Resolution {
     pub platform_id: String,
     pub platform_display_name: String,
@@ -577,9 +1029,21 @@ pub struct Resolution {
     pub python: serde_json::Value,
     pub health: Vec<serde_json::Value>,
     pub preserved_dirs: Vec<String>,
+    #[serde(default)]
+    pub locations: Vec<ResolvedLocation>,
     pub environment_scopes: Vec<String>,
     pub display: serde_json::Value,
     pub input: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ResolvedLocation {
+    pub id: String,
+    pub kind: LocationKind,
+    pub path: PathBuf,
+    pub roles: Vec<LocationRole>,
+    pub formats: Vec<BundleFormat>,
+    pub priority: i32,
 }
 
 impl Config {
@@ -600,22 +1064,59 @@ impl Config {
                 .cmp(&left.priority)
                 .then_with(|| left_id.cmp(right_id))
         });
+        if matches.len() > 1 && matches[0].1.priority == matches[1].1.priority {
+            return Err(Error::Resolution(format!(
+                "ambiguous platform recognition at priority {}: {:?} and {:?}",
+                matches[0].1.priority, matches[0].0, matches[1].0
+            )));
+        }
         let (platform_id, platform) = matches
             .first()
             .copied()
             .ok_or_else(|| Error::Resolution("no platform recognition predicate matched".into()))?;
 
         let mut model_matches = Vec::new();
-        for (id, model) in &platform.models {
+        for model in &platform.models {
             if model.recognition.evaluate(context)? {
-                model_matches.push((id, model));
+                model_matches.push(model);
             }
         }
-        model_matches.sort_by_key(|(id, _)| *id);
+        model_matches.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        if model_matches.len() > 1 && model_matches[0].priority == model_matches[1].priority {
+            return Err(Error::Resolution(format!(
+                "ambiguous model recognition at priority {}: {:?} and {:?}",
+                model_matches[0].priority, model_matches[0].id, model_matches[1].id
+            )));
+        }
         let model = model_matches.first().copied();
 
         let adapters = loader.validate_resolved_closure(self, platform_id)?;
         let paths = resolve_paths(&platform.paths, context)?;
+        let locations = platform
+            .locations
+            .iter()
+            .map(|location| {
+                let path = paths.get(&location.path).cloned().ok_or_else(|| {
+                    Error::Resolution(format!(
+                        "location {:?} references unresolved path {:?}",
+                        location.id, location.path
+                    ))
+                })?;
+                Ok(ResolvedLocation {
+                    id: location.id.clone(),
+                    kind: location.kind,
+                    path,
+                    roles: location.roles.clone(),
+                    formats: location.formats.clone(),
+                    priority: location.priority,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let target_confirmed = match platform.support.target_confirmation.as_str() {
             "detected" => true,
             "existing_core_or_override" => {
@@ -628,8 +1129,8 @@ impl Config {
         };
         let mut display = merged_model_value(
             &platform.display,
-            model.map(|(_, model)| &model.display),
-            model.and_then(|(_, model)| model.overrides.display.as_ref()),
+            model.map(|model| &model.display),
+            model.and_then(|model| model.overrides.display.as_ref()),
         );
         if let (Some((width, height)), Some(display)) =
             (context.display_dimensions(), display.as_object_mut())
@@ -641,7 +1142,7 @@ impl Config {
             platform_id: platform_id.clone(),
             platform_display_name: platform.display_name.clone(),
             device_manufacturer: model
-                .and_then(|(_, model)| model.device_manufacturer.clone())
+                .and_then(|model| model.device_manufacturer.clone())
                 .or_else(|| platform.device_manufacturer.clone()),
             device_class: if target_confirmed {
                 platform.support.device_class.clone()
@@ -649,8 +1150,8 @@ impl Config {
                 "unknown-path".into()
             },
             target_confirmed,
-            model_id: model.map(|(id, _)| id.clone()),
-            model_display_name: model.map(|(_, model)| model.display_name.clone()),
+            model_id: model.map(|model| model.id.clone()),
+            model_display_name: model.map(|model| model.display_name.clone()),
             adapters,
             paths,
             source_route: platform.source_route.clone(),
@@ -660,11 +1161,14 @@ impl Config {
             python: platform.python.clone(),
             health: platform.health.clone(),
             preserved_dirs: platform.preserved_dirs.clone(),
+            locations,
             environment_scopes: platform.environment_scopes.clone(),
             display,
-            input: model
-                .and_then(|(_, model)| model.overrides.input.clone())
-                .unwrap_or_else(|| platform.input.clone()),
+            input: merged_model_value(
+                &platform.input,
+                None,
+                model.and_then(|model| model.overrides.input.as_ref()),
+            ),
         })
     }
 }
@@ -696,22 +1200,22 @@ fn resolve_paths(
         let names: Vec<_> = remaining.keys().cloned().collect();
         for name in names {
             let strategy = remaining[name];
-            if name == "portmaster_core" {
-                if let Some(target) = &context.target_override {
-                    if !target.is_absolute()
-                        || target
-                            .components()
-                            .any(|part| matches!(part, Component::ParentDir))
-                    {
-                        return Err(Error::Resolution(format!(
-                            "unsafe target override {target:?}"
-                        )));
-                    }
-                    let target = context.rooted_path(&target.to_string_lossy())?;
-                    resolved.insert(name.clone(), target);
-                    remaining.remove(name);
-                    continue;
+            if name == "portmaster_core"
+                && let Some(target) = &context.target_override
+            {
+                if !target.is_absolute()
+                    || target
+                        .components()
+                        .any(|part| matches!(part, Component::ParentDir))
+                {
+                    return Err(Error::Resolution(format!(
+                        "unsafe target override {target:?}"
+                    )));
                 }
+                let target = context.rooted_path(&target.to_string_lossy())?;
+                resolved.insert(name.clone(), target);
+                remaining.remove(name);
+                continue;
             }
             if strategy.strategy == "first_existing"
                 && strategy
@@ -719,16 +1223,19 @@ fn resolve_paths(
                     .get("on_missing")
                     .and_then(serde_json::Value::as_str)
                     == Some("unresolved")
-                && !strategy
+            {
+                let matches = strategy
                     .strings("candidates")?
                     .into_iter()
                     .map(|value| context.rooted_path(value))
                     .collect::<Result<Vec<_>>>()?
                     .iter()
-                    .any(|path| path.exists())
-            {
-                remaining.remove(name);
-                continue;
+                    .map(|path| strategy.matches_expected_type(path))
+                    .collect::<Result<Vec<_>>>()?;
+                if !matches.into_iter().any(|value| value) {
+                    remaining.remove(name);
+                    continue;
+                }
             }
             match strategy.resolve(name, context, &resolved) {
                 Ok(value) => {
@@ -811,5 +1318,35 @@ mod tests {
         assert_eq!(parse_display_mode("U:640x480p-0"), Some((640, 480)));
         assert_eq!(parse_display_mode("1920x1080"), Some((1920, 1080)));
         assert_eq!(parse_display_mode("640,960"), None);
+    }
+
+    #[test]
+    fn first_existing_directory_skips_files_and_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().unwrap();
+        std::fs::create_dir(fixture.path().join("valid")).unwrap();
+        std::fs::write(fixture.path().join("file"), b"not a directory").unwrap();
+        symlink(fixture.path().join("valid"), fixture.path().join("link")).unwrap();
+        let strategy: PathStrategy = serde_json::from_value(serde_json::json!({
+            "strategy": "first_existing",
+            "expected_type": "directory",
+            "candidates": ["/file", "/link", "/valid"]
+        }))
+        .unwrap();
+        strategy.validate(&ParserLimits::default()).unwrap();
+        let context = DetectionContext {
+            root: Some(fixture.path().to_path_buf()),
+            launcher_path: "/launcher.sh".into(),
+            environment: BTreeMap::new(),
+            os_release: BTreeMap::new(),
+            target_override: None,
+        };
+        assert_eq!(
+            strategy
+                .resolve("data", &context, &BTreeMap::new())
+                .unwrap(),
+            fixture.path().join("valid")
+        );
     }
 }

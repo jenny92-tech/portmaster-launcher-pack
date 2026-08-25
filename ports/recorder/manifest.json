@@ -1,0 +1,43 @@
+{
+  "name": "jenny92-screenrec",
+  "app_id": "com.jenny92.screenrec",
+  "title": "Screen Recorder",
+  "engine": "LÖVE 11.5 + Shell",
+  "engine_status": "prototype",
+  "engine_scope": "recorder-app-only",
+  "runtime": "PortMaster LÖVE 11.5 + bundled static aarch64 ffmpeg",
+  "launcher": "LÖVE UIKit + kmsgrab frame-capture engine",
+  "devices": ["TrimUI Smart Pro/Brick"],
+  "language": ["en", "zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "jenny92-screenrec",
+  "script": "Screen Recorder.sh",
+  "portable_dir": "jenny92-screenrec",
+  "launcher_sh": "love/launcher.sh.template",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "runtime-discovery"
+  ],
+  "trimui_app": {
+    "folder": "jenny92-screenrec",
+    "archive": "录屏助手",
+    "package": "com.jenny92.screenrec",
+    "label": "Screen Recorder",
+    "label_zh": "录屏助手",
+    "description": "把掌机屏幕录制成视频(5fps 抽帧,游戏运行时零编码负担)",
+    "icon": "trimui-app/icon.png",
+    "include": ["Screen Recorder.sh", "jenny92-screenrec"],
+    "env": {
+      "REC_APP_ROOT_OVERRIDE": "{app_dir}"
+    }
+  },
+  "portmaster": {
+    "items": ["Screen Recorder.sh", "jenny92-screenrec"],
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": ["Screen Recorder.png"]
+    }
+  },
+  "depends_on": []
+}

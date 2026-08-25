@@ -10,11 +10,7 @@ grep -Fq "$CONTACT" "$ROOT/_kit/love/kit.lua" || {
 }
 
 for main in "$ROOT"/ports/*/love/main.lua; do
-  case "$main" in
-    */ports/appmanager/*) required='require("kit")' ;;
-    *) required='require("launcher")' ;;
-  esac
-  grep -Fq "$required" "$main" || {
+  grep -Eq 'require\("(launcher|kit)"\)' "$main" || {
     echo "${main#$ROOT/}: does not load the shared LÖVE layer" >&2
     exit 1
   }

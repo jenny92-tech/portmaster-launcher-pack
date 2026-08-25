@@ -15,6 +15,8 @@ grep -Fq '"$PAM_LOVE" "$PAM_APP_ROOT/love_ui"' "$LAUNCHER"
 ! grep -Fq 'exec "$PAM_LOVE"' "$LAUNCHER"
 grep -Fq 'exit "$PAM_STATUS"' "$LAUNCHER"
 grep -Fq 'log.txt' "$LAUNCHER"
+grep -Fq 'game_to_launch.xdg_data_home' "$LAUNCHER"
+grep -Fq 'export XDG_DATA_HOME="$PAM_GAME_XDG_DATA_HOME"' "$LAUNCHER"
 for forbidden in \
   'write_env()' 'apply_plan()' 'pam_core_health()' 'pam_lock_acquire()' \
   'runtime_progress_write()' 'install_portmaster_release()' 'PAM_TEST_'; do

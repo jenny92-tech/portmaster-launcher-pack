@@ -11,6 +11,7 @@ portmaster_discover() {
   elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
   elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then controlfolder="$XDG_DATA_HOME/PortMaster"
   elif [ -d "/mnt/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/mnt/sdcard/roms/ports/PortMaster"
+  elif [ -d "/mnt/SDCARD/Roms/PORTS/PortMaster/" ]; then controlfolder="/mnt/SDCARD/Roms/PORTS/PortMaster"
   elif [ -d "/sdcard/roms/ports/PortMaster/" ]; then controlfolder="/sdcard/roms/ports/PortMaster"
   else controlfolder="/roms/ports/PortMaster"
   fi

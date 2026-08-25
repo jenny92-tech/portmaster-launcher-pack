@@ -493,6 +493,7 @@ mod tests {
                     images: Some(temp.path().join("images")),
                     libs: Some(temp.path().join("libs")),
                     app_state: temp.path().join("state"),
+                    apps: vec![],
                     trash: temp.path().join("trash"),
                 },
                 frontend: FrontendContext {

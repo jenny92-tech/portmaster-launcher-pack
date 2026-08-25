@@ -35,9 +35,10 @@ function Native.new()
         return value
     end
 
-    function self.start(kind,payload)
+    function self.start(kind,payload,revision)
         local body={kind=kind}
-        if kind=="apply" then body.actions=payload or {} end
+        if kind=="apply" or kind=="install-zips" then body.actions=payload or {} end
+        if kind=="apply" then body.revision=revision end
         local value=request("start",body)
         if type(value)~="number" or value<1 or value%1~=0 then
             fail("start","expected positive integer task id, got "..type(value))
@@ -62,6 +63,23 @@ function Native.new()
             fail("poll","event data must be a table")
         end
         return value
+    end
+
+    function self.web_set(enabled)
+        local value=request("web-set", enabled==true)
+        if type(value)~="table" or type(value.port)~="number" or type(value.code)~="string" then
+            fail("web-set", "expected {port, code} response")
+        end
+        return value
+    end
+
+    function self.run(path)
+        if type(path)~="string" or path=="" then
+            fail("run","script path is required")
+        end
+        local value=request("run", path)
+        if value~=true then fail("run", "expected true acknowledgement") end
+        return true
     end
 
     function self.cancel()

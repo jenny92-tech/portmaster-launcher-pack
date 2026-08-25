@@ -6,6 +6,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 bash "$ROOT/_kit/dist_trimui_app.sh" appmanager "$TMP" >/dev/null
+mkdir "$TMP/rebuild"
+bash "$ROOT/_kit/dist_trimui_app.sh" appmanager "$TMP/rebuild" >/dev/null
+cmp "$TMP/[TrimUI App] APP Manager.zip" "$TMP/rebuild/[TrimUI App] APP Manager.zip"
 bash "$ROOT/_kit/dist_trimui_app.sh" terraria "$TMP" >/dev/null
 
 python3 - "$TMP" <<'PY'
@@ -55,6 +58,32 @@ with zipfile.ZipFile(root / "[TrimUI App] Terraria.zip") as archive:
     assert not any(name.startswith(prefix + "love_ui/") for name in names)
     launcher = archive.read(prefix + "launch.sh").decode()
     assert 'exec "$APP_DIR/T_泰拉瑞亚[中].sh" "$@"' in launcher
+PY
+
+# The recorder is a standalone APP: script + nested data folder must both be
+# present and the wrapper must export the app root the launcher resolves.
+bash "$ROOT/_kit/dist_trimui_app.sh" recorder "$TMP" >/dev/null
+python3 - "$TMP" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+root = Path(sys.argv[1])
+archive_path = root / "[TrimUI App] 录屏助手.zip"
+assert archive_path.is_file()
+with zipfile.ZipFile(archive_path) as archive:
+    assert archive.testzip() is None
+    names = set(archive.namelist())
+    prefix = "jenny92-screenrec/"
+    assert prefix + "Screen Recorder.sh" in names
+    assert prefix + "launch.sh" in names
+    assert prefix + "config.json" in names
+    assert prefix + "icon.png" in names
+    assert prefix + "jenny92-screenrec/love_ui/main.lua" in names
+    assert prefix + "jenny92-screenrec/bin/record_screen.sh" in names
+    launcher = archive.read(prefix + "launch.sh").decode()
+    assert 'export REC_APP_ROOT_OVERRIDE="$APP_DIR"' in launcher
+    assert 'exec "$APP_DIR/Screen Recorder.sh" "$@"' in launcher
 PY
 
 # A descendant symlink must never make the packager copy files from outside a

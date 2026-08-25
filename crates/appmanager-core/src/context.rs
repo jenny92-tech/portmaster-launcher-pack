@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::path::{ManagedRoot, PathSafetyError};
+use portkit_core::{BundleFormat, LocationRole};
 
 pub const CONTEXT_SCHEMA: u32 = 1;
 
@@ -35,7 +36,17 @@ pub struct ContextCapabilities {
     #[serde(default = "unknown_capability")]
     pub cache_invalidation: CapabilityState,
     #[serde(default = "unknown_capability")]
+    pub inventory_ports: CapabilityState,
+    #[serde(default = "unknown_capability")]
     pub manage_ports: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub install_ports: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub inventory_apps: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub manage_apps: CapabilityState,
+    #[serde(default = "unknown_capability")]
+    pub install_apps: CapabilityState,
     #[serde(default = "unknown_capability")]
     pub trash: CapabilityState,
     #[serde(default = "unknown_capability")]
@@ -50,7 +61,12 @@ impl Default for ContextCapabilities {
             inventory: CapabilityState::Unknown,
             install_plan: CapabilityState::Unknown,
             cache_invalidation: CapabilityState::Unknown,
+            inventory_ports: CapabilityState::Unknown,
             manage_ports: CapabilityState::Unknown,
+            install_ports: CapabilityState::Unknown,
+            inventory_apps: CapabilityState::Unknown,
+            manage_apps: CapabilityState::Unknown,
+            install_apps: CapabilityState::Unknown,
             trash: CapabilityState::Unknown,
             leftovers: CapabilityState::Unknown,
             cleanup_appledouble: CapabilityState::Unknown,
@@ -66,8 +82,20 @@ pub struct ManagedRoots {
     pub game_dirs: PathBuf,
     pub images: Option<PathBuf>,
     pub libs: Option<PathBuf>,
+    #[serde(default)]
+    pub apps: Vec<ManagedAppLocation>,
     pub app_state: PathBuf,
     pub trash: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedAppLocation {
+    pub id: String,
+    pub path: PathBuf,
+    pub roles: Vec<LocationRole>,
+    pub formats: Vec<BundleFormat>,
+    pub priority: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,24 +205,19 @@ impl ResolvedDeviceContext {
             ));
         }
 
-        let roots = [
-            ("scripts", &self.roots.scripts),
-            ("game_dirs", &self.roots.game_dirs),
-            ("app_state", &self.roots.app_state),
-            ("trash", &self.roots.trash),
-            ("frontend", &self.frontend.directory),
-        ];
-        for (field, path) in roots {
-            ManagedRoot::new(path).map_err(|source| ContextError::UnsafeRoot { field, source })?;
+        // All mutation policy and overlap checks use the path after resolving
+        // the existing parent chain. Checking only the configured spelling
+        // would let `/safe/alias/new` escape through `alias -> /etc`.
+        let scripts_resolved = validate_managed_root("scripts", &self.roots.scripts)?;
+        let game_dirs_resolved = validate_managed_root("game_dirs", &self.roots.game_dirs)?;
+        let app_state_resolved = validate_managed_root("app_state", &self.roots.app_state)?;
+        let trash_resolved = validate_managed_root("trash", &self.roots.trash)?;
+        validate_managed_root("frontend", &self.frontend.directory)?;
+        if let Some(path) = &self.roots.portmaster {
+            validate_managed_root("portmaster", path)?;
         }
-        for (field, path) in [
-            ("portmaster", self.roots.portmaster.as_ref()),
-            ("libs", self.roots.libs.as_ref()),
-        ] {
-            if let Some(path) = path {
-                ManagedRoot::new(path)
-                    .map_err(|source| ContextError::UnsafeRoot { field, source })?;
-            }
+        if let Some(path) = &self.roots.libs {
+            validate_managed_root("libs", path)?;
         }
         if self.target_confirmed && self.roots.portmaster.is_none() {
             return Err(ContextError::InvalidInstallContract(
@@ -202,10 +225,79 @@ impl ResolvedDeviceContext {
             ));
         }
         if let Some(images) = &self.roots.images {
-            ManagedRoot::new(images).map_err(|source| ContextError::UnsafeRoot {
-                field: "images",
-                source,
-            })?;
+            validate_managed_root("images", images)?;
+        }
+        let mut app_ids = std::collections::BTreeSet::new();
+        let mut app_paths = std::collections::BTreeSet::new();
+        let mut trimui_install_targets = Vec::new();
+        for app in &self.roots.apps {
+            if !safe_identifier(&app.id) || !app_ids.insert(app.id.as_str()) {
+                return Err(ContextError::InvalidInstallContract(
+                    "APP location ids must be safe and unique".to_owned(),
+                ));
+            }
+            let app_resolved = validate_managed_root("apps", &app.path)?;
+            if !app_paths.insert(app_resolved.clone()) {
+                return Err(ContextError::InvalidInstallContract(
+                    "APP location paths must be unique".to_owned(),
+                ));
+            }
+            let unique_roles = app.roles.iter().collect::<std::collections::BTreeSet<_>>();
+            let unique_formats = app
+                .formats
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            if unique_roles.len() != app.roles.len() || unique_formats.len() != app.formats.len() {
+                return Err(ContextError::InvalidInstallContract(
+                    "APP location roles and formats must be unique".to_owned(),
+                ));
+            }
+            if app.roles.contains(&LocationRole::Install)
+                && app.formats.contains(&BundleFormat::TrimuiApp)
+            {
+                trimui_install_targets.push((app.priority, app.id.as_str()));
+            }
+            for protected in [&scripts_resolved, &game_dirs_resolved] {
+                if app_resolved.starts_with(protected) || protected.starts_with(&app_resolved) {
+                    return Err(ContextError::InvalidInstallContract(format!(
+                        "APP location {:?} overlaps a protected managed root",
+                        app.id
+                    )));
+                }
+            }
+            // TrimUI keeps APP Manager itself below the managed Apps root, so
+            // its private state and Trash are expected descendants of that
+            // root. The inverse remains unsafe: an Apps root must never live
+            // inside APP Manager's private mutation directories.
+            for private in [&app_state_resolved, &trash_resolved] {
+                if app_resolved.starts_with(private) {
+                    return Err(ContextError::InvalidInstallContract(format!(
+                        "APP location {:?} overlaps a protected managed root",
+                        app.id
+                    )));
+                }
+            }
+        }
+        if self.capabilities.install_apps == CapabilityState::Current {
+            let highest = trimui_install_targets
+                .iter()
+                .map(|(priority, _)| *priority)
+                .max();
+            let Some(highest) = highest else {
+                return Err(ContextError::InvalidInstallContract(
+                    "install_apps requires an APP install location".to_owned(),
+                ));
+            };
+            if trimui_install_targets
+                .iter()
+                .filter(|(priority, _)| *priority == highest)
+                .count()
+                != 1
+            {
+                return Err(ContextError::InvalidInstallContract(
+                    "highest-priority APP install location is ambiguous".to_owned(),
+                ));
+            }
         }
 
         validate_names(&self.frontend.names)?;
@@ -362,6 +454,36 @@ impl ResolvedDeviceContext {
     }
 }
 
+fn validate_mutation_namespace(field: &'static str, path: &Path) -> Result<(), ContextError> {
+    const FORBIDDEN: &[&str] = &[
+        "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/run", "/sbin", "/sys",
+        "/usr", "/var",
+    ];
+    let root_frontend = field == "frontend"
+        && path
+            .strip_prefix("/root/.local/share")
+            .is_ok_and(|relative| relative.components().count() == 1);
+    let host_test_temporary = cfg!(target_os = "macos") && path.starts_with("/var/folders");
+    let protected = !host_test_temporary
+        && (FORBIDDEN.iter().any(|root| path.starts_with(root))
+            || (path.starts_with("/root") && !root_frontend));
+    if protected {
+        return Err(ContextError::InvalidInstallContract(format!(
+            "{field} root {} is in a protected system namespace",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn validate_managed_root(field: &'static str, path: &Path) -> Result<PathBuf, ContextError> {
+    let managed =
+        ManagedRoot::new(path).map_err(|source| ContextError::UnsafeRoot { field, source })?;
+    let resolved = managed.resolved_path().to_path_buf();
+    validate_mutation_namespace(field, &resolved)?;
+    Ok(resolved)
+}
+
 fn validate_names(names: &[String]) -> Result<(), ContextError> {
     let mut unique = names.to_vec();
     unique.sort();
@@ -404,4 +526,21 @@ fn validate_relative(value: &str, nested: bool) -> Result<(), PathSafetyError> {
         return Err(PathSafetyError::UnsafeComponent);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn protected_namespace_check_uses_resolved_parent_chain() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        symlink("/usr", temporary.path().join("alias")).unwrap();
+        let disguised = temporary.path().join("alias/appmanager-new-root");
+        let error = validate_managed_root("apps", &disguised).unwrap_err();
+        assert!(error.to_string().contains("protected system namespace"));
+    }
 }

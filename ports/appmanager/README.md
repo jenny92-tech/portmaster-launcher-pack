@@ -33,9 +33,20 @@ Port App Manager 不管理游戏本体内容，也不替代 PortMaster 的 Port 
 `love/ui.gptk` 和 `gamecontrollerdb.txt`，不修改其他启动器的按键映射。Start 和
 Select 显式映射到 UIKit 不处理的 F10，因此不会触发确认或返回。
 
-扫描结果采用 APP 进程内的细粒度 lazy cache。页面切换和选择只读缓存；安装、
-Runtime 修复、卸载、恢复或删除完成后，只失效受影响的缓存。未知外部变化不会
-触发后台重扫，重新启动 APP 或明确刷新才重建对应快照。
+已安装项目只扫描管理根的直接条目，不递归读取游戏数据内容。安装、Runtime 修复、
+卸载、恢复或删除完成后重新读取清单；不会为了显示目录大小遍历整张存储卡。
+
+## 远程管理
+
+APP 内开启远程管理后，会显示实际访问地址和一次性生成的六位配对码。浏览器端完成
+配对后可上传并安装标准 Port/APP zip、查看和卸载已安装项目，以及恢复或彻底删除
+回收站条目。服务只监听局域网，不开启跨域访问；所有管理 API 都要求本次服务的随机
+会话令牌，关闭远程管理或正常退出 APP 会立即结束服务。
+
+远程服务与 APP 运行在同一进程中：APP 保持打开时可用，关闭 APP 时立即停止。上传采用
+流式落盘，单文件上限 4 GiB，并在接收前检查剩余空间；安装成功后直接删除上传副本，
+不再把 1–2 GiB 的传输文件重复塞进回收站。设备锁屏后是否保留网络由固件决定，APP
+Manager 不修改系统电源策略，也不承诺锁屏期间继续传输。
 
 ## 原生核心与配置
 
@@ -72,9 +83,10 @@ Shell 只解析 APP 路径，作为前端持有的父进程启动并等待 Rust 
 
 安装流程只接受 native resolution 生成并再次验证的计划。归档解压到受管目录内的
 临时工作目录并完成校验后，旧受管条目先经同文件系统 rename 退役到工作目录，新内容
-再 rename 到位；成功后工作目录整体删除。没有文件式回滚或待验证协议：stable 包很小，
-中断或断电后的恢复方式就是重新安装，下一次安装会清扫上一次留下的 `.pm-install*`
-工作目录。错误写入 APP 的 `log.txt`；`libs`、`config`、`themes`、日志和缓存不属于
+再 rename 到位。交换过程写入同文件系统事务 journal；任一步失败会按逆序删除新条目并
+恢复旧 core/frontend。进程或设备在提交点前中断时，下次启动先读取 journal 完成恢复，
+不会把旧版本当作临时垃圾清掉。只有提交成功后才删除 retired 内容。错误写入 APP 的
+`log.txt`；`libs`、`config`、`themes`、日志和缓存不属于
 core 替换范围，`libs` 由 Runtime 修复单独管理。
 
 卸载默认进入 `jenny92-appmanager/trash/<timestamp>/`。只有卸载 Dialog 主动勾选
@@ -113,7 +125,10 @@ jenny92-appmanager/
   trash/     recoverable uninstall batches
 ```
 
-MiniLoong 默认 core 位于 `/mnt/sdcard/roms/ports/PortMaster`。TrimUI 官方布局默认 core
+MiniLoong 旧固件的 Port 根位于 `/mnt/sdcard/roms/ports`；`ID=loong` 且
+`VERSION_ID >= 1.4.0.0` 的 LoongOS 布局使用 `/roms/ports`。若固件将其中的
+`PortMaster` 做成软链接，APP Manager 会解析并验证其
+真实目标后再管理。TrimUI 官方布局默认 core
 位于 `/mnt/SDCARD/Apps/PortMaster/PortMaster`，frontend 位于它的父目录。ROCKNIX、
 JELOS 与 UnofficialOS 使用系统 frontend、core 内启动器布局，APP 不生成外层入口，
 也不修改 `gamelist.xml`。
@@ -127,6 +142,15 @@ _kit/dist_trimui_app.sh appmanager
 生成的 `[TrimUI App] APP Manager.zip` 可直接解压到 `/mnt/SDCARD/Apps/`。该系统 APP
 不属于 Port 扫描、卸载或残留清理范围。
 
+通用 Port 包使用同一份已验证产物生成：
+
+```sh
+_kit/dist_port_zip.sh appmanager
+```
+
+生成的 `jenny92-appmanager.zip` 可由 APP Manager 网页或端侧安装页直接识别；
+`port.json` 明确绑定 `APP Manager.sh` 与 `jenny92-appmanager/`，不依赖名称猜测。
+
 ## 构建与验证
 
 ```sh
@@ -135,7 +159,10 @@ python3 -m unittest -v config.tests.test_config_contract
 cargo test --workspace
 _kit/build_appmanager_love_lite.sh
 _kit/dist_port.sh appmanager
+_kit/dist_port_zip.sh appmanager
+_kit/dist_trimui_app.sh appmanager
 bash tests/test_appmanager_portable_package.sh
+bash tests/test_appmanager_port_zip.sh
 bash tests/test_appmanager_inprocess_bridge.sh
 ```
 

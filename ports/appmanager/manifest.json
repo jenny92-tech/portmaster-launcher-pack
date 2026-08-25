@@ -31,6 +31,7 @@
     }
   },
   "portmaster": {
+    "min_glibc": "2.29",
     "items": ["APP Manager.sh", "jenny92-appmanager"],
     "image": {
       "screenshot": "screenshot.png",

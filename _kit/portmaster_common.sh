@@ -32,8 +32,15 @@ audio_setup() {
   # writable runtime dir for its socket (the only reason we set XDG here).
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/xdg-${PORT_NAME}}"
   mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null && chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null
-  if pgrep -x pulseaudio >/dev/null 2>&1 || pgrep -x pipewire-pulse >/dev/null 2>&1; then
+  local pulse_ready=0 pulse_socket
+  if command -v pactl >/dev/null 2>&1 && pactl info >/dev/null 2>&1; then
+    pulse_ready=1
+  fi
+
+  if [ "$pulse_ready" = 1 ]; then
     echo "$LOG_PREFIX pulse/pipewire daemon already up"
+  elif pgrep -x pulseaudio >/dev/null 2>&1 || pgrep -x pipewire-pulse >/dev/null 2>&1; then
+    echo "$LOG_PREFIX pulse/pipewire daemon already up; locating its socket"
   elif command -v pulseaudio >/dev/null 2>&1; then
     pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1
     sleep 1
@@ -41,7 +48,30 @@ audio_setup() {
     echo "$LOG_PREFIX no pulseaudio on this CFW — direct ALSA (double-open may hang)"
   fi
 
-  if command -v pactl >/dev/null 2>&1 && ! pactl list short sinks 2>/dev/null | grep -qv auto_null; then
+  if [ "$pulse_ready" = 0 ] && command -v pactl >/dev/null 2>&1; then
+    if pactl info >/dev/null 2>&1; then
+      pulse_ready=1
+    else
+      for pulse_socket in /tmp/xdg-*/pulse/native; do
+        [ -S "$pulse_socket" ] || continue
+        if PULSE_SERVER="unix:$pulse_socket" pactl info >/dev/null 2>&1; then
+          export PULSE_SERVER="unix:$pulse_socket"
+          pulse_ready=1
+          echo "$LOG_PREFIX pulse socket -> $pulse_socket"
+          break
+        fi
+      done
+    fi
+  fi
+
+  if [ "$pulse_ready" = 1 ]; then
+    export SDL_AUDIODRIVER=pulseaudio
+  else
+    echo "$LOG_PREFIX pulse unavailable — direct ALSA (double-open may hang)"
+    return
+  fi
+
+  if ! pactl list short sinks 2>/dev/null | grep -qv auto_null; then
     pactl load-module module-alsa-sink device=default tsched=0 >/dev/null 2>&1
     local sink
     sink=$(pactl list short sinks 2>/dev/null | grep -v auto_null | head -1 | awk '{print $2}')

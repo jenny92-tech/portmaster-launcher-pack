@@ -9,14 +9,16 @@ set -euo pipefail
 
 PROJECT_DIR="${1:?usage: reimport.sh <recovered_dir>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-case "$(uname -s)" in
-  Darwin) GODOT="/Users/smallraw/Development/Jenny92Work/godot-sdl2/bin/godot.macos.editor.arm64" ;;
-  Linux)  GODOT="$SCRIPT_DIR/bin/godot_mono_linux" ;;
-  *)      echo "Unsupported OS"; exit 1 ;;
-esac
+if [ -z "${GODOT:-}" ]; then
+  case "$(uname -s)" in
+    Darwin) GODOT="$(command -v godot4 || command -v godot || true)" ;;
+    Linux)  GODOT="$SCRIPT_DIR/bin/godot_mono_linux" ;;
+    *)      echo "Unsupported OS"; exit 1 ;;
+  esac
+fi
 
-if [ ! -x "$GODOT" ]; then
-  echo "godot editor missing at $GODOT — see bin/README.md"
+if [ -z "$GODOT" ] || [ ! -x "$GODOT" ]; then
+  echo "godot editor missing; set GODOT to an executable editor path"
   exit 1
 fi
 

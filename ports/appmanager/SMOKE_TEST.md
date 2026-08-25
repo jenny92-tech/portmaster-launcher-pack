@@ -12,6 +12,8 @@ resolution and any controller/display difference with the result.
 - [ ] A completed repair requests an explicit exit. Reopening blocks on automatic validation before Home appears.
 - [ ] Environment Management shows current/latest versions, device, health and paths; Runtime Repair and Environment Details open normally.
 - [ ] Port list scanning, selection, uninstall-to-Trash, restore, leftovers and exit confirmation still work.
+- [ ] Enable Remote Management while APP Manager remains open, pair from another LAN device and upload a 1–2 GiB zip. Close APP Manager and confirm the endpoint stops; lock-screen behavior is firmware-defined and unsupported.
+- [ ] From the web UI install one Port zip and one APP zip, uninstall each, restore both from Trash, and confirm a successful upload does not leave the original zip in Trash.
 
 ## TrimUI / chuimi
 
@@ -22,3 +24,5 @@ resolution and any controller/display difference with the result.
 - [ ] Reopening blocks on automatic validation and reaches Home only after success; a forced validation failure restores the previous core.
 - [ ] Environment Management, Runtime Repair, Environment Details and normal port operations work at the native display resolution.
 - [ ] Record any clipped text, font blur, focus offset, controller mismatch or display-driver difference.
+- [ ] Enable Remote Management while APP Manager remains open, complete a 1–2 GiB upload, then close APP Manager and verify the web endpoint stops. Lock-screen behavior is firmware-defined and is not a supported transfer mode.
+- [ ] Pair from desktop and mobile browser widths; install, uninstall, restore and empty Trash, checking that no control overflows horizontally.

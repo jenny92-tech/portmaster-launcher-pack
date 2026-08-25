@@ -3,6 +3,7 @@ use crate::platform::Platform;
 use crate::predicate::Predicate;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -136,7 +137,16 @@ pub struct RootConfig {
 pub struct PlatformEntry {
     pub priority: i32,
     pub recognition: Predicate,
-    pub detail: String,
+    pub detail: DetailArtifact,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetailArtifact {
+    #[serde(rename = "ref")]
+    pub ref_path: String,
+    pub sha256: String,
+    pub bytes: u64,
 }
 
 /// Resolves a config fragment reference (e.g. "./platforms/miniloong.json") to
@@ -200,6 +210,14 @@ pub struct ConfigLoader {
 
 impl ConfigLoader {
     pub fn validate(&self, config: &Config) -> Result<()> {
+        if !config.extra.is_empty()
+            || !config.metadata.extra.is_empty()
+            || !config.parser_limits.extra.is_empty()
+        {
+            return Err(Error::InvalidConfig(
+                "Config v1 contains unknown top-level or metadata fields".into(),
+            ));
+        }
         if config.format != CONFIG_FORMAT {
             return Err(Error::InvalidConfig(format!(
                 "format must be {CONFIG_FORMAT:?}"
@@ -216,6 +234,8 @@ impl ConfigLoader {
         }
         config.environment.validate()?;
         validate_limits(&config.parser_limits)?;
+        validate_bootstrap(&config.bootstrap)?;
+        validate_sources(&config.sources)?;
         if config.platforms.is_empty() {
             return Err(Error::InvalidConfig("platforms cannot be empty".into()));
         }
@@ -223,11 +243,12 @@ impl ConfigLoader {
             validate_identifier("platform", id)?;
         }
         for platform in config.platforms.values() {
-            for (id, model) in &platform.models {
-                validate_identifier("model", id)?;
+            platform.validate(&config.parser_limits)?;
+            for model in &platform.models {
                 if model.extra.contains_key("inherits") {
                     return Err(Error::InvalidConfig(format!(
-                        "model {id:?} must not declare inherits; its parent platform is implicit"
+                        "model {:?} must not declare inherits; its parent platform is implicit",
+                        model.id
                     )));
                 }
             }
@@ -253,6 +274,14 @@ impl ConfigLoader {
     }
 
     pub fn validate_root(&self, root: &RootConfig) -> Result<()> {
+        if !root.extra.is_empty()
+            || !root.metadata.extra.is_empty()
+            || !root.parser_limits.extra.is_empty()
+        {
+            return Err(Error::InvalidConfig(
+                "Config v1 root contains unknown top-level or metadata fields".into(),
+            ));
+        }
         if root.format != CONFIG_FORMAT {
             return Err(Error::InvalidConfig(format!(
                 "format must be {CONFIG_FORMAT:?}"
@@ -270,16 +299,39 @@ impl ConfigLoader {
         if root.platforms.is_empty() {
             return Err(Error::InvalidConfig("platforms cannot be empty".into()));
         }
+        validate_bootstrap(&root.bootstrap)?;
+        validate_sources(&root.sources)?;
         for (id, entry) in &root.platforms {
             validate_identifier("platform", id)?;
-            if entry.detail.trim().is_empty() || entry.detail.contains(char::is_whitespace) {
+            entry
+                .recognition
+                .validate(1, root.parser_limits.max_depth)?;
+            if entry.detail.ref_path.trim().is_empty()
+                || entry.detail.ref_path.contains(char::is_whitespace)
+            {
                 return Err(Error::InvalidConfig(format!(
                     "platform {id:?} has an invalid detail ref"
                 )));
             }
-            if entry.detail.len() > root.parser_limits.max_path_bytes {
+            if entry.detail.ref_path.len() > root.parser_limits.max_path_bytes {
                 return Err(Error::InvalidConfig(format!(
                     "platform {id:?} detail ref exceeds max_path_bytes"
+                )));
+            }
+            if entry.detail.bytes == 0 {
+                return Err(Error::InvalidConfig(format!(
+                    "platform {id:?} detail byte length must be positive"
+                )));
+            }
+            if entry.detail.sha256.len() != 64
+                || !entry
+                    .detail
+                    .sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            {
+                return Err(Error::InvalidConfig(format!(
+                    "platform {id:?} detail sha256 must be 64 lowercase hexadecimal characters"
                 )));
             }
         }
@@ -305,6 +357,12 @@ impl ConfigLoader {
                 .cmp(&left.priority)
                 .then_with(|| left_id.cmp(right_id))
         });
+        if matches.len() > 1 && matches[0].1.priority == matches[1].1.priority {
+            return Err(Error::Resolution(format!(
+                "ambiguous platform recognition at priority {}: {:?} and {:?}",
+                matches[0].1.priority, matches[0].0, matches[1].0
+            )));
+        }
         matches
             .first()
             .map(|(id, _)| (*id).clone())
@@ -323,7 +381,18 @@ impl ConfigLoader {
             .platforms
             .get(platform_id)
             .ok_or_else(|| Error::Resolution(format!("unknown platform {platform_id:?}")))?;
-        let bytes = details.read(&entry.detail)?;
+        let bytes = details.read(&entry.detail.ref_path)?;
+        if bytes.len() as u64 != entry.detail.bytes {
+            return Err(Error::InvalidConfig(format!(
+                "platform {platform_id:?} detail byte length does not match root"
+            )));
+        }
+        let actual_digest = format!("{:x}", Sha256::digest(&bytes));
+        if actual_digest != entry.detail.sha256 {
+            return Err(Error::InvalidConfig(format!(
+                "platform {platform_id:?} detail sha256 does not match root"
+            )));
+        }
         let mut raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
             Error::InvalidConfig(format!(
                 "platform {platform_id:?} detail is invalid: {error}"
@@ -482,6 +551,336 @@ impl ConfigLoader {
     }
 }
 
+fn validate_bootstrap(value: &serde_json::Value) -> Result<()> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::InvalidConfig("bootstrap must be an object".to_owned()))?;
+    require_exact_object_keys(
+        object,
+        &[
+            "policy",
+            "config_url",
+            "fallback",
+            "transport",
+            "required_format",
+        ],
+        "bootstrap",
+    )?;
+    let string = |name: &str| {
+        object
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| Error::InvalidConfig(format!("bootstrap.{name} must be a string")))
+    };
+    if string("policy")? != "remote_then_embedded"
+        || string("fallback")? != "embedded_root_then_local_dir"
+        || string("transport")? != "github_https"
+        || string("required_format")? != CONFIG_FORMAT
+    {
+        return Err(Error::InvalidConfig(
+            "bootstrap policy is unsupported by this engine".to_owned(),
+        ));
+    }
+    let url = string("config_url")?;
+    if !url.starts_with("https://raw.githubusercontent.com/") || url.contains(char::is_whitespace) {
+        return Err(Error::InvalidConfig(
+            "bootstrap.config_url must be a GitHub raw HTTPS URL".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_sources(sources: &BTreeMap<String, serde_json::Value>) -> Result<()> {
+    let expected_source_keys = ["endpoints", "release_routes", "runtime", "transport"]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if sources.keys().map(String::as_str).collect::<BTreeSet<_>>() != expected_source_keys {
+        return Err(Error::InvalidConfig(
+            "sources must contain exactly endpoints, release_routes, runtime and transport".into(),
+        ));
+    }
+    let object = |name: &str| {
+        sources
+            .get(name)
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| Error::InvalidConfig(format!("sources.{name} must be an object")))
+    };
+    let endpoints = object("endpoints")?;
+    if endpoints.is_empty() {
+        return Err(Error::InvalidConfig(
+            "sources.endpoints cannot be empty".to_owned(),
+        ));
+    }
+    for (id, value) in endpoints {
+        validate_identifier("source endpoint", id)?;
+        let url = value.as_str().ok_or_else(|| {
+            Error::InvalidConfig(format!("source endpoint {id:?} must be a string"))
+        })?;
+        if !url.starts_with("https://github.com/") || url.contains(char::is_whitespace) {
+            return Err(Error::InvalidConfig(format!(
+                "source endpoint {id:?} must be a GitHub HTTPS URL"
+            )));
+        }
+    }
+
+    let routes = object("release_routes")?;
+    if routes.is_empty() {
+        return Err(Error::InvalidConfig(
+            "sources.release_routes cannot be empty".to_owned(),
+        ));
+    }
+    for (id, value) in routes {
+        validate_identifier("release route", id)?;
+        let route = value.as_object().ok_or_else(|| {
+            Error::InvalidConfig(format!("release route {id:?} must be an object"))
+        })?;
+        let mut route_keys = vec!["manifest", "channel", "archive_name", "checksum"];
+        if route.contains_key("install_allowed") {
+            route_keys.push("install_allowed");
+        }
+        require_exact_object_keys(route, &route_keys, &format!("release route {id:?}"))?;
+        let manifest = route
+            .get("manifest")
+            .and_then(serde_json::Value::as_str)
+            .filter(|manifest| endpoints.contains_key(*manifest))
+            .ok_or_else(|| {
+                Error::InvalidConfig(format!(
+                    "release route {id:?} references an unknown manifest endpoint"
+                ))
+            })?;
+        let _ = manifest;
+        if route.get("channel").and_then(serde_json::Value::as_str) != Some("stable")
+            || route.get("checksum").and_then(serde_json::Value::as_str)
+                != Some("md5_from_manifest")
+        {
+            return Err(Error::InvalidConfig(format!(
+                "release route {id:?} has an unsupported channel or checksum contract"
+            )));
+        }
+        let archive = route
+            .get("archive_name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                Error::InvalidConfig(format!("release route {id:?} has no archive_name"))
+            })?;
+        if archive.is_empty()
+            || archive.contains(['/', '\\', '\t', '\r', '\n'])
+            || matches!(archive, "." | "..")
+        {
+            return Err(Error::InvalidConfig(format!(
+                "release route {id:?} has an unsafe archive_name"
+            )));
+        }
+        if route
+            .get("install_allowed")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(Error::InvalidConfig(format!(
+                "release route {id:?} install_allowed must be boolean"
+            )));
+        }
+    }
+
+    let runtime = object("runtime")?;
+    require_exact_object_keys(
+        runtime,
+        &["metadata", "architectures", "verification"],
+        "sources.runtime",
+    )?;
+    let metadata = runtime
+        .get("metadata")
+        .and_then(serde_json::Value::as_str)
+        .filter(|metadata| endpoints.contains_key(*metadata))
+        .ok_or_else(|| {
+            Error::InvalidConfig(
+                "sources.runtime.metadata references an unknown endpoint".to_owned(),
+            )
+        })?;
+    let _ = metadata;
+    let architectures = runtime
+        .get("architectures")
+        .and_then(serde_json::Value::as_array)
+        .filter(|architectures| !architectures.is_empty())
+        .ok_or_else(|| {
+            Error::InvalidConfig("sources.runtime.architectures must be a non-empty array".into())
+        })?;
+    let mut architecture_ids = BTreeSet::new();
+    let mut system_names = BTreeSet::new();
+    for architecture in architectures {
+        let architecture = architecture.as_object().ok_or_else(|| {
+            Error::InvalidConfig("Runtime architecture entries must be objects".into())
+        })?;
+        require_exact_object_keys(
+            architecture,
+            &["id", "system_names"],
+            "Runtime architecture",
+        )?;
+        let id = architecture
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| Error::InvalidConfig("Runtime architecture has no id".into()))?;
+        validate_identifier("Runtime architecture", id)?;
+        if !architecture_ids.insert(id) {
+            return Err(Error::InvalidConfig(format!(
+                "duplicate Runtime architecture {id:?}"
+            )));
+        }
+        let aliases = architecture
+            .get("system_names")
+            .and_then(serde_json::Value::as_array)
+            .filter(|aliases| !aliases.is_empty())
+            .ok_or_else(|| {
+                Error::InvalidConfig(format!("Runtime architecture {id:?} has no system_names"))
+            })?;
+        for alias in aliases {
+            let alias = alias
+                .as_str()
+                .filter(|alias| safe_arch_name(alias))
+                .ok_or_else(|| {
+                    Error::InvalidConfig(format!(
+                        "Runtime architecture {id:?} has an unsafe system name"
+                    ))
+                })?;
+            if !system_names.insert(alias) {
+                return Err(Error::InvalidConfig(format!(
+                    "Runtime system architecture {alias:?} is mapped more than once"
+                )));
+            }
+        }
+    }
+    let verification = runtime
+        .get("verification")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            Error::InvalidConfig("sources.runtime.verification must be an array".to_owned())
+        })?;
+    let verification_count = verification.len();
+    let verification = verification
+        .iter()
+        .map(|value| {
+            value.as_str().ok_or_else(|| {
+                Error::InvalidConfig(
+                    "sources.runtime.verification entries must be strings".to_owned(),
+                )
+            })
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    let required = ["url", "size", "md5", "squashfs_magic"]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if verification_count != required.len() || verification != required {
+        return Err(Error::InvalidConfig(
+            "sources.runtime.verification does not match the implemented security contract"
+                .to_owned(),
+        ));
+    }
+
+    let transport = object("transport")?;
+    require_exact_object_keys(
+        transport,
+        &[
+            "proxy_registry_ref",
+            "probe_batch_limit",
+            "capabilities",
+            "routes",
+            "cache_scope",
+            "resume_requires_same_formatted_endpoint",
+        ],
+        "sources.transport",
+    )?;
+    if transport
+        .get("proxy_registry_ref")
+        .and_then(serde_json::Value::as_str)
+        != Some("embedded://github-proxy-registry/v1")
+        || transport
+            .get("resume_requires_same_formatted_endpoint")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        || transport
+            .get("cache_scope")
+            .and_then(serde_json::Value::as_str)
+            != Some("process")
+    {
+        return Err(Error::InvalidConfig(
+            "sources.transport has an unsupported security contract".to_owned(),
+        ));
+    }
+    let batch = transport
+        .get("probe_batch_limit")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if !(1..=32).contains(&batch) {
+        return Err(Error::InvalidConfig(
+            "sources.transport.probe_batch_limit must be between 1 and 32".to_owned(),
+        ));
+    }
+    let capabilities = transport
+        .get("capabilities")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            Error::InvalidConfig("sources.transport.capabilities must be an array".into())
+        })?;
+    let capability_count = capabilities.len();
+    let capabilities = capabilities
+        .iter()
+        .map(|value| {
+            value.as_str().ok_or_else(|| {
+                Error::InvalidConfig(
+                    "sources.transport.capabilities entries must be strings".into(),
+                )
+            })
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    let required_capabilities = ["release", "raw", "archive", "api", "gist", "clone"]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if capability_count != required_capabilities.len() || capabilities != required_capabilities {
+        return Err(Error::InvalidConfig(
+            "sources.transport.capabilities does not match the engine transport".into(),
+        ));
+    }
+    let route_map = transport
+        .get("routes")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| Error::InvalidConfig("sources.transport.routes must be an object".into()))?;
+    if route_map.keys().collect::<BTreeSet<_>>() != endpoints.keys().collect::<BTreeSet<_>>() {
+        return Err(Error::InvalidConfig(
+            "sources.transport.routes must map every endpoint exactly once".into(),
+        ));
+    }
+    for endpoint in endpoints.keys() {
+        if route_map.get(endpoint).and_then(serde_json::Value::as_str) != Some("release") {
+            return Err(Error::InvalidConfig(format!(
+                "source endpoint {endpoint:?} has no release transport route"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn safe_arch_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.' | b'-')
+        })
+}
+
+fn require_exact_object_keys(
+    object: &serde_json::Map<String, serde_json::Value>,
+    expected: &[&str],
+    path: &str,
+) -> Result<()> {
+    let actual = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    let expected = expected.iter().copied().collect::<BTreeSet<_>>();
+    if actual != expected {
+        return Err(Error::InvalidConfig(format!(
+            "{path} has unexpected or missing fields"
+        )));
+    }
+    Ok(())
+}
+
 fn require_detail_identity(
     object: &mut serde_json::Map<String, serde_json::Value>,
     field: &str,
@@ -504,7 +903,7 @@ fn detail_identity_error(platform_id: &str, field: &str) -> Error {
     ))
 }
 
-fn validate_identifier(kind: &str, value: &str) -> Result<()> {
+pub(crate) fn validate_identifier(kind: &str, value: &str) -> Result<()> {
     let mut bytes = value.bytes();
     if value.len() > 128
         || !matches!(bytes.next(), Some(b'a'..=b'z'))

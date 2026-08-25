@@ -69,6 +69,7 @@ class ConfigContractTests(unittest.TestCase):
             set(self.config["platforms"]),
             {
                 "miniloong",
+                "miniloong-loongos",
                 "trimui",
                 "arkos",
                 "amberelec",
@@ -85,18 +86,109 @@ class ConfigContractTests(unittest.TestCase):
 
     def test_models_are_recognition_display_only_and_inherit_parent(self) -> None:
         self.assertNotIn("models", self.config)
-        allowed = {"display_name", "recognition", "display", "overrides"}
+        allowed = {"id", "priority", "display_name", "recognition", "display", "overrides"}
         models = self.config["platforms"]["trimui"]["models"]
+        by_id = {model["id"]: model for model in models}
         for model in ("brick", "brick_pro", "smart_pro"):
-            entry = models[model]
+            entry = by_id[model]
             self.assertNotIn("inherits", entry)
             self.assertLessEqual(set(entry), allowed)
             self.assertLessEqual(set(entry.get("overrides", {})), {"display", "input"})
         # Parentage is represented by containment, so model ids can be reused
         # independently by another platform.
-        duplicate = copy.deepcopy(models["brick"])
+        duplicate = copy.deepcopy(by_id["brick"])
         config = copy.deepcopy(self.config)
-        config["platforms"]["generic"]["models"] = {"brick": duplicate}
+        config["platforms"]["generic"]["models"] = [duplicate]
+        self.validator.validate(config)
+
+    def test_v1_locations_are_stable_typed_and_never_use_scan_roots(self) -> None:
+        for name, platform in self.config["platforms"].items():
+            self.assertNotIn("scan_roots", platform, name)
+            self.assertNotIn("apps_root", platform, name)
+            ids = [location["id"] for location in platform["locations"]]
+            self.assertEqual(len(ids), len(set(ids)), name)
+            for location in platform["locations"]:
+                self.assertIn(location["path"], platform["paths"], name)
+        app_locations = [
+            location for location in self.config["platforms"]["trimui"]["locations"]
+            if location["kind"] == "apps"
+        ]
+        self.assertEqual([location["id"] for location in app_locations], ["apps-primary"])
+
+    def test_validator_rejects_bad_location_and_capability_types(self) -> None:
+        config = copy.deepcopy(self.config)
+        config["platforms"]["trimui"]["locations"][0]["id"] = "apps-primary"
+        with self.assertRaises(self.validator.ConfigError):
+            self.validator.validate(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["trimui"]["capabilities"]["install_apps"] = "yes"
+        with self.assertRaises(self.validator.ConfigError):
+            self.validator.validate(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["trimui"]["paths"]["apps"] = {
+            "strategy": "literal", "value": "/tmp/../etc"
+        }
+        with self.assertRaises(self.validator.ConfigError):
+            self.validator.validate(config)
+
+    def test_v1_strictness_and_location_selection_are_one_contract(self) -> None:
+        mutations = []
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["generic"]["locations"][0]["future"] = True
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["trimui"]["models"][0].pop("display")
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["trimui"]["models"][0]["future"] = True
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["generic"]["capabilities"].pop("scan_script_images")
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["generic"]["locations"] = config["platforms"]["generic"]["locations"][:1]
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        platform = config["platforms"]["generic"]
+        platform["paths"]["scripts_secondary"] = {
+            "strategy": "literal", "value": "/ports-secondary"
+        }
+        duplicate = copy.deepcopy(platform["locations"][0])
+        duplicate.update(id="ports-scripts-secondary", path="scripts_secondary")
+        platform["locations"].append(duplicate)
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["platforms"]["generic"]["locations"][0]["roles"] = ["inventory"]
+        mutations.append(config)
+
+        for config in mutations:
+            with self.assertRaises(self.validator.ConfigError):
+                self.validator.validate(config)
+
+        # A separate, higher-priority inventory root remains valid, but it must
+        # never replace the lower-priority root that carries install/manage.
+        config = copy.deepcopy(self.config)
+        platform = config["platforms"]["generic"]
+        platform["paths"]["inventory_scripts"] = {
+            "strategy": "literal", "value": "/inventory-only"
+        }
+        platform["locations"].append({
+            "id": "ports-scripts-inventory",
+            "kind": "port_scripts",
+            "path": "inventory_scripts",
+            "roles": ["inventory"],
+            "formats": ["port"],
+            "priority": 200,
+        })
         self.validator.validate(config)
 
     def test_environment_is_default_open_with_exact_blocklist(self) -> None:
@@ -143,10 +235,11 @@ class ConfigContractTests(unittest.TestCase):
             ],
         )
         self.assertEqual(trimui["libraries"]["groups"]["gles"]["candidates"], ["/usr/lib"])
-        self.assertEqual(
-            self.config["platforms"]["miniloong"]["python"]["mode"],
-            "runtime_mount",
-        )
+        for platform in ("miniloong", "miniloong-loongos"):
+            self.assertEqual(
+                self.config["platforms"][platform]["python"]["mode"],
+                "runtime_mount",
+            )
         for platform in ("rocknix", "jelos"):
             self.assertEqual(
                 self.config["platforms"][platform]["frontend"]["management"],
@@ -183,6 +276,17 @@ class ConfigContractTests(unittest.TestCase):
                 self.assertTrue(group["required_sonames"], name)
                 self.assertTrue(group["candidates"], name)
 
+        broken = copy.deepcopy(self.config)
+        broken["platforms"]["generic"]["health"][0] = {"kind": "required_file"}
+        with self.assertRaises(self.validator.ConfigError):
+            self.validator.validate(broken)
+
+        broken = copy.deepcopy(self.config)
+        apps = broken["platforms"]["trimui"]["locations"][-1]
+        apps["roles"] = ["install"]
+        with self.assertRaises(self.validator.ConfigError):
+            self.validator.validate(broken)
+
     def test_subsequent_sources_use_capability_aware_proxy_registry(self) -> None:
         transport = self.config["sources"]["transport"]
         self.assertEqual(transport["proxy_registry_ref"], "embedded://github-proxy-registry/v1")
@@ -194,6 +298,7 @@ class ConfigContractTests(unittest.TestCase):
     def test_frontend_installer_policy_matches_launcher_contract(self) -> None:
         expected = {
             "miniloong": (None, None, False, False, "PortMaster.sh", "PortMaster.sh"),
+            "miniloong-loongos": (None, None, False, False, "PortMaster.sh", "PortMaster.sh"),
             "trimui": ("trimui/control.txt", None, True, True, None, "launch.sh"),
             "arkos": (None, None, True, False, None, "PortMaster.sh"),
             "amberelec": (None, None, True, False, None, "PortMaster.sh"),
@@ -230,7 +335,7 @@ class ConfigContractTests(unittest.TestCase):
     def test_support_classification_never_authorizes_a_guessed_generic_target(self) -> None:
         for name, platform in self.config["platforms"].items():
             support = platform["support"]
-            if name in {"miniloong", "trimui"}:
+            if name in {"miniloong", "miniloong-loongos", "trimui"}:
                 self.assertEqual(support["device_class"], "tested", name)
             elif name == "generic":
                 self.assertEqual(support["device_class"], "unsupported-known")
@@ -249,6 +354,7 @@ class ConfigContractTests(unittest.TestCase):
     def test_launcher_directory_matches_portmaster_directory_contract(self) -> None:
         expected = {
             "miniloong": {"strategy": "literal", "value": "/mnt/sdcard/roms"},
+            "miniloong-loongos": {"strategy": "launcher_dir"},
             "trimui": {"strategy": "literal", "value": "/mnt/SDCARD/Data"},
             "arkos": {"strategy": "parent", "of": "game_data"},
             "amberelec": {"strategy": "parent", "of": "game_data"},
@@ -268,6 +374,51 @@ class ConfigContractTests(unittest.TestCase):
                 name,
             )
 
+    def test_miniloong_accepts_old_and_loongos_layouts_declaratively(self) -> None:
+        legacy = self.config["platforms"]["miniloong"]
+        loongos = self.config["platforms"]["miniloong-loongos"]
+        self.assertEqual(
+            legacy["recognition"],
+            {"kind": "file_exists", "path": "/loong/loong_version"},
+        )
+        self.assertEqual(
+            legacy["paths"]["game_data"],
+            {"strategy": "literal", "value": "/mnt/sdcard/roms/ports"},
+        )
+        self.assertGreater(loongos["priority"], legacy["priority"])
+        self.assertEqual(
+            loongos["recognition"],
+            {
+                "kind": "all",
+                "predicates": [
+                    {
+                        "kind": "os_release_equals",
+                        "field": "ID",
+                        "value": "loong",
+                        "case_insensitive": True,
+                    },
+                    {
+                        "kind": "os_release_version_at_least",
+                        "field": "VERSION_ID",
+                        "value": "1.4.0.0",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(
+            loongos["paths"]["game_data"],
+            {"strategy": "literal", "value": "/roms/ports"},
+        )
+        self.assertEqual(
+            loongos["paths"]["portmaster_core"],
+            {
+                "strategy": "relative_to",
+                "base": "game_data",
+                "suffix": "PortMaster",
+                "canonicalize_existing": True,
+            },
+        )
+
     def test_official_installer_layouts_are_declarative(self) -> None:
         arkos = self.config["platforms"]["arkos"]
         self.assertEqual(
@@ -278,6 +429,7 @@ class ConfigContractTests(unittest.TestCase):
             arkos["paths"]["game_data"],
             {
                 "strategy": "first_existing",
+                "expected_type": "directory",
                 "candidates": ["/roms2/ports", "/roms/ports"],
             },
         )
@@ -355,6 +507,62 @@ class ConfigContractTests(unittest.TestCase):
         }
         with self.assertRaises(self.validator.ConfigError):
             self.validator.validate(config)
+
+    def test_validator_rejects_inert_or_weakened_source_contracts(self) -> None:
+        mutations = []
+
+        config = copy.deepcopy(self.config)
+        config["bootstrap"]["config_url"] = "http://example.test/config.json"
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["sources"]["runtime"]["verification"].remove("md5")
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["sources"]["release_routes"]["official"]["manifest"] = "missing"
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["sources"]["transport"]["probe_batch_limit"] = 0
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["sources"]["runtime"]["architectures"][1]["system_names"] = ["aarch64"]
+        mutations.append(config)
+
+        config = copy.deepcopy(self.config)
+        config["sources"]["runtime"]["verfication"] = config["sources"]["runtime"].pop("verification")
+        mutations.append(config)
+
+        for config in mutations:
+            with self.assertRaises(self.validator.ConfigError):
+                self.validator.validate(config)
+
+    def test_schema_defines_the_same_source_and_detail_contracts(self) -> None:
+        schema = json.loads((CONFIG_DIR / "appmanager-config.schema.json").read_text())
+        self.assertEqual(schema["properties"]["bootstrap"]["$ref"], "#/$defs/bootstrap")
+        self.assertEqual(schema["properties"]["sources"]["$ref"], "#/$defs/sources")
+        self.assertFalse(schema["$defs"]["bootstrap"]["additionalProperties"])
+        self.assertFalse(schema["$defs"]["sources"]["additionalProperties"])
+        detail_schema = json.loads((CONFIG_DIR / "platform-detail.schema.json").read_text())
+        for field in ("device_manufacturer", "locations", "models"):
+            self.assertIn(field, detail_schema["properties"])
+        required_capabilities = set(schema["$defs"]["capabilities"]["required"])
+        self.assertEqual(required_capabilities, self.validator.REQUIRED_CAPABILITIES)
+        self.assertEqual(schema["$defs"]["locations"]["minItems"], 2)
+        self.assertEqual(
+            schema["$defs"]["locations"]["x-appmanager-unique-highest-priority-by-kind"],
+            list(self.validator.PORT_LOCATION_KINDS),
+        )
+        self.assertEqual(
+            detail_schema["properties"]["locations"]["$ref"],
+            "appmanager-config.schema.json#/$defs/locations",
+        )
+        self.assertEqual(
+            detail_schema["properties"]["capabilities"]["$ref"],
+            "appmanager-config.schema.json#/$defs/capabilities",
+        )
 
     def test_validator_cli_accepts_generated_artifact_and_schema(self) -> None:
         subprocess.run(

@@ -313,8 +313,33 @@ fn appmanager_request_value(
                         })?,
                 ),
             };
+            let revision = match request.get::<LuaValue>("revision").map_err(|error| {
+                BridgeFailure::new(
+                    "invalid_request",
+                    format!("invalid start revision: {error}"),
+                )
+            })? {
+                LuaValue::Nil => None,
+                LuaValue::String(value) => Some(
+                    value
+                        .to_str()
+                        .map_err(|error| {
+                            BridgeFailure::new(
+                                "invalid_request",
+                                format!("invalid start revision: {error}"),
+                            )
+                        })?
+                        .to_owned(),
+                ),
+                _ => {
+                    return Err(BridgeFailure::new(
+                        "invalid_request",
+                        "start revision must be a string",
+                    ));
+                }
+            };
             let task_id = service
-                .start(&kind, actions)
+                .start_at_revision(&kind, actions, revision)
                 .map_err(|message| BridgeFailure::new("start_failed", message))?;
             i64::try_from(task_id).map(LuaValue::Integer).map_err(|_| {
                 BridgeFailure::new("invalid_response", "task id exceeds the Lua integer range")
@@ -326,6 +351,48 @@ fn appmanager_request_value(
             .cancel()
             .map(|()| LuaValue::Boolean(true))
             .map_err(|message| BridgeFailure::new("cancel_failed", message)),
+        "web-set" => {
+            let enabled: bool = match payload {
+                Some(LuaValue::Boolean(value)) => value,
+                Some(LuaValue::Table(table)) => table.get::<bool>("enabled").map_err(|error| {
+                    BridgeFailure::new(
+                        "invalid_request",
+                        format!("invalid web-set payload: {error}"),
+                    )
+                })?,
+                _ => {
+                    return Err(BridgeFailure::new(
+                        "invalid_request",
+                        "web-set requires a boolean or {enabled} table",
+                    ));
+                }
+            };
+            let endpoint = service
+                .web_set(enabled)
+                .map_err(|message| BridgeFailure::new("web_failed", message))?;
+            lua.to_value_with(&endpoint, bridge_serialize_options())
+                .map_err(|error| BridgeFailure::new("encode_failed", error.to_string()))
+        }
+        "run" => {
+            let path: String = match payload {
+                Some(LuaValue::String(path)) => match path.to_str() {
+                    Ok(value) => value.to_owned(),
+                    Err(_) => {
+                        return Err(BridgeFailure::new("invalid_request", "invalid run path"));
+                    }
+                },
+                _ => {
+                    return Err(BridgeFailure::new(
+                        "invalid_request",
+                        "run requires a script path string",
+                    ));
+                }
+            };
+            service
+                .run_script(path)
+                .map(|()| LuaValue::Boolean(true))
+                .map_err(|message| BridgeFailure::new("run_failed", message))
+        }
         _ => Err(BridgeFailure::new(
             "unsupported_method",
             "unsupported APP Manager bridge method",

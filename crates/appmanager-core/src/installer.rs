@@ -3,10 +3,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use portkit_core::ExclusiveFileLock;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zip::ZipArchive;
 
@@ -75,12 +74,43 @@ pub enum InstallError {
     Io(#[from] io::Error),
 }
 
-struct WorkGuard(PathBuf);
+const TRANSACTION_PREFIX: &str = ".pm-install-v1-";
+
+struct WorkGuard {
+    path: PathBuf,
+    cleanup: bool,
+}
+
+impl WorkGuard {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            cleanup: true,
+        }
+    }
+
+    fn preserve(&mut self) {
+        self.cleanup = false;
+    }
+}
 
 impl Drop for WorkGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        if self.cleanup {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SwapJournal {
+    schema: u32,
+    transaction_id: String,
+    old_core: Vec<String>,
+    old_frontend: Vec<String>,
+    new_core: Vec<String>,
+    new_frontend: Vec<String>,
 }
 
 pub fn install_portmaster(request: &InstallRequest) -> Result<InstallOutcome, InstallError> {
@@ -93,6 +123,22 @@ pub fn install_portmaster(request: &InstallRequest) -> Result<InstallOutcome, In
     result
 }
 
+/// Recover a PortMaster swap left by a crashed process before any new archive
+/// is downloaded or staged. This is safe to call at APP startup.
+pub fn recover_portmaster_transactions(
+    plan: &ValidatedInstallPlan,
+    state_dir: &Path,
+) -> Result<(), InstallError> {
+    if !plan.target.exists() && !plan.frontend_dir.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(state_dir)?;
+    fs::create_dir_all(&plan.target)?;
+    fs::create_dir_all(&plan.frontend_dir)?;
+    let _lock = acquire_lock(state_dir)?;
+    sweep_stale_artifacts(plan, &[])
+}
+
 fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, InstallError> {
     validate_request(request)?;
     fs::create_dir_all(&request.state_dir)?;
@@ -101,15 +147,19 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
 
     fs::create_dir_all(&request.plan.target)?;
     fs::create_dir_all(&request.plan.frontend_dir)?;
-    let core_work = unique_path(&request.plan.target, ".pm-install");
-    let frontend_work = unique_path(&request.plan.frontend_dir, ".pm-install");
-    let _core_work_guard = WorkGuard(core_work.clone());
-    let _frontend_work_guard = WorkGuard(frontend_work.clone());
+    let (transaction_id, core_work, frontend_work) =
+        allocate_work_pair(&request.plan.target, &request.plan.frontend_dir)?;
+    let mut core_work_guard = WorkGuard::new(core_work.clone());
+    let mut frontend_work_guard = WorkGuard::new(frontend_work.clone());
     let staged_core = core_work.join("stage");
     let staged_frontend = frontend_work.join("stage");
     fs::create_dir_all(&staged_core)?;
     fs::create_dir_all(&staged_frontend)?;
-    extract_archive(&request.archive, &staged_core)?;
+    extract_archive(
+        &request.archive,
+        &staged_core,
+        request.cancel_token.as_ref(),
+    )?;
     prepare_staging(
         &request.plan,
         &staged_core,
@@ -120,6 +170,8 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     if staged_files.is_empty() {
         return Err(InstallError::Archive("managed core is empty".into()));
     }
+    sync_tree(&staged_core)?;
+    sync_tree(&staged_frontend)?;
     cancel(request)?;
 
     let _lock = acquire_lock(&request.state_dir)?;
@@ -145,10 +197,10 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
         .collect::<Vec<_>>();
     progress(request, "installing", 60, "Replacing managed core");
 
-    // Retire the current managed entries into the per-run work directories:
-    // same-filesystem renames, removed with the work directories on success,
-    // swept by the next install after a crash. There is no rollback — a
-    // failed swap leaves the core damaged and the fix is installing again.
+    // Retire the current managed entries into same-filesystem work
+    // directories. The journal is durable before the first rename, so both an
+    // ordinary I/O failure and a process/device crash can restore the previous
+    // core instead of leaving a half-installed system.
     let retired_core = core_work.join("retired");
     let retired_frontend = frontend_work.join("retired");
     fs::create_dir_all(&retired_core)?;
@@ -157,17 +209,62 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
         .file_name()
         .and_then(|name| name.to_str())
         .expect("generated stage name is UTF-8");
-    for (name, path) in managed_top_entries(&request.plan, Some(stage_name))? {
-        rename_synced(&path, &retired_core.join(&name))?;
+    let old_core = managed_top_entries(&request.plan, Some(stage_name))?;
+    let new_core = direct_names(&staged_core)?;
+    let journal = SwapJournal {
+        schema: 1,
+        transaction_id: transaction_id.clone(),
+        old_core: old_core.iter().map(|(name, _)| name.clone()).collect(),
+        old_frontend: frontend_existing.clone(),
+        new_core: new_core.clone(),
+        new_frontend: request.plan.frontend_names.clone(),
+    };
+    write_swap_journal(&core_work, &journal)?;
+    let swap = (|| -> io::Result<()> {
+        for (name, path) in &old_core {
+            rename_synced(path, &retired_core.join(name))?;
+        }
+        for name in &frontend_existing {
+            rename_synced(
+                &request.plan.frontend_dir.join(name),
+                &retired_frontend.join(name),
+            )?;
+        }
+        for name in &new_core {
+            rename_synced(&staged_core.join(name), &request.plan.target.join(name))?;
+        }
+        for name in &request.plan.frontend_names {
+            rename_synced(
+                &staged_frontend.join(name),
+                &request.plan.frontend_dir.join(name),
+            )?;
+        }
+        set_executables(&request.plan)
+    })();
+    if let Err(swap_error) = swap {
+        if let Err(rollback_error) =
+            rollback_swap(&request.plan, &core_work, &frontend_work, &journal, true)
+        {
+            core_work_guard.preserve();
+            frontend_work_guard.preserve();
+            return Err(InstallError::Io(io::Error::other(format!(
+                "swap failed: {swap_error}; rollback failed: {rollback_error}"
+            ))));
+        }
+        return Err(InstallError::Io(swap_error));
     }
-    for name in &frontend_existing {
-        rename_synced(
-            &request.plan.frontend_dir.join(name),
-            &retired_frontend.join(name),
-        )?;
+    if let Err(commit_error) = write_commit_marker(&core_work) {
+        if let Err(rollback_error) =
+            rollback_swap(&request.plan, &core_work, &frontend_work, &journal, true)
+        {
+            core_work_guard.preserve();
+            frontend_work_guard.preserve();
+            return Err(InstallError::Io(io::Error::other(format!(
+                "cannot commit install journal: {commit_error}; rollback failed: {rollback_error}"
+            ))));
+        }
+        return Err(InstallError::Io(commit_error));
     }
-    install_staged(&request.plan, &staged_core, &staged_frontend)?;
-    set_executables(&request.plan)?;
     // The replacement above is the commit point. A removable filesystem may
     // reject this final UI-only write; never report a committed install as
     // failed because its completion message could not be persisted.
@@ -184,14 +281,267 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
 
 // Removes per-run work directories left by a crashed install.
 fn sweep_stale_artifacts(plan: &ValidatedInstallPlan, keep: &[&Path]) -> Result<(), InstallError> {
-    for parent in [&plan.target, &plan.frontend_dir] {
-        for name in direct_names(parent)? {
-            if !name.starts_with(".pm-install") {
+    for name in direct_names(&plan.target)? {
+        if !name.starts_with(TRANSACTION_PREFIX) {
+            continue;
+        }
+        let core_work = plan.target.join(&name);
+        if keep.iter().any(|kept| **kept == core_work) {
+            continue;
+        }
+        let journal_path = core_work.join("swap.json");
+        if !core_work.join("owner").is_file() && !journal_path.is_file() {
+            // Crash before transaction publication: no managed rename could
+            // have occurred because swap.json is written after both owners.
+            remove_any(&plan.frontend_dir.join(&name))?;
+            remove_any(&core_work)?;
+            continue;
+        }
+        validate_transaction_owner(&core_work, &name)?;
+        if journal_path.is_file() {
+            let journal: SwapJournal =
+                serde_json::from_slice(&fs::read(&journal_path)?).map_err(|error| {
+                    InstallError::Invalid(format!("invalid stale install journal: {error}"))
+                })?;
+            validate_journal(&journal, &name)?;
+            let frontend_work = plan.frontend_dir.join(&journal.transaction_id);
+            match fs::symlink_metadata(&frontend_work) {
+                Ok(_) => validate_transaction_owner(&frontend_work, &journal.transaction_id)?,
+                // Recovery may have completed and removed the frontend half
+                // immediately before power was lost. The core journal is the
+                // authoritative half and rollback is idempotent without it.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(InstallError::Io(error)),
+            }
+            if !core_work.join("committed").is_file() {
+                // A stale journal is filesystem input, not authority to
+                // delete a live new-only name. Restoring entries that have a
+                // real retired backup is safe; any extra new entry is left for
+                // the immediately following install to retire and replace.
+                rollback_swap(plan, &core_work, &frontend_work, &journal, false)?;
+            }
+            remove_any(&frontend_work)?;
+        }
+        remove_any(&core_work)?;
+    }
+    for name in direct_names(&plan.frontend_dir)? {
+        if !name.starts_with(TRANSACTION_PREFIX) {
+            continue;
+        }
+        let path = plan.frontend_dir.join(name);
+        if !keep.iter().any(|kept| **kept == path) {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| InstallError::Invalid("work name is not UTF-8".to_owned()))?;
+            if !path.join("owner").is_file() {
+                // Frontend work without an owner is necessarily from the
+                // create-dir window before either staging or swapping.
+                remove_any(&path)?;
                 continue;
             }
-            let path = parent.join(&name);
-            if !keep.iter().any(|kept| **kept == path) {
+            validate_transaction_owner(&path, name)?;
+            // Orphan frontend stages have no journal and therefore predate
+            // the first managed rename; they are safe to discard.
+            remove_any(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn allocate_work_pair(
+    core_parent: &Path,
+    frontend_parent: &Path,
+) -> Result<(String, PathBuf, PathBuf), InstallError> {
+    for _ in 0..128 {
+        let transaction_id = secure_transaction_name()?;
+        let core_work = core_parent.join(&transaction_id);
+        let frontend_work = frontend_parent.join(&transaction_id);
+        match fs::create_dir(&core_work) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(InstallError::Io(error)),
+        }
+        test_pm_crash_point("after-core-work-dir");
+        if let Err(error) = fs::create_dir(&frontend_work) {
+            let _ = fs::remove_dir(&core_work);
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                continue;
+            }
+            return Err(InstallError::Io(error));
+        }
+        test_pm_crash_point("after-frontend-work-dir");
+        let write_owners = write_owner(&core_work, &transaction_id).and_then(|()| {
+            test_pm_crash_point("after-core-owner");
+            write_owner(&frontend_work, &transaction_id)
+        });
+        if let Err(error) = write_owners {
+            let _ = fs::remove_dir_all(&frontend_work);
+            let _ = fs::remove_dir_all(&core_work);
+            return Err(InstallError::Io(error));
+        }
+        return Ok((transaction_id, core_work, frontend_work));
+    }
+    Err(InstallError::Invalid(
+        "cannot allocate an install transaction".to_owned(),
+    ))
+}
+
+#[cfg(test)]
+fn test_pm_crash_point(point: &str) {
+    if std::env::var("PAM_TEST_PM_CRASH_POINT").as_deref() == Ok(point) {
+        std::process::exit(87);
+    }
+}
+
+#[cfg(not(test))]
+fn test_pm_crash_point(_point: &str) {}
+
+fn write_owner(work: &Path, transaction_id: &str) -> io::Result<()> {
+    let path = work.join("owner");
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    output.write_all(transaction_id.as_bytes())?;
+    output.flush()?;
+    output.sync_all()?;
+    sync_parent(&path)
+}
+
+fn validate_transaction_owner(work: &Path, expected: &str) -> Result<(), InstallError> {
+    let metadata = fs::symlink_metadata(work).map_err(|error| {
+        InstallError::Invalid(format!("invalid transaction directory: {error}"))
+    })?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err(InstallError::Invalid(
+            "transaction path is not a real directory".to_owned(),
+        ));
+    }
+    let owner = work.join("owner");
+    let owner_metadata = fs::symlink_metadata(&owner)
+        .map_err(|_| InstallError::Invalid("transaction owner marker is missing".to_owned()))?;
+    if !owner_metadata.file_type().is_file()
+        || fs::read_to_string(owner).ok().as_deref() != Some(expected)
+    {
+        return Err(InstallError::Invalid(
+            "transaction owner marker is invalid".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_journal(
+    journal: &SwapJournal,
+    expected_transaction_id: &str,
+) -> Result<(), InstallError> {
+    if journal.schema != 1
+        || journal.transaction_id != expected_transaction_id
+        || !journal.transaction_id.starts_with(TRANSACTION_PREFIX)
+        || journal.transaction_id.len() != TRANSACTION_PREFIX.len() + 64
+        || !journal.transaction_id[TRANSACTION_PREFIX.len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(InstallError::Invalid(
+            "install journal is not owned by its transaction directory".to_owned(),
+        ));
+    }
+    ManagedRoot::validate_child_name(&journal.transaction_id)
+        .map_err(|error| InstallError::Invalid(format!("unsafe install journal: {error}")))?;
+    for name in journal
+        .old_core
+        .iter()
+        .chain(&journal.old_frontend)
+        .chain(&journal.new_core)
+        .chain(&journal.new_frontend)
+    {
+        ManagedRoot::validate_child_name(name)
+            .map_err(|error| InstallError::Invalid(format!("unsafe install journal: {error}")))?;
+    }
+    Ok(())
+}
+
+fn write_swap_journal(work: &Path, journal: &SwapJournal) -> io::Result<()> {
+    let path = work.join("swap.json");
+    let temporary = work.join("swap.json.new");
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    serde_json::to_writer(&mut output, journal).map_err(io::Error::other)?;
+    output.flush()?;
+    output.sync_all()?;
+    fs::rename(&temporary, &path)?;
+    sync_parent(&path)
+}
+
+fn write_commit_marker(work: &Path) -> io::Result<()> {
+    let path = work.join("committed");
+    let output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    output.sync_all()?;
+    sync_parent(&path)
+}
+
+fn rollback_swap(
+    plan: &ValidatedInstallPlan,
+    core_work: &Path,
+    frontend_work: &Path,
+    journal: &SwapJournal,
+    remove_new_only: bool,
+) -> io::Result<()> {
+    rollback_domain(
+        &plan.frontend_dir,
+        &frontend_work.join("retired"),
+        &journal.old_frontend,
+        &journal.new_frontend,
+        remove_new_only,
+    )?;
+    rollback_domain(
+        &plan.target,
+        &core_work.join("retired"),
+        &journal.old_core,
+        &journal.new_core,
+        remove_new_only,
+    )
+}
+
+fn rollback_domain(
+    live: &Path,
+    retired: &Path,
+    old_names: &[String],
+    new_names: &[String],
+    remove_new_only: bool,
+) -> io::Result<()> {
+    let old = old_names
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    for name in old_names.iter().rev() {
+        let backup = retired.join(name);
+        if path_exists(&backup) {
+            let destination = live.join(name);
+            if remove_new_only || !path_exists(&destination) {
+                remove_any(&destination)?;
+                rename_synced(&backup, &destination)?;
+            }
+        }
+    }
+    // If an old entry's backup is already gone, a previous recovery pass has
+    // restored it. Never delete it again. Entries which had no old value are
+    // always safe to remove, making this rollback crash-idempotent.
+    if remove_new_only {
+        for name in new_names.iter().rev() {
+            if old.contains(name.as_str()) {
+                continue;
+            }
+            let path = live.join(name);
+            if path_exists(&path) {
                 remove_any(&path)?;
+                sync_parent(&path)?;
             }
         }
     }
@@ -320,7 +670,10 @@ fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> 
     }
 
     let frontend_device = device_path(&frontend_resolved, request.probe_root.as_deref());
-    if protected_system_namespace(&frontend_device) {
+    let supported_root_frontend = frontend_device
+        .strip_prefix("/root/.local/share")
+        .is_ok_and(|relative| relative.components().count() == 1);
+    if protected_system_namespace(&frontend_device) && !supported_root_frontend {
         return Err(InstallError::Invalid(format!(
             "frontend root {} is in a protected system namespace",
             frontend_device.display()
@@ -353,7 +706,8 @@ fn device_path(path: &Path, fixture_root: Option<&Path>) -> PathBuf {
 
 fn protected_system_namespace(path: &Path) -> bool {
     const FORBIDDEN: &[&str] = &[
-        "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/sbin", "/sys", "/usr",
+        "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root", "/sbin", "/sys",
+        "/usr", "/var",
     ];
     FORBIDDEN.iter().any(|root| path.starts_with(root))
         || path == Path::new("/run")
@@ -409,14 +763,28 @@ fn acquire_lock(state: &Path) -> Result<ExclusiveFileLock, InstallError> {
     })
 }
 
-fn extract_archive(archive: &Path, staged_core: &Path) -> Result<(), InstallError> {
-    extract_archive_with_limits(archive, staged_core, ARCHIVE_LIMITS)
+fn extract_archive(
+    archive: &Path,
+    staged_core: &Path,
+    cancel_token: Option<&CancellationToken>,
+) -> Result<(), InstallError> {
+    extract_archive_with_limits_and_cancel(archive, staged_core, ARCHIVE_LIMITS, cancel_token)
 }
 
+#[cfg(test)]
 fn extract_archive_with_limits(
     archive: &Path,
     staged_core: &Path,
     limits: ArchiveLimits,
+) -> Result<(), InstallError> {
+    extract_archive_with_limits_and_cancel(archive, staged_core, limits, None)
+}
+
+fn extract_archive_with_limits_and_cancel(
+    archive: &Path,
+    staged_core: &Path,
+    limits: ArchiveLimits,
+    cancel_token: Option<&CancellationToken>,
 ) -> Result<(), InstallError> {
     let file = File::open(archive)?;
     let mut zip =
@@ -431,6 +799,7 @@ fn extract_archive_with_limits(
     let mut seen = BTreeSet::new();
     let mut total = 0_u64;
     for index in 0..zip.len() {
+        cancel_token_check(cancel_token)?;
         let mut entry = zip
             .by_index(index)
             .map_err(|error| InstallError::Archive(error.to_string()))?;
@@ -470,7 +839,14 @@ fn extract_archive_with_limits(
             .write(true)
             .create_new(true)
             .open(&output)?;
-        copy_bounded(&mut entry, &mut target, &raw, &mut total, limits)?;
+        copy_bounded(
+            &mut entry,
+            &mut target,
+            &raw,
+            &mut total,
+            limits,
+            cancel_token,
+        )?;
         target.sync_all()?;
     }
     Ok(())
@@ -485,8 +861,16 @@ fn validate_archive_relative(value: &str) -> Result<(), InstallError> {
         return Err(InstallError::Archive(format!("unsafe path: {value:?}")));
     }
     for component in Path::new(value.trim_end_matches('/')).components() {
-        if !matches!(component, Component::Normal(_)) {
+        let Component::Normal(name) = component else {
             return Err(InstallError::Archive(format!("unsafe path: {value:?}")));
+        };
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with(".pm-install") || name.starts_with(".pam-install"))
+        {
+            return Err(InstallError::Archive(format!(
+                "reserved transaction path: {value:?}"
+            )));
         }
     }
     Ok(())
@@ -498,10 +882,12 @@ fn copy_bounded(
     label: &str,
     total: &mut u64,
     limits: ArchiveLimits,
+    cancel_token: Option<&CancellationToken>,
 ) -> Result<(), InstallError> {
     let mut entry_bytes = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
+        cancel_token_check(cancel_token)?;
         let read = source
             .read(&mut buffer)
             .map_err(|error| InstallError::Archive(format!("cannot read {label:?}: {error}")))?;
@@ -525,6 +911,14 @@ fn copy_bounded(
             ));
         }
         destination.write_all(&buffer[..read])?;
+    }
+}
+
+fn cancel_token_check(cancel_token: Option<&CancellationToken>) -> Result<(), InstallError> {
+    if cancel_token.is_some_and(CancellationToken::is_cancelled) {
+        Err(InstallError::Cancelled)
+    } else {
+        Ok(())
     }
 }
 
@@ -573,6 +967,7 @@ fn validate_nested_zip(path: &Path) -> Result<(), InstallError> {
             "pylibs.zip entry",
             &mut total,
             ARCHIVE_LIMITS,
+            None,
         )?;
     }
     Ok(())
@@ -732,16 +1127,6 @@ fn copy_regular(source: &Path, destination: &Path, label: &str) -> Result<(), In
     Ok(())
 }
 
-fn install_staged(plan: &ValidatedInstallPlan, core: &Path, frontend: &Path) -> io::Result<()> {
-    for name in direct_names(core)? {
-        rename_synced(&core.join(&name), &plan.target.join(name))?;
-    }
-    for name in &plan.frontend_names {
-        rename_synced(&frontend.join(name), &plan.frontend_dir.join(name))?;
-    }
-    Ok(())
-}
-
 fn set_executables(plan: &ValidatedInstallPlan) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -857,6 +1242,20 @@ fn regular_files(root: &Path) -> io::Result<Vec<String>> {
     Ok(files)
 }
 
+fn sync_tree(path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::other("cannot sync a symbolic link"));
+    }
+    if metadata.is_file() {
+        return File::open(path)?.sync_all();
+    }
+    for entry in fs::read_dir(path)? {
+        sync_tree(&entry?.path())?;
+    }
+    File::open(path)?.sync_all()
+}
+
 fn rename_synced(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)?;
     sync_parent(destination)?;
@@ -891,12 +1290,15 @@ fn path_exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
 
-fn unique_path(parent: &Path, prefix: &str) -> PathBuf {
-    parent.join(format!(
-        "{prefix}-{}.{}.{}",
-        std::process::id(),
-        epoch_seconds(),
-        unique_counter()
+fn secure_transaction_name() -> io::Result<String> {
+    let mut bytes = [0_u8; 32];
+    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(format!(
+        "{TRANSACTION_PREFIX}{}",
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     ))
 }
 
@@ -905,18 +1307,17 @@ fn unique_counter() -> u64 {
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
-fn epoch_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write;
 
     use tempfile::TempDir;
+
+    fn current_test_executable() -> PathBuf {
+        std::env::var_os("PAM_LAB_TEST_EXECUTABLE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_exe().unwrap())
+    }
     use zip::write::SimpleFileOptions;
 
     use super::*;
@@ -1065,6 +1466,220 @@ mod tests {
     }
 
     #[test]
+    fn failed_swap_restores_the_previous_core_and_frontend() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut request = request(&temp);
+        fs::create_dir_all(&request.plan.target).unwrap();
+        fs::write(request.plan.target.join("control.txt"), b"old core").unwrap();
+        fs::write(request.plan.frontend_dir.join("launch.sh"), b"old frontend").unwrap();
+        // This file is deliberately absent. set_executables runs after all
+        // renames, giving the transaction a deterministic post-swap failure.
+        request.plan.core_executable = Some("missing-core-entry".to_owned());
+
+        assert!(install_portmaster(&request).is_err());
+        assert_eq!(
+            fs::read(request.plan.target.join("control.txt")).unwrap(),
+            b"old core"
+        );
+        assert_eq!(
+            fs::read(request.plan.frontend_dir.join("launch.sh")).unwrap(),
+            b"old frontend"
+        );
+        assert!(!request.plan.target.join("device_info.txt").exists());
+    }
+
+    #[test]
+    fn rollback_is_idempotent_after_an_old_entry_was_already_restored() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = request(&temp);
+        fs::create_dir_all(&request.plan.target).unwrap();
+        fs::create_dir_all(&request.plan.frontend_dir).unwrap();
+        let core_work = request.plan.target.join(".pm-install-v1-recovery");
+        let frontend_work = request.plan.frontend_dir.join(".pm-install-v1-recovery");
+        fs::create_dir_all(core_work.join("retired")).unwrap();
+        fs::create_dir_all(frontend_work.join("retired")).unwrap();
+        fs::write(request.plan.target.join("control.txt"), b"old-restored").unwrap();
+        fs::write(request.plan.target.join("new-only"), b"new").unwrap();
+        let journal = SwapJournal {
+            schema: 1,
+            transaction_id: ".pm-install-v1-recovery".to_owned(),
+            old_core: vec!["control.txt".to_owned()],
+            old_frontend: Vec::new(),
+            new_core: vec!["control.txt".to_owned(), "new-only".to_owned()],
+            new_frontend: Vec::new(),
+        };
+
+        rollback_swap(&request.plan, &core_work, &frontend_work, &journal, true).unwrap();
+        rollback_swap(&request.plan, &core_work, &frontend_work, &journal, true).unwrap();
+        assert_eq!(
+            fs::read(request.plan.target.join("control.txt")).unwrap(),
+            b"old-restored"
+        );
+        assert!(!request.plan.target.join("new-only").exists());
+    }
+
+    #[test]
+    fn stale_journal_cannot_name_a_managed_frontend_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = request(&temp);
+        fs::create_dir_all(&request.plan.target).unwrap();
+        fs::create_dir_all(&request.plan.frontend_dir).unwrap();
+        fs::write(request.plan.frontend_dir.join("launch.sh"), b"keep").unwrap();
+        let work = request.plan.target.join(".pm-install-v1-forged");
+        fs::create_dir_all(&work).unwrap();
+        fs::write(
+            work.join("swap.json"),
+            serde_json::to_vec(&SwapJournal {
+                schema: 1,
+                transaction_id: "launch.sh".to_owned(),
+                old_core: Vec::new(),
+                old_frontend: Vec::new(),
+                new_core: Vec::new(),
+                new_frontend: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(sweep_stale_artifacts(&request.plan, &[]).is_err());
+        assert_eq!(
+            fs::read(request.plan.frontend_dir.join("launch.sh")).unwrap(),
+            b"keep"
+        );
+    }
+
+    #[test]
+    fn stale_recovery_tolerates_a_cleaned_frontend_half_and_keeps_new_only_live_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = request(&temp);
+        fs::create_dir_all(&request.plan.target).unwrap();
+        fs::create_dir_all(&request.plan.frontend_dir).unwrap();
+        let live = request.plan.target.join("unowned-live-entry");
+        fs::write(&live, b"keep").unwrap();
+        let transaction_id = secure_transaction_name().unwrap();
+        let core_work = request.plan.target.join(&transaction_id);
+        fs::create_dir_all(core_work.join("retired")).unwrap();
+        write_owner(&core_work, &transaction_id).unwrap();
+        write_swap_journal(
+            &core_work,
+            &SwapJournal {
+                schema: 1,
+                transaction_id,
+                old_core: Vec::new(),
+                old_frontend: Vec::new(),
+                new_core: vec!["unowned-live-entry".to_owned()],
+                new_frontend: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        recover_portmaster_transactions(&request.plan, &request.state_dir).unwrap();
+        assert_eq!(fs::read(&live).unwrap(), b"keep");
+        assert!(!core_work.exists());
+    }
+
+    #[test]
+    fn ownerless_pretransaction_directories_are_swept_without_blocking_install() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = request(&temp);
+        fs::create_dir_all(&request.plan.target).unwrap();
+        fs::create_dir_all(&request.plan.frontend_dir).unwrap();
+        let transaction_id = format!("{TRANSACTION_PREFIX}{}", "e".repeat(64));
+        fs::create_dir(request.plan.target.join(&transaction_id)).unwrap();
+        fs::create_dir(request.plan.frontend_dir.join(&transaction_id)).unwrap();
+
+        sweep_stale_artifacts(&request.plan, &[]).unwrap();
+
+        assert!(!request.plan.target.join(&transaction_id).exists());
+        assert!(!request.plan.frontend_dir.join(&transaction_id).exists());
+    }
+
+    #[test]
+    #[ignore = "spawned by work_pair_crash_windows_recover_after_real_process_exit"]
+    fn work_pair_crash_fixture_process() {
+        let core = PathBuf::from(std::env::var_os("PAM_TEST_PM_CORE").unwrap());
+        let frontend = PathBuf::from(std::env::var_os("PAM_TEST_PM_FRONTEND").unwrap());
+        let result = allocate_work_pair(&core, &frontend);
+        panic!("PortMaster work failpoint did not exit: {result:?}");
+    }
+
+    #[test]
+    fn work_pair_crash_windows_recover_after_real_process_exit() {
+        for point in [
+            "after-core-work-dir",
+            "after-frontend-work-dir",
+            "after-core-owner",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let request = request(&temp);
+            fs::create_dir_all(&request.plan.target).unwrap();
+            fs::create_dir_all(&request.plan.frontend_dir).unwrap();
+            let status = std::process::Command::new(current_test_executable())
+                .args([
+                    "--exact",
+                    "installer::tests::work_pair_crash_fixture_process",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("PAM_TEST_PM_CORE", &request.plan.target)
+                .env("PAM_TEST_PM_FRONTEND", &request.plan.frontend_dir)
+                .env("PAM_TEST_PM_CRASH_POINT", point)
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(87), "failpoint {point}");
+
+            sweep_stale_artifacts(&request.plan, &[]).unwrap();
+            assert!(
+                direct_names(&request.plan.target)
+                    .unwrap()
+                    .iter()
+                    .all(|name| !name.starts_with(TRANSACTION_PREFIX))
+            );
+            assert!(
+                direct_names(&request.plan.frontend_dir)
+                    .unwrap()
+                    .iter()
+                    .all(|name| !name.starts_with(TRANSACTION_PREFIX))
+            );
+        }
+    }
+
+    #[test]
+    fn stale_journal_never_overwrites_an_existing_live_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let request = request(&temp);
+        fs::create_dir_all(&request.plan.target).unwrap();
+        fs::create_dir_all(&request.plan.frontend_dir).unwrap();
+        let transaction_id = secure_transaction_name().unwrap();
+        let core_work = request.plan.target.join(&transaction_id);
+        let frontend_work = request.plan.frontend_dir.join(&transaction_id);
+        fs::create_dir_all(core_work.join("retired")).unwrap();
+        fs::create_dir_all(&frontend_work).unwrap();
+        write_owner(&core_work, &transaction_id).unwrap();
+        write_owner(&frontend_work, &transaction_id).unwrap();
+        fs::write(request.plan.target.join("victim"), b"live").unwrap();
+        fs::write(core_work.join("retired/victim"), b"journal backup").unwrap();
+        write_swap_journal(
+            &core_work,
+            &SwapJournal {
+                schema: 1,
+                transaction_id,
+                old_core: vec!["victim".to_owned()],
+                old_frontend: Vec::new(),
+                new_core: vec!["victim".to_owned()],
+                new_frontend: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        sweep_stale_artifacts(&request.plan, &[]).unwrap();
+        assert_eq!(
+            fs::read(request.plan.target.join("victim")).unwrap(),
+            b"live"
+        );
+    }
+
+    #[test]
     fn unsafe_zip_entry_is_rejected_before_mutation() {
         let temp = tempfile::tempdir().unwrap();
         let mut request = request(&temp);
@@ -1075,12 +1690,23 @@ mod tests {
     }
 
     #[test]
+    fn archive_cannot_occupy_the_private_transaction_namespace() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut request = request(&temp);
+        request.archive = archive(&temp, Some("PortMaster/.pm-install-v1-forged/payload"));
+        let error = install_portmaster(&request).unwrap_err();
+        assert!(matches!(error, InstallError::Archive(message) if message.contains("reserved")));
+    }
+
+    #[test]
     fn install_sweeps_stale_work_directories() {
         let temp = tempfile::tempdir().unwrap();
         let request = request(&temp);
-        fs::create_dir_all(request.plan.target.join(".pm-install-stale/stage")).unwrap();
+        let stale = request.plan.target.join(".pm-install-v1-stale");
+        fs::create_dir_all(stale.join("stage")).unwrap();
+        write_owner(&stale, ".pm-install-v1-stale").unwrap();
         install_portmaster(&request).unwrap();
-        assert!(!request.plan.target.join(".pm-install-stale").exists());
+        assert!(!stale.exists());
     }
 
     #[test]
@@ -1163,6 +1789,28 @@ mod tests {
         assert!(matches!(
             extract_archive_with_limits(&archive, &temp.path().join("stage-2"), limits),
             Err(InstallError::Archive(message)) if message.contains("too many entries")
+        ));
+    }
+
+    #[test]
+    fn extraction_observes_cancellation_inside_the_copy_loop() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("cancel.zip");
+        let mut zip = zip::ZipWriter::new(File::create(&archive).unwrap());
+        zip.start_file("PortMaster/large", SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&vec![7_u8; 256 * 1024]).unwrap();
+        zip.finish().unwrap();
+        let token = CancellationToken::default();
+        token.cancel();
+        assert!(matches!(
+            extract_archive_with_limits_and_cancel(
+                &archive,
+                &temp.path().join("stage"),
+                ARCHIVE_LIMITS,
+                Some(&token)
+            ),
+            Err(InstallError::Cancelled)
         ));
     }
 

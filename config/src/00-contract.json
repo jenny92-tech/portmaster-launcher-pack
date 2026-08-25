@@ -3,8 +3,8 @@
   "schema_version": 1,
   "config_version": "1.0.0",
   "metadata": {
-    "generated_at": "2026-07-21T00:00:00Z",
-    "source_revision": "config-v1.0.0"
+    "generated_at": "2026-08-13T00:00:00Z",
+    "source_revision": "config-v1.0.0-initial"
   },
   "parser_limits": {
     "max_depth": 32,
@@ -48,6 +48,11 @@
     },
     "runtime": {
       "metadata": "runtime_metadata",
+      "architectures": [
+        {"id": "aarch64", "system_names": ["aarch64", "arm64", "armv8"]},
+        {"id": "armhf", "system_names": ["armv7", "armv7l"]},
+        {"id": "x86_64", "system_names": ["amd64", "x86_64"]}
+      ],
       "verification": ["url", "size", "md5", "squashfs_magic"]
     },
     "transport": {

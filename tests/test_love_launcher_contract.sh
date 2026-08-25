@@ -58,6 +58,10 @@ for port in heishenhua hk sunkendragon terraria vampiresurvivors114; do
   grep -Fq 'apply_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
 done
 
+# Pixel Wukong keeps pixel edges sharp while its existing quality picker
+# continues to own the texture dimension cap.
+grep -Fq 'textureDownsampleFilter = "nearest"' "$ROOT/ports/heishenhua/love/launcher.sh.template"
+
 # Build one representative port and assert the common files are materialized in dist.
 bash "$ROOT/_kit/dist_port.sh" hk >/dev/null
 for file in kit.lua launcher.lua conf.lua ui.gptk; do

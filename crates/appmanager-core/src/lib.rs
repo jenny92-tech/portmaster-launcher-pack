@@ -12,8 +12,10 @@ pub mod inventory;
 pub mod operations;
 pub mod path;
 pub mod plan;
+pub mod port_zip;
 pub mod resolution;
 pub mod runtime;
+pub mod storage;
 pub mod task;
 
 pub use artifact::{
@@ -24,7 +26,8 @@ pub use artifact::{
 };
 pub use context::{
     CapabilityState, ContextCapabilities, ExpectedInstallContract, FrontendContext,
-    FrontendMapEntry, FrontendTransform, ManagedRoots, ManagementMode, ResolvedDeviceContext,
+    FrontendMapEntry, FrontendTransform, ManagedAppLocation, ManagedRoots, ManagementMode,
+    ResolvedDeviceContext,
 };
 pub use device::{
     DeviceConfigSources, DeviceIdentity, DeviceResolution, DeviceResolutionError,
@@ -32,17 +35,16 @@ pub use device::{
 };
 pub use installer::{
     InstallError, InstallMode, InstallOutcome, InstallRequest, PORTMASTER_STATE_PRESERVED,
-    install_portmaster,
+    install_portmaster, recover_portmaster_transactions,
 };
 pub use inventory::{
-    DeadScriptFact, ImageFact, Inventory, InventoryEntry, InventoryKind, InventoryOptions,
-    PortFact, RuntimeFact, RuntimeHealth, RuntimeInventory, TrashFact,
+    DeadScriptFact, INVENTORY_SCHEMA, ImageFact, Inventory, InventoryEntry, InventoryKind,
+    InventoryOptions, PortFact, RuntimeFact, RuntimeHealth, RuntimeInventory, TrashFact,
 };
 pub use operations::{
     AUTOINSTALL_DIR_NAME, DEFAULT_LAUNCHER_SCRIPT_NAME, FileAction, FileActionKind,
-    FileApplyOutcome, FileApplyRequest, FileOperationError, PROTECTED_DIR_NAMES,
-    PROTECTED_SCRIPT_NAMES, SCAN_EXCLUDED_DIR_NAMES, SizeScanOutcome, SizeScanRequest,
-    apply_file_actions, scan_size_cache,
+    FileActionResult, FileApplyOutcome, FileApplyRequest, FileOperationError, PROTECTED_DIR_NAMES,
+    PROTECTED_SCRIPT_NAMES, SCAN_EXCLUDED_DIR_NAMES, apply_file_actions,
 };
 pub use path::{ManagedRoot, PathSafetyError};
 pub use plan::{InstallPlan, PlanError, ValidatedInstallPlan};

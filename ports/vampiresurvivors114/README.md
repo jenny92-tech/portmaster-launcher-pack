@@ -154,21 +154,22 @@ Copy the standard loader, plugins and launcher atomically. The plugin source
 directory below represents the matching Bogodroid build output:
 
 ```bash
+DEVICE=root@HANDHELD_IP
 scp build-release/unityloader \
-  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.new
+  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.new"
 rsync -a --delete build-release/unityloader.libs/ \
-  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.libs/
+  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.libs/"
 rsync -a --delete build-release/unityloader.d/ \
-  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.d/
+  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.d/"
 _kit/dist_port.sh vampiresurvivors114
 scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
-  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/launcher.sh.new
+  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/launcher.sh.new"
 scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
-  root@10.10.1.91:/mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new
+  "${DEVICE}:/mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new"
 rsync -a ports/vampiresurvivors114/dist/love_ui/ \
-  root@10.10.1.91:/mnt/SDCARD/Data/ports/vampiresurvivors114/love_ui/
+  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/love_ui/"
 
-ssh root@10.10.1.91 'set -e
+ssh "$DEVICE" 'set -e
 cd /mnt/SDCARD/Data/ports/vampiresurvivors114
 chmod 755 unityloader.new launcher.sh.new
 mv unityloader.new unityloader

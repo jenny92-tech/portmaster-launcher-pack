@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -104,7 +105,11 @@ def main() -> int:
             pid: {
                 "priority": platform["priority"],
                 "recognition": platform["recognition"],
-                "detail": f"./platforms/{pid}.json",
+                "detail": {
+                    "ref": f"./platforms/{pid}.json",
+                    "sha256": hashlib.sha256(detail_outputs[pid]).hexdigest(),
+                    "bytes": len(detail_outputs[pid]),
+                },
             }
             for pid, platform in config["platforms"].items()
         }

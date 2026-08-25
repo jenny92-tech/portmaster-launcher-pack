@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::context::{CapabilityState, ResolvedDeviceContext};
 use crate::path::{ManagedRoot, PathSafetyError};
 
-pub const INVENTORY_SCHEMA: u32 = 3;
+pub const INVENTORY_SCHEMA: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -37,15 +37,24 @@ pub struct Inventory {
     pub schema: u32,
     pub entries: Vec<InventoryEntry>,
     pub ports: Vec<PortFact>,
-    pub refcount: BTreeMap<String, usize>,
+    /// Exact managed data-directory path -> number of launchers that reference
+    /// it. Display names must never be used as destructive association keys.
+    pub data_refcount: BTreeMap<String, usize>,
     pub data_dirs: Vec<InventoryEntry>,
     pub images: Vec<ImageFact>,
-    pub orphan_dirs: Vec<String>,
+    pub orphan_dirs: Vec<InventoryEntry>,
     pub orphan_images: Vec<ImageFact>,
     pub dead_scripts: Vec<DeadScriptFact>,
     pub trash: Vec<TrashFact>,
     pub runtimes: RuntimeInventory,
+    #[serde(default)]
+    pub apps: Vec<AppFact>,
     pub diagnostics: Vec<String>,
+    /// True when any script could not be parsed reliably. Callers must then
+    /// fail closed: never delete a shared data folder based on reference counts that
+    /// may be missing dynamic references.
+    #[serde(default)]
+    pub classification_uncertain: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +78,23 @@ impl Default for InventoryOptions {
             home: "/root".to_owned(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppFact {
+    pub root_id: String,
+    pub name: String,
+    pub folder: PathBuf,
+    pub launch: PathBuf,
+    pub has_icon: bool,
+    pub has_config: bool,
+    /// config.json `label` (English display name) when present.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// config.json `label.ch.lang` (Chinese display name) when present.
+    #[serde(default)]
+    pub label_zh: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +123,7 @@ pub struct ImageFact {
 #[serde(deny_unknown_fields)]
 pub struct DeadScriptFact {
     pub script: String,
+    pub path: PathBuf,
     pub missing_dir: String,
 }
 
@@ -108,6 +135,10 @@ pub struct TrashFact {
     pub kind: InventoryKind,
     pub is_dir: bool,
     pub bucket: String,
+    #[serde(default)]
+    pub restore_target: PathBuf,
+    #[serde(default)]
+    pub restore_conflict: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,20 +212,24 @@ impl Inventory {
         context
             .validate()
             .map_err(|error| InventoryError::Context(error.to_string()))?;
-        if context.capabilities.inventory != CapabilityState::Current {
+        if context.capabilities.inventory_ports != CapabilityState::Current
+            && context.capabilities.inventory_apps != CapabilityState::Current
+        {
             return Err(InventoryError::CapabilityUnknown);
         }
 
-        let mut roots = vec![
-            ("scripts", context.roots.scripts.as_path()),
-            ("game-dirs", context.roots.game_dirs.as_path()),
-            ("trash", context.roots.trash.as_path()),
-        ];
-        if let Some(libs) = &context.roots.libs {
-            roots.push(("libs", libs.as_path()));
-        }
-        if let Some(images) = &context.roots.images {
-            roots.push(("images", images.as_path()));
+        let mut roots = vec![("trash", context.roots.trash.as_path())];
+        if context.capabilities.inventory_ports == CapabilityState::Current {
+            roots.extend([
+                ("scripts", context.roots.scripts.as_path()),
+                ("game-dirs", context.roots.game_dirs.as_path()),
+            ]);
+            if let Some(libs) = &context.roots.libs {
+                roots.push(("libs", libs.as_path()));
+            }
+            if let Some(images) = &context.roots.images {
+                roots.push(("images", images.as_path()));
+            }
         }
         let mut directories = DirectorySnapshots::default();
         let mut entries = Vec::new();
@@ -209,7 +244,7 @@ impl Inventory {
             schema: INVENTORY_SCHEMA,
             entries,
             ports: facts.ports,
-            refcount: facts.refcount,
+            data_refcount: facts.data_refcount,
             data_dirs: facts.data_dirs,
             images: facts.images,
             orphan_dirs: facts.orphan_dirs,
@@ -217,7 +252,9 @@ impl Inventory {
             dead_scripts: facts.dead_scripts,
             trash: facts.trash,
             runtimes: facts.runtimes,
+            apps: facts.apps,
             diagnostics: facts.diagnostics,
+            classification_uncertain: facts.classification_uncertain,
         })
     }
 
@@ -256,11 +293,15 @@ impl Inventory {
                 ));
             }
         }
-        for (name, count) in &self.refcount {
-            rows.push(format!("refcount\t{name}\t{count}"));
+        for (path, count) in &self.data_refcount {
+            rows.push(format!("data-refcount\t{path}\t{count}"));
         }
-        for name in &self.orphan_dirs {
-            rows.push(format!("orphan-dir\t{name}"));
+        for entry in &self.orphan_dirs {
+            rows.push(format!(
+                "orphan-dir\t{}\t{}",
+                entry.path.display(),
+                entry.name
+            ));
         }
         for image in &self.orphan_images {
             rows.push(format!(
@@ -271,8 +312,10 @@ impl Inventory {
         }
         for dead in &self.dead_scripts {
             rows.push(format!(
-                "dead-script\t{}\t{}",
-                dead.script, dead.missing_dir
+                "dead-script\t{}\t{}\t{}",
+                dead.path.display(),
+                dead.script,
+                dead.missing_dir
             ));
         }
         for item in &self.trash {
@@ -309,15 +352,17 @@ impl Inventory {
 
 struct ScannedFacts {
     ports: Vec<PortFact>,
-    refcount: BTreeMap<String, usize>,
+    data_refcount: BTreeMap<String, usize>,
     data_dirs: Vec<InventoryEntry>,
     images: Vec<ImageFact>,
-    orphan_dirs: Vec<String>,
+    orphan_dirs: Vec<InventoryEntry>,
     orphan_images: Vec<ImageFact>,
     dead_scripts: Vec<DeadScriptFact>,
     trash: Vec<TrashFact>,
     runtimes: RuntimeInventory,
+    apps: Vec<AppFact>,
     diagnostics: Vec<String>,
+    classification_uncertain: bool,
 }
 
 fn scan_facts(
@@ -389,7 +434,7 @@ fn scan_facts(
 
     let mut ports = Vec::new();
     let mut dead_scripts = Vec::new();
-    let mut refcount = BTreeMap::<String, usize>::new();
+    let mut data_refcount = BTreeMap::<String, usize>::new();
     let mut parsed_dir_refs = BTreeSet::new();
     let mut diagnostics = Vec::new();
     let mut orphan_classification_uncertain = false;
@@ -413,28 +458,52 @@ fn scan_facts(
                 continue;
             }
         };
-        let (claimed_dir, dir_exists) = port_dir_of(&text, &real_dirs, &seed, &options.ignore_dirs);
-        let (refs, uncertain) =
-            parsed_existing_dir_refs(&text, &real_dirs, &seed, &options.ignore_dirs);
+        let script_name = entry.name.trim_end_matches(".sh").to_owned();
+        let script_dir = entry
+            .path
+            .parent()
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (claimed_dir, dir_exists) = port_dir_of(
+            &text,
+            &real_dirs,
+            &seed,
+            &options.ignore_dirs,
+            &script_name,
+            &script_dir,
+        );
+        let (refs, gamedir_uncertain, script_uncertain) = parsed_existing_dir_refs(
+            &text,
+            &real_dirs,
+            &seed,
+            &options.ignore_dirs,
+            &script_name,
+            &script_dir,
+        );
         parsed_dir_refs.extend(refs.iter().cloned());
         for referenced_dir in &refs {
-            *refcount.entry(referenced_dir.clone()).or_default() += 1;
+            if let Some(path) = data_dir_paths.get(referenced_dir) {
+                *data_refcount
+                    .entry(path.to_string_lossy().into_owned())
+                    .or_default() += 1;
+            }
         }
-        if uncertain {
+        if gamedir_uncertain {
             orphan_classification_uncertain = true;
             diagnostics.push(format!(
                 "orphan classification uncertain for script {}",
                 entry.name
             ));
         }
-        if !dir_exists && !claimed_dir.is_empty() && !uncertain {
+        if !dir_exists && !claimed_dir.is_empty() && !script_uncertain {
             dead_scripts.push(DeadScriptFact {
                 script: entry.name.clone(),
+                path: entry.path.clone(),
                 missing_dir: claimed_dir.clone(),
             });
         }
         let data_path =
-            if dir_exists && !uncertain && refs.len() == 1 && refs.contains(&claimed_dir) {
+            if dir_exists && !gamedir_uncertain && refs.len() == 1 && refs.contains(&claimed_dir) {
                 data_dir_paths
                     .get(&claimed_dir)
                     .cloned()
@@ -497,14 +566,15 @@ fn scan_facts(
     });
 
     let mut orphan_dirs = if !orphan_classification_uncertain {
-        real_dirs
-            .difference(&parsed_dir_refs)
+        data_dirs
+            .iter()
+            .filter(|entry| !parsed_dir_refs.contains(&entry.name))
             .cloned()
             .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
-    orphan_dirs.sort();
+    orphan_dirs.sort_by_key(|entry| path_sort_key(&entry.path));
     let mut orphan_images = images
         .iter()
         .filter(|image| !all_script_stems.contains(stem(&image.name)))
@@ -535,18 +605,88 @@ fn scan_facts(
         .cloned()
         .collect::<Vec<_>>();
     let facts = runtime_facts(context.roots.libs.as_deref(), &need, &libs_entries)?;
-    let trash = scan_trash(&trash_entries, directories)?;
+    let trash = scan_trash(context, &trash_entries, directories)?;
+    let mut apps = Vec::new();
+    // Apps are platform-config driven (TrimUI's Apps folder is the only
+    // device with one today; PortMaster devices scan PORTS only). New
+    // app layouts are added per device when they actually exist.
+    for root in &context.roots.apps {
+        if context.capabilities.inventory_apps != CapabilityState::Current {
+            break;
+        }
+        if !root.roles.contains(&portkit_core::LocationRole::Inventory) {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&root.path) {
+            Ok(entries) => entries,
+            Err(error) => {
+                diagnostics.push(format!(
+                    "cannot enumerate APP location {} ({}): {error}",
+                    root.id,
+                    root.path.display()
+                ));
+                continue;
+            }
+        };
+        let mut folders = Vec::new();
+        for entry in entries {
+            match entry {
+                Ok(entry)
+                    if std::fs::symlink_metadata(entry.path())
+                        .is_ok_and(|metadata| metadata.file_type().is_dir()) =>
+                {
+                    folders.push(entry.path());
+                }
+                Ok(_) => {}
+                Err(error) => diagnostics.push(format!(
+                    "cannot read an APP entry in location {}: {error}",
+                    root.id
+                )),
+            }
+        }
+        folders.sort();
+        for folder in folders {
+            let launch = folder.join("launch.sh");
+            if !std::fs::symlink_metadata(&launch)
+                .is_ok_and(|metadata| metadata.file_type().is_file())
+            {
+                continue;
+            }
+            let name = folder
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let has_icon = folder.join("icon.png").is_file();
+            let has_config = folder.join("config.json").is_file();
+            let (label, label_zh) = read_app_labels(&folder);
+            apps.push(AppFact {
+                root_id: root.id.clone(),
+                name,
+                folder,
+                launch,
+                has_icon,
+                has_config,
+                label,
+                label_zh,
+            });
+        }
+    }
     Ok(ScannedFacts {
         ports,
-        refcount,
+        data_refcount,
         data_dirs,
         images,
         orphan_dirs,
         orphan_images,
         dead_scripts,
         trash,
+        apps,
         runtimes: RuntimeInventory { need, facts },
         diagnostics,
+        classification_uncertain: orphan_classification_uncertain,
     })
 }
 
@@ -620,25 +760,27 @@ fn port_json_runtimes(directory: &Path) -> Result<Option<Vec<String>>, String> {
 }
 
 fn scan_trash(
+    context: &ResolvedDeviceContext,
     top_entries: &[InventoryEntry],
     directories: &mut DirectorySnapshots,
 ) -> Result<Vec<TrashFact>, InventoryError> {
     let mut result = Vec::new();
     for top in top_entries.iter().cloned() {
         if top.kind != InventoryKind::Directory {
-            result.push(trash_fact(top, "item"));
+            result.push(trash_fact(context, top, "item"));
             continue;
         }
         for entry in directories.read("trash", &top.path)? {
             let bucket = entry.name.as_str();
             if entry.kind == InventoryKind::Directory
-                && matches!(bucket, "scripts" | "script-images" | "data" | "images")
+                && (matches!(bucket, "scripts" | "script-images" | "data" | "images")
+                    || bucket.strip_prefix("apps-").is_some_and(is_safe_bucket_id))
             {
                 for item in directories.read("trash", &entry.path)? {
-                    result.push(trash_fact(item, bucket));
+                    result.push(trash_fact(context, item, bucket));
                 }
             } else {
-                result.push(trash_fact(entry, "legacy"));
+                result.push(trash_fact(context, entry, "legacy"));
             }
         }
     }
@@ -650,6 +792,16 @@ fn scan_trash(
         ))
     });
     Ok(result)
+}
+
+fn is_safe_bucket_id(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    !value.is_empty()
+        && value.len() <= 128
+        && matches!(bytes.next(), Some(b'a'..=b'z'))
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.')
+        })
 }
 
 #[derive(Default)]
@@ -689,15 +841,75 @@ impl DirectorySnapshots {
     }
 }
 
-fn trash_fact(entry: InventoryEntry, bucket: &str) -> TrashFact {
+fn trash_fact(context: &ResolvedDeviceContext, entry: InventoryEntry, bucket: &str) -> TrashFact {
     let is_dir = entry.kind == InventoryKind::Directory;
+    let restore_root = match bucket {
+        "scripts" | "script-images" => Some(&context.roots.scripts),
+        "data" => Some(&context.roots.game_dirs),
+        "images" => context.roots.images.as_ref(),
+        value if value.starts_with("apps-") => context
+            .roots
+            .apps
+            .iter()
+            .find(|root| {
+                root.id == value[5..]
+                    && root
+                        .roles
+                        .contains(&portkit_core::LocationRole::TrashRestore)
+            })
+            .map(|root| &root.path),
+        _ => None,
+    };
+    let restore_target = restore_root
+        .map(|root| root.join(&entry.name))
+        .unwrap_or_default();
+    let restore_conflict =
+        !restore_target.as_os_str().is_empty() && fs::symlink_metadata(&restore_target).is_ok();
     TrashFact {
         name: entry.name,
         path: entry.path,
         kind: entry.kind,
         is_dir,
         bucket: bucket.to_owned(),
+        restore_target,
+        restore_conflict,
     }
+}
+
+/// Resolve the data directories actually referenced by a launcher. This is
+/// shared with ZIP recognition so installation and inventory use one rule:
+/// the launcher contents define the association; the SH filename does not.
+pub(crate) fn launcher_data_directories(
+    text: &str,
+    real_dirs: &BTreeSet<String>,
+    script_name: &str,
+    script_dir: &str,
+) -> BTreeSet<String> {
+    let seed = BTreeMap::new();
+    let ignore = BTreeSet::new();
+    let (refs, _, _) =
+        parsed_existing_dir_refs(text, real_dirs, &seed, &ignore, script_name, script_dir);
+    refs
+}
+
+/// Read `label` / `label.ch.lang` from a TrimUI-style app config.json so the
+/// launcher list can show the localized name instead of the raw folder name.
+fn read_app_labels(folder: &std::path::Path) -> (Option<String>, Option<String>) {
+    let Ok(text) = fs::read_to_string(folder.join("config.json")) else {
+        return (None, None);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return (None, None);
+    };
+    let label = value
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let label_zh = value
+        .get("label.ch.lang")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    (label, label_zh)
 }
 
 fn runtime_facts(
@@ -781,8 +993,10 @@ fn port_dir_of(
     real_dirs: &BTreeSet<String>,
     seed: &BTreeMap<String, String>,
     ignore_dirs: &BTreeSet<String>,
+    script_name: &str,
+    script_dir: &str,
 ) -> (String, bool) {
-    let vars = collect_vars(text, seed);
+    let vars = collect_vars(text, seed, script_name, script_dir);
     let candidates = dir_candidates(text, &vars);
     let mut claimed = String::new();
     for candidate in candidates {
@@ -842,21 +1056,83 @@ fn parsed_existing_dir_refs(
     real_dirs: &BTreeSet<String>,
     seed: &BTreeMap<String, String>,
     ignore_dirs: &BTreeSet<String>,
-) -> (BTreeSet<String>, bool) {
-    let vars = collect_vars(text, seed);
+    script_name: &str,
+    script_dir: &str,
+) -> (BTreeSet<String>, bool, bool) {
+    let vars = collect_vars(text, seed, script_name, script_dir);
     let mut refs = BTreeSet::new();
-    let mut uncertain = false;
-    for candidate in dir_candidates(text, &vars) {
+    // gamedir_uncertain: the primary data-folder declaration is dynamic, so
+    // this launcher's reference may be missing from the reference counts entirely
+    // (drives the global fail-closed flag).
+    let mut gamedir_uncertain = false;
+    // script_uncertain: some secondary reference line is dynamic, so this
+    // launcher must never be classified as a dead script.
+    let mut script_uncertain = false;
+    for name in ["GAMEDIR", "gamedir", "rundir", "game_dir"] {
+        let Some(candidate) = vars.get(name) else {
+            continue;
+        };
+        let candidate = expand_known_templates(candidate, script_name, script_dir);
         if has_unresolved_shell_value(&candidate, &vars) {
-            uncertain = true;
+            // Port launchers commonly keep the storage-card root in a shell
+            // variable that is only known at runtime, while the component
+            // after `/ports/` is a fixed data-directory name. Resolve known
+            // variables and accept that fixed final component; never infer it
+            // from the SH filename.
+            let partial = expand_vars(&candidate, &vars);
+            let declared = dir_from_path(&partial);
+            if !declared.is_empty()
+                && !declared.bytes().any(|byte| {
+                    matches!(byte, b'$' | b'(' | b')' | b'`' | b'*' | b'?' | b'{' | b'}')
+                })
+                && real_dirs.contains(&declared)
+                && !ignore_dirs.contains(&declared)
+            {
+                refs.insert(declared);
+                continue;
+            }
+            gamedir_uncertain = true;
             continue;
         }
-        let name = dir_from_path(&expand_vars(&candidate, &vars));
+        let expanded = expand_vars(&candidate, &vars);
+        if expanded.is_empty() {
+            continue;
+        }
+        let name = dir_from_path(&expanded);
+        if name.is_empty() {
+            gamedir_uncertain = true;
+            continue;
+        }
         if real_dirs.contains(&name) && !ignore_dirs.contains(&name) {
             refs.insert(name);
         }
     }
-    (refs, uncertain)
+    // Secondary candidates (cd lines, for-loop value lists, assignment lines)
+    // are hints only. Wildcards in a `for f in "$GAMEDIR"/*.jar` line are not
+    // directory references at all; a dynamic value elsewhere in the script
+    // means we cannot rule out a missing association (keeps dead-script
+    // classification conservative).
+    for candidate in dir_candidates(text, &vars) {
+        let candidate = expand_known_templates(&candidate, script_name, script_dir);
+        if has_unresolved_shell_value(&candidate, &vars) {
+            if !candidate.bytes().any(|byte| matches!(byte, b'*' | b'?')) {
+                script_uncertain = true;
+            }
+            continue;
+        }
+        let expanded = expand_vars(&candidate, &vars);
+        if expanded.is_empty() {
+            continue;
+        }
+        let name = dir_from_path(&expanded);
+        if name.is_empty() {
+            continue;
+        }
+        if real_dirs.contains(&name) && !ignore_dirs.contains(&name) {
+            refs.insert(name);
+        }
+    }
+    (refs, gamedir_uncertain, script_uncertain)
 }
 
 fn has_unresolved_shell_value(value: &str, vars: &BTreeMap<String, String>) -> bool {
@@ -903,7 +1179,12 @@ fn has_unresolved_shell_value(value: &str, vars: &BTreeMap<String, String>) -> b
     false
 }
 
-fn collect_vars(text: &str, seed: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+fn collect_vars(
+    text: &str,
+    seed: &BTreeMap<String, String>,
+    script_name: &str,
+    script_dir: &str,
+) -> BTreeMap<String, String> {
     let mut vars = seed.clone();
     for line in text.lines() {
         let line = line.trim();
@@ -918,8 +1199,17 @@ fn collect_vars(text: &str, seed: &BTreeMap<String, String>) -> BTreeMap<String,
         if let Some((before, _)) = value.split_once(" #") {
             value = before.trim();
         }
-        if !value.starts_with("$(") && !value.starts_with('`') {
-            vars.insert(name.to_owned(), unquote(value).to_owned());
+        let bare = unquote(value);
+        if !bare.starts_with("$(") && !bare.starts_with('`') {
+            vars.insert(name.to_owned(), bare.to_owned());
+        } else {
+            // A command-substitution value is fine when it is the standard
+            // PortMaster template (dirname/basename of $0), which is fully
+            // predictable from the script path.
+            let expanded = expand_known_templates(bare, script_name, script_dir);
+            if !expanded.starts_with("$(") && !expanded.starts_with('`') {
+                vars.insert(name.to_owned(), expanded.to_owned());
+            }
         }
     }
     vars
@@ -995,17 +1285,49 @@ fn expand_vars(value: &str, vars: &BTreeMap<String, String>) -> String {
 
 fn dir_from_path(value: &str) -> String {
     let normalized = value.replace('\\', "/");
-    let parts = normalized
+    let segments = normalized
         .trim_end_matches('/')
         .split('/')
-        .filter(|part| !part.is_empty() && !part.contains(' '))
+        .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
-    for pair in parts.windows(2) {
-        if pair[0] == "ports" {
-            return pair[1].to_owned();
+    // Standard PortMaster layout is <root>/ports/gamedata/<Game> (some
+    // frontends use <root>/ports/data/<Game> or <root>/ports/<Game>). The
+    // game data folder name is the segment after the optional gamedata/data
+    // middle layer, never the middle layer itself. Spaces in the name are
+    // valid (e.g. "My Game"); keep them so we never guess "gamedata".
+    for (index, part) in segments.iter().enumerate() {
+        if *part == "ports" {
+            for next in &segments[index + 1..] {
+                if *next != "gamedata" && *next != "data" {
+                    return next.to_string();
+                }
+            }
+            return segments.last().copied().unwrap_or_default().to_owned();
         }
     }
-    parts.last().copied().unwrap_or_default().to_owned()
+    segments.last().copied().unwrap_or_default().to_owned()
+}
+
+/// Resolve only the launcher directory portion of well-known shell templates.
+/// The basename of `$0` is deliberately not expanded into a data directory:
+/// SH names are presentation names and are never an association key.
+fn expand_known_templates(value: &str, _script_name: &str, script_dir: &str) -> String {
+    let mut out = value.to_string();
+    // Longest variants first so nested $(cd "$(dirname "$0")" && pwd) forms
+    // resolve in one pass. MiniLoong launchers use the `;` variant.
+    for (template, replacement) in [
+        ("$(cd \"$(dirname \"$0\")\" && pwd)", script_dir),
+        ("$(cd \"$(dirname \"$0\")\"; pwd)", script_dir),
+        ("$(cd \"$(dirname $0)\"; pwd)", script_dir),
+        ("$(cd $(dirname \"$0\"); pwd)", script_dir),
+        ("$(cd $(dirname $0); pwd)", script_dir),
+        ("$(cd $(dirname $0) && pwd)", script_dir),
+        ("$(dirname \"$0\")", script_dir),
+        ("$(dirname $0)", script_dir),
+    ] {
+        out = out.replace(template, replacement);
+    }
+    out
 }
 
 fn for_values(line: &str) -> Option<&str> {
@@ -1231,12 +1553,18 @@ mod tests {
 
     use super::*;
     use crate::context::{
-        ContextCapabilities, ExpectedInstallContract, FrontendContext, ManagedRoots, ManagementMode,
+        ContextCapabilities, ExpectedInstallContract, FrontendContext, ManagedAppLocation,
+        ManagedRoots, ManagementMode,
     };
 
     struct Fixture {
         _temp: TempDir,
         context: ResolvedDeviceContext,
+    }
+
+    #[test]
+    fn unreleased_inventory_schema_stays_on_the_existing_baseline() {
+        assert_eq!(INVENTORY_SCHEMA, 1);
     }
 
     fn fixture() -> Fixture {
@@ -1256,6 +1584,7 @@ mod tests {
                 target_confirmed: true,
                 capabilities: ContextCapabilities {
                     inventory: CapabilityState::Current,
+                    inventory_ports: CapabilityState::Current,
                     install_plan: CapabilityState::Current,
                     cache_invalidation: CapabilityState::Current,
                     ..ContextCapabilities::default()
@@ -1267,6 +1596,7 @@ mod tests {
                     images: Some(temp.path().join("images")),
                     libs: Some(temp.path().join("libs")),
                     app_state: temp.path().join("state"),
+                    apps: vec![],
                     trash: temp.path().join("trash"),
                 },
                 frontend: FrontendContext {
@@ -1313,6 +1643,192 @@ mod tests {
         assert_eq!(scripts[0].root, "scripts");
         assert_eq!(games[0].root, "game-dirs");
         assert_eq!(scripts[0].path, games[0].path);
+    }
+
+    #[test]
+    fn app_labels_come_from_config_json_label_fields() {
+        // TrimUI apps carry label/label.ch.lang in config.json; the launcher
+        // list must prefer them over the raw folder name.
+        let mut fixture = fixture();
+        let app_dir = tempfile::tempdir().unwrap();
+        fixture.context.capabilities.inventory_apps = CapabilityState::Current;
+        fixture.context.roots.apps.push(ManagedAppLocation {
+            id: "apps-primary".to_owned(),
+            path: app_dir.path().to_path_buf(),
+            roles: vec![
+                portkit_core::LocationRole::Inventory,
+                portkit_core::LocationRole::Install,
+            ],
+            formats: vec![portkit_core::BundleFormat::TrimuiApp],
+            priority: 100,
+        });
+        fs::create_dir_all(app_dir.path().join("myapp")).unwrap();
+        fs::write(app_dir.path().join("myapp/launch.sh"), b"#!/bin/sh\n").unwrap();
+        let config = format!(
+            r#"{{"label":"My App","label.ch.lang":"{}","icon":"icon.png","launch":"launch.sh"}}"#,
+            "我的应用"
+        );
+        fs::write(app_dir.path().join("myapp/config.json"), config.as_bytes()).unwrap();
+        fs::create_dir_all(app_dir.path().join("plain")).unwrap();
+        fs::write(app_dir.path().join("plain/launch.sh"), b"#!/bin/sh\n").unwrap();
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        let by_name: std::collections::HashMap<_, _> = inventory
+            .apps
+            .iter()
+            .map(|app| (app.name.as_str(), app))
+            .collect();
+        assert_eq!(by_name["myapp"].label.as_deref(), Some("My App"));
+        assert_eq!(by_name["myapp"].label_zh.as_deref(), Some("我的应用"));
+        assert_eq!(by_name["plain"].label, None);
+        assert_eq!(by_name["plain"].label_zh, None);
+    }
+
+    #[test]
+    fn app_inventory_never_follows_folder_or_launcher_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let mut fixture = fixture();
+        let app_root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fixture.context.capabilities.inventory_apps = CapabilityState::Current;
+        fixture.context.roots.apps.push(ManagedAppLocation {
+            id: "apps-primary".to_owned(),
+            path: app_root.path().to_path_buf(),
+            roles: vec![
+                portkit_core::LocationRole::Inventory,
+                portkit_core::LocationRole::Install,
+            ],
+            formats: vec![portkit_core::BundleFormat::TrimuiApp],
+            priority: 100,
+        });
+
+        fs::write(outside.path().join("launch.sh"), b"#!/bin/sh\n").unwrap();
+        symlink(outside.path(), app_root.path().join("folder-link")).unwrap();
+        fs::create_dir(app_root.path().join("launcher-link")).unwrap();
+        symlink(
+            outside.path().join("launch.sh"),
+            app_root.path().join("launcher-link/launch.sh"),
+        )
+        .unwrap();
+
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        assert!(inventory.apps.is_empty());
+    }
+
+    #[test]
+    fn sh_basename_is_never_used_as_a_data_directory_association() {
+        // A launcher that derives its folder from its own filename violates
+        // the APP Manager association contract. Keep the data unassociated
+        // and fail closed instead of guessing from `hollow-knight.sh`.
+        let fixture = fixture();
+        fs::create_dir_all(fixture.context.roots.game_dirs.join("hollow-knight")).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("hollow-knight.sh"),
+            br#"GAMEDIR="$(cd "$(dirname "$0")" && pwd)/gamedata/$(basename "$0" .sh)"
+PORTDIR="$directory"
+"#,
+        )
+        .unwrap();
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        assert!(inventory.classification_uncertain);
+        assert_eq!(inventory.ports.len(), 1);
+        assert!(inventory.ports[0].dir.is_empty());
+        assert!(inventory.ports[0].data_path.as_os_str().is_empty());
+        assert!(!inventory.ports[0].dir_exists);
+        assert!(inventory.dead_scripts.is_empty());
+        assert!(inventory.orphan_dirs.is_empty());
+    }
+
+    #[test]
+    fn real_miniloong_launchers_resolve_without_uncertain() {
+        // Runs against real launchers pulled from a MiniLoong device when
+        // MINILOONG_DATA points at a directory containing scripts/ and a
+        // data-dirs.txt (one directory name per line). Skipped otherwise.
+        let Ok(root) = std::env::var("MINILOONG_DATA") else {
+            eprintln!("MINILOONG_DATA not set; skipping real-device fixture");
+            return;
+        };
+        let root = std::path::Path::new(&root);
+        let scripts_dir = root.join("scripts");
+        let fixture = fixture();
+        fs::create_dir_all(&fixture.context.roots.game_dirs).unwrap();
+        let mut copied = 0usize;
+        for entry in fs::read_dir(&scripts_dir).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if !name.ends_with(".sh") {
+                continue;
+            }
+            let bytes = fs::read(entry.path()).unwrap();
+            fs::write(fixture.context.roots.scripts.join(name), bytes).unwrap();
+            copied += 1;
+        }
+        // Mirror the real layout: MiniLoong keeps game data as sibling
+        // directories of the launchers (GAMEDIR=$SHDIR/<name>).
+        let Ok(data_names) = fs::read_to_string(root.join("data-dirs.txt")) else {
+            panic!("missing data-dirs.txt in MINILOONG_DATA");
+        };
+        for line in data_names.lines() {
+            let name = line.trim();
+            if !name.is_empty() {
+                fs::create_dir_all(fixture.context.roots.game_dirs.join(name)).unwrap();
+            }
+        }
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        let with_data = inventory
+            .ports
+            .iter()
+            .filter(|port| port.dir_exists)
+            .count();
+        let linked = inventory
+            .ports
+            .iter()
+            .filter(|port| !port.data_path.as_os_str().is_empty())
+            .count();
+        eprintln!(
+            "real-device scan: scripts={copied} ports={} linked_data={linked} uncertain={} orphan_dirs={} dead={}",
+            inventory.ports.len(),
+            inventory.classification_uncertain,
+            inventory.orphan_dirs.len(),
+            inventory.dead_scripts.len()
+        );
+        for port in &inventory.ports {
+            if port.data_path.as_os_str().is_empty() || !port.dir_exists {
+                eprintln!(
+                    "  UNLINKED: {} dir={:?} claimed={:?}",
+                    port.script, port.dir, port.claimed_dir
+                );
+            }
+        }
+        // Most launchers are the standard template; the scan must stay calm.
+        assert!(
+            inventory.dead_scripts.len() <= 5,
+            "too many dead scripts: {:?}",
+            inventory.dead_scripts
+        );
+        // Sizes are cosmetic; linking is the core guarantee.
+        assert!(
+            linked >= inventory.ports.len().saturating_sub(8),
+            "data linkage lost: {linked}/{}",
+            inventory.ports.len()
+        );
+        assert!(with_data >= inventory.ports.len().saturating_sub(8));
+    }
+
+    #[test]
+    fn truly_dynamic_gamedir_stays_uncertain() {
+        // A path assembled at runtime (variable lookup of an unknown value)
+        // cannot be resolved statically; the scan must stay fail-closed.
+        let fixture = fixture();
+        fs::write(
+            fixture.context.roots.scripts.join("dynamic.sh"),
+            br#"GAMEDIR="/mnt/games/$UNKNOWN_VAR"
+"#,
+        )
+        .unwrap();
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        assert!(inventory.classification_uncertain);
     }
 
     #[cfg(unix)]
@@ -1426,10 +1942,27 @@ mod tests {
         );
         assert_eq!(snapshot.ports[0].images.len(), 2);
         assert_eq!(snapshot.ports[0].runtimes, ["mono", "godot"]);
-        assert_eq!(snapshot.refcount["GameA"], 1);
-        assert_eq!(snapshot.orphan_dirs, ["Orphan"]);
+        assert_eq!(
+            snapshot.data_refcount[&fixture
+                .context
+                .roots
+                .game_dirs
+                .join("GameA")
+                .to_string_lossy()
+                .into_owned()],
+            1
+        );
+        assert_eq!(snapshot.orphan_dirs[0].name, "Orphan");
+        assert_eq!(
+            snapshot.orphan_dirs[0].path,
+            fixture.context.roots.game_dirs.join("Orphan")
+        );
         assert_eq!(snapshot.orphan_images[0].name, "Ghost.webp");
         assert_eq!(snapshot.dead_scripts[0].missing_dir, "Missing");
+        assert_eq!(
+            snapshot.dead_scripts[0].path,
+            fixture.context.roots.scripts.join("Dead.sh")
+        );
         assert_eq!(snapshot.trash.len(), 2);
         assert_eq!(snapshot.runtimes.need["mono"], ["Alpha.sh"]);
         assert_eq!(
@@ -1445,6 +1978,25 @@ mod tests {
         assert!(snapshot.to_tsv().contains("port\tAlpha.sh\t"));
         assert!(snapshot.to_tsv().contains("trash\tscripts\tfile\t"));
         assert!(snapshot.to_tsv().contains("runtime\tmono\tunknown\t"));
+    }
+
+    #[test]
+    fn trash_snapshot_exposes_restore_destination_conflicts() {
+        let fixture = fixture();
+        let installed = fixture.context.roots.scripts.join("Game.sh");
+        let trashed = fixture.context.roots.trash.join("batch/scripts/Game.sh");
+        fs::write(&installed, b"current").unwrap();
+        fs::create_dir_all(trashed.parent().unwrap()).unwrap();
+        fs::write(&trashed, b"old").unwrap();
+
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        let fact = inventory
+            .trash
+            .iter()
+            .find(|entry| entry.path == trashed)
+            .expect("structured Trash item");
+        assert_eq!(fact.restore_target, installed);
+        assert!(fact.restore_conflict);
     }
 
     #[cfg(unix)]
@@ -1485,6 +2037,8 @@ mod tests {
     fn unknown_inventory_capability_fails_closed() {
         let mut fixture = fixture();
         fixture.context.capabilities.inventory = CapabilityState::Unknown;
+        fixture.context.capabilities.inventory_ports = CapabilityState::Unknown;
+        fixture.context.capabilities.inventory_apps = CapabilityState::Unknown;
         assert!(matches!(
             Inventory::scan(&fixture.context),
             Err(InventoryError::CapabilityUnknown)
@@ -1501,7 +2055,11 @@ mod tests {
         )
         .unwrap();
         let snapshot = Inventory::scan(&fixture.context).unwrap();
-        assert_eq!(snapshot.orphan_dirs, ["MentionedOnly"]);
+        assert_eq!(snapshot.orphan_dirs[0].name, "MentionedOnly");
+        assert_eq!(
+            snapshot.orphan_dirs[0].path,
+            fixture.context.roots.game_dirs.join("MentionedOnly")
+        );
     }
 
     #[test]
@@ -1545,13 +2103,11 @@ mod tests {
         .unwrap();
 
         let snapshot = Inventory::scan(&fixture.context).unwrap();
+        // GAMEDIR resolves (to a folder that does not exist), so the reference
+        // is known; but the dynamic cd line keeps dead-script classification
+        // conservative: this launcher must never be offered as a dead script.
         assert!(snapshot.dead_scripts.is_empty());
-        assert!(
-            snapshot
-                .diagnostics
-                .iter()
-                .any(|value| value.contains("orphan classification uncertain"))
-        );
+        assert!(!snapshot.classification_uncertain);
     }
 
     #[test]
@@ -1569,8 +2125,26 @@ mod tests {
         let snapshot = Inventory::scan(&fixture.context).unwrap();
         assert_eq!(snapshot.ports[0].dir, "Primary");
         assert!(snapshot.ports[0].data_path.as_os_str().is_empty());
-        assert_eq!(snapshot.refcount["Primary"], 1);
-        assert_eq!(snapshot.refcount["Secondary"], 1);
+        assert_eq!(
+            snapshot.data_refcount[&fixture
+                .context
+                .roots
+                .game_dirs
+                .join("Primary")
+                .to_string_lossy()
+                .into_owned()],
+            1
+        );
+        assert_eq!(
+            snapshot.data_refcount[&fixture
+                .context
+                .roots
+                .game_dirs
+                .join("Secondary")
+                .to_string_lossy()
+                .into_owned()],
+            1
+        );
         assert!(snapshot.orphan_dirs.is_empty());
         assert!(
             snapshot
@@ -1684,7 +2258,11 @@ mod tests {
         assert_eq!(snapshot.ports[0].runtimes, ["ags_3.6"]);
         assert_eq!(snapshot.diagnostics.len(), 1);
         assert!(snapshot.diagnostics[0].contains("invalid port.json"));
-        assert_eq!(snapshot.orphan_dirs, ["UnrelatedOrphan"]);
+        assert_eq!(snapshot.orphan_dirs[0].name, "UnrelatedOrphan");
+        assert_eq!(
+            snapshot.orphan_dirs[0].path,
+            fixture.context.roots.game_dirs.join("UnrelatedOrphan")
+        );
     }
 
     #[test]

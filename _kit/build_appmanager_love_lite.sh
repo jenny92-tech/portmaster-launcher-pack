@@ -8,7 +8,12 @@ IMAGE="${PAM_LOVE_LITE_BUILD_IMAGE:-rust:1.88-bullseye}"
 OUT="$ROOT/ports/appmanager/portable/runtime/love.aarch64"
 REVISION_FILE="$ROOT/ports/appmanager/love-lite-revision.txt"
 STAGING="$ROOT/.tmp/love-lite-build"
+python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || {
+  echo "Python 3.11 or newer is required to compute the Cargo source revision." >&2
+  exit 69
+}
 REVISION="$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")"
+CONTAINER_NAME="pam-love-lite-build-${REVISION:0:12}"
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker is required to build the aarch64 LOVE-lite runtime." >&2
@@ -16,19 +21,12 @@ command -v docker >/dev/null 2>&1 || {
 }
 
 mkdir -p "$STAGING" "$(dirname "$OUT")"
-docker run --rm --platform linux/arm64 \
+docker run --rm --name "$CONTAINER_NAME" --platform linux/arm64 \
   -e LOVE_LITE_SOURCE_REVISION="$REVISION" \
   -v "$ROOT:/work" \
   -w /work \
   "$IMAGE" \
-  bash -c '
-    set -euo pipefail
-    apt-get update >/dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libsdl2-dev >/dev/null
-    FREETYPE2_NO_PKG_CONFIG=1 CARGO_TARGET_DIR=/tmp/love-lite-target \
-      cargo build --locked --release -p love-lite --features sdl-backend
-    install -m 0755 /tmp/love-lite-target/release/love-lite /work/.tmp/love-lite-build/love.aarch64
-  '
+  /work/_kit/build_appmanager_love_lite_in_container.sh
 
 install -m 0755 "$STAGING/love.aarch64" "$OUT"
 printf '%s\n' "$REVISION" > "$REVISION_FILE"

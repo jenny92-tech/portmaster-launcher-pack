@@ -6,27 +6,20 @@ function Environment.new(model,operations,pages_ui)
     local self={}
     local device_risk_ack,device_support_ack=false,false
     local function button(label,action,opts) return kit.button(label,action,opts) end
-    local function system_managed() return env.portmaster_management=="system" end
+    local function system_managed() return model.system_managed() end
     local function enabled(name) return env[name]~=false end
-    local function can_install() return not system_managed() and enabled("capability_manage_portmaster") and
-        enabled("capability_install_portmaster") and env.portmaster_release_install_allowed~=false end
-    local function can_update() return can_install() and enabled("capability_update_portmaster") end
+    local function can_install() return model.can_install() end
+    local function can_update() return model.can_update() end
     local function note(label,value,id)
-        return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=4,
-            expanded_lines=4,label_px=18,value_px=20,surface=false})
+        return kit.textview(label,value,{id=id,focusable=true,expandable=true,max_lines=4,
+            expanded_lines=8,label_px=18,value_px=20,surface=false})
     end
 
-    local function health_label()
-        if system_managed() then
-            if env.portmaster_health=="healthy" then return L("Managed by system · Available","系统管理 · 当前可用") end
-            if env.portmaster_health=="damaged" then return L("Managed by system · Needs repair","系统管理 · 需要修复") end
-            return L("Managed by system · Not available","系统管理 · 当前不可用")
-        end
-        if env.portmaster_health=="healthy" and env.portmaster_python_ok~=false then return L("Healthy","正常") end
-        if env.portmaster_health=="healthy" then return L("Healthy · Python issue","正常 · Python 问题") end
-        if env.portmaster_health=="damaged" then return L("Needs repair","需要修复") end
-        return L("Not installed","未安装")
-    end
+    local function support_label() return model.support_label() end
+
+    local function support_explanation() return model.support_explanation() end
+
+    local function health_label() return model.health_label() end
 
     local function confirm_environment_repair(plan)
         local healthy=env.portmaster_health=="healthy"
@@ -38,8 +31,15 @@ function Environment.new(model,operations,pages_ui)
                 "将从 "..tostring(env.portmaster_version or "?").." 更新到 "..tostring(env.portmaster_latest or "?").."。Runtime 和个人设置会保留。")
         elseif healthy then
             title=L("Reinstall PortMaster","重新安装 PortMaster")
-            message=L("Reinstall the current version. Runtimes and personal settings will be kept.",
-                "将重新安装当前版本。Runtime 和个人设置会保留。")
+            local from=tostring(env.portmaster_version or "")
+            local to=tostring(env.portmaster_latest or "")
+            if to~="" and to~=from then
+                message=L("Install "..to.." (current is "..from.."). Runtimes and personal settings will be kept.",
+                    "将安装 "..to.."（当前为 "..from.."）。Runtime 和个人设置会保留。")
+            else
+                message=L("Reinstall the current version. Runtimes and personal settings will be kept.",
+                    "将重新安装当前版本。Runtime 和个人设置会保留。")
+            end
         elseif env.portmaster_health=="damaged" then
             title=L("Repair PortMaster","修复 PortMaster")
             message=L("Download and reinstall PortMaster. Runtimes and personal settings will be kept.",
@@ -110,14 +110,25 @@ function Environment.new(model,operations,pages_ui)
         build_gate(false); kit.goto_page(page.MANAGE)
     end
 
+    local function update_check_busy()
+        kit.set_busy(true,L("Checking for updates…","正在检查更新……"),{
+            progress=0,indeterminate=true,
+            stage=L("Checking for updates…","正在检查更新……"),
+            detail=L("Please wait a moment.","请稍候片刻。"),
+            footer_left=L("Checking…","检查中…"),footer_right=L("Checking…","检查中…"),
+            on_exit=operations.busy_exit})
+    end
+
     function self.start_forced_update_check()
         local ok,task_id=pcall(model.native.start,"update-check",{})
         if not ok then
             env.update_status="error"
+            kit.set_busy(false)
             kit.toast(L("Cannot check right now. Try again later.","暂时无法检查，请稍后再试。"),{kind="error"})
             return false
         end
         operations.task={id=task_id,kind="update-check",elapsed=0,poll=0,timeout=35}
+        update_check_busy()
         return true
     end
 
@@ -134,11 +145,11 @@ function Environment.new(model,operations,pages_ui)
                 "当前设备暂不支持更新 PortMaster。"),{kind="info"}); return
         end
         env.update_status="checking"; env.portmaster_latest=""
-        kit.toast(L("Checking for updates…","正在检查更新……"),{kind="info"})
         if operations.background_task then
             -- The automatic check may legally return a cached result. Keep it
             -- in its own lane and run a real forced check as soon as it exits.
             operations.request_forced_update()
+            update_check_busy()
             return
         end
         self.start_forced_update_check()
@@ -147,16 +158,22 @@ function Environment.new(model,operations,pages_ui)
     function self.build_manage(preserve)
         local state=model.update_state()
         local managed=system_managed()
-        local latest=managed and L("Managed by system","由系统管理") or
-            (env.portmaster_latest and env.portmaster_latest~="" and env.portmaster_latest or L("Not checked","尚未检查"))
-        local primary_label,primary_disabled
-        if env.portmaster_health=="missing" then primary_label=L("Install PortMaster","安装 PortMaster")
-        elseif env.portmaster_health~="healthy" then primary_label=L("Repair PortMaster","修复 PortMaster")
-        elseif state=="update" then primary_label=L("Update now","立即更新")
-        elseif state=="current" then primary_label=L("Up to date","已是最新版"); primary_disabled=true
-        else primary_label=L("Reinstall","重新安装") end
+        local missing=env.portmaster_health=="missing"
+        local latest
+        if managed then latest=L("Managed by system","由系统管理")
+        elseif missing then latest=L("Not installed","未安装")
+        elseif env.portmaster_latest and env.portmaster_latest~="" then latest=env.portmaster_latest
+        else latest=L("Not checked","尚未检查") end
+        local primary_label,primary_action,primary_disabled,primary_is_check
+        if env.portmaster_health=="missing" then primary_label=L("Install PortMaster","安装 PortMaster"); primary_action=self.repair_environment
+        elseif env.portmaster_health~="healthy" then primary_label=L("Repair PortMaster","修复 PortMaster"); primary_action=self.repair_environment
+        elseif state=="update" then primary_label=L("Update now","立即更新"); primary_action=self.repair_environment
+        elseif state=="current" then primary_label=L("Up to date","已是最新版"); primary_disabled=true; primary_action=self.repair_environment
+        elseif state=="unknown" and can_update() then primary_label=L("Check for updates","检查更新"); primary_action=self.start_update_check; primary_is_check=true
+        else primary_label=L("Reinstall","重新安装"); primary_action=self.repair_environment end
         local rows={
             kit.section(L("PortMaster environment","PortMaster 环境"),{font_px=22}),
+            kit.textview(L("PortMaster support","PortMaster 支持"),support_label(),{id="manage:support",label_px=18,value_px=20}),
             kit.textview(L("Current version","当前版本"),model.provided(env.portmaster_version),{id="manage:current",label_px=18,value_px=20}),
             kit.textview(managed and L("PortMaster updates","PortMaster 更新") or L("Latest stable","最新稳定版"),latest,
                 {id="manage:latest",label_px=18,value_px=20}),
@@ -165,6 +182,10 @@ function Environment.new(model,operations,pages_ui)
             kit.textview(L("SH directory","SH 目录"),model.provided(env.scripts_dir),{id="manage:sh-dir",label_px=18,value_px=20}),
             kit.textview(L("Data directory","Data 目录"),model.provided(env.gamedirs_dir),{id="manage:data-dir",label_px=18,value_px=20}),
         }
+        local support_note=support_explanation()
+        if support_note then
+            rows[#rows+1]=note(L("Support","支持说明"),support_note,"manage:support-note")
+        end
         if managed then
             rows[#rows+1]=note(L("Maintenance","维护方式"),
                 L("PortMaster is maintained by the system. Runtime repair and game management are still available here.",
@@ -181,11 +202,11 @@ function Environment.new(model,operations,pages_ui)
                     "部分 PortMaster 核心文件丢失或损坏。游戏管理功能仍可正常使用。"),"manage:damaged")
         end
         local actions={}
-        if not managed and can_update() then
-            actions[#actions+1]=button(L("Check for updates","检查更新"),self.start_update_check,{id="manage:check"})
-        end
         if not managed and can_install() then
-            actions[#actions+1]=button(primary_label,self.repair_environment,{id="manage:update",disabled=primary_disabled})
+            actions[#actions+1]=button(primary_label,primary_action,{id="manage:update",disabled=primary_disabled})
+        end
+        if not managed and can_update() and not primary_is_check then
+            actions[#actions+1]=button(L("Check for updates","检查更新"),self.start_update_check,{id="manage:check"})
         end
         if not managed and can_install() and state=="current" and env.portmaster_health=="healthy" then
             actions[#actions+1]=button(L("Reinstall current stable","重装当前稳定版"),self.repair_environment,{id="manage:reinstall"})

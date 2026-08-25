@@ -2,8 +2,7 @@
 # Build dist/ and push it to a device over SSH.
 #
 # Usage:
-#   ports/sts2/src/scripts/deploy-to-device.sh
-#   DEVICE=root@10.10.1.91 ports/sts2/src/scripts/deploy-to-device.sh
+#   DEVICE=root@HANDHELD_IP ports/sts2/src/scripts/deploy-to-device.sh
 
 set -euo pipefail
 
@@ -11,7 +10,7 @@ SRC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT_ROOT="$(cd "$SRC_ROOT/.." && pwd)"
 DIST="$PORT_ROOT/dist"
 
-DEVICE="${DEVICE:-root@10.10.1.193}"
+: "${DEVICE:?set DEVICE to the SSH target, for example root@HANDHELD_IP}"
 PORT_PATH="${PORT_PATH:-/mnt/sdcard/mmcblk1p1/Data/ports/sts2}"
 PORTMASTER_PATH="${PORTMASTER_PATH:-/mnt/sdcard/mmcblk1p1/Roms/PORTS}"
 # Launcher script name is single-sourced from the manifest (same rule as

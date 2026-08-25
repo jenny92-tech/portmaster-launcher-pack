@@ -28,13 +28,50 @@ when the generated contract changes.
 The engine first checks `format` and `schema_version`, compares root
 `config_version` without downgrading, detects from the root, then verifies and
 loads one detail. The detail must match the root's format, schema version,
-config version and platform ID.
+config version and platform ID. Each root detail descriptor also binds the
+exact byte length and SHA-256 digest, so a mutable branch cannot combine a root
+with a different same-version detail.
+
 Models provide recognition, display facts, and narrow display/input overrides;
-containment defines their parent platform.
+containment defines their parent platform. Models are an ordered array with a
+stable id and explicit priority. Matching more than one model at the highest
+priority is an error instead of depending on object-key ordering.
+
+Managed storage is expressed as `locations[]`. Every location has a stable id,
+typed kind, named path reference, roles, accepted bundle formats and priority.
+Array order is never used as persistent identity or an implicit install
+destination. Port script/data targets are selected only after filtering for all
+roles required by the enabled capabilities; an inventory-only root can never
+become an install or management destination. A highest-priority tie is invalid,
+including ties among eligible targets. An APP bundle must resolve to exactly
+one location with both the `install` role and `trimui_app` format. Trash
+manifests retain the location id, so reordering the array cannot restore an APP
+to another card. Linux storage card discovery is deliberately not configurable
+per platform: ZIP scanning uses the system mount table, while install
+destinations remain typed Config locations.
+
+Config v1 is strict for contract objects: unknown platform, model, location and
+power fields are rejected. Model display metadata, the baseline capability set,
+and at least one Port script plus one Port data location are explicit rather
+than supplied by runtime defaults. The schema's `x-appmanager-*` annotations
+name cross-item priority/role invariants that JSON Schema Draft 2020-12 cannot
+compare natively; both the source validator and Rust loader enforce them.
+
+Power retention is `power { mode, strategies[] }`. `any` means one successful
+strategy is sufficient; `all` requires every configured strategy. Runtime
+architecture aliases are likewise an ordered array under
+`sources.runtime.architectures`, so a new architecture is enabled by Config
+instead of a compiled three-name whitelist.
 
 Adapter definitions are an extension point. An engine may retain an unknown
 adapter used only by an unrelated device. It must reject the current resolved
 device closure if any referenced adapter kind or contract version is unknown.
+
+Objects remain where they are stable-id registries referenced by name
+(`adapters`, source routes, named paths and environment profiles). Arrays are
+used where order, priority, multiple instances or future additional roots are
+part of behavior (`models`, `locations`, power strategies and Runtime
+architecture mappings). Object key order is never a business rule.
 
 Predicates, path strategies, health checks, and environment operations are
 finite declarative vocabularies. There is no shell,
@@ -42,6 +79,12 @@ evaluation, or arbitrary-code operation. Environment values are copied
 literally. Inheritance is default-open and blocks exactly the names and prefix
 listed in `environment`; each platform explicitly references the `love_ui`
 execution scope.
+
+`relative_to` may opt into `canonicalize_existing: true` for a firmware-owned
+alias such as LoongOS `/roms/ports/PortMaster`. Only an already existing path is
+canonicalized; a missing install target remains the derived child. The resolved
+target still passes the native managed-root, protected-namespace and overlap
+checks, so the option cannot authorize a symlink into a system directory.
 
 Each platform frontend also carries the normalized installer policy consumed
 by native plan validation. Optional shell `-` values are represented as JSON

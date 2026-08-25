@@ -15,6 +15,7 @@ def main() -> int:
     crate = root / "crates" / "love-lite"
     files = [
         root / "_kit" / "build_appmanager_love_lite.sh",
+        root / "_kit" / "build_appmanager_love_lite_in_container.sh",
         root / "_kit" / "cargo_revision.py",
         root / "_kit" / "love_lite_revision.py",
         crate / "Cargo.toml",

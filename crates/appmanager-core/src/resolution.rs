@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use portkit_core::Resolution;
+use portkit_core::{
+    LocationKind, Resolution, ResolvedLocation, required_location_format, required_location_roles,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -35,6 +37,7 @@ pub struct ResolvedPlatformContext {
     roots: PlatformRoots,
     frontend: FrontendContext,
     install: ExpectedInstallContract,
+    apps: Vec<ResolvedLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,10 +117,43 @@ impl TryFrom<&Resolution> for ResolvedPlatformContext {
         if resolution.target_confirmed && portmaster.is_none() {
             return Err(ResolutionConversionError::MissingPath("portmaster_core"));
         }
-        let scripts = path("scripts")?;
-        let game_dirs = path("game_data")?;
+        let selected_location =
+            |kind: LocationKind| -> Result<Option<PathBuf>, ResolutionConversionError> {
+                let required_roles = required_location_roles(kind, &resolution.capabilities);
+                let required_format = required_location_format(kind, &resolution.capabilities);
+                let candidates = resolution
+                    .locations
+                    .iter()
+                    .filter(|location| {
+                        location.kind == kind
+                            && required_roles
+                                .iter()
+                                .all(|role| location.roles.contains(role))
+                            && required_format
+                                .is_none_or(|format| location.formats.contains(&format))
+                    })
+                    .collect::<Vec<_>>();
+                let Some(highest) = candidates.iter().map(|location| location.priority).max()
+                else {
+                    return Ok(None);
+                };
+                let selected = candidates
+                    .into_iter()
+                    .filter(|location| location.priority == highest)
+                    .collect::<Vec<_>>();
+                if selected.len() != 1 {
+                    return Err(ResolutionConversionError::Frontend(format!(
+                        "ambiguous {kind:?} location at priority {highest}"
+                    )));
+                }
+                Ok(Some(selected[0].path.clone()))
+            };
+        let scripts = selected_location(LocationKind::PortScripts)?
+            .ok_or(ResolutionConversionError::MissingPath("scripts location"))?;
+        let game_dirs = selected_location(LocationKind::PortData)?
+            .ok_or(ResolutionConversionError::MissingPath("game data location"))?;
         let frontend_dir = path("frontend")?;
-        let images = resolution.paths.get("images").cloned();
+        let images = selected_location(LocationKind::PortImages)?;
 
         let raw: ResolvedFrontend = serde_json::from_value(resolution.frontend.clone())
             .map_err(|error| ResolutionConversionError::Frontend(error.to_string()))?;
@@ -194,10 +230,21 @@ impl TryFrom<&Resolution> for ResolvedPlatformContext {
             device_class: resolution.device_class.clone(),
             target_confirmed: resolution.target_confirmed,
             capabilities: ContextCapabilities {
-                inventory: capability(&resolution.capabilities, "manage_ports"),
+                inventory: capability_any(
+                    &resolution.capabilities,
+                    &["inventory_ports", "inventory_apps"],
+                ),
                 install_plan: capability(&resolution.capabilities, "install_portmaster"),
-                cache_invalidation: capability(&resolution.capabilities, "manage_ports"),
+                cache_invalidation: capability_any(
+                    &resolution.capabilities,
+                    &["manage_ports", "manage_apps"],
+                ),
+                inventory_ports: capability(&resolution.capabilities, "inventory_ports"),
                 manage_ports: capability(&resolution.capabilities, "manage_ports"),
+                install_ports: capability(&resolution.capabilities, "install_ports"),
+                inventory_apps: capability(&resolution.capabilities, "inventory_apps"),
+                manage_apps: capability(&resolution.capabilities, "manage_apps"),
+                install_apps: capability(&resolution.capabilities, "install_apps"),
                 trash: capability(&resolution.capabilities, "trash"),
                 leftovers: capability(&resolution.capabilities, "leftovers"),
                 cleanup_appledouble: capability(&resolution.capabilities, "cleanup_appledouble"),
@@ -216,6 +263,12 @@ impl TryFrom<&Resolution> for ResolvedPlatformContext {
                 launcher,
                 names: raw.names.clone(),
             },
+            apps: resolution
+                .locations
+                .iter()
+                .filter(|location| location.kind == LocationKind::Apps)
+                .cloned()
+                .collect(),
             install: ExpectedInstallContract {
                 schema: 1,
                 frontend_names: raw.names,
@@ -252,6 +305,17 @@ impl ResolvedPlatformContext {
                 game_dirs: self.roots.game_dirs,
                 images: self.roots.images,
                 libs: self.roots.libs,
+                apps: self
+                    .apps
+                    .into_iter()
+                    .map(|location| crate::context::ManagedAppLocation {
+                        id: location.id,
+                        path: location.path,
+                        roles: location.roles,
+                        formats: location.formats,
+                        priority: location.priority,
+                    })
+                    .collect(),
                 app_state: app_owned.state,
                 trash: app_owned.trash,
             },
@@ -270,6 +334,20 @@ fn capability(
     name: &str,
 ) -> CapabilityState {
     if capabilities.get(name) == Some(&true) {
+        CapabilityState::Current
+    } else {
+        CapabilityState::Unknown
+    }
+}
+
+fn capability_any(
+    capabilities: &std::collections::BTreeMap<String, bool>,
+    names: &[&str],
+) -> CapabilityState {
+    if names
+        .iter()
+        .any(|name| capabilities.get(*name) == Some(&true))
+    {
         CapabilityState::Current
     } else {
         CapabilityState::Unknown
@@ -348,6 +426,32 @@ mod tests {
                 python: json!({}),
                 health: Vec::new(),
                 preserved_dirs: vec!["libs".to_owned(), "config".to_owned(), "themes".to_owned()],
+                locations: vec![
+                    ResolvedLocation {
+                        id: "ports-scripts".to_owned(),
+                        kind: LocationKind::PortScripts,
+                        path: temp.path().join("scripts"),
+                        roles: vec![portkit_core::LocationRole::Inventory],
+                        formats: vec![portkit_core::BundleFormat::Port],
+                        priority: 100,
+                    },
+                    ResolvedLocation {
+                        id: "ports-data".to_owned(),
+                        kind: LocationKind::PortData,
+                        path: temp.path().join("games"),
+                        roles: vec![portkit_core::LocationRole::Inventory],
+                        formats: vec![portkit_core::BundleFormat::Port],
+                        priority: 100,
+                    },
+                    ResolvedLocation {
+                        id: "ports-images".to_owned(),
+                        kind: LocationKind::PortImages,
+                        path: temp.path().join("images"),
+                        roles: vec![portkit_core::LocationRole::Inventory],
+                        formats: Vec::new(),
+                        priority: 100,
+                    },
+                ],
                 environment_scopes: Vec::new(),
                 display: json!({}),
                 input: json!({}),
@@ -437,5 +541,101 @@ mod tests {
             crate::InstallPlan::from_context(&context),
             Err(crate::PlanError::CapabilityUnknown)
         ));
+    }
+
+    #[test]
+    fn inventory_only_location_never_replaces_the_install_and_manage_root() {
+        let mut fixture = fixture();
+        let required_roles = vec![
+            portkit_core::LocationRole::Inventory,
+            portkit_core::LocationRole::Install,
+            portkit_core::LocationRole::Manage,
+        ];
+        for location in &mut fixture.resolution.locations {
+            if matches!(
+                location.kind,
+                LocationKind::PortScripts | LocationKind::PortData
+            ) {
+                location.roles = required_roles.clone();
+            }
+        }
+        fixture.resolution.capabilities.extend([
+            ("inventory_ports".to_owned(), true),
+            ("install_ports".to_owned(), true),
+            ("manage_ports".to_owned(), true),
+        ]);
+        let inventory_only = fixture._temp.path().join("inventory-only");
+        fs::create_dir(&inventory_only).unwrap();
+        fixture.resolution.locations.push(ResolvedLocation {
+            id: "ports-scripts-inventory".to_owned(),
+            kind: LocationKind::PortScripts,
+            path: inventory_only,
+            roles: vec![portkit_core::LocationRole::Inventory],
+            formats: vec![portkit_core::BundleFormat::Port],
+            priority: 200,
+        });
+
+        let context = ResolvedPlatformContext::try_from(&fixture.resolution)
+            .unwrap()
+            .with_app_owned_paths(fixture.app_owned)
+            .unwrap();
+        assert_eq!(context.roots.scripts, fixture._temp.path().join("scripts"));
+    }
+
+    #[test]
+    fn eligible_port_location_priority_ties_are_rejected() {
+        let mut fixture = fixture();
+        fixture
+            .resolution
+            .capabilities
+            .insert("inventory_ports".to_owned(), true);
+        let second = fixture._temp.path().join("scripts-second");
+        fs::create_dir(&second).unwrap();
+        fixture.resolution.locations.push(ResolvedLocation {
+            id: "ports-scripts-second".to_owned(),
+            kind: LocationKind::PortScripts,
+            path: second,
+            roles: vec![portkit_core::LocationRole::Inventory],
+            formats: vec![portkit_core::BundleFormat::Port],
+            priority: 100,
+        });
+
+        let error = ResolvedPlatformContext::try_from(&fixture.resolution).unwrap_err();
+        assert!(error.to_string().contains("ambiguous PortScripts location"));
+    }
+
+    #[test]
+    fn trimui_apps_root_may_contain_appmanager_private_state() {
+        let mut fixture = fixture();
+        let apps = fixture._temp.path().join("Apps");
+        let app_root = apps.join("jenny92-appmanager");
+        let state = app_root.join("state");
+        let trash = app_root.join("trash");
+        fs::create_dir_all(&state).unwrap();
+        fs::create_dir(&trash).unwrap();
+        fixture.resolution.capabilities.extend([
+            ("inventory_apps".to_owned(), true),
+            ("manage_apps".to_owned(), true),
+            ("install_apps".to_owned(), true),
+        ]);
+        fixture.resolution.locations.push(ResolvedLocation {
+            id: "apps-primary".to_owned(),
+            kind: LocationKind::Apps,
+            path: apps.clone(),
+            roles: vec![
+                portkit_core::LocationRole::Inventory,
+                portkit_core::LocationRole::Install,
+                portkit_core::LocationRole::Manage,
+            ],
+            formats: vec![portkit_core::BundleFormat::TrimuiApp],
+            priority: 100,
+        });
+        fixture.app_owned = AppOwnedPaths { state, trash };
+
+        let context = ResolvedPlatformContext::try_from(&fixture.resolution)
+            .unwrap()
+            .with_app_owned_paths(fixture.app_owned)
+            .unwrap();
+        assert_eq!(context.roots.apps[0].path, apps);
     }
 }

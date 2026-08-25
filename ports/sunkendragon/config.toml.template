@@ -21,6 +21,7 @@ mainIntentBundle={}
 displayWidth=1280
 displayHeight=720
 displayRotation=0
+displayRefreshRate=60
 
 [input]
 
@@ -30,3 +31,4 @@ dpad_synthesize_hat=false
 [unity]
 
 block_analytics=true
+swappy_invalid_interval_fallback=true

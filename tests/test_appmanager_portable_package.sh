@@ -107,7 +107,7 @@ grep -Fq 'model.native.start,"config-refresh-if-newer"' "$APP/love_ui/main.lua"
 [ "$(grep -Ec '^[ab] = enter$' "$APP/love_ui/ui.gptk")" = "2" ]
 [ "$(grep -Ec '^(start|back) = f10$' "$APP/love_ui/ui.gptk")" = "2" ]
 ! grep -Eq '^(start|back) = (enter|esc)$' "$APP/love_ui/ui.gptk"
-grep -Fq 'env.portmaster_health=="missing" and env.portmaster_management~="system"' "$APP/love_ui/main.lua"
+grep -Fq 'env.portmaster_management~="system" and model.severe_health_issue()' "$APP/love_ui/main.lua"
 grep -Fq '"portmaster_management"' "$ROOT/crates/appmanager-service/src/launcher.rs"
 grep -Fq 'L("Environment Management","环境管理")' "$APP/love_ui/app_environment.lua"
 grep -Fq 'L("PortMaster not found","未找到 PortMaster")' "$APP/love_ui/app_environment.lua"

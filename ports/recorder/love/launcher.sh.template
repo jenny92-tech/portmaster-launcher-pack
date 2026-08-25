@@ -1,0 +1,49 @@
+#!/bin/bash
+# PORTMASTER: jenny92-screenrec, Screen Recorder.sh
+# Standalone screen recorder: LÖVE UI (start/stop/status) + shell engine +
+# bundled static ffmpeg. Runs as a TrimUI MainUI APP (Apps/) or PortMaster
+# port; requires PortMaster for the LÖVE 11.5 runtime, font and gptokeyb.
+
+PORT_NAME="screenrec"; LOG_PREFIX="[REC]"
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+#@KIT-END
+portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
+source $controlfolder/control.txt
+[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+get_controls
+
+# GAMEDIR: TrimUI APP (REC_APP_ROOT_OVERRIDE from the generated App wrapper —
+# the data folder nests inside the App folder) / data folder next to the
+# script / manual copy (script dir itself).
+if [ -n "${REC_APP_ROOT_OVERRIDE:-}" ]; then
+  GAMEDIR="$REC_APP_ROOT_OVERRIDE"
+  [ -d "$GAMEDIR/jenny92-screenrec" ] && GAMEDIR="$GAMEDIR/jenny92-screenrec"
+elif [ -d "$(dirname "$0")/jenny92-screenrec" ]; then
+  GAMEDIR="$(cd "$(dirname "$0")/jenny92-screenrec" && pwd)"
+else
+  GAMEDIR="$(cd "$(dirname "$0")" && pwd)"
+fi
+CONFDIR="$GAMEDIR/conf"
+mkdir -p "$CONFDIR"
+cd "$GAMEDIR"
+exec >> "$GAMEDIR/log.txt" 2>&1
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_common.sh"
+#@KIT-END
+
+export REC_ENGINE="$GAMEDIR/bin/record_screen.sh"
+export REC_DIR="${REC_DIR:-/mnt/SDCARD/videos}"
+mkdir -p "$REC_DIR"
+
+echo "$LOG_PREFIX CFW=$CFW_NAME GAMEDIR=$GAMEDIR REC_DIR=$REC_DIR"
+[ -x "$REC_ENGINE" ] || echo "$LOG_PREFIX WARN: engine missing at $REC_ENGINE"
+
+# The UI calls the engine directly (status/start/stop); no stage-2 game.
+run_love_launcher_ui
+pm_finish
+exit 0

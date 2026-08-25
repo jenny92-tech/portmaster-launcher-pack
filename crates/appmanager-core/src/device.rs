@@ -106,15 +106,39 @@ pub fn resolve_device(
                 .as_ref()
                 .map(|source| source as &dyn portkit_core::FragmentSource),
         );
-    let selected = CandidateSelector {
+    let selector = CandidateSelector {
         loader: ConfigLoader::default(),
-    }
-    .select_root_for_context(
-        ConfigCandidate::embedded(request.config.embedded_root),
+    };
+    let embedded_root = request.config.embedded_root;
+    let mut selected = selector.select_root_for_context(
+        ConfigCandidate::embedded(embedded_root.clone()),
         &embedded_details,
         remote,
         &detection,
     )?;
+    let app_owned = AppOwnedPaths {
+        state: request.app_state,
+        trash: request.trash,
+    };
+    let mut context = ResolvedDeviceContext::try_from(ResolvedContextInput {
+        resolution: selected.resolution.clone(),
+        app_owned: app_owned.clone(),
+    });
+    // A remote candidate is not committed until APP Manager's complete
+    // domain context validates. PortKit intentionally does not depend on this
+    // crate, so this final fallback belongs at the application boundary.
+    if context.is_err() && selected.selected.origin == ConfigOrigin::Remote {
+        selected = selector.select_root_for_context(
+            ConfigCandidate::embedded(embedded_root),
+            &embedded_details,
+            None,
+            &detection,
+        )?;
+        context = ResolvedDeviceContext::try_from(ResolvedContextInput {
+            resolution: selected.resolution.clone(),
+            app_owned,
+        });
+    }
     let config_origin = selected.selected.origin;
     let config = selected.selected.config;
     let resolution = selected.resolution;
@@ -124,14 +148,7 @@ pub fn resolve_device(
         &resolution.platform_display_name,
         resolution.model_id.as_deref(),
     );
-    let context = ResolvedDeviceContext::try_from(ResolvedContextInput {
-        resolution: resolution.clone(),
-        app_owned: AppOwnedPaths {
-            state: request.app_state,
-            trash: request.trash,
-        },
-    })
-    .map_err(|error| DeviceResolutionError::Context(error.to_string()))?;
+    let context = context.map_err(|error| DeviceResolutionError::Context(error.to_string()))?;
     Ok(DeviceResolution {
         config_origin,
         model_id,
@@ -212,6 +229,60 @@ fn parse_os_release(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceReso
 mod tests {
     use super::*;
 
+    fn satisfy_predicate(
+        predicate: &portkit_core::predicate::Predicate,
+        root: &Path,
+        context: &mut DetectionContext,
+    ) {
+        let string = |names: &[&str]| {
+            names
+                .iter()
+                .find_map(|name| predicate.arguments.get(*name)?.as_str())
+                .unwrap()
+        };
+        match predicate.kind.as_str() {
+            "always" => {}
+            "all" => {
+                for child in &predicate.predicates {
+                    satisfy_predicate(child, root, context);
+                }
+            }
+            "any" => satisfy_predicate(&predicate.predicates[0], root, context),
+            "directory_exists" => {
+                let path = string(&["path", "value"]);
+                fs::create_dir_all(root.join(path.trim_start_matches('/'))).unwrap();
+            }
+            "file_exists" => {
+                let path = root.join(string(&["path", "value"]).trim_start_matches('/'));
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, b"fixture\n").unwrap();
+            }
+            "launcher_path_prefix" => {
+                context.launcher_path =
+                    Path::new(string(&["prefix", "path", "value"])).join("APP Manager.sh");
+            }
+            "env_equals" => {
+                context.environment.insert(
+                    predicate.string_argument("name").unwrap().to_owned(),
+                    predicate.string_argument("value").unwrap().to_owned(),
+                );
+            }
+            "os_release_equals" => {
+                context.os_release.insert(
+                    string(&["field", "name", "key"]).to_owned(),
+                    predicate.string_argument("value").unwrap().to_owned(),
+                );
+            }
+            "os_release_version_at_least" => {
+                context.os_release.insert(
+                    predicate.string_argument("field").unwrap().to_owned(),
+                    predicate.string_argument("value").unwrap().to_owned(),
+                );
+            }
+            other => panic!("unsupported fixture predicate {other}"),
+        }
+    }
+
     #[test]
     fn os_release_parser_accepts_standard_quotes_and_ignores_comments() {
         let parsed = parse_os_release(b"# comment\nOS_NAME='ROCKNIX'\nVERSION=2026.07\n").unwrap();
@@ -221,8 +292,11 @@ mod tests {
 
     #[test]
     fn identity_prefers_firmware_and_model_facts_then_uses_platform_fallbacks() {
+        let probe = tempfile::tempdir().unwrap();
         let context = DetectionContext {
-            root: None,
+            // Keep this fallback test independent of the build host's DMI
+            // identity (for example QEMU inside the ARM64 lab container).
+            root: Some(probe.path().to_path_buf()),
             launcher_path: "/ports/Test.sh".into(),
             environment: BTreeMap::from([
                 ("CFW_NAME".into(), "CrossMix".into()),
@@ -267,5 +341,61 @@ mod tests {
             Some("MiniLoong Pocket One")
         );
         assert_eq!(identity.system_version.as_deref(), Some("1.2.3"));
+    }
+
+    #[test]
+    fn every_current_platform_reaches_the_app_domain_and_install_boundary() {
+        let config_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+        let loader = ConfigLoader::default();
+        let root_bytes = fs::read(config_dir.join("config.json")).unwrap();
+        let root_config = loader.parse_root(&root_bytes).unwrap();
+        for (platform_id, entry) in &root_config.platforms {
+            let fixture = tempfile::tempdir().unwrap();
+            let root = fixture.path();
+            fs::create_dir_all(root.join("launcher")).unwrap();
+            let mut detection = DetectionContext {
+                root: Some(root.to_path_buf()),
+                launcher_path: "/launcher/APP Manager.sh".into(),
+                environment: BTreeMap::new(),
+                os_release: BTreeMap::new(),
+                target_override: Some("/target/PortMaster".into()),
+            };
+            satisfy_predicate(&entry.recognition, root, &mut detection);
+            fs::create_dir_all(root.join("target/PortMaster")).unwrap();
+            let config = loader
+                .load_platform(
+                    loader.parse_root(&root_bytes).unwrap(),
+                    platform_id,
+                    &LocalFragmentSource::new(&config_dir),
+                )
+                .unwrap();
+            let platform = &config.platforms[platform_id];
+            for strategy in platform.paths.values() {
+                if strategy.strategy == "first_existing" {
+                    let candidate = strategy.arguments["candidates"][0].as_str().unwrap();
+                    fs::create_dir_all(root.join(candidate.trim_start_matches('/'))).unwrap();
+                }
+            }
+            let resolution = config.detect_and_resolve(&loader, &detection).unwrap();
+            assert_eq!(&resolution.platform_id, platform_id);
+            for path in resolution.paths.values() {
+                fs::create_dir_all(path).unwrap();
+            }
+            let state = root.join("owned/state");
+            let trash = root.join("owned/trash");
+            fs::create_dir_all(&state).unwrap();
+            fs::create_dir_all(&trash).unwrap();
+            let context = ResolvedDeviceContext::try_from(ResolvedContextInput {
+                resolution,
+                app_owned: AppOwnedPaths { state, trash },
+            })
+            .unwrap_or_else(|error| panic!("{platform_id}: {error}"));
+            if context.management == crate::ManagementMode::App {
+                let plan = crate::InstallPlan::from_context(&context)
+                    .unwrap_or_else(|error| panic!("{platform_id}: {error}"));
+                plan.validate(&context)
+                    .unwrap_or_else(|error| panic!("{platform_id}: {error}"));
+            }
+        }
     }
 }

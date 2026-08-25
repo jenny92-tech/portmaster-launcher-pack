@@ -32,14 +32,20 @@ impl ActivityGuard {
 pub(super) struct DownloadProgress {
     channel: Option<ProgressChannel>,
     runtime: &'static str,
+    cancel: Option<appmanager_core::CancellationToken>,
     state: Mutex<(Instant, u64)>,
 }
 
 impl DownloadProgress {
-    pub(super) fn new(channel: Option<ProgressChannel>, runtime: &'static str) -> Self {
+    pub(super) fn new(
+        channel: Option<ProgressChannel>,
+        runtime: &'static str,
+        cancel: Option<appmanager_core::CancellationToken>,
+    ) -> Self {
         Self {
             channel,
             runtime,
+            cancel,
             state: Mutex::new((Instant::now(), 0)),
         }
     }
@@ -72,6 +78,18 @@ impl DownloadProgress {
 
 impl Progress for DownloadProgress {
     fn update(&self, received: u64, total: u64) -> std::io::Result<()> {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(|token| token.is_cancelled())
+        {
+            // Interrupt the transfer loop so a cancel request actually stops
+            // the download instead of running to completion.
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "PortMaster download cancelled",
+            ));
+        }
         self.publish(received, total)
     }
 }

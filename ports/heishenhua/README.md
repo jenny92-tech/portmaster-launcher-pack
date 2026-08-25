@@ -31,6 +31,9 @@ PortMaster 自带的 LÖVE 11.5 显示设置界面；Stage 2 按选择修改 `co
 `il2cpp_patch.so` 提供；类名、方法名和字段偏移仍只写在本游戏的
 `config.toml`，不再需要 `heishenhua_mods.so`。
 
+像素纹理固定使用 `textureDownsampleFilter = "nearest"`，保留硬边并降低启动时
+缩放开销；纹理尺寸上限仍由画面质量选项控制。
+
 ## Bogodroid 运行文件
 
 ```text

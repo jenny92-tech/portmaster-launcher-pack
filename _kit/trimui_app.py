@@ -14,6 +14,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+
 
 def fail(message: str) -> None:
     raise SystemExit(f"trimui app: {message}")
@@ -131,11 +133,17 @@ def add_tree(archive: zipfile.ZipFile, root: Path) -> None:
         relative = path.relative_to(root.parent).as_posix()
         if path.is_dir():
             info = zipfile.ZipInfo(relative.rstrip("/") + "/")
+            info.date_time = ZIP_TIMESTAMP
             info.create_system = 3
             info.external_attr = (stat.S_IFDIR | 0o755) << 16
             archive.writestr(info, b"")
         else:
-            archive.write(path, relative)
+            info = zipfile.ZipInfo(relative)
+            info.date_time = ZIP_TIMESTAMP
+            info.create_system = 3
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = (stat.S_IFREG | stat.S_IMODE(path.stat().st_mode)) << 16
+            archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
 
 
 def main() -> None:

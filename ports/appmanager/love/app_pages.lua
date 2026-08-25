@@ -14,25 +14,73 @@ function Pages.new(model,operations)
     local home_actions,junk_actions={},{}
 
     local function button(label,action,opts) return kit.button(label,action,opts) end
+    local function header_badge()
+        if env.portmaster_management=="system" then
+            return kit.badge(L("System managed","系统管理"),{0.62,0.64,0.69})
+        end
+        -- Severity wins: a broken core must never be masked by a green update
+        -- hint, otherwise the user thinks everything is fine and just needs
+        -- an update while the primary action is actually Repair.
+        if env.portmaster_health=="damaged" then
+            if model.severe_health_issue() then
+                return kit.badge(L("Needs repair","需修复"),{1,0.45,0.38})
+            end
+            return kit.badge(L("Needs attention","需注意"),{0.95,0.70,0.30})
+        end
+        if env.portmaster_python_ok==false then
+            return kit.badge(L("Python issue","Python 问题"),{0.95,0.70,0.30})
+        end
+        if model.update_state()=="update" then
+            return kit.badge(L("Update","可升级"),{0.48,0.90,0.62})
+        end
+        return nil
+    end
+    local function start_home_tour()
+        local state=kit.get_state()
+        kit.guide({
+            title=L("Welcome to Port App Manager","欢迎使用 Port App Manager"),
+            message=L(
+                "A Port game maintenance tool with five tools: uninstall games, one-tap zip install, leftover cleanup, Port Runtime repair, and PortMaster management.",
+                "Port 游戏维护工具，共五个功能：卸载管理、一键安装、垃圾清理、Port Runtime 和 PortMaster 管理。"),
+            confirm=L("Start using","开始使用"),
+            callouts={
+                {target="home:games",title=L("Uninstall manager","卸载管理"),
+                    body=L("List installed games, uninstall them, and manage Trash.",
+                        "查看已安装游戏、卸载，以及管理回收站。")},
+                {target="home:zip",title=L("One-tap install","一键安装"),
+                    body=L("Scan storage card roots for game zip bundles and install them in one tap.",
+                        "把下载好的游戏压缩包（zip）放进存储卡，这里会自动找到并一键安装。")},
+                {target="home:junk",title=L("Leftover cleanup","垃圾清理"),
+                    body=L("Find launchers, images, and data folders that no longer match.",
+                        "找出不再需要的游戏残留文件和数据，清理后释放空间。")},
+                {target="home:runtime",title=L("Port Runtime","Port Runtime"),
+                    body=L("Check and repair the Runtimes needed by installed games.",
+                        "检查并修复已安装游戏需要的 Runtime。")},
+                {target="home:pm",title=L("PortMaster manager","PortMaster 管理"),
+                    body=env.portmaster_management=="system" and L(
+                        "View the version, device and install path. PortMaster updates are handled by the system.",
+                        "查看版本、设备和安装路径。PortMaster 更新由系统负责。") or L(
+                        "Check for updates, and install or repair PortMaster.",
+                        "检查更新，以及安装或修复 PortMaster。")},
+            },
+            on_confirm=function()
+                state.onboarding_seen="1"
+                kit.persist_state()
+            end,
+            on_skip=function()
+                state.onboarding_seen="1"
+                kit.persist_state()
+            end,
+        })
+    end
     local function note(label,value,id)
         return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=3,
             expanded_lines=3,label_px=18,value_px=20,surface=false})
     end
     local function empty(values) return function() return model.selected_count(values)==0 end end
-    local function enabled(name) return env[name]~=false end
+    local function enabled(name) return env[name]==true end
     local function exact_path(value)
         return type(value)=="string" and value~="" and value or nil
-    end
-    local function inventory_paths()
-        local paths={}
-        for _,entry in ipairs(report.entries or {}) do
-            local path=exact_path(entry.path)
-            if path and type(entry.root)=="string" and type(entry.name)=="string" then
-                paths[entry.root]=paths[entry.root] or {}
-                paths[entry.root][entry.name]=path
-            end
-        end
-        return paths
     end
     local function port_name_counts()
         local counts={}
@@ -46,11 +94,12 @@ function Pages.new(model,operations)
         local name=model.display_name(port.script)
         return (counts[name] or 0)>1 and port.script or name
     end
-    local function primary_dir_counts()
+    local function primary_data_counts()
         local counts={}
         for _,port in ipairs(report.ports or {}) do
-            if type(port.dir)=="string" and port.dir~="" then
-                counts[port.dir]=(counts[port.dir] or 0)+1
+            local path=exact_path(port.data_path)
+            if path then
+                counts[path]=(counts[path] or 0)+1
             end
         end
         return counts
@@ -63,27 +112,34 @@ function Pages.new(model,operations)
 
     local function select_all_home(value)
         for key in pairs(home_actions) do selected_home[key]=value end
-        self.build_home(true)
+        self.build_games(true)
     end
 
     local function uninstall_selected()
-        local plan,labels,chosen,dir_counts,planned_dirs={},{},{},{},{}
+        local plan,labels,chosen,data_counts,planned_data={},{},{},{},{}
         for key,action in pairs(home_actions) do
             if selected_home[key] then
                 chosen[#chosen+1]=action
-                if action.dir~="" then dir_counts[action.dir]=(dir_counts[action.dir] or 0)+1 end
+                if action.data_path then
+                    data_counts[action.data_path]=(data_counts[action.data_path] or 0)+1
+                end
             end
         end
         table.sort(chosen,function(a,b) return a.script_path<b.script_path end)
+        -- When any script could not be parsed reliably, reference counts may miss
+        -- dynamic references to a shared folder. Fail closed: uninstall the
+        -- launcher and images, but never the data folder.
+        local uncertain=report.classification_uncertain==true
         for _,action in ipairs(chosen) do
             labels[#labels+1]=action.label
             plan[#plan+1]={kind="TRASH",arg=action.script_path}
             for _,path in ipairs(action.image_paths) do
                 plan[#plan+1]={kind="TRASH",arg=path}
             end
-            if action.dir~="" and action.data_path and
-               dir_counts[action.dir]==(report.refcount[action.dir] or 0) and not planned_dirs[action.dir] then
-                planned_dirs[action.dir]=true
+            if not uncertain and action.data_path and
+               data_counts[action.data_path]==(report.data_refcount[action.data_path] or 0) and
+               not planned_data[action.data_path] then
+                planned_data[action.data_path]=true
                 plan[#plan+1]={kind="TRASH",arg=action.data_path}
             end
         end
@@ -105,13 +161,211 @@ function Pages.new(model,operations)
     end
 
     function self.build_home(preserve_focus)
+
+        -- Home IS the app launcher: every game and standalone app is listed
+        -- here for one-tap launch. The five management tools live in the
+        -- sidebar (Quick Tools).
         local can_manage_ports=enabled("capability_manage_ports")
-        local can_trash=can_manage_ports and enabled("capability_trash")
+        local can_manage_apps=enabled("capability_manage_apps")
+        local can_inventory=enabled("capability_inventory_ports") or enabled("capability_inventory_apps")
+        local can_install_bundles=enabled("capability_install_ports") or enabled("capability_install_apps")
+        local can_leftovers=can_manage_ports and enabled("capability_leftovers") and enabled("capability_trash")
+        local can_runtimes=enabled("capability_repair_runtimes")
+        if can_inventory then model.ensure_report() end
+        local rows={}
+        local state=kit.get_state()
+        local function web_toggle(on)
+            -- Header switch does not store state itself; keep it in sync and
+            -- drive the service, then rebuild so the banner appears/disappears.
+            state.web_enabled=on and "1" or "0"
+            local ok,endpoint=pcall(model.native.web_set,on==true)
+            if ok and on and type(endpoint)=="table" and type(endpoint.port)=="number" and endpoint.port>0 then
+                state.web_port=tostring(endpoint.port)
+                state.web_code=tostring(endpoint.code or "")
+                kit.persist_state()
+            elseif ok and not on then
+                state.web_port=nil; state.web_code=nil
+                kit.persist_state()
+                kit.toast(L("Remote management is off.","远程管理已关闭。"),{kind="info"})
+            else
+                if on then
+                    state.web_enabled="0"; state.web_port=nil; state.web_code=nil
+                else
+                    state.web_enabled="1"
+                end
+                kit.persist_state()
+                kit.toast(L("Cannot switch remote management.","无法切换远程管理。"),{kind="error"})
+            end
+            self.build_home(true)
+        end
+        if state.web_enabled=="1" and state.web_port then
+            local host=(env.web_url or ""):match("^[^:]+://[^:]+") or ""
+            rows[#rows+1]=kit.textview(L("Remote management","远程管理"),
+                (kit.get_state().ui_lang=="zh" and "电脑浏览器打开 " or "Open in a browser: ")..host..":"..state.web_port..
+                (state.web_code and state.web_code~="" and (kit.get_state().ui_lang=="zh" and "  ·  配对码 " or "  ·  Pairing code ")..state.web_code or ""),
+                {id="home:web-banner",focusable=false,expandable=false,max_lines=3,expanded_lines=3,
+                 label_px=18,value_px=20,bg={0.32,0.22,0.06}})
+        end
+        if env.portmaster_health=="missing" and env.portmaster_management~="system" then
+            rows[#rows+1]=note(L("PortMaster not installed","PortMaster 未安装"),
+                L("Install PortMaster to enable Runtime repair and environment updates. Game management still works here.",
+                    "安装 PortMaster 后可修复 Runtime 和更新环境；游戏管理不受影响。"),"home:pm-missing")
+            if model.can_install() then
+                rows[#rows+1]=button(L("Install PortMaster","安装 PortMaster"),function() environment.repair_environment() end,{id="home:install"})
+            end
+        end
+        local function launch_confirm(label,script)
+            kit.dialog({
+                title=L("Launch "..label.."?","启动 "..label.."？"),
+                message=L("Port App Manager will close and "..label.." will start.",
+                    "Port App Manager 将退出并启动"..label.."。"),
+                confirm=L("Launch","启动"),cancel=L("Back","返回"),danger=false,
+                on_confirm=function()
+                    local ok=pcall(model.native.run,script)
+                    if ok then kit.quit(kit.EXIT_START) return end
+                    kit.toast(L("Cannot launch the game.","无法启动。"),{kind="error"})
+                end,
+            })
+        end
+        for _,app in ipairs(enabled("capability_inventory_apps") and (report.apps or {}) or {}) do
+            local name=model.app_label(app)
+            rows[#rows+1]=button(name,function() launch_confirm(name,app.launch) end,
+                {id="launcher:app:"..tostring(app.root_id or "unknown")..":"..app.name,badge=kit.badge(L("App","APP"),{0.62,0.64,0.69})})
+        end
+        for _,port in ipairs(can_manage_ports and (report.ports or {}) or {}) do
+            if port.path and port.path~="" then
+                local name=model.display_name(port.script)
+                rows[#rows+1]=button(name,function() launch_confirm(name,port.path) end,
+                    {id="launcher:game:"..port.script,badge=kit.badge(L("Game","游戏"),{0.48,0.90,0.62})})
+            end
+        end
+        if #rows==0 then
+            rows[#rows+1]=note(L("Status","状态"),L(
+                "Nothing to launch yet. Install games from the storage card with One-tap install, or add apps to the Apps folder.",
+                "还没有可启动的内容。用一键安装从存储卡安装游戏，或把 APP 放到 Apps 目录。"),"launcher:empty")
+        end
+        local function tool(label,action,id)
+            return button(label,action,{id=id,detail=""})
+        end
+        local sidebar={
+            button(L("Refresh","刷新"),function() operations.refresh_inventory(page.HOME) end,{id="home:refresh"}),
+        }
+        if can_manage_ports or can_manage_apps then
+            sidebar[#sidebar+1]=tool(L("Uninstall manager","卸载管理"),function() self.build_games(); kit.push_page(page.GAMES) end,"home:games")
+        end
+        if can_install_bundles then
+            sidebar[#sidebar+1]=tool(L("One-tap install","一键安装"),function() model.selected_zip={}; operations.scan_zip_bundles(page.ZIP) end,"home:zip")
+        end
+        if can_leftovers then
+            sidebar[#sidebar+1]=tool(L("Leftover cleanup","垃圾清理"),function() self.build_junk(); kit.push_page(page.JUNK) end,"home:junk")
+        end
+        if can_runtimes then
+            sidebar[#sidebar+1]=tool(L("Port Runtime","Port Runtime"),function() self.build_runtime(); kit.push_page(page.RUNTIME) end,"home:runtime")
+        end
+        sidebar[#sidebar+1]=tool(L("PortMaster manager","PortMaster 管理"),function() environment.build_manage(); kit.push_page(page.MANAGE) end,"home:pm")
+        sidebar[#sidebar+1]=button(L("Tutorial","重新看教程"),function() start_home_tour() end,{id="home:tutorial"})
+        sidebar[#sidebar+1]=button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"})
+        kit.set_page(page.HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
+            preserve_focus=preserve_focus,row_layout={mode="flow",min_width=420,max_columns=1},
+            header_action={kind="switch",
+                label=function() return kit.get_state().ui_lang=="zh" and "远程管理" or "Remote" end,
+                checked=state.web_enabled=="1",
+                on_toggle=function(on) web_toggle(on) end,
+                id="home:web"},
+            sidebar_title=L("Quick Tools","快捷工具"),sidebar=sidebar,
+            sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}}})
+        if state.onboarding_seen~="1" and not preserve_focus then
+            start_home_tour()
+        end
+    end
+
+    function self.build_launcher(preserve_focus)
+        -- Unified launcher: Port games (Roms/PORTS .sh) and standalone apps
+        -- (Apps/*/launch.sh) in one list. Press a row to launch it: the app
+        -- detaches the script, then quits so the game takes over the display.
+        local rows={}
+        local function launch_confirm(label,script)
+            kit.dialog({
+                title=L("Launch "..label.."?","启动 "..label.."？"),
+                message=L("Port App Manager will close and "..label.." will start.",
+                    "Port App Manager 将退出并启动"..label.."。"),
+                confirm=L("Launch","启动"),cancel=L("Back","返回"),danger=false,
+                on_confirm=function()
+                    local ok=pcall(model.native.run,script)
+                    if ok then
+                        kit.quit(kit.EXIT_START)
+                    else
+                        kit.toast(L("Cannot launch the game.","无法启动。"),{kind="error"})
+                    end
+                end,
+            })
+        end
+        for _,app in ipairs(report.apps or {}) do
+            local name=model.app_label(app)
+            rows[#rows+1]=button(name,
+                function() launch_confirm(name,app.launch) end,
+                {id="launcher:app:"..tostring(app.root_id or "unknown")..":"..app.name,
+                 detail=L("App","APP"),
+                 badge=kit.badge(L("App","APP"),{0.62,0.64,0.69})})
+        end
+        for _,port in ipairs(report.ports or {}) do
+            if port.path and port.path~="" then
+                local name=model.display_name(port.script)
+                rows[#rows+1]=button(name,
+                    function() launch_confirm(name,port.path) end,
+                    {id="launcher:game:"..port.script,
+                     detail=L("Game","游戏"),
+                     badge=kit.badge(L("Game","游戏"),{0.48,0.90,0.62})})
+            end
+        end
+        if #rows==0 then
+            rows[#rows+1]=note(L("Status","状态"),L(
+                "Nothing to launch yet. Install games from the storage card with One-tap install, or add apps to the Apps folder.",
+                "还没有可启动的内容。用一键安装从存储卡安装游戏，或把 APP 放到 Apps 目录。"),"launcher:empty")
+        end
+        kit.set_page(page.LAUNCHER,L("App launcher","应用启动器"),rows,{
+            preserve_focus=preserve_focus,row_layout={mode="flow",min_width=420,max_columns=1},
+            sidebar_title=L("Quick Tools","快捷工具"),sidebar={
+            button(L("Refresh","刷新"),function() operations.refresh_inventory(page.LAUNCHER) end,{id="launcher:refresh"}),
+            button(L("Uninstall manager","卸载管理"),function() self.build_games(); kit.goto_page(page.GAMES) end,{id="launcher:manage"}),
+            button(L("Back","返回"),kit.back_page,{group="bottom"}),
+        }})
+        local state=kit.get_state()
+        if state.onboarding_launcher~="1" and not preserve_focus then
+            kit.guide({
+                title=L("App launcher","应用启动器"),
+                message=L("Press a game or app to launch it right here.",
+                    "在这里直接按一个游戏或应用即可启动。"),
+                confirm=L("Got it","知道了"),
+                callouts={
+                    {target="launcher:rules",title=L("One list for everything","一个列表装全部"),
+                        body=L("Port games and standalone apps are merged here; no more hunting across folders.",
+                            "Port 游戏和独立 APP 合并在这里，不用再到处找。")},
+                },
+                on_confirm=function() state.onboarding_launcher="1"; kit.persist_state() end,
+                on_skip=function() state.onboarding_launcher="1"; kit.persist_state() end,
+            })
+        end
+    end
+
+    function self.build_games(preserve_focus)
+        local can_manage_ports=enabled("capability_manage_ports")
+        local can_manage_apps=enabled("capability_manage_apps")
+        local can_manage_any=can_manage_ports or can_manage_apps
+        local can_trash=can_manage_any and enabled("capability_trash")
         local can_leftovers=can_manage_ports and enabled("capability_leftovers") and can_trash
         local can_runtimes=enabled("capability_repair_runtimes")
-        if can_manage_ports then model.ensure_report() end
+        if can_manage_any then model.ensure_report() end
         clear(home_actions)
         local rows,name_counts={},port_name_counts()
+        if env.portmaster_health=="missing" and env.portmaster_management~="system" then
+            rows[#rows+1]=note(L("PortMaster not installed","PortMaster 未安装"),
+                L("Install PortMaster to enable Runtime repair and environment updates. Game management still works here.",
+                    "安装 PortMaster 后可修复 Runtime 和更新环境；游戏管理不受影响。"),"home:pm-missing")
+            if model.can_install() then
+                rows[#rows+1]=button(L("Install PortMaster","安装 PortMaster"),function() environment.repair_environment() end,{id="home:install"})
+            end
+        end
         for _,port in ipairs(can_manage_ports and (report.ports or {}) or {}) do
             local script=port.script
             local script_path=exact_path(port.path)
@@ -134,10 +388,13 @@ function Pages.new(model,operations)
                 detail[#detail+1]=L("Data folder kept: association is not unique",
                     "数据目录会保留：无法确认唯一关联")[kit.get_state().ui_lang]
             end
+            if report.classification_uncertain==true and port.dir~="" then
+                detail[#detail+1]=L("Data folder kept: some launchers could not be parsed",
+                    "数据目录会保留：部分启动项无法解析")[kit.get_state().ui_lang]
+            end
             local missing=model.missing_runtime(script)
             if missing~="" then detail[#detail+1]=(kit.get_state().ui_lang=="zh" and "缺少 Runtime: " or "Missing Runtime: ")..missing end
             if not script_path then detail[#detail+1]=L("Path unavailable","路径未验证")[kit.get_state().ui_lang] end
-            local bytes=model.path_size(action_paths); if bytes>0 then detail[#detail+1]=model.human(bytes) end
             local key=script_path and ("home:"..script_path) or ("home-unverified:"..script)
             if script_path then
                 home_actions[key]={key=key,label=label,script_path=script_path,data_path=data_path,
@@ -152,16 +409,34 @@ function Pages.new(model,operations)
                 badge=missing~="" and kit.badge(L("Runtime missing","缺少 Runtime")) or nil,
             })
         end
+        for _,app in ipairs(can_manage_apps and (report.apps or {}) or {}) do
+            local folder=exact_path(app.folder)
+            local label=model.app_label(app)
+            local manageable=model.app_manageable(app)
+            local detail={(manageable and L("APP folder","APP 目录") or
+                L("Protected system APP · Cannot uninstall","受保护的系统 APP · 不可卸载"))[kit.get_state().ui_lang]}
+            local key=folder and ("home:app:"..folder) or ("home:app-unverified:"..tostring(app.name))
+            if folder and manageable then
+                home_actions[key]={key=key,label=label,script_path=folder,data_path=nil,image_paths={},dir=""}
+            end
+            rows[#rows+1]=kit.checkbox(label,{id=key,detail=model.join(detail),
+                checked=folder and manageable and selected_home[key] or false,
+                sidebar_target="uninstall",meta={key=key},
+                on_change=function(value,meta)
+                    if meta and home_actions[meta.key] then selected_home[meta.key]=value end
+                end,disabled=not folder or not manageable})
+        end
         for key in pairs(selected_home) do
             if not home_actions[key] then selected_home[key]=nil end
         end
-        if #rows==0 then rows[1]=note(L("Status","状态"),can_manage_ports and
-            L("No Port games are available to manage.","没有可管理的 Port 游戏。") or
-            L("Game management is not available on this device.","当前设备暂不支持游戏管理。"),"home:empty") end
+        if #rows==0 then rows[1]=note(L("Status","状态"),can_manage_any and
+            L("No installed items are available to manage.","没有可管理的已安装项目。") or
+            L("Uninstall management is not available on this device.","当前设备暂不支持卸载管理。"),"home:empty") end
         local junk_count=#(report.orphan_dirs or {})+#(report.orphan_images or {})+#(report.dead_scripts or {})
-        local primary_counts=primary_dir_counts()
+        local primary_counts=primary_data_counts()
         for _,port in ipairs(report.ports or {}) do
-            if port.dir~="" and (primary_counts[port.dir] or 0)>1 then
+            local path=exact_path(port.data_path)
+            if path and (primary_counts[path] or 0)>1 then
                 junk_count=junk_count+1
             end
         end
@@ -174,65 +449,31 @@ function Pages.new(model,operations)
             sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
                 function() self.build_trash(); kit.push_page(page.TRASH) end,{id="trash"})
         end
-        if can_manage_ports then
+        if can_manage_any then
             sidebar[#sidebar+1]=button(L("Select all","全选"),function() select_all_home(true) end,{half=true,id="select-all"})
             sidebar[#sidebar+1]=button(L("Select none","全不选"),function() select_all_home(false) end,{half=true,id="select-none"})
         end
-        if can_leftovers then
-            sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("残留清理 (%d)",junk_count) or string.format("Leftovers (%d)",junk_count) end,
-                function() self.build_junk(); kit.push_page(page.JUNK) end,{id="leftovers"})
-        end
-        if can_runtimes then
-            sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("Runtime 修复 (%d)",runtime_count) or string.format("Runtime repair (%d)",runtime_count) end,
-                function() self.build_runtime(); kit.push_page(page.RUNTIME) end,{id="runtime-repair-entry"})
-        end
-        sidebar[#sidebar+1]=button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"})
-        kit.set_page(page.HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
+        sidebar[#sidebar+1]=button(L("Back","返回"),kit.back_page,{group="bottom"})
+        kit.set_page(page.GAMES,L("Uninstall manager","卸载管理"),rows,{
             preserve_focus=preserve_focus,sidebar_title=L("Quick Tools","快捷工具"),
             sidebar_footer={lines={L("Developer: Bili 解腻Jenny","开发: Bili 解腻Jenny"),kit.CONTACT}},
-            header_action=button(L("Environment","环境管理"),function() environment.build_manage(); kit.push_page(page.MANAGE) end,
-                {badge=env.portmaster_management=="system" and kit.badge(L("System managed","系统管理"),{0.62,0.64,0.69}) or
-                    (model.update_state()=="update" and kit.badge(L("Update","可升级"),{0.62,0.64,0.69}) or nil)}),
             sidebar=sidebar})
         local state=kit.get_state()
-        if state.onboarding_seen~="1" and not preserve_focus then
+        if state.onboarding_games~="1" and not preserve_focus then
             kit.guide({
-                title=L("Welcome to Port App Manager","欢迎使用 Port App Manager"),
-                message=L(
-                    "A Port game maintenance tool for PortMaster, Runtimes, installed games, and Trash.",
-                    "Port 游戏维护工具，可管理 PortMaster、Runtime、已安装游戏和回收站。"),
-                confirm=L("Start using","开始使用"),
+                title=L("Uninstall manager","卸载管理"),
+                message=L("Check a game, then uninstall it from the sidebar. Uninstalled games go to Trash and can be restored.",
+                    "勾选游戏后从侧栏卸载。卸载的游戏进入回收站，可以还原。"),
+                confirm=L("Got it","知道了"),
                 callouts={
-                    {target="header",title=L("PortMaster environment","PortMaster 环境"),
-                        body=env.portmaster_management=="system" and L(
-                            "View the version, device, system, and install path. PortMaster updates are handled by the system.",
-                            "查看版本、设备、系统和安装路径。PortMaster 更新由系统负责。") or L(
-                            "View device details, check for updates, and install or repair PortMaster.",
-                            "查看设备信息、检查更新，以及安装或修复 PortMaster。")},
                     {targets={"uninstall","trash"},title=L("Uninstall and Trash","卸载与回收站"),
-                        body=L(
-                            "Uninstalled games go to Trash by default. Restore them later or delete them permanently.",
-                            "游戏卸载后默认进入回收站，可以还原或彻底删除。")},
-                    {target="leftovers",title=L("Leftover cleanup","残留清理"),
-                        body=L(
-                            "Find launchers, images, and data folders that no longer match. Shared folders are left unselected for review.",
-                            "查找不再配套的启动项、图片和数据目录。共用目录默认不选，请确认后处理。")},
-                    {target="runtime-repair-entry",title=L("Runtime management","Runtime 管理"),
-                        body=L(
-                            "Check and repair the Runtimes needed by installed games.",
-                            "检查并修复已安装游戏需要的 Runtime。")},
-                    {target="footer",title=L("Maintainer and feedback","维护者与反馈"),
-                        body=L(
-                            "Maintainer: Bili 解腻Jenny. Use the QQ group for help and feedback.",
-                            "维护者：Bili 解腻Jenny。需要帮助或反馈时，请联系 QQ 群。")},
+                        body=L("Check a game, then press Uninstall. It moves to Trash; restore it there or delete permanently.",
+                            "勾选游戏后按卸载，会移入回收站；可在回收站还原或永久删除。")},
                 },
-                on_confirm=function()
-                    state.onboarding_seen="1"
-                    kit.persist_state()
-                end,
+                on_confirm=function() state.onboarding_games="1"; kit.persist_state() end,
+                on_skip=function() state.onboarding_games="1"; kit.persist_state() end,
             })
-        end
-    end
+        end    end
 
     local function select_all_runtime(value)
         for _,item in ipairs(model.required_runtimes()) do
@@ -256,6 +497,18 @@ function Pages.new(model,operations)
 
     function self.build_runtime(preserve_focus)
         model.load_runtime_metadata()
+        if env.portmaster_health=="missing" and env.portmaster_management~="system" then
+            -- Runtime files live under the PortMaster core; without it there is
+            -- nowhere to put them. Tell the user instead of failing a repair.
+            kit.set_page(page.RUNTIME,L("Runtime repair","Runtime 修复"),{
+                note(L("Status","状态"),
+                    L("PortMaster is not installed, so Runtime files have nowhere to go. Install PortMaster first; game management still works.",
+                        "未安装 PortMaster，Runtime 没有可用的存放目录。请先安装 PortMaster；游戏管理不受影响。"),"runtime:needs-pm"),
+                button(L("Install PortMaster","安装 PortMaster"),function() environment.repair_environment() end,{id="runtime:install-pm"}),
+                button(L("Back","返回"),kit.back_page,{group="bottom"}),
+            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+            return
+        end
         local rows,details,available_runtime={},{},{}
         local required=model.required_runtimes()
         local repair_needed,installed={},{}
@@ -309,7 +562,7 @@ function Pages.new(model,operations)
             if #installed==0 then rows[#rows+1]=note(L("Status","状态"),L("No required Runtime is installed yet.","还没有安装游戏所需的 Runtime。"),"runtime:none-installed")
             else for _,item in ipairs(installed) do add_runtime(item) end end
         else
-            rows[1]=note(L("Status","状态"),L("The current games do not need an additional Runtime.","当前游戏不需要额外安装 Runtime。"),"runtime:not-required")
+            rows[1]=note(L("Status","状态"),L("The current games do not need an additional Runtime.","所有游戏都正常，不需要额外安装。"),"runtime:not-required")
         end
         kit.set_page(page.RUNTIME,L("Runtime repair","Runtime 修复"),rows,{preserve_focus=preserve_focus,
             row_layout={mode="flow",min_width=360,max_columns=1},sidebar_details=details,
@@ -360,13 +613,23 @@ function Pages.new(model,operations)
         if not preserve_focus then clear(selected_junk) end
         clear(junk_actions)
         local rows,item_count={},0
+        -- Generic / unknown-path profiles derive folders by best-effort guessing,
+        -- so never pre-select leftover data folders there: a wrong guess could
+        -- otherwise sweep unrelated directories into Trash with one confirm.
+        local guessed_layout=tostring(env.device_class or "")=="unsupported-known" or
+            tostring(env.device_class or "")=="unknown-path"
         rows[#rows+1]=kit.textview(L("Cleanup rules","清理说明"),L(
             "Unmatched launchers and data folders are selected by default. Shared folders are not selected. Selected items are moved to Trash.",
-            "未配套的启动项和数据目录会默认选中。多个启动项共用同一目录时不会默认选中，请确认后处理。选中内容会移入回收站。"),{
-            id="leftovers:rules",focusable=false,expandable=false,max_lines=5,expanded_lines=5,
+            "自动勾选的是确认没用的内容，拿不准的一律不勾。勾选后移入回收站，可以反悔。"),{
+            id="leftovers:rules",focusable=true,expandable=true,max_lines=3,expanded_lines=8,
             label_px=18,value_px=20,surface=false})
-        local paths=inventory_paths()
-        local data_paths,script_paths=paths["game-dirs"] or {},paths.scripts or {}
+        if guessed_layout then
+            rows[#rows+1]=kit.textview(L("Generic layout warning","通用布局提醒"),L(
+                "This device uses the generic profile, so folder paths are best-effort guesses. Nothing is selected by default; review each item before moving it to Trash.",
+                "当前设备使用通用配置，目录路径为估算值，默认不会勾选任何项目。请逐项确认后再移入回收站。"),{
+                id="leftovers:guess-warning",focusable=true,expandable=true,max_lines=3,expanded_lines=6,
+                label_px=18,value_px=20,surface=false})
+        end
         local function add(kind,label,detail,path,default_selected)
             path=exact_path(path)
             if not path then
@@ -389,23 +652,24 @@ function Pages.new(model,operations)
                 end,
             })
         end
-        for _,name in ipairs(report.orphan_dirs or {}) do add("dir",name.."/",L(
+        for _,item in ipairs(report.orphan_dirs or {}) do add("dir",item.name.."/",L(
             "No launcher uses this data folder.",
-            "没有启动项使用这个数据目录。"),data_paths[name],true) end
+            "没有启动项使用这个数据目录。"),item.path,not guessed_layout) end
         for _,image in ipairs(report.orphan_images or {}) do add("image",image.name,L(
             "No matching launcher was found.",
             "没有找到配套的启动项。"),image.path,false) end
         for _,item in ipairs(report.dead_scripts or {}) do
             add("script",item.script,L("Missing data folder: ",
                 "缺少数据目录：")[kit.get_state().ui_lang]..item.missing_dir,
-                script_paths[item.script],true)
+                item.path,not guessed_layout)
         end
 
-        local shared,primary_counts={},primary_dir_counts()
+        local shared,primary_counts={},primary_data_counts()
         for _,port in ipairs(report.ports or {}) do
-            if port.dir~="" and (primary_counts[port.dir] or 0)>1 then
-                shared[port.dir]=shared[port.dir] or {}
-                shared[port.dir][#shared[port.dir]+1]=port
+            local path=exact_path(port.data_path)
+            if path and (primary_counts[path] or 0)>1 then
+                shared[path]=shared[path] or {}
+                shared[path][#shared[path]+1]=port
             end
         end
         local shared_names={}
@@ -413,14 +677,15 @@ function Pages.new(model,operations)
         table.sort(shared_names)
         if #shared_names>0 then
             rows[#rows+1]=kit.section(L("Duplicate folder references","重复目录引用"),{font_px=22})
-            for _,name in ipairs(shared_names) do
-                table.sort(shared[name],function(a,b) return a.script<b.script end)
+            for _,path in ipairs(shared_names) do
+                table.sort(shared[path],function(a,b) return a.script<b.script end)
+                local name=shared[path][1].dir
                 rows[#rows+1]=kit.textview(name.."/",L(
-                    string.format("%d launchers use this folder. None are selected by default.",#shared[name]),
-                    string.format("%d 个启动项共用这个目录，默认不选。请确认后处理。",#shared[name])),{
-                    id="leftovers:shared:"..name,focusable=false,expandable=false,max_lines=4,expanded_lines=4,
+                    string.format("%d launchers use this folder. None are selected by default.",#shared[path]),
+                    string.format("%d 个启动项共用这个目录，默认不选。请确认后处理。",#shared[path])),{
+                    id="leftovers:shared:"..path,focusable=false,expandable=false,max_lines=4,expanded_lines=4,
                     label_px=18,value_px=20,surface=false})
-                for _,port in ipairs(shared[name]) do
+                for _,port in ipairs(shared[path]) do
                     add("shared-script",port.script,L(
                         "Only this launcher will be moved to Trash. The shared folder will stay.",
                         "只会把这个启动项移入回收站，共用目录会保留。"),port.path,false)
@@ -437,6 +702,13 @@ function Pages.new(model,operations)
             button(L("Select none","全不选"),function() select_all_junk(false) end,{half=true}),
             button(L("Rescan","重新扫描"),function() operations.refresh_inventory(page.JUNK) end,{id="leftovers-rescan"}),
         }
+        -- Leftover cleanup sends items to Trash; give the same Trash entry
+        -- the Uninstall manager has so users can find where the items went.
+        if enabled("capability_trash") then
+            local trash_count=#self.collect_trash() or 0
+            sidebar[#sidebar+1]=button(function() return kit.get_state().ui_lang=="zh" and string.format("回收站 (%d)",trash_count) or string.format("Trash (%d)",trash_count) end,
+                function() self.build_trash(); kit.push_page(page.TRASH) end,{id="junk-trash"})
+        end
         if enabled("capability_cleanup_appledouble") then
             sidebar[#sidebar+1]=button(L("Clean ._Files","清理 ._Files"),cleanup_appledouble,{id="clean-appledouble"})
         end
@@ -446,6 +718,80 @@ function Pages.new(model,operations)
             sidebar_title=L("Quick Tools","快捷工具"),sidebar=sidebar})
     end
 
+    function self.build_zip_install(preserve_focus)
+        local rows,selected_zip={},selected_zip
+        local bundles=model.zip_bundles or {}
+        rows[#rows+1]=note(L("Bundle install","压缩包安装"),L(
+            "Select zip files found on the storage card. Supported packages are recognized automatically; unsupported or ambiguous files stay disabled.",
+            "选择存储卡根目录中的 zip。系统会自动识别可安装内容；不支持、损坏或存在歧义的文件会直接提示。"),"zip:rules")
+        local function zip_label(bundle)
+            local name=bundle.path:match("([^/]+)$") or bundle.path
+            return name
+        end
+        local function zip_detail(bundle)
+            local parts={model.human(bundle.size)}
+            if bundle.kind~="port" and bundle.kind~="trimui_app" then
+                parts[#parts+1]=tostring(bundle.diagnostic or L("Unsupported package","不支持的安装包"))
+            end
+            return table.concat(parts," · ")
+        end
+        if #bundles==0 then
+            rows[#rows+1]=note(L("Status","状态"),
+                L("No ZIP install packages were found on the storage card roots. Put .zip files in the card root and rescan.",
+                    "存储卡根目录没有发现 ZIP 安装包。把 .zip 放到存储卡根目录后重新扫描。"),"zip:empty")
+        end
+        for _,bundle in ipairs(bundles) do
+            local key="zip:"..bundle.path
+            rows[#rows+1]=kit.checkbox(zip_label(bundle),{
+                id=key,detail=zip_detail(bundle),checked=model.selected_zip and model.selected_zip[key] or false,
+                disabled=bundle.kind~="port" and bundle.kind~="trimui_app",
+                meta={key=key},
+                on_change=function(value,meta)
+                    if meta and model.selected_zip then model.selected_zip[meta.key]=value end
+                end,
+            })
+        end
+        local function install_selected()
+            local chosen={}
+            for _,bundle in ipairs(model.zip_bundles or {}) do
+                local key="zip:"..bundle.path
+                if model.selected_zip and model.selected_zip[key] and
+                    (bundle.kind=="port" or bundle.kind=="trimui_app") then
+                    chosen[#chosen+1]=bundle
+                end
+            end
+            if #chosen==0 then
+                kit.toast(L("Select at least one bundle first.","请先勾选要安装的压缩包。"),{kind="info"})
+                return
+            end
+            local labels={}
+            for _,bundle in ipairs(chosen) do
+                labels[#labels+1]=(bundle.path:match("([^/]+)$") or bundle.path)
+            end
+            kit.dialog({
+                title=L("Install selected bundles","安装所选压缩包"),
+                message=L("Install these bundles now? The zip files are moved to Trash on success.",
+                    "现在安装这些压缩包？成功后 zip 会移入回收站。"),
+                items=labels,confirm=L("Install","安装"),cancel=L("Back","返回"),danger=false,
+                checkbox={label=L("Replace an existing APP or data folder with the same name",
+                    "覆盖同名 APP 或游戏数据目录"),checked=false,danger=true},
+                message_checked=L(
+                    "Existing APP or data folders with the same name will be replaced. Duplicate SH launchers still receive a numeric suffix.",
+                    "同名 APP 或游戏数据目录会被覆盖；重复的 SH 启动项仍会自动添加数字编号。"),
+                on_confirm=function(_,replace_existing)
+                    operations.install_zip_bundles(chosen,replace_existing)
+                end,
+            })
+        end
+        kit.set_page(page.ZIP,L("Bundle install","压缩包安装"),rows,{
+            preserve_focus=preserve_focus,
+            sidebar_title=L("Quick Tools","快捷工具"),sidebar={
+            button(L("Install","安装"),install_selected,{id="zip-install"}),
+            button(L("Rescan","重新扫描"),function() operations.scan_zip_bundles(page.ZIP) end,{id="zip-rescan"}),
+            button(L("Back","返回"),kit.back_page,{group="bottom"}),
+        }})
+    end
+
     function self.collect_trash()
         local out={}
         for _,entry in ipairs(model.trash_items()) do
@@ -453,16 +799,22 @@ function Pages.new(model,operations)
             if entry.bucket=="scripts" then kind=L("Launcher","启动项")
             elseif entry.bucket=="data" then kind=L("Game data","游戏数据")
             elseif entry.bucket=="images" or entry.bucket=="script-images" then kind=L("Image","图片")
+            elseif entry.bucket:match("^apps%-.+$") then kind=L("APP","APP")
             elseif entry.bucket=="legacy" then kind=L("Other file","其他文件")
             else kind=L("Trash item","回收站项目") end
-            local restorable=entry.bucket=="scripts" or entry.bucket=="data" or
+            local port_bucket=entry.bucket=="scripts" or entry.bucket=="data" or
                 entry.bucket=="images" or entry.bucket=="script-images"
+            local app_bucket=entry.bucket:match("^apps%-.+$")~=nil
+            local restorable=(port_bucket and enabled("capability_manage_ports")) or
+                (app_bucket and enabled("capability_manage_apps"))
             local detail=kind
             if not restorable then
                 detail=L("Old Trash item · Delete only","旧版回收站项目 · 仅可永久删除")
+            elseif entry.restore_conflict then
+                detail=L("Destination exists · confirmation required","目标已存在 · 还原前需确认覆盖")
             end
             out[#out+1]={title=entry.name..(entry.is_dir and "/" or ""),detail=detail,
-                paths={entry.path},restorable=restorable}
+                paths={entry.path},restorable=restorable,restore_conflict=entry.restore_conflict==true}
         end
         return out
     end
@@ -473,18 +825,31 @@ function Pages.new(model,operations)
     end
 
     local function trash_action(kind,title)
-        local plan,labels={},{}
+        local plan,labels,has_conflict={},{},false
         for _,item in ipairs(self.collect_trash()) do
             local chosen=false
             if kind~="RESTORE_ITEM" or item.restorable then
                 for _,path in ipairs(item.paths) do
-                    if selected_trash[path] then chosen=true; plan[#plan+1]={kind=kind,arg=path} end
+                    if selected_trash[path] then
+                        chosen=true
+                        local action_kind=kind
+                        if kind=="RESTORE_ITEM" and item.restore_conflict then
+                            action_kind="RESTORE_REPLACE"; has_conflict=true
+                        end
+                        plan[#plan+1]={kind=action_kind,arg=path}
+                    end
                 end
             end
             if chosen then labels[#labels+1]=item.title end
         end
-        if #plan>0 then operations.show_confirm(title,plan,labels,page.TRASH,{danger=kind~="RESTORE_ITEM",
-            confirm=kind=="RESTORE_ITEM" and L("Restore","放回") or L("Delete forever","永久删除")}) end
+        if #plan>0 then operations.show_confirm(title,plan,labels,page.TRASH,{
+            danger=kind~="RESTORE_ITEM" or has_conflict,
+            message=has_conflict and L(
+                "A destination with the same name already exists. Replace it and restore the selected item? The current destination will be moved to Trash.",
+                "原目录已有同名项目。是否覆盖并还原？当前同名项目会先移入回收站。") or nil,
+            confirm=kind=="RESTORE_ITEM" and
+                (has_conflict and L("Replace and restore","覆盖并还原") or L("Restore","放回")) or
+                L("Delete forever","永久删除")}) end
     end
 
     local function selected_trash_count(restorable_only)
@@ -509,9 +874,8 @@ function Pages.new(model,operations)
     function self.build_trash(preserve_focus)
         local rows,available_trash={},{}
         for _,item in ipairs(self.collect_trash()) do
-            local key=item.paths[1]; local bytes=model.path_size(item.paths); local detail=item.detail
+            local key=item.paths[1]; local detail=item.detail
             for _,path in ipairs(item.paths) do available_trash[path]=true end
-            if bytes>0 then detail=function() return kit.translate(item.detail).." · "..model.human(bytes) end end
             rows[#rows+1]=kit.checkbox(item.title,{
                 id=key,detail=detail,checked=selected_trash[key],meta={paths=item.paths},
                 on_change=function(value) for _,path in ipairs(item.paths) do selected_trash[path]=value end end,
@@ -537,9 +901,175 @@ function Pages.new(model,operations)
         model.ensure_report()
         local rows,details={},{}
         local function section(label) rows[#rows+1]=kit.section(label,{font_px=22}) end
-        local function info(key,label,value,title,body)
-            rows[#rows+1]=kit.textview(label,model.provided(value),{id=key,label_px=18,value_px=20})
+        local function info(key,label,value,title,body,badge)
+            local row={id=key,label_px=18,value_px=20}
+            if badge then row.badge=badge end
+            rows[#rows+1]=kit.textview(label,model.provided(value),row)
             details[key]={title=title or label,body=body}
+        end
+
+        -- ── PortMaster readiness: can it be installed here, and will it run? ──
+        local function install_status()
+            if model.system_managed() then
+                return L("Managed by system","由系统管理")
+            end
+            if not model.can_install() then
+                return L("Not enabled on this device","当前设备配置未启用")
+            end
+            if env.target_confirmed~="1" or not env.portmaster_target or env.portmaster_target=="" then
+                return L("Install location unknown","无法确定安装位置")
+            end
+            if tostring(env.device_class or "")=="unsupported-known" then
+                return L("Possible after confirming the location","可安装（需确认安装位置）")
+            end
+            return L("Installable","可以安装")
+        end
+        local function library_status()
+            local groups=env.library_groups
+            if type(groups)~="table" or #groups==0 then
+                return L("No special requirement","无特殊要求"),nil
+            end
+            local missing,ready={},{}
+            for _,group in ipairs(groups) do
+                if group.ok==true then ready[#ready+1]=group.name
+                else
+                    for _,name in ipairs(group.missing or {}) do missing[#missing+1]=name end
+                end
+            end
+            if #missing>0 then
+                return L("Missing: "..table.concat(missing," "),"缺少："..table.concat(missing," ")),
+                    kit.badge(L("Missing","缺少"),{1,0.45,0.38})
+            end
+            return L("Ready: "..table.concat(ready," · "),"就绪："..table.concat(ready," · ")),
+                kit.badge(L("Ready","就绪"),{0.48,0.90,0.62})
+        end
+        local function python_status()
+            if tostring(env.portmaster_health or "")=="missing" then
+                return L("Checked after install","安装后自动检查")
+            end
+            if env.portmaster_python_ok==false then
+                return L("Import check failed (required: "..tostring(env.portmaster_python_imports or "?")..")",
+                    "导入检查未通过（必需模块："..tostring(env.portmaster_python_imports or "?").."）")
+            end
+            return L("Available","可用")
+        end
+        local function state_status()
+            local health=tostring(env.portmaster_health or "")
+            if health=="missing" then return L("Not installed","未安装") end
+            if health=="damaged" then return L("Needs repair","需要修复") end
+            local version=tostring(env.portmaster_version or "")
+            local label=model.health_label()
+            if version~="" and type(label)=="table" then
+                return L(label.en.." · "..version,label.zh.." · "..version)
+            end
+            return label
+        end
+        local function conclusion()
+            local health=tostring(env.portmaster_health or "")
+            local groups=env.library_groups
+            local missing_libs=false
+            if type(groups)=="table" then
+                for _,group in ipairs(groups) do
+                    if group.ok~=true then missing_libs=true break end
+                end
+            end
+            if model.system_managed() then
+                return L("PortMaster is managed by the system.","PortMaster 由系统管理。")
+            end
+            if health=="" then
+                return L("PortMaster state could not be determined.","无法确定 PortMaster 状态。")
+            end
+            if health=="damaged" then
+                return L("PortMaster is installed but needs repair.","PortMaster 已安装但需要修复。")
+            end
+            if health=="missing" then
+                if not model.can_install() then
+                    return L("PortMaster installation is not enabled on this device.",
+                        "当前设备暂不支持安装 PortMaster。")
+                end
+                if missing_libs then
+                    return L("PortMaster can be installed, but the system is missing required libraries and it may not run.",
+                        "可以安装 PortMaster，但系统缺少必要运行库，可能无法运行。")
+                end
+                return L("PortMaster can be installed. A self-check runs when the install finishes.",
+                    "可以安装 PortMaster，安装完成后会自动检查能否正常使用。")
+            end
+            if missing_libs then
+                return L("PortMaster is installed, but some required system libraries were not found and it may not run.",
+                    "PortMaster 已安装，但未检测到部分系统运行库，可能无法运行。")
+            end
+            if env.portmaster_python_ok==false then
+                return L("PortMaster is installed and usable for game management, but the Python environment has issues.",
+                    "PortMaster 已安装，游戏管理可用，但 Python 环境存在问题。")
+            end
+            return L("PortMaster is installed and usable.","PortMaster 已安装且可正常使用。")
+        end
+
+        section(L("PortMaster readiness","PortMaster 可用性"))
+        local device_name=env.device_name and tostring(env.device_name) or ""
+        local platform_id=tostring(env.param_device or "")
+        local device_value
+        if device_name~="" and platform_id~="" then device_value=device_name.."（"..platform_id.."）"
+        elseif device_name~="" then device_value=device_name
+        else device_value=model.provided(platform_id) end
+        info("readiness:device",L("Device detected","设备识别"),device_value,
+            L("Device detected","设备识别"),
+            L("The detected device platform. It decides every check below.",
+                "当前识别到的设备平台，决定下面的各项检查。"))
+        info("readiness:support",L("Support","支持方式"),model.support_label(),
+            L("Support","支持方式"),
+            L("How PortMaster is provided on this device: official release, our custom build, or an unknown device.",
+                "当前设备获得 PortMaster 的方式：官方稳定版、我们维护的定制版，或未知设备。"))
+        local official_class=tostring(env.device_class or "unknown-path")
+        local channel=tostring(env.portmaster_release_channel or "")
+        local official_label
+        if model.system_managed() then official_label=L("Managed by system","由系统管理")
+        elseif channel~="" and channel~="official" and channel~="system" then
+            -- A custom release channel (MiniLoong) ships our own build; the
+            -- official PortMaster release does not cover it.
+            official_label=L("Not compatible with the official release","官方不兼容（使用定制版）")
+        elseif official_class=="tested" then official_label=L("Supported by the official release","官方已支持（收录）")
+        elseif official_class=="official-untested" then official_label=L("Not officially tested","官方未实测")
+        elseif official_class=="unsupported-known" then official_label=L("Not in the official support list","未收录官方列表")
+        else official_label=L("Cannot determine","无法确定") end
+        info("readiness:official",L("Official compatibility","官方兼容性"),official_label,
+            L("Official compatibility","官方兼容性"),
+            L("Whether the official PortMaster release supports this device model.",
+                "官方 PortMaster 版本是否支持这台设备。"))
+        local fork_label
+        if model.system_managed() then fork_label=L("System built-in","系统内置")
+        elseif channel=="" or channel=="official" then fork_label=L("Official original","官方原版")
+        else fork_label=L("Custom build ("..channel..")","定制版（"..channel.."）") end
+        info("readiness:fork",L("Custom build","是否魔改"),fork_label,
+            L("Custom build","是否魔改"),
+            L("Whether this device uses a modified PortMaster build instead of the official one.",
+                "当前设备是否使用修改版（非官方原版）PortMaster。"))
+        info("readiness:install",L("Can install","能否安装"),install_status(),
+            L("Can install","能否安装"),
+            L("Whether the install location and device configuration allow installing PortMaster.",
+                "安装位置与设备配置是否允许安装 PortMaster。"))
+        local library_value,library_badge=library_status()
+        info("readiness:libraries",L("System libraries","系统运行库"),library_value,
+            L("System libraries","系统运行库"),
+            L("Required GLES/SDL2 libraries detected on this system, using the same rule as the installer.",
+                "系统是否具备所需的 GLES/SDL2 运行库，与安装时的校验规则一致。"),library_badge)
+        info("readiness:python",L("Python environment","Python 环境"),python_status(),
+            L("Python environment","Python 环境"),
+            L("Python availability for PortMaster, either from the system or bundled with the install.",
+                "PortMaster 所需的 Python 环境可用性，来自系统或随安装包提供。"))
+        info("readiness:state",L("PortMaster state","PortMaster 状态"),state_status(),
+            L("PortMaster state","PortMaster 状态"),
+            L("The current install state of PortMaster on this device.",
+                "PortMaster 在当前设备上的安装状态。"))
+        rows[#rows+1]=note(L("Conclusion","结论"),conclusion(),"readiness:conclusion")
+
+        local web_state=kit.get_state()
+        if env.web_url and env.web_url~="" and web_state.web_enabled=="1" and web_state.web_port then
+            local web_display=env.web_url:gsub("^http://",""):gsub("^https://","")..":"..web_state.web_port
+            info("readiness:web",L("Remote management","远程管理"),web_display,
+                L("Remote management","远程管理"),
+                L("Open this address in a browser on the same network to manage games and upload zip bundles.",
+                    "在同一个网络的电脑浏览器打开这个地址，可远程管理游戏和上传压缩包安装。"))
         end
         section(L("Key paths","关键路径"))
         info("path:scripts",L("SH path","SH 路径"),env.scripts_dir,

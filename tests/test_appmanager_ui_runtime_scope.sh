@@ -45,6 +45,7 @@ PY
 
 grep -Fq 'Engine::load_appmanager' "$ROOT/crates/love-lite/src/main.rs"
 ! grep -Fq 'AppInstanceLock' "$ROOT/crates/love-lite/src/main.rs"
+! grep -Fq -- '--web-only' "$ROOT/crates/love-lite/src/main.rs"
 grep -Fq 'runtime/love.aarch64' "$ROOT/ports/appmanager/src/launcher.sh"
 ! grep -Fq 'launcher-session' "$ROOT/ports/appmanager/src/launcher.sh"
 ! grep -Fiq 'this experiment' "$ROOT/crates/love-lite/UPSTREAM.md"

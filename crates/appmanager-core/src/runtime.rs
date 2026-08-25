@@ -103,7 +103,7 @@ impl RuntimeMetadata {
 }
 
 fn validate_raw_runtime(raw: RawRuntime) -> Option<RuntimeMetadataEntry> {
-    if !matches!(raw.runtime_arch.as_str(), "aarch64" | "armhf" | "x86_64")
+    if !safe_runtime_arch(&raw.runtime_arch)
         || raw.size == 0
         || raw.md5.len() != 32
         || !raw.md5.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -143,6 +143,14 @@ fn safe_asset_name(name: &str) -> bool {
 
 fn safe_runtime_name(name: &str) -> bool {
     safe_asset_name(name) && !name.starts_with('.') && !name.contains("..")
+}
+
+fn safe_runtime_arch(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
 }
 
 #[derive(Clone, Debug)]
@@ -229,7 +237,7 @@ fn repair_with_fetcher<F>(
 where
     F: FnMut(&RuntimeMetadataEntry, &Path, &dyn Progress) -> Result<String, RuntimeRepairError>,
 {
-    if !matches!(request.arch.as_str(), "aarch64" | "armhf" | "x86_64") {
+    if !safe_runtime_arch(&request.arch) {
         return Err(RuntimeRepairError::UnsupportedArchitecture(
             request.arch.clone(),
         ));
@@ -289,6 +297,7 @@ where
 {
     check_cancel(request)?;
     let libs = prepare_root(&request.libs_root)?;
+    sweep_stale_runtime_stages(libs.path())?;
     let state = ManagedRoot::new(&request.state_dir)?;
     let cache_path = state.join_child("runtime-cache")?;
     let cache = prepare_root(&cache_path)?;
@@ -301,7 +310,9 @@ where
         progress.write_at("preparing", &entry.name, index, completed, 0, &entry.name)?;
         let target = libs.join_child(&format!("{}.squashfs", entry.name))?;
         reject_directory(&target)?;
-        if !is_symlink(&target)? && validate_image(&target, entry).is_ok() {
+        if !is_symlink(&target)?
+            && validate_image_if_present(&target, entry, request.cancel_token.as_ref())?
+        {
             completed += entry.size;
             progress.write_at(
                 "finished",
@@ -326,44 +337,45 @@ where
         clean_symlink(&suffixed_path(&download, ".part"))?;
         clean_symlink(&suffixed_path(&download, ".part.route"))?;
 
-        let (source, route_id) = if validate_image(&download, entry).is_ok() {
-            progress.write_at(
-                "downloading",
-                &entry.name,
-                index,
-                completed + entry.size,
-                0,
-                "Using local cache",
-            )?;
-            (RuntimeRepairSource::Cache, None)
-        } else {
-            remove_regular_if_exists(&download)?;
-            progress.write_at(
-                "probing",
-                &entry.name,
-                index,
-                completed,
-                0,
-                "Checking routes",
-            )?;
-            progress.write_at(
-                "downloading",
-                &entry.name,
-                index,
-                completed,
-                0,
-                "Downloading Runtime",
-            )?;
-            let live_progress = RuntimeDownloadProgress::new(
-                progress,
-                request.cancel_token.as_ref(),
-                &entry.name,
-                index,
-                completed,
-            );
-            let route = fetch(entry, &download, &live_progress)?;
-            (RuntimeRepairSource::Network, Some(route))
-        };
+        let (source, route_id) =
+            if validate_image_if_present(&download, entry, request.cancel_token.as_ref())? {
+                progress.write_at(
+                    "downloading",
+                    &entry.name,
+                    index,
+                    completed + entry.size,
+                    0,
+                    "Using local cache",
+                )?;
+                (RuntimeRepairSource::Cache, None)
+            } else {
+                remove_regular_if_exists(&download)?;
+                progress.write_at(
+                    "probing",
+                    &entry.name,
+                    index,
+                    completed,
+                    0,
+                    "Checking routes",
+                )?;
+                progress.write_at(
+                    "downloading",
+                    &entry.name,
+                    index,
+                    completed,
+                    0,
+                    "Downloading Runtime",
+                )?;
+                let live_progress = RuntimeDownloadProgress::new(
+                    progress,
+                    request.cancel_token.as_ref(),
+                    &entry.name,
+                    index,
+                    completed,
+                );
+                let route = fetch(entry, &download, &live_progress)?;
+                (RuntimeRepairSource::Network, Some(route))
+            };
 
         check_cancel(request)?;
         progress.write_at(
@@ -374,7 +386,7 @@ where
             0,
             &entry.name,
         )?;
-        validate_image(&download, entry)?;
+        validate_image_with_cancel(&download, entry, request.cancel_token.as_ref())?;
         let staged = libs.join_child(&format!(
             ".pam-{}.squashfs.{}",
             entry.name,
@@ -389,7 +401,13 @@ where
             0,
             &target.to_string_lossy(),
         )?;
-        if let Err(error) = stage_and_replace(&download, &staged, &target, entry) {
+        if let Err(error) = stage_and_replace(
+            &download,
+            &staged,
+            &target,
+            entry,
+            request.cancel_token.as_ref(),
+        ) {
             let _ = remove_regular_if_exists(&staged);
             return Err(error);
         }
@@ -434,13 +452,25 @@ fn stage_and_replace(
     staged: &Path,
     target: &Path,
     entry: &RuntimeMetadataEntry,
+    cancel_token: Option<&CancellationToken>,
 ) -> Result<(), RuntimeRepairError> {
     let mut input = File::open(source)?;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(staged)?;
-    io::copy(&mut input, &mut output)?;
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        if cancel_token.is_some_and(CancellationToken::is_cancelled) {
+            return Err(RuntimeRepairError::Cancelled);
+        }
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        use std::io::Write as _;
+        output.write_all(&buffer[..count])?;
+    }
     output.sync_all()?;
     drop(output);
     #[cfg(unix)]
@@ -448,7 +478,10 @@ fn stage_and_replace(
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(staged, fs::Permissions::from_mode(0o644))?;
     }
-    validate_image(staged, entry)?;
+    validate_image_with_cancel(staged, entry, cancel_token)?;
+    if cancel_token.is_some_and(CancellationToken::is_cancelled) {
+        return Err(RuntimeRepairError::Cancelled);
+    }
     check_target_replaceable(target)?;
     fs::rename(staged, target)?;
     if let Some(parent) = target.parent() {
@@ -462,6 +495,26 @@ fn stage_and_replace(
 }
 
 fn validate_image(path: &Path, entry: &RuntimeMetadataEntry) -> Result<(), RuntimeRepairError> {
+    validate_image_with_cancel(path, entry, None)
+}
+
+fn validate_image_if_present(
+    path: &Path,
+    entry: &RuntimeMetadataEntry,
+    cancel_token: Option<&CancellationToken>,
+) -> Result<bool, RuntimeRepairError> {
+    match validate_image_with_cancel(path, entry, cancel_token) {
+        Ok(()) => Ok(true),
+        Err(RuntimeRepairError::Cancelled) => Err(RuntimeRepairError::Cancelled),
+        Err(_) => Ok(false),
+    }
+}
+
+fn validate_image_with_cancel(
+    path: &Path,
+    entry: &RuntimeMetadataEntry,
+    cancel_token: Option<&CancellationToken>,
+) -> Result<(), RuntimeRepairError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|_| RuntimeRepairError::Validation(entry.name.clone()))?;
     if !metadata.file_type().is_file() || metadata.len() != entry.size {
@@ -479,6 +532,9 @@ fn validate_image(path: &Path, entry: &RuntimeMetadataEntry) -> Result<(), Runti
     context.consume(magic);
     let mut buffer = [0_u8; 64 * 1024];
     loop {
+        if cancel_token.is_some_and(CancellationToken::is_cancelled) {
+            return Err(RuntimeRepairError::Cancelled);
+        }
         let count = file
             .read(&mut buffer)
             .map_err(|_| RuntimeRepairError::Validation(entry.name.clone()))?;
@@ -489,6 +545,31 @@ fn validate_image(path: &Path, entry: &RuntimeMetadataEntry) -> Result<(), Runti
     }
     if format!("{:x}", context.compute()) != entry.md5 {
         return Err(RuntimeRepairError::Validation(entry.name.clone()));
+    }
+    Ok(())
+}
+
+fn sweep_stale_runtime_stages(libs_root: &Path) -> Result<(), RuntimeRepairError> {
+    for entry in fs::read_dir(libs_root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some((runtime, pid)) = name
+            .strip_prefix(".pam-")
+            .and_then(|name| name.rsplit_once(".squashfs."))
+        else {
+            continue;
+        };
+        if !safe_runtime_name(runtime)
+            || pid.is_empty()
+            || !pid.bytes().all(|byte| byte.is_ascii_digit())
+            || !entry.file_type()?.is_file()
+        {
+            continue;
+        }
+        fs::remove_file(entry.path())?;
     }
     Ok(())
 }
@@ -769,6 +850,18 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn stale_pid_stages_are_removed_without_touching_unowned_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let stale = temp.path().join(".pam-godot.squashfs.12345");
+        let unrelated = temp.path().join(".pam-godot.squashfs.not-a-pid");
+        fs::write(&stale, b"partial").unwrap();
+        fs::write(&unrelated, b"keep").unwrap();
+        sweep_stale_runtime_stages(temp.path()).unwrap();
+        assert!(!stale.exists());
+        assert!(unrelated.exists());
+    }
+
     fn request(temp: &tempfile::TempDir, image: &[u8]) -> RuntimeRepairRequest {
         RuntimeRepairRequest {
             metadata: metadata("godot", "aarch64", image),
@@ -796,6 +889,24 @@ mod tests {
         value["utils"]["arbitrary-key"]["url"] =
             serde_json::json!("https://example.com/godot.squashfs");
         assert!(RuntimeMetadata::parse(&serde_json::to_vec(&value).unwrap()).is_err());
+    }
+
+    #[test]
+    fn runtime_architectures_are_data_driven_not_compiled_to_three_names() {
+        let payload = image(b"runtime");
+        let parsed = RuntimeMetadata::parse(&metadata("godot", "riscv64", &payload)).unwrap();
+        assert!(parsed.get("godot", "riscv64").is_some());
+
+        let temp = tempfile::tempdir().unwrap();
+        let mut request = request(&temp, &payload);
+        request.metadata = metadata("godot", "riscv64", &payload);
+        request.arch = "riscv64".to_owned();
+        let outcome = repair_with_fetcher(&request, |_entry, output, _progress| {
+            fs::write(output, &payload)?;
+            Ok("origin".to_owned())
+        })
+        .unwrap();
+        assert_eq!(outcome.arch, "riscv64");
     }
 
     #[test]

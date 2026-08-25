@@ -35,4 +35,41 @@ export PAM_SOURCE_DIR PAM_APP_ROOT PAM_LAUNCHER
 "$PAM_LOVE" "$PAM_APP_ROOT/love_ui" \
   "${DISPLAY_WIDTH:-960}" "${DISPLAY_HEIGHT:-720}"
 PAM_STATUS=$?
+
+# Standard love-port handoff: the APP exits with 42 (kit.EXIT_START) when the
+# user picked a game to launch. The launcher script owns the shell that the
+# frontend called, so it execs the game *after* the APP has fully closed --
+# same pattern as every PortMaster LÖVE game. The APP is gone (window and
+# process), nothing fights the game for the display, and when the game exits
+# the whole script returns and the frontend restores its UI normally.
+if [ "$PAM_STATUS" = "42" ]; then
+  PAM_GAME=""
+  PAM_EXPECTED=""
+  PAM_GAME_XDG_DATA_HOME=""
+  [ -f "$PAM_APP_ROOT/game_to_launch.txt" ] && PAM_GAME="$(cat "$PAM_APP_ROOT/game_to_launch.txt")"
+  [ -f "$PAM_APP_ROOT/game_to_launch.fingerprint" ] && PAM_EXPECTED="$(cat "$PAM_APP_ROOT/game_to_launch.fingerprint")"
+  [ -f "$PAM_APP_ROOT/game_to_launch.xdg_data_home" ] && PAM_GAME_XDG_DATA_HOME="$(cat "$PAM_APP_ROOT/game_to_launch.xdg_data_home")"
+  rm -f "$PAM_APP_ROOT/game_to_launch.txt" \
+    "$PAM_APP_ROOT/game_to_launch.fingerprint" \
+    "$PAM_APP_ROOT/game_to_launch.xdg_data_home"
+  if [ -n "$PAM_GAME" ] && [ -n "$PAM_EXPECTED" ] && [ -f "$PAM_GAME" ] && exec 9<"$PAM_GAME"; then
+    PAM_ACTUAL=$(stat -Lc '%d:%i' /proc/self/fd/9 2>/dev/null)
+  else
+    PAM_ACTUAL=""
+  fi
+  if [ -n "$PAM_ACTUAL" ] && [ "$PAM_ACTUAL" = "$PAM_EXPECTED" ]; then
+    printf '%s\n' "[PAM] launching game: $PAM_GAME"
+    if [ -n "$PAM_GAME_XDG_DATA_HOME" ] && \
+        [ -f "$PAM_GAME_XDG_DATA_HOME/PortMaster/control.txt" ]; then
+      export XDG_DATA_HOME="$PAM_GAME_XDG_DATA_HOME"
+      printf '%s\n' "[PAM] game PortMaster base: $XDG_DATA_HOME"
+    fi
+    # Execute the already-opened inode while preserving the original path as
+    # $0 for normal PortMaster scripts that derive their data directory from it.
+    exec /bin/sh -c '. /proc/self/fd/9' "$PAM_GAME"
+  else
+    printf '%s\n' '[PAM] EXIT_START without a matching validated game file; exiting.' >&2
+    exit 42
+  fi
+fi
 exit "$PAM_STATUS"

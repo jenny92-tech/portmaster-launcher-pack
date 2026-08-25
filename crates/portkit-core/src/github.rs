@@ -50,7 +50,7 @@ const FULL_ROUTES: &str = "7435399fda45e4ec1c2da3adf463d4919e65f25d8827eab3431e1
 fn read(encoded: &str) -> Option<String> {
     let mut output = Vec::with_capacity(encoded.len() / 2);
     let bytes = encoded.as_bytes();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return None;
     }
     const KEYS: [u8; 11] = [91, 37, 204, 113, 18, 167, 62, 209, 84, 9, 231];
@@ -251,38 +251,33 @@ impl GitHubRegistry {
             .filter(|line| !line.is_empty())
             .enumerate()
         {
-            let (formatter, capabilities): (_, Vec<Capability>) =
-                if base.starts_with("socks5://")
-                    || base.starts_with("socks5h://")
-                    || base.starts_with("socks4://")
-                {
-                    (
-                        RouteFormatter::Forward,
-                        vec![
-                            Capability::Release,
-                            Capability::Raw,
-                            Capability::Archive,
-                            Capability::Gist,
-                        ],
-                    )
-                } else {
-                    (
-                        RouteFormatter::Full,
-                        vec![
-                            Capability::Release,
-                            Capability::Raw,
-                            Capability::Archive,
-                            Capability::Clone,
-                            Capability::Gist,
-                        ],
-                    )
-                };
-            if let Ok(route) = Route::new(
-                format!("r{}", index + 1),
-                formatter,
-                capabilities,
-                base,
-            ) {
+            let (formatter, capabilities): (_, Vec<Capability>) = if base.starts_with("socks5://")
+                || base.starts_with("socks5h://")
+                || base.starts_with("socks4://")
+            {
+                (
+                    RouteFormatter::Forward,
+                    vec![
+                        Capability::Release,
+                        Capability::Raw,
+                        Capability::Archive,
+                        Capability::Gist,
+                    ],
+                )
+            } else {
+                (
+                    RouteFormatter::Full,
+                    vec![
+                        Capability::Release,
+                        Capability::Raw,
+                        Capability::Archive,
+                        Capability::Clone,
+                        Capability::Gist,
+                    ],
+                )
+            };
+            if let Ok(route) = Route::new(format!("r{}", index + 1), formatter, capabilities, base)
+            {
                 routes.push(route);
             }
         }
@@ -369,7 +364,10 @@ impl GitHubTransport {
                 .filter(|url| !url.is_empty())
                 .map(str::to_owned)
                 .collect::<Vec<_>>(),
-            Err(_) => SOCKS_FALLBACK_URLS.iter().map(|url| (*url).to_owned()).collect(),
+            Err(_) => SOCKS_FALLBACK_URLS
+                .iter()
+                .map(|url| (*url).to_owned())
+                .collect(),
         };
         Self {
             registry,
@@ -464,6 +462,7 @@ impl GitHubTransport {
         if capability == Capability::Clone {
             return Err(GitHubError::UnsupportedFileFetch { capability });
         }
+        eprintln!("[GH] fetch cap={capability:?} source={source}");
         let candidates = match self.registry.candidates(capability, source) {
             Ok(candidates) => candidates,
             // An empty registry for this capability must still fall through to
@@ -491,6 +490,10 @@ impl GitHubTransport {
         // retry through those forward proxies; a fresh list (or an empty one)
         // fails fast and keeps the original exhaustion result.
         let fallback = self.socks_fallback_candidates(capability, source, deadline)?;
+        eprintln!(
+            "[GH] bundled routes exhausted; socks fallback candidates={}",
+            fallback.len()
+        );
         if !fallback.is_empty() {
             match self.attempt_candidates(
                 fallback,
@@ -508,6 +511,7 @@ impl GitHubTransport {
                 Err(error) => return Err(error),
             }
         }
+        eprintln!("[GH] all routes exhausted (validation_failed={validation_failed})");
         Err(GitHubError::Exhausted { validation_failed })
     }
 
@@ -543,7 +547,13 @@ impl GitHubTransport {
 
         for batch in candidates.chunks(self.batch_size) {
             remaining(deadline)?;
+            eprintln!("[GH] probing batch of {} candidates", batch.len());
             let mut responsive = self.probe_batch(batch, deadline)?;
+            eprintln!(
+                "[GH] batch responsive={} ({} total)",
+                responsive.len(),
+                candidates.len()
+            );
             if let Some(id) = self.preferred_route(capability) {
                 if let Some(index) = responsive
                     .iter()
@@ -556,10 +566,13 @@ impl GitHubTransport {
             }
             for candidate in responsive {
                 remaining(deadline)?;
-                match self.transfer(
-                    &candidate, output, validator, progress, max_bytes, deadline,
-                ) {
+                eprintln!(
+                    "[GH] transfer try route={} endpoint={}",
+                    candidate.route_id, candidate.endpoint
+                );
+                match self.transfer(&candidate, output, validator, progress, max_bytes, deadline) {
                     Ok(()) => {
+                        eprintln!("[GH] transfer OK route={}", candidate.route_id);
                         if remember_preferred {
                             self.set_preferred(capability, &candidate.route_id);
                         }
@@ -568,10 +581,15 @@ impl GitHubTransport {
                         });
                     }
                     Err(AttemptError::Validation) => {
+                        eprintln!(
+                            "[GH] transfer validation-failed route={}",
+                            candidate.route_id
+                        );
                         *validation_failed = true;
                         self.clear_if_preferred(capability, &candidate.route_id);
                     }
                     Err(AttemptError::Transfer) => {
+                        eprintln!("[GH] transfer failed route={}", candidate.route_id);
                         self.clear_if_preferred(capability, &candidate.route_id);
                     }
                     Err(AttemptError::Deadline) => return Err(GitHubError::DeadlineExceeded),
@@ -655,11 +673,20 @@ impl GitHubTransport {
         // A 2xx response (including 206 to the Range probe) means the route is
         // reachable; whether it actually delivers usable content is confirmed
         // by the transfer validator. Non-2xx or transport errors skip it.
-        agent
+        let result = agent
             .get(&candidate.endpoint)
             .header("Range", "bytes=0-15")
-            .call()
-            .is_ok()
+            .call();
+        let ok = result.is_ok();
+        eprintln!(
+            "[GH] probe route={} {} {}",
+            candidate.route_id,
+            if ok { "ok" } else { "FAIL" },
+            result
+                .map(|r| r.status().as_u16())
+                .map_or(String::new(), |c| format!("code={c}"))
+        );
+        ok
     }
 
     fn transfer<F>(
@@ -1373,17 +1400,15 @@ fn cached_socks_proxies_from(url: &str, deadline: Option<Instant>) -> Option<Vec
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((fetched_at, list)) = cache.get(url) {
-            if fetched_at.elapsed() < SOCKS_FALLBACK_TTL && !list.is_empty() {
-                return Some(list.clone());
-            }
+        if let Some((fetched_at, list)) = cache.get(url)
+            && fetched_at.elapsed() < SOCKS_FALLBACK_TTL
+            && !list.is_empty()
+        {
+            return Some(list.clone());
         }
     }
     let fresh = fetch_socks_list(url, deadline)?;
-    if let Ok(mut cache) = CACHE
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-    {
+    if let Ok(mut cache) = CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock() {
         cache.insert(url.to_owned(), (Instant::now(), fresh.clone()));
     }
     Some(fresh)
@@ -1732,12 +1757,10 @@ mod tests {
                 let _ = stream.write_all(b"\x05\x00");
                 // connect request: ver/cmd/rsv/atyp + ipv4 + port
                 let _ = read_exact(&mut stream, 10);
-                let _ = stream
-                    .write_all(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00");
+                let _ = stream.write_all(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00");
                 // tunneled request served by this socket as the origin
                 read_headers(&mut stream);
-                let header =
-                    format!("HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                let header = format!("HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
                 let _ = stream.write_all(header.as_bytes());
                 let _ = stream.write_all(body);
             }
@@ -1807,13 +1830,15 @@ mod tests {
 
     #[test]
     fn candidates_expose_forward_proxies_without_rewriting_the_source() {
-        let registry = GitHubRegistry::new(vec![Route::new(
-            "fwd",
-            RouteFormatter::Forward,
-            [Capability::Release],
-            "socks5://1.2.3.4:1080",
-        )
-        .unwrap()])
+        let registry = GitHubRegistry::new(vec![
+            Route::new(
+                "fwd",
+                RouteFormatter::Forward,
+                [Capability::Release],
+                "socks5://1.2.3.4:1080",
+            )
+            .unwrap(),
+        ])
         .unwrap();
         let candidates = registry
             .candidates(
@@ -2040,9 +2065,7 @@ mod tests {
         // 60 socks5 entries (over the 50 cap) plus one http and one socks4.
         let mut body = String::from("[");
         for index in 0..60 {
-            body.push_str(&format!(
-                r#"{{"proxy":"socks5://10.0.0.{index}:1080"}},"#
-            ));
+            body.push_str(&format!(r#"{{"proxy":"socks5://10.0.0.{index}:1080"}},"#));
         }
         body.push_str(r#"{"proxy":"http://8.8.8.8:80"},"#);
         body.push_str(r#"{"proxy":"socks4://9.9.9.9:1080"}]"#);
@@ -2059,9 +2082,7 @@ mod tests {
     #[test]
     fn socks_fallback_tries_sources_in_order_until_one_responds() {
         let socks_port = local_socks5_proxy(b"probe-ok");
-        let list_body = format!(
-            r#"[{{"proxy":"socks5://127.0.0.1:{socks_port}"}}]"#
-        );
+        let list_body = format!(r#"[{{"proxy":"socks5://127.0.0.1:{socks_port}"}}]"#);
         let list_url = Box::leak(list_body.into_boxed_str());
         let list_port = local_server(list_url.as_bytes());
         let mut transport = GitHubTransport::new();
@@ -2071,19 +2092,17 @@ mod tests {
             format!("http://127.0.0.1:{list_port}/list.json"),
         ];
         let candidates = transport
-            .socks_fallback_candidates(
-                Capability::Raw,
-                "https://github.com/o/r/raw/main/f",
-                None,
-            )
+            .socks_fallback_candidates(Capability::Raw, "https://github.com/o/r/raw/main/f", None)
             .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].route_id(), "socks1");
-        assert!(candidates[0]
-            .proxy
-            .as_deref()
-            .unwrap()
-            .starts_with("socks5://"));
+        assert!(
+            candidates[0]
+                .proxy
+                .as_deref()
+                .unwrap()
+                .starts_with("socks5://")
+        );
     }
 
     #[test]
@@ -2095,14 +2114,9 @@ mod tests {
         let list_url = Box::leak(list_body.into_boxed_str());
         let list_port = local_server(list_url.as_bytes());
         let mut transport = GitHubTransport::new();
-        transport.socks_fallback_urls =
-            vec![format!("http://127.0.0.1:{list_port}/list.json")];
+        transport.socks_fallback_urls = vec![format!("http://127.0.0.1:{list_port}/list.json")];
         let candidates = transport
-            .socks_fallback_candidates(
-                Capability::Raw,
-                "https://github.com/o/r/raw/main/f",
-                None,
-            )
+            .socks_fallback_candidates(Capability::Raw, "https://github.com/o/r/raw/main/f", None)
             .unwrap();
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].route_id(), "socks1");
@@ -2110,11 +2124,13 @@ mod tests {
             candidates[0].endpoint(),
             "https://github.com/o/r/raw/main/f"
         );
-        assert!(candidates[0]
-            .proxy
-            .as_deref()
-            .unwrap()
-            .starts_with("socks5://"));
+        assert!(
+            candidates[0]
+                .proxy
+                .as_deref()
+                .unwrap()
+                .starts_with("socks5://")
+        );
         // The live local proxy answers a probe through the SOCKS tunnel; the
         // unreachable origin host proves the request went through the proxy.
         let probed = GitHubCandidate {
@@ -2127,17 +2143,18 @@ mod tests {
 
     #[test]
     fn socks_fallback_stays_silent_when_the_list_cannot_be_fetched() {
-        let registry = GitHubRegistry::new(vec![Route::new(
-            "dead",
-            RouteFormatter::Mirror,
-            [Capability::Release],
-            "http://127.0.0.1:1",
-        )
-        .unwrap()])
+        let registry = GitHubRegistry::new(vec![
+            Route::new(
+                "dead",
+                RouteFormatter::Mirror,
+                [Capability::Release],
+                "http://127.0.0.1:1",
+            )
+            .unwrap(),
+        ])
         .unwrap();
         let mut transport = GitHubTransport::with_registry(registry);
-        transport.socks_fallback_urls =
-            vec!["http://127.0.0.1:1/list.json".to_owned()];
+        transport.socks_fallback_urls = vec!["http://127.0.0.1:1/list.json".to_owned()];
         let root = test_directory("socks-fallback-silent");
         let error = transport
             .fetch(

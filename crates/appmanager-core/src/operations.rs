@@ -1,8 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::{self, File, FileTimes, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::fs::MetadataExt;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::io::{self, Write};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,9 +12,10 @@ use thiserror::Error;
 use crate::context::{CapabilityState, ResolvedDeviceContext};
 use crate::path::ManagedRoot;
 use crate::{ProgressChannel, TaskProgress};
+use portkit_core::LocationRole;
 
 /// Script names in the managed scripts root that are always protected from
-/// managed file operations and excluded from inventory/size scans. This is a
+/// managed file operations and excluded from inventory scans. This is a
 /// security boundary, not device policy, so it is compiled in: remote
 /// configuration must never be able to unprotect these entries.
 pub const PROTECTED_SCRIPT_NAMES: &[&str] = &["APP Manager.sh", "PortMaster.sh", ".port.sh"];
@@ -27,12 +27,12 @@ pub const PROTECTED_SCRIPT_NAMES: &[&str] = &["APP Manager.sh", "PortMaster.sh",
 pub const PROTECTED_DIR_NAMES: &[&str] = &["PortMaster", "images"];
 
 /// The PortMaster drop directory for user-supplied install archives. It is
-/// not a managed port, so it is excluded from inventory/size scans — but it
+/// not a managed port, so it is excluded from inventory scans — but it
 /// is deliberately NOT part of [`PROTECTED_DIR_NAMES`]: managed file
 /// operations may remove it.
 pub const AUTOINSTALL_DIR_NAME: &str = "autoinstall";
 
-/// Directory names excluded from inventory and size scans: every entry of
+/// Directory names excluded from inventory scans: every entry of
 /// [`PROTECTED_DIR_NAMES`] plus [`AUTOINSTALL_DIR_NAME`] (pinned by the
 /// `scan_exclusions_are_a_superset_of_protected_dirs` test).
 pub const SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["PortMaster", "autoinstall", "images"];
@@ -48,6 +48,7 @@ pub enum FileActionKind {
     EmptyTrash,
     RestoreTrash,
     RestoreItem,
+    RestoreReplace,
     DeleteItem,
     CleanAppleDouble,
 }
@@ -60,6 +61,7 @@ impl FileActionKind {
             "EMPTY_TRASH" => Self::EmptyTrash,
             "RESTORE_TRASH" => Self::RestoreTrash,
             "RESTORE_ITEM" => Self::RestoreItem,
+            "RESTORE_REPLACE" => Self::RestoreReplace,
             "DELETE_ITEM" => Self::DeleteItem,
             "CLEAN_APPLEDOUBLE" => Self::CleanAppleDouble,
             _ => return None,
@@ -77,18 +79,19 @@ pub struct FileAction {
 pub struct FileApplyRequest<'a> {
     pub context: &'a ResolvedDeviceContext,
     pub actions: &'a [FileAction],
-    pub size_cache: Option<&'a Path>,
     pub self_launcher: &'a Path,
     pub self_port: &'a str,
     pub privilege_command: Option<&'a Path>,
     pub privilege_arguments: &'a [String],
     pub progress_channel: Option<ProgressChannel>,
+    pub cancel_token: Option<&'a crate::CancellationToken>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileApplyOutcome {
     pub handled: usize,
     pub failures: usize,
+    pub results: Vec<FileActionResult>,
     pub appledouble_removed: usize,
     pub changed_scripts: bool,
     pub changed_game_dirs: bool,
@@ -96,17 +99,11 @@ pub struct FileApplyOutcome {
     pub changed_trash: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct SizeScanRequest<'a> {
-    pub context: &'a ResolvedDeviceContext,
-    pub output: &'a Path,
-    pub self_port: &'a str,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SizeScanOutcome {
-    pub entries: usize,
-    pub total_bytes: u64,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileActionResult {
+    pub argument: PathBuf,
+    pub success: bool,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -123,35 +120,6 @@ pub enum FileOperationError {
     ResultIo(#[source] io::Error),
 }
 
-pub fn scan_size_cache(
-    request: &SizeScanRequest<'_>,
-) -> Result<SizeScanOutcome, FileOperationError> {
-    request
-        .context
-        .validate()
-        .map_err(|error| FileOperationError::Context(error.to_string()))?;
-    if request.context.capabilities.manage_ports != CapabilityState::Current {
-        return Err(FileOperationError::Capability);
-    }
-    let mut paths = BTreeSet::new();
-    collect_managed_size_paths(request, &mut paths)
-        .map_err(|error| FileOperationError::ResultIo(io::Error::other(error)))?;
-    let temporary = request
-        .output
-        .with_extension(format!("tmp.{}", std::process::id()));
-    let mut output = File::create(&temporary).map_err(FileOperationError::ResultIo)?;
-    let mut outcome = SizeScanOutcome::default();
-    for path in paths {
-        let bytes = allocated_size(&path);
-        writeln!(output, "{}\t{}", bytes, path.display()).map_err(FileOperationError::ResultIo)?;
-        outcome.entries += 1;
-        outcome.total_bytes = outcome.total_bytes.saturating_add(bytes);
-    }
-    output.flush().map_err(FileOperationError::ResultIo)?;
-    fs::rename(temporary, request.output).map_err(FileOperationError::ResultIo)?;
-    Ok(outcome)
-}
-
 #[derive(Debug, Clone)]
 enum Mutation {
     Move { from: PathBuf, to: PathBuf },
@@ -165,7 +133,9 @@ pub fn apply_file_actions(
         .context
         .validate()
         .map_err(|error| FileOperationError::Context(error.to_string()))?;
-    if request.context.capabilities.manage_ports != CapabilityState::Current {
+    if request.context.capabilities.manage_ports != CapabilityState::Current
+        && request.context.capabilities.manage_apps != CapabilityState::Current
+    {
         return Err(FileOperationError::Capability);
     }
     if request.actions.is_empty() {
@@ -176,10 +146,16 @@ pub fn apply_file_actions(
     let mut mutations = Vec::new();
     let mut changed_directories = BTreeSet::new();
     let mut appledouble_ran = false;
+    let mut appledouble_failed = false;
     let trash_batch = request
         .actions
         .iter()
-        .any(|action| action.kind == FileActionKind::Trash)
+        .any(|action| {
+            matches!(
+                action.kind,
+                FileActionKind::Trash | FileActionKind::RestoreReplace
+            )
+        })
         .then(|| create_trash_batch(request))
         .transpose()
         .map_err(|message| FileOperationError::ResultIo(io::Error::other(message)))?;
@@ -205,7 +181,20 @@ pub fn apply_file_actions(
             FileActionKind::RestoreTrash => require_capability(request.context.capabilities.trash)
                 .and_then(|()| restore_all(request, &mut mutations)),
             FileActionKind::RestoreItem => require_capability(request.context.capabilities.trash)
-                .and_then(|()| restore_selected(request, &action.argument, &mut mutations)),
+                .and_then(|()| {
+                    restore_selected(request, &action.argument, false, None, &mut mutations)
+                }),
+            FileActionKind::RestoreReplace => {
+                require_capability(request.context.capabilities.trash).and_then(|()| {
+                    restore_selected(
+                        request,
+                        &action.argument,
+                        true,
+                        trash_batch.as_deref(),
+                        &mut mutations,
+                    )
+                })
+            }
             FileActionKind::DeleteItem => require_capability(request.context.capabilities.trash)
                 .and_then(|()| delete_selected(request, &action.argument, &mut mutations)),
             FileActionKind::CleanAppleDouble => require_capability(
@@ -217,13 +206,29 @@ pub fn apply_file_actions(
                 }
                 write_appledouble_progress(request, "scanning", 0);
                 appledouble_ran = true;
-                let removed = cleanup_appledouble(request, &mut changed_directories)?;
+                let mut removed = 0;
+                let result = cleanup_appledouble(request, &mut changed_directories, &mut removed);
                 outcome.appledouble_removed += removed;
-                Ok(())
+                result
             }),
         };
-        if operation.is_err() {
-            outcome.failures += 1;
+        match operation {
+            Ok(()) => outcome.results.push(FileActionResult {
+                argument: action.argument.clone(),
+                success: true,
+                message: None,
+            }),
+            Err(message) => {
+                if action.kind == FileActionKind::CleanAppleDouble {
+                    appledouble_failed = true;
+                }
+                outcome.failures += 1;
+                outcome.results.push(FileActionResult {
+                    argument: action.argument.clone(),
+                    success: false,
+                    message: Some(message),
+                });
+            }
         }
     }
     for mutation in &mutations {
@@ -231,14 +236,19 @@ pub fn apply_file_actions(
         collect_mutation_directories(mutation, &mut changed_directories);
     }
     if appledouble_ran {
-        if let Some(path) = request.size_cache {
-            let _ = fs::remove_file(path);
-        }
-        write_appledouble_progress(request, "complete", outcome.appledouble_removed);
-    } else if let Some(path) = request.size_cache {
-        if apply_size_mutations(path, &mutations).is_err() {
-            let _ = fs::remove_file(path);
-        }
+        let phase = if appledouble_failed {
+            if request
+                .cancel_token
+                .is_some_and(crate::CancellationToken::is_cancelled)
+            {
+                "cancelled"
+            } else {
+                "failed"
+            }
+        } else {
+            "complete"
+        };
+        write_appledouble_progress(request, phase, outcome.appledouble_removed);
     }
     if let Some(batch) = trash_batch {
         remove_empty(&batch);
@@ -264,12 +274,14 @@ fn validate_actions(
                         .ok_or_else(|| "invalid Trash action marker".to_owned())
                 })
             }
-            FileActionKind::RestoreItem => require_capability(request.context.capabilities.trash)
-                .and_then(|()| {
+            FileActionKind::RestoreItem | FileActionKind::RestoreReplace => {
+                require_capability(request.context.capabilities.trash).and_then(|()| {
                     validate_trash_item(&request.context.roots.trash, &action.argument, false)?;
-                    structured_trash_bucket(&request.context.roots.trash, &action.argument)?;
-                    Ok(())
-                }),
+                    let bucket =
+                        structured_trash_bucket(&request.context.roots.trash, &action.argument)?;
+                    require_restore_domain(request.context, &bucket)
+                })
+            }
             FileActionKind::DeleteItem => require_capability(request.context.capabilities.trash)
                 .and_then(|()| {
                     validate_trash_item(&request.context.roots.trash, &action.argument, true)
@@ -295,6 +307,16 @@ fn require_capability(value: CapabilityState) -> Result<(), String> {
         .ok_or_else(|| "capability disabled".to_owned())
 }
 
+fn require_restore_domain(context: &ResolvedDeviceContext, bucket: &str) -> Result<(), String> {
+    if bucket.starts_with("apps-") {
+        require_capability(context.capabilities.manage_apps)
+    } else if matches!(bucket, "scripts" | "script-images" | "images" | "data") {
+        require_capability(context.capabilities.manage_ports)
+    } else {
+        Err("unknown restore bucket".to_owned())
+    }
+}
+
 fn trash_item(
     request: &FileApplyRequest<'_>,
     path: &Path,
@@ -307,19 +329,19 @@ fn trash_item(
     }
     let base = direct_name(path)?;
     let bucket = match kind {
-        ManagedSource::Script => "scripts",
-        ManagedSource::ScriptImage => "script-images",
-        ManagedSource::Image => "images",
-        ManagedSource::Data => "data",
+        ManagedSource::Script => "scripts".to_owned(),
+        ManagedSource::ScriptImage => "script-images".to_owned(),
+        ManagedSource::Image => "images".to_owned(),
+        ManagedSource::Data => "data".to_owned(),
+        ManagedSource::App(id) => format!("apps-{id}"),
     };
     ensure_real_directory(batch)?;
     let destination = batch.join(bucket);
-    if !path_exists(&destination) {
-        if let Err(error) = create_directory(request, &destination) {
-            if !path_exists(&destination) {
-                return Err(error);
-            }
-        }
+    if !path_exists(&destination)
+        && let Err(error) = create_directory(request, &destination)
+        && !path_exists(&destination)
+    {
+        return Err(error);
     }
     ensure_real_directory(&destination)?;
     let target = unique_child(&destination, base);
@@ -397,30 +419,26 @@ fn restore_all(
             );
             continue;
         }
-        for bucket in ["scripts", "script-images", "images", "data"] {
-            let directory = batch.join(bucket);
-            if !is_real_directory(&directory) {
-                continue;
-            }
-            for item in direct_entries(&directory)? {
-                if let Err(error) = restore_to_bucket(request, &item, bucket, mutations) {
-                    remember_error(&mut first_error, error);
-                }
-            }
-            remove_empty(&directory);
-        }
         for item in direct_entries(&batch)? {
-            if item
+            let bucket = item
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, "scripts" | "script-images" | "images" | "data"))
-            {
-                continue;
+                .unwrap_or("");
+            if is_structured_bucket(bucket) && is_real_directory(&item) {
+                for child in direct_entries(&item)? {
+                    if let Err(error) =
+                        restore_to_bucket(request, &child, bucket, false, None, mutations)
+                    {
+                        remember_error(&mut first_error, error);
+                    }
+                }
+                remove_empty(&item);
+            } else {
+                remember_error(
+                    &mut first_error,
+                    "legacy Trash item has no recorded restore destination".to_owned(),
+                );
             }
-            remember_error(
-                &mut first_error,
-                "legacy Trash item has no recorded restore destination".to_owned(),
-            );
         }
         remove_empty(&batch);
     }
@@ -436,6 +454,8 @@ fn remember_error(first: &mut Option<String>, error: String) {
 fn restore_selected(
     request: &FileApplyRequest<'_>,
     source: &Path,
+    replace: bool,
+    trash_batch: Option<&Path>,
     mutations: &mut Vec<Mutation>,
 ) -> Result<(), String> {
     validate_trash_item(&request.context.roots.trash, source, false)?;
@@ -443,7 +463,7 @@ fn restore_selected(
     if !path_exists(source) {
         return Ok(());
     }
-    restore_to_bucket(request, source, &bucket, mutations)?;
+    restore_to_bucket(request, source, &bucket, replace, trash_batch, mutations)?;
     cleanup_trash_parents(&request.context.roots.trash, source);
     Ok(())
 }
@@ -467,22 +487,37 @@ fn delete_selected(
 fn cleanup_appledouble(
     request: &FileApplyRequest<'_>,
     changed_directories: &mut BTreeSet<PathBuf>,
-) -> Result<usize, String> {
-    let mut count = 0;
-    let mut roots = [
-        Some(&request.context.roots.scripts),
-        Some(&request.context.roots.game_dirs),
-        request
-            .context
-            .roots
-            .images
-            .as_ref()
-            .filter(|path| path_exists(path)),
-    ]
-    .into_iter()
-    .flatten()
-    .cloned()
-    .collect::<Vec<_>>();
+    count: &mut usize,
+) -> Result<(), String> {
+    let mut roots = Vec::new();
+    if request.context.capabilities.manage_ports == CapabilityState::Current {
+        roots.extend(
+            [
+                Some(&request.context.roots.scripts),
+                Some(&request.context.roots.game_dirs),
+                request
+                    .context
+                    .roots
+                    .images
+                    .as_ref()
+                    .filter(|path| path_exists(path)),
+            ]
+            .into_iter()
+            .flatten()
+            .cloned(),
+        );
+    }
+    if request.context.capabilities.manage_apps == CapabilityState::Current {
+        roots.extend(
+            request
+                .context
+                .roots
+                .apps
+                .iter()
+                .filter(|root| root.roles.contains(&LocationRole::CleanupAppleDouble))
+                .map(|root| root.path.clone()),
+        );
+    }
     roots.sort_by_key(|path| path.components().count());
     let mut selected = Vec::<PathBuf>::new();
     for root in roots {
@@ -491,9 +526,9 @@ fn cleanup_appledouble(
         }
     }
     for root in selected {
-        cleanup_appledouble_under(request, &root, &mut count, changed_directories)?;
+        cleanup_appledouble_under(request, &root, count, changed_directories)?;
     }
-    Ok(count)
+    Ok(())
 }
 
 fn cleanup_appledouble_under(
@@ -508,7 +543,19 @@ fn cleanup_appledouble_under(
         .dev();
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
+        if request
+            .cancel_token
+            .is_some_and(crate::CancellationToken::is_cancelled)
+        {
+            return Err("AppleDouble cleanup cancelled".to_owned());
+        }
         for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+            if request
+                .cancel_token
+                .is_some_and(crate::CancellationToken::is_cancelled)
+            {
+                return Err("AppleDouble cleanup cancelled".to_owned());
+            }
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             let kind = entry.file_type().map_err(|error| error.to_string())?;
@@ -524,7 +571,7 @@ fn cleanup_appledouble_under(
                 remove_managed(request, &path)?;
                 changed_directories.insert(directory.clone());
                 *count += 1;
-                if *count % 10 == 0 {
+                if (*count).is_multiple_of(10) {
                     write_appledouble_progress(request, "cleaning", *count);
                 }
             } else if kind.is_dir() {
@@ -593,12 +640,13 @@ fn write_appledouble_progress(request: &FileApplyRequest<'_>, phase: &str, count
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ManagedSource {
     Script,
     ScriptImage,
     Image,
     Data,
+    App(String),
 }
 
 fn managed_source(request: &FileApplyRequest<'_>, path: &Path) -> Result<ManagedSource, String> {
@@ -614,6 +662,7 @@ fn managed_source(request: &FileApplyRequest<'_>, path: &Path) -> Result<Managed
         return Err("protected APP or PortMaster path".to_owned());
     }
     if parent == request.context.roots.scripts {
+        require_capability(request.context.capabilities.manage_ports)?;
         if extension_is(path, "sh") {
             return Ok(ManagedSource::Script);
         }
@@ -622,12 +671,39 @@ fn managed_source(request: &FileApplyRequest<'_>, path: &Path) -> Result<Managed
         }
     }
     if request.context.roots.images.as_deref() == Some(parent) && is_image(path) {
+        require_capability(request.context.capabilities.manage_ports)?;
         return Ok(ManagedSource::Image);
     }
     if parent == request.context.roots.game_dirs {
+        require_capability(request.context.capabilities.manage_ports)?;
         return Ok(ManagedSource::Data);
     }
+    if let Some(root) = request
+        .context
+        .roots
+        .apps
+        .iter()
+        .find(|root| root.path == parent && root.roles.contains(&LocationRole::Manage))
+    {
+        require_capability(request.context.capabilities.manage_apps)?;
+        return Ok(ManagedSource::App(root.id.clone()));
+    }
     Err("path is outside managed direct children".to_owned())
+}
+
+fn is_structured_bucket(value: &str) -> bool {
+    matches!(value, "scripts" | "script-images" | "images" | "data")
+        || value.strip_prefix("apps-").is_some_and(is_safe_bucket_id)
+}
+
+fn is_safe_bucket_id(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    !value.is_empty()
+        && value.len() <= 128
+        && matches!(bytes.next(), Some(b'a'..=b'z'))
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.')
+        })
 }
 
 fn validate_trash_item(root: &Path, path: &Path, deleting: bool) -> Result<String, String> {
@@ -655,10 +731,7 @@ fn validate_trash_item(root: &Path, path: &Path, deleting: bool) -> Result<Strin
     }
     let bucket = if parts.len() == 3 {
         let value = parts[1].as_os_str().to_string_lossy().into_owned();
-        if !matches!(
-            value.as_str(),
-            "scripts" | "script-images" | "images" | "data"
-        ) {
+        if !is_structured_bucket(&value) {
             return Err("unknown Trash bucket".to_owned());
         }
         value
@@ -671,12 +744,7 @@ fn validate_trash_item(root: &Path, path: &Path, deleting: bool) -> Result<Strin
     };
     if deleting
         && is_real_directory(path)
-        && (parts.len() == 1
-            || parts.len() == 2
-                && matches!(
-                    direct_name(path)?.as_str(),
-                    "scripts" | "script-images" | "images" | "data"
-                ))
+        && (parts.len() == 1 || parts.len() == 2 && is_structured_bucket(&direct_name(path)?))
     {
         return Err("Trash containers cannot be deleted as items".to_owned());
     }
@@ -692,10 +760,7 @@ fn structured_trash_bucket(root: &Path, path: &Path) -> Result<String, String> {
         return Err("legacy Trash item has no recorded restore destination".to_owned());
     }
     let bucket = parts[1].as_os_str().to_string_lossy().into_owned();
-    if !matches!(
-        bucket.as_str(),
-        "scripts" | "script-images" | "images" | "data"
-    ) {
+    if !is_structured_bucket(&bucket) {
         return Err("unknown Trash bucket".to_owned());
     }
     Ok(bucket)
@@ -705,8 +770,11 @@ fn restore_to_bucket(
     request: &FileApplyRequest<'_>,
     source: &Path,
     bucket: &str,
+    replace: bool,
+    trash_batch: Option<&Path>,
     mutations: &mut Vec<Mutation>,
 ) -> Result<(), String> {
+    require_restore_domain(request.context, bucket)?;
     let target_root = match bucket {
         "scripts" | "script-images" => &request.context.roots.scripts,
         "images" => request
@@ -716,136 +784,50 @@ fn restore_to_bucket(
             .as_ref()
             .ok_or_else(|| "image root is unavailable".to_owned())?,
         "data" => &request.context.roots.game_dirs,
+        value if value.starts_with("apps-") => request
+            .context
+            .roots
+            .apps
+            .iter()
+            .find(|root| root.id == value[5..] && root.roles.contains(&LocationRole::TrashRestore))
+            .map(|root| &root.path)
+            .ok_or_else(|| "APP restore root is unavailable".to_owned())?,
         _ => return Err("unknown restore bucket".to_owned()),
     };
     ensure_real_directory(target_root)?;
     let target = target_root.join(direct_name(source)?);
+    let mut replaced_to = None;
     if path_exists(&target) {
-        return Err("restore destination already exists".to_owned());
+        if !replace {
+            return Err("restore destination already exists".to_owned());
+        }
+        let before = mutations.len();
+        trash_item(
+            request,
+            &target,
+            trash_batch.ok_or_else(|| "restore replacement Trash batch is missing".to_owned())?,
+            mutations,
+        )?;
+        if let Some(Mutation::Move { from, to }) = mutations.get(before)
+            && from == &target
+        {
+            replaced_to = Some(to.clone());
+        }
     }
-    move_managed(request, source, &target)?;
+    if let Err(error) = move_managed(request, source, &target) {
+        if let Some(preserved) = replaced_to
+            && !path_exists(&target)
+            && move_managed(request, &preserved, &target).is_ok()
+        {
+            mutations.pop();
+        }
+        return Err(error);
+    }
     mutations.push(Mutation::Move {
         from: source.to_path_buf(),
         to: target,
     });
     Ok(())
-}
-
-fn apply_size_mutations(path: &Path, mutations: &[Mutation]) -> io::Result<()> {
-    if !path.is_file() {
-        return Ok(());
-    }
-    let mut values = BTreeMap::<PathBuf, u64>::new();
-    for line in BufReader::new(File::open(path)?).lines() {
-        let line = line?;
-        let Some((bytes, item)) = line.split_once('\t') else {
-            continue;
-        };
-        if let Ok(bytes) = bytes.parse() {
-            values.insert(PathBuf::from(item), bytes);
-        }
-    }
-    for mutation in mutations {
-        match mutation {
-            Mutation::Move { from, to } => {
-                if let Some(bytes) = values.remove(from) {
-                    values.insert(to.clone(), bytes);
-                }
-            }
-            Mutation::Delete { path } => {
-                values.retain(|item, _| item != path && !item.starts_with(path));
-            }
-        }
-    }
-    let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
-    let mut output = File::create(&temporary)?;
-    for (item, bytes) in values {
-        writeln!(output, "{}\t{}", bytes, item.display())?;
-    }
-    output.flush()?;
-    fs::rename(temporary, path)
-}
-
-fn collect_managed_size_paths(
-    request: &SizeScanRequest<'_>,
-    paths: &mut BTreeSet<PathBuf>,
-) -> Result<(), String> {
-    ensure_real_directory(&request.context.roots.game_dirs)?;
-    ensure_real_directory(&request.context.roots.scripts)?;
-    ensure_real_directory(&request.context.roots.trash)?;
-    for path in direct_entries(&request.context.roots.game_dirs)? {
-        let name = direct_name(&path)?;
-        if is_real_directory(&path)
-            && name != request.self_port
-            && !SCAN_EXCLUDED_DIR_NAMES.contains(&name.as_str())
-        {
-            paths.insert(path);
-        }
-    }
-    for path in direct_entries(&request.context.roots.scripts)? {
-        let name = direct_name(&path)?;
-        if path.is_file()
-            && !PROTECTED_SCRIPT_NAMES.contains(&name.as_str())
-            && (extension_is(&path, "sh") || is_image(&path))
-        {
-            paths.insert(path);
-        }
-    }
-    if let Some(images) = &request.context.roots.images {
-        if path_exists(images) {
-            ensure_real_directory(images)?;
-            for path in direct_entries(images)? {
-                if path.is_file() {
-                    paths.insert(path);
-                }
-            }
-        }
-    }
-    for batch in direct_entries(&request.context.roots.trash)? {
-        if !is_real_directory(&batch) {
-            paths.insert(batch);
-            continue;
-        }
-        let mut structured = false;
-        for bucket in ["scripts", "script-images", "data", "images"] {
-            let directory = batch.join(bucket);
-            if !is_real_directory(&directory) {
-                continue;
-            }
-            structured = true;
-            paths.extend(direct_entries(&directory)?);
-        }
-        for item in direct_entries(&batch)? {
-            let is_bucket = item
-                .file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|value| {
-                    matches!(value, "scripts" | "script-images" | "data" | "images")
-                });
-            if !structured || !is_bucket {
-                paths.insert(item);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn allocated_size(path: &Path) -> u64 {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return 0;
-    };
-    let own = metadata.blocks().saturating_mul(512);
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return own;
-    }
-    own.saturating_add(
-        fs::read_dir(path)
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .map(|entry| allocated_size(&entry.path()))
-            .sum(),
-    )
 }
 
 fn mark_changed(
@@ -1096,7 +1078,8 @@ fn is_image(path: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::context::{
-        ContextCapabilities, ExpectedInstallContract, FrontendContext, ManagedRoots, ManagementMode,
+        ContextCapabilities, ExpectedInstallContract, FrontendContext, ManagedAppLocation,
+        ManagedRoots, ManagementMode,
     };
     use crate::inventory::{Inventory, InventoryOptions};
     use tempfile::TempDir;
@@ -1125,9 +1108,10 @@ mod tests {
         let scripts = temp.path().join("ports");
         let game_dirs = temp.path().join("data");
         let images = temp.path().join("images");
+        let apps = temp.path().join("apps");
         let app_state = temp.path().join("state");
         let trash = temp.path().join("app/trash");
-        for directory in [&scripts, &game_dirs, &images, &app_state, &trash] {
+        for directory in [&scripts, &game_dirs, &images, &apps, &app_state, &trash] {
             fs::create_dir_all(directory).unwrap();
         }
         let frontend = scripts.join("PortMaster.sh");
@@ -1139,8 +1123,13 @@ mod tests {
             target_confirmed: true,
             capabilities: ContextCapabilities {
                 inventory: CapabilityState::Current,
+                inventory_ports: CapabilityState::Current,
                 cache_invalidation: CapabilityState::Current,
                 manage_ports: CapabilityState::Current,
+                install_ports: CapabilityState::Current,
+                inventory_apps: CapabilityState::Current,
+                manage_apps: CapabilityState::Current,
+                install_apps: CapabilityState::Current,
                 trash: CapabilityState::Current,
                 leftovers: CapabilityState::Current,
                 cleanup_appledouble: CapabilityState::Current,
@@ -1152,6 +1141,19 @@ mod tests {
                 game_dirs: game_dirs.clone(),
                 images: Some(images),
                 libs: Some(temp.path().join("PortMaster/libs")),
+                apps: vec![ManagedAppLocation {
+                    id: "apps-primary".to_owned(),
+                    path: apps,
+                    roles: vec![
+                        LocationRole::Inventory,
+                        LocationRole::Install,
+                        LocationRole::Manage,
+                        LocationRole::Trash,
+                        LocationRole::TrashRestore,
+                    ],
+                    formats: vec![portkit_core::BundleFormat::TrimuiApp],
+                    priority: 100,
+                }],
                 app_state,
                 trash,
             },
@@ -1196,18 +1198,17 @@ mod tests {
     fn apply(
         context: &ResolvedDeviceContext,
         actions: &[FileAction],
-        size_cache: Option<&Path>,
         progress_channel: Option<ProgressChannel>,
     ) -> Result<FileApplyOutcome, FileOperationError> {
         apply_file_actions(&FileApplyRequest {
             context,
             actions,
-            size_cache,
             self_launcher: &context.roots.scripts.join("APP Manager.sh"),
             self_port: "jenny92-appmanager",
             privilege_command: None,
             privilege_arguments: &[],
             progress_channel,
+            cancel_token: None,
         })
     }
 
@@ -1249,7 +1250,7 @@ mod tests {
                 context.roots.images.as_ref().unwrap().join("OldB.png"),
             ),
         ];
-        apply(&context, &actions, None, None).unwrap();
+        apply(&context, &actions, None).unwrap();
 
         let inventory = Inventory::scan_with_options(
             &context,
@@ -1267,6 +1268,84 @@ mod tests {
     }
 
     #[test]
+    fn app_directory_round_trips_through_structured_trash() {
+        let (_temp, context) = fixture();
+        let app = context.roots.apps[0].path.join("Clock");
+        fs::create_dir(&app).unwrap();
+        fs::write(app.join("launch.sh"), b"#!/bin/sh\n").unwrap();
+
+        apply(
+            &context,
+            &[action(FileActionKind::Trash, app.clone())],
+            None,
+        )
+        .unwrap();
+        assert!(!app.exists());
+
+        let trashed = fs::read_dir(&context.roots.trash)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+            .join("apps-apps-primary/Clock");
+        assert!(trashed.is_dir());
+        apply(
+            &context,
+            &[action(FileActionKind::RestoreItem, trashed)],
+            None,
+        )
+        .unwrap();
+        assert!(app.join("launch.sh").is_file());
+    }
+
+    #[test]
+    fn app_restore_uses_stable_root_id_after_locations_are_reordered() {
+        let (temp, mut context) = fixture();
+        let second = temp.path().join("apps-secondary");
+        fs::create_dir(&second).unwrap();
+        context.roots.apps.push(ManagedAppLocation {
+            id: "apps-secondary".to_owned(),
+            path: second.clone(),
+            roles: vec![
+                LocationRole::Inventory,
+                LocationRole::Manage,
+                LocationRole::Trash,
+                LocationRole::TrashRestore,
+            ],
+            formats: vec![portkit_core::BundleFormat::TrimuiApp],
+            priority: 50,
+        });
+
+        let original = context.roots.apps[0].path.join("Clock");
+        fs::create_dir(&original).unwrap();
+        fs::write(original.join("launch.sh"), b"#!/bin/sh\n").unwrap();
+        apply(
+            &context,
+            &[action(FileActionKind::Trash, original.clone())],
+            None,
+        )
+        .unwrap();
+        let trashed = fs::read_dir(&context.roots.trash)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+            .join("apps-apps-primary/Clock");
+
+        context.roots.apps.reverse();
+        apply(
+            &context,
+            &[action(FileActionKind::RestoreItem, trashed)],
+            None,
+        )
+        .unwrap();
+        assert!(original.join("launch.sh").is_file());
+        assert!(!second.join("Clock").exists());
+    }
+
+    #[test]
     fn an_invalid_later_action_rejects_the_whole_operation_before_mutation() {
         let (_temp, context) = fixture();
         let launcher = context.roots.scripts.join("APP Manager.sh");
@@ -1279,7 +1358,7 @@ mod tests {
             action(FileActionKind::Trash, managed.clone()),
             action(FileActionKind::Trash, outside.clone()),
         ];
-        let error = apply(&context, &actions, None, None).unwrap_err();
+        let error = apply(&context, &actions, None).unwrap_err();
         assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert!(launcher.exists());
         assert!(managed.exists());
@@ -1297,75 +1376,9 @@ mod tests {
             action(FileActionKind::DeleteItem, escaped),
             action(FileActionKind::RestoreItem, deep_escaped),
         ];
-        let error = apply(&context, &actions, None, None).unwrap_err();
+        let error = apply(&context, &actions, None).unwrap_err();
         assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert_eq!(fs::read(outside).unwrap(), b"keep");
-    }
-
-    #[test]
-    fn size_scan_deduplicates_shared_roots_and_excludes_the_app_directory() {
-        let (_temp, mut context) = fixture();
-        context.roots.game_dirs = context.roots.scripts.clone();
-        let app = context.roots.game_dirs.join("jenny92-appmanager");
-        let game = context.roots.game_dirs.join("GameData");
-        fs::create_dir(&app).unwrap();
-        fs::create_dir(&game).unwrap();
-        fs::write(game.join("save.dat"), vec![0_u8; 4096]).unwrap();
-        fs::write(context.roots.scripts.join("Game.sh"), b"#!/bin/sh\n").unwrap();
-        fs::write(context.roots.scripts.join("Game.png"), b"image").unwrap();
-        let trash_item = context.roots.trash.join("batch/data/OldGame");
-        fs::create_dir_all(&trash_item).unwrap();
-        fs::write(trash_item.join("save.dat"), b"old").unwrap();
-        let output = context.roots.app_state.join("sizes.tsv");
-
-        let outcome = scan_size_cache(&SizeScanRequest {
-            context: &context,
-            output: &output,
-            self_port: "jenny92-appmanager",
-        })
-        .unwrap();
-        let rows = fs::read_to_string(output).unwrap();
-
-        assert_eq!(rows.matches(&format!("\t{}\n", game.display())).count(), 1);
-        assert_eq!(
-            rows.matches(&format!(
-                "\t{}\n",
-                context.roots.scripts.join("Game.sh").display()
-            ))
-            .count(),
-            1
-        );
-        assert_eq!(rows.matches(&format!("\t{}\n", app.display())).count(), 0);
-        assert_eq!(
-            rows.matches(&format!("\t{}\n", trash_item.display()))
-                .count(),
-            1
-        );
-        assert_eq!(outcome.entries, rows.lines().count());
-        assert!(outcome.total_bytes > 0);
-    }
-
-    #[test]
-    fn incremental_size_updates_never_measure_an_uncached_destination() {
-        let temp = tempfile::tempdir().unwrap();
-        let cache = temp.path().join("sizes.tsv");
-        let known = temp.path().join("known");
-        let moved = temp.path().join("moved");
-        fs::write(&cache, format!("42\t{}\n", known.display())).unwrap();
-        fs::create_dir(&moved).unwrap();
-        fs::write(moved.join("large.bin"), vec![0_u8; 1024 * 1024]).unwrap();
-
-        apply_size_mutations(
-            &cache,
-            &[Mutation::Move {
-                from: temp.path().join("uncached"),
-                to: moved.clone(),
-            }],
-        )
-        .unwrap();
-        let rows = fs::read_to_string(cache).unwrap();
-        assert!(rows.contains(&format!("42\t{}", known.display())));
-        assert!(!rows.contains(&moved.display().to_string()));
     }
 
     #[test]
@@ -1381,21 +1394,99 @@ mod tests {
         fs::create_dir(&outside).unwrap();
         fs::write(outside.join("._keep"), b"metadata").unwrap();
         symlink(&outside, context.roots.game_dirs.join("Game/link")).unwrap();
-        let sizes = context.roots.app_state.join("sizes.tsv");
         let progress = ProgressChannel::default();
-        fs::write(&sizes, "1\tstale\n").unwrap();
 
         let actions = [action(FileActionKind::CleanAppleDouble, "-")];
-        let outcome = apply(&context, &actions, Some(&sizes), Some(progress.clone())).unwrap();
+        let outcome = apply(&context, &actions, Some(progress.clone())).unwrap();
 
         assert_eq!(outcome.appledouble_removed, 1);
         assert!(!nested.join("._local").exists());
         assert!(nested.join("._real-directory").is_dir());
         assert!(outside.join("._keep").exists());
-        assert!(!sizes.exists());
         let update = progress.take().unwrap();
         assert_eq!(update.phase, "complete");
         assert_eq!(update.runtime, "AppleDouble");
+    }
+
+    #[test]
+    fn appledouble_cleanup_includes_configured_apps_and_honors_cancellation() {
+        let (_temp, mut context) = fixture();
+        context.roots.apps[0]
+            .roles
+            .push(LocationRole::CleanupAppleDouble);
+        let app = context.roots.apps[0].path.join("Clock");
+        fs::create_dir(&app).unwrap();
+        let junk = app.join("._metadata");
+        fs::write(&junk, b"junk").unwrap();
+        let actions = [action(FileActionKind::CleanAppleDouble, "-")];
+        let outcome = apply(&context, &actions, None).unwrap();
+        assert_eq!(outcome.failures, 0);
+        assert!(!junk.exists());
+
+        fs::write(&junk, b"junk").unwrap();
+        let cancel = crate::CancellationToken::default();
+        cancel.cancel();
+        let outcome = apply_file_actions(&FileApplyRequest {
+            context: &context,
+            actions: &actions,
+            self_launcher: &context.roots.scripts.join("APP Manager.sh"),
+            self_port: "jenny92-appmanager",
+            privilege_command: None,
+            privilege_arguments: &[],
+            progress_channel: None,
+            cancel_token: Some(&cancel),
+        })
+        .unwrap();
+        assert_eq!(outcome.failures, 1);
+        assert!(
+            outcome.results[0]
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("cancelled"))
+        );
+        assert!(junk.exists());
+    }
+
+    #[test]
+    fn appledouble_late_cancellation_reports_partial_count_and_cancelled_phase() {
+        let (_temp, context) = fixture();
+        let root = context.roots.game_dirs.join("Many");
+        fs::create_dir(&root).unwrap();
+        for index in 0..5_000 {
+            fs::write(root.join(format!("._{index:05}")), b"metadata").unwrap();
+        }
+        let cancel = crate::CancellationToken::default();
+        let worker_cancel = cancel.clone();
+        let progress = ProgressChannel::default();
+        let worker_progress = progress.clone();
+        let worker = std::thread::spawn(move || {
+            let actions = [action(FileActionKind::CleanAppleDouble, "-")];
+            apply_file_actions(&FileApplyRequest {
+                context: &context,
+                actions: &actions,
+                self_launcher: &context.roots.scripts.join("APP Manager.sh"),
+                self_port: "jenny92-appmanager",
+                privilege_command: None,
+                privilege_arguments: &[],
+                progress_channel: Some(worker_progress),
+                cancel_token: Some(&worker_cancel),
+            })
+            .unwrap()
+        });
+        for _ in 0..2_000 {
+            if progress
+                .take()
+                .is_some_and(|update| update.phase == "cleaning")
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        cancel.cancel();
+        let outcome = worker.join().unwrap();
+        assert_eq!(outcome.failures, 1);
+        assert!(outcome.appledouble_removed > 0);
+        assert_eq!(progress.take().unwrap().phase, "cancelled");
     }
 
     #[test]
@@ -1413,11 +1504,11 @@ mod tests {
             action(FileActionKind::Trash, image.clone()),
             action(FileActionKind::Trash, data.clone()),
         ];
-        apply(&context, &trash_actions, None, None).unwrap();
+        apply(&context, &trash_actions, None).unwrap();
         assert!(!script.exists() && !image.exists() && !data.exists());
 
         let restore_actions = [action(FileActionKind::RestoreTrash, "-")];
-        apply(&context, &restore_actions, None, None).unwrap();
+        apply(&context, &restore_actions, None).unwrap();
         assert!(script.exists() && image.exists() && data.join("save.dat").exists());
         assert!(direct_entries(&context.roots.trash).unwrap().is_empty());
     }
@@ -1434,7 +1525,7 @@ mod tests {
             action(FileActionKind::DeleteManaged, managed.clone()),
             action(FileActionKind::DeleteManaged, outside.clone()),
         ];
-        let error = apply(&context, &actions, None, None).unwrap_err();
+        let error = apply(&context, &actions, None).unwrap_err();
         assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert!(managed.exists());
         assert!(outside.exists());
@@ -1449,10 +1540,40 @@ mod tests {
         fs::write(&installed, b"new").unwrap();
         fs::write(&trashed, b"old").unwrap();
         let actions = [action(FileActionKind::RestoreItem, trashed.clone())];
-        let outcome = apply(&context, &actions, None, None).unwrap();
+        let outcome = apply(&context, &actions, None).unwrap();
         assert_eq!(outcome.failures, 1);
         assert_eq!(fs::read(&installed).unwrap(), b"new");
         assert_eq!(fs::read(&trashed).unwrap(), b"old");
+    }
+
+    #[test]
+    fn confirmed_restore_moves_the_current_item_back_to_trash_before_replacing_it() {
+        let (_temp, context) = fixture();
+        let installed = context.roots.scripts.join("Game.sh");
+        let trashed = context.roots.trash.join("old-batch/scripts/Game.sh");
+        fs::create_dir_all(trashed.parent().unwrap()).unwrap();
+        fs::write(&installed, b"new").unwrap();
+        fs::write(&trashed, b"old").unwrap();
+
+        let outcome = apply(
+            &context,
+            &[action(FileActionKind::RestoreReplace, trashed.clone())],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.failures, 0);
+        assert_eq!(fs::read(&installed).unwrap(), b"old");
+        assert!(!trashed.exists());
+        let preserved_current = direct_entries(&context.roots.trash)
+            .unwrap()
+            .into_iter()
+            .flat_map(|batch| direct_entries(&batch).unwrap_or_default())
+            .filter(|bucket| bucket.file_name().is_some_and(|name| name == "scripts"))
+            .flat_map(|bucket| direct_entries(&bucket).unwrap_or_default())
+            .find(|item| item.file_name().is_some_and(|name| name == "Game.sh"))
+            .expect("the overwritten current launcher remains recoverable in Trash");
+        assert_eq!(fs::read(preserved_current).unwrap(), b"new");
     }
 
     #[test]
@@ -1463,13 +1584,13 @@ mod tests {
         fs::write(&legacy, b"legacy").unwrap();
         let guessed_target = context.roots.scripts.join("Unknown.sh");
         let restore_actions = [action(FileActionKind::RestoreItem, legacy.clone())];
-        let error = apply(&context, &restore_actions, None, None).unwrap_err();
+        let error = apply(&context, &restore_actions, None).unwrap_err();
         assert!(matches!(error, FileOperationError::InvalidAction(_)));
         assert!(legacy.exists());
         assert!(!guessed_target.exists());
 
         let delete_actions = [action(FileActionKind::DeleteItem, legacy.clone())];
-        let outcome = apply(&context, &delete_actions, None, None).unwrap();
+        let outcome = apply(&context, &delete_actions, None).unwrap();
         assert_eq!(outcome.failures, 0);
         assert!(!legacy.exists());
     }
@@ -1485,7 +1606,7 @@ mod tests {
         fs::write(bucket.join("Conflict.sh"), b"trash").unwrap();
         fs::write(bucket.join("Restored.sh"), b"restore").unwrap();
         let actions = [action(FileActionKind::RestoreTrash, "-")];
-        let outcome = apply(&context, &actions, None, None).unwrap();
+        let outcome = apply(&context, &actions, None).unwrap();
         assert_eq!(outcome.failures, 1);
         assert_eq!(fs::read(conflict).unwrap(), b"installed");
         assert_eq!(fs::read(bucket.join("Conflict.sh")).unwrap(), b"trash");
@@ -1503,7 +1624,7 @@ mod tests {
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         symlink(&outside, &link).unwrap();
         let actions = [action(FileActionKind::DeleteItem, link.clone())];
-        let outcome = apply(&context, &actions, None, None).unwrap();
+        let outcome = apply(&context, &actions, None).unwrap();
         assert_eq!(outcome.failures, 0);
         assert!(!path_exists(&link));
         assert_eq!(fs::read(outside).unwrap(), b"keep");
@@ -1561,12 +1682,12 @@ mod tests {
         let request = FileApplyRequest {
             context: &context,
             actions: &actions,
-            size_cache: None,
             self_launcher: &context.roots.scripts.join("APP Manager.sh"),
             self_port: "jenny92-appmanager",
             privilege_command: Some(&prefix),
             privilege_arguments: &explicit,
             progress_channel: None,
+            cancel_token: None,
         };
 
         run_privileged(

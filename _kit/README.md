@@ -20,8 +20,11 @@ launcher fail to start.
 | `dist_port.sh` | Build a port and stage `love_ui/`, runtime, and metadata files into `dist/`. |
 | `build_appmanager_love_lite.sh` | Build App Manager's production aarch64 LOVE-lite runtime; never used by game launchers. |
 | `build_portkit_launcher.sh` | Build the small static aarch64 PortKit helper carried by game launchers that declare advanced compatibility tools. |
+| `build_ffmpeg_recorder.sh` | Build the minimal static aarch64 ffmpeg (kmsgrab + mjpeg + libx264) used by the standalone Screen Recorder app. |
+| `build_recorder_tool.sh` | Generate the self-contained `tools/record_screen.sh` CLI from the canonical `_kit/recorder.sh` engine. |
 | `stage_portkit_launcher.sh` | Validate and copy that launcher-only binary into generated game data. |
 | `dist_trimui_app.sh` | Wrap a built launcher as a TrimUI MainUI APP ZIP prefixed with `[TrimUI App]`; the archive extracts directly under `Apps/`. |
+| `dist_port_zip.sh` | Build the standard PortMaster ZIP declared by `portmaster.items` and the generated `port.json`. |
 
 ## TrimUI system APP packages
 

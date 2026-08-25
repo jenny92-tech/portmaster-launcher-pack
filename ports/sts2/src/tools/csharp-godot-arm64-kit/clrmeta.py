@@ -2,7 +2,9 @@
 # Minimal ECMA-335 metadata reader: confirm a type+method exists in a .NET assembly.
 import struct, sys
 
-path = sys.argv[1] if len(sys.argv) > 1 else "/Users/smallraw/Downloads/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll"
+if len(sys.argv) != 2:
+    raise SystemExit("usage: clrmeta.py <assembly.dll>")
+path = sys.argv[1]
 d = open(path, "rb").read()
 
 def u8(o):  return d[o]

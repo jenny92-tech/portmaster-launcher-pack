@@ -626,6 +626,14 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
                 .expect("copy App Manager Lua module");
         }
     }
+    // Skip the first-run guide: it is drawn with stencil operations that are
+    // intentionally outside the supported GPU command subset, and this test
+    // verifies page rendering, not the onboarding overlay.
+    fs::write(
+        directory.path().join("state.txt"),
+        "ui_lang=zh\nonboarding_seen=1\n",
+    )
+    .expect("write App Manager state");
 
     for (width, height, expected_scale) in
         [(640, 480, 0.80f32), (960, 720, 1.0f32), (1028, 720, 1.0f32)]
@@ -653,11 +661,9 @@ fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
                                             pending_install_exists=false,
                                             install_transaction_exists=false,
                                             portmaster_active_exists=false,
-                                            operation_active_exists=false,
-                                            size_cache_ready=false
+                                            operation_active_exists=false
                                         },
                                         inventory=nil,
-                                        sizes={},
                                         runtime_metadata={}
                                     }"#,
                                 )
@@ -746,14 +752,14 @@ fn runtime_repair_completion_rebuilds_the_home_and_runtime_pages() {
             return {
                 env={libs_dir="/libs"},
                 inventory={
-                    ports={{script="Game.sh",dir="Game",images={}}},
-                    refcount={Game=1},orphan_dirs={},orphan_images={},dead_scripts={},trash={},
+                    ports={{script="Game.sh",dir="Game",data_path="/data/Game",images={}}},
+                    data_refcount={["/data/Game"]=1},orphan_dirs={},orphan_images={},dead_scripts={},trash={},
                     runtimes={
                         need={godot_4_6_3={"Game.sh"}},
                         facts={{name="godot_4_6_3",health=health,bytes=health=="healthy" and 4096 or 0}},
                     },
                 },
-                sizes={},runtime_metadata={},
+                runtime_metadata={},
             }
         end
         assert(model.apply_snapshot(snapshot("missing")))
@@ -814,9 +820,9 @@ fn background_update_result_survives_a_concurrent_foreground_snapshot() {
         local function snapshot()
             return {
                 env={update_checked=0,update_status="unknown",portmaster_latest=""},
-                inventory={ports={},refcount={},orphan_dirs={},orphan_images={},dead_scripts={},
+                inventory={ports={},data_refcount={},orphan_dirs={},orphan_images={},dead_scripts={},
                     trash={},runtimes={need={},facts={}}},
-                sizes={},runtime_metadata={},
+                runtime_metadata={},
             }
         end
         assert(model.apply_snapshot(snapshot()))
@@ -873,6 +879,8 @@ fn manual_update_wait_does_not_reserve_the_foreground_lane() {
         local model=require("app_model").new(kit,native)
         model.env={
             portmaster_management="app",
+            target_confirmed="1",
+            portmaster_target="/mnt/PortMaster",
             capability_manage_portmaster=true,
             capability_install_portmaster=true,
             capability_update_portmaster=true,
@@ -889,7 +897,9 @@ fn manual_update_wait_does_not_reserve_the_foreground_lane() {
         assert(operations.background_task.id==7)
         assert(operations.forced_update_pending==true)
         assert(#starts==0)
+        model.inventory_revision=string.rep("a",64)
         operations.confirm_plan={{kind="CLEAN_APPLEDOUBLE",arg=""}}
+        operations.confirm_revision=model.inventory_revision
         operations.start_apply()
         assert(#starts==1 and starts[1]=="apply")
 
@@ -923,7 +933,11 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
 
         local captured=nil
         local kit={_junk_rows={}}
-        function kit.get_state() return {ui_lang="en",onboarding_seen="1"} end
+        function kit.get_state()
+            return {ui_lang="en",onboarding_seen="1",onboarding_games="1",
+                onboarding_launcher="1",onboarding_junk="1",onboarding_runtime="1",
+                onboarding_pm="1"}
+        end
         function kit.checkbox(label,opts)
             opts.kind="checkbox"; opts.label=label
             opts.on_toggle=opts.on_toggle or opts.on_change
@@ -946,17 +960,19 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
             kit.sidebar=opts.sidebar
         end
         function kit.back_page() end
+        function kit.badge(text) return {text=text} end
 
         local report={
             ports={
-                {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",images={}},
-                {script="B_Game.sh",path="/scripts/B_Game.sh",dir="Shared",images={}},
+                {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",data_path="/data/Shared",images={}},
+                {script="B_Game.sh",path="/scripts/B_Game.sh",dir="Shared",data_path="/data/Shared",images={}},
             },
-            refcount={Shared=2},orphan_dirs={},orphan_images={},dead_scripts={},
+            data_refcount={["/data/Shared"]=2},orphan_dirs={},orphan_images={},dead_scripts={},
         }
         local model={
             kit=kit,
             L=function(en,zh) return {en=en,zh=zh} end,
+            support_label=function() return {en="Supported",zh="支持"} end,
             env={
                 scripts_dir="/scripts",gamedirs_dir="/data",
                 capability_cleanup_appledouble=false,
@@ -980,7 +996,6 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
                 end
             end,
             missing_runtime=function() return "" end,
-            path_size=function() return 0 end,
             human=function() return "0 B" end,
             runtime_issue_count=function() return 0 end,
             update_state=function() return "unknown" end,
@@ -1014,9 +1029,9 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
         -- focus must not preserve a now-invisible destructive action.
         captured=nil
         report.ports={
-            {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",images={}},
+            {script="A_Game.sh",path="/scripts/A_Game.sh",dir="Shared",data_path="/data/Shared",images={}},
         }
-        report.refcount={Shared=1}
+        report.data_refcount={["/data/Shared"]=1}
         pages.build_junk(true)
         kit.sidebar[1].action()
         assert(captured==nil,
@@ -1025,9 +1040,9 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
         -- A display name without an authoritative inventory path must fail
         -- closed. Never reconstruct a destructive path from root + name.
         report.ports={}
-        report.refcount={}
+        report.data_refcount={}
         report.entries={}
-        report.orphan_dirs={"Unverified"}
+        report.orphan_dirs={{name="Unverified",path=""}}
         captured=nil
         pages.build_junk()
         kit.sidebar[2].action() -- Select all.
@@ -1038,9 +1053,11 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
         -- A verified orphan keeps the exact path supplied by the Rust
         -- inventory even when its display name suggests another root.
         report.entries={{
+            root="game-dirs",name="Verified",path="/wrong/name-search-result",
+        }}
+        report.orphan_dirs={{
             root="game-dirs",name="Verified",path="/authoritative/Verified",
         }}
-        report.orphan_dirs={"Verified"}
         captured=nil
         pages.build_junk()
         kit.sidebar[2].action() -- Select all.
@@ -1059,7 +1076,7 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
             {script="B_Game.sh",path="/scripts/B_Game.sh",dir="Shared",
                 data_path="/authoritative/Shared",images={}},
         }
-        report.refcount={Shared=2}
+        report.data_refcount={["/authoritative/Shared"]=2}
         report.orphan_dirs={}
         model.env.capability_manage_ports=true
         model.env.capability_trash=true
@@ -1068,7 +1085,7 @@ fn leftover_cleanup_keeps_shared_launcher_selection_bound_to_exact_script() {
         model.env.portmaster_management="app"
         pages.bind_environment({build_manage=function() end})
         captured=nil
-        pages.build_home()
+        pages.build_games()
         first,second=nil,nil
         for _,row in ipairs(kit._junk_rows) do
             if row.kind=="checkbox" and row.id=="home:/scripts/A_Game.sh" then first=row end
