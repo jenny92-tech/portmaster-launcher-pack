@@ -11,12 +11,16 @@ assets. Corresponding license notices are stored in this directory.
 - The UI runtime statically links FreeType through `freetype-sys` for lazy,
   auto-hinted glyph rasterization. FreeType is distributed under the FreeType
   Project License; the Rust binding is MIT licensed.
+- ZIP support is provided by `zip` 2.4.2 (MIT). 7z decoding, common codec
+  support and AES password handling are provided by `sevenz-rust2` 0.20.2
+  (Apache-2.0). The standard Apache-2.0 text included as
+  `LICENSE-love-lite-APACHE-2.0.txt` also covers `sevenz-rust2`.
 - classic gptokeyb and SDL controller database: PortMaster-GUI's aarch64
   distribution.
 - Noto Sans SC Regular: the Noto CJK archive distributed by PortMaster-GUI.
 - CA certificate bundle: the certifi bundle distributed by PortMaster-GUI.
 
-HTTPS, hashes, ZIP inspection, filesystem operations, task coordination, device
+HTTPS, hashes, ZIP/7z inspection, filesystem operations, task coordination, device
 resolution, and the Lua UI host are linked into the single LOVE-lite Rust main
 executable. The package no longer ships separate PortKit/APP Manager helper
 processes or PortMaster's LÖVE, LuaJIT, ModPlug, Ogg or Theora libraries.

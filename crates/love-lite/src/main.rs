@@ -491,6 +491,8 @@ fn love_key(key: Keycode) -> Option<&'static str> {
         Keycode::Down => Some("down"),
         Keycode::Left => Some("left"),
         Keycode::Right => Some("right"),
+        Keycode::PageUp => Some("pageup"),
+        Keycode::PageDown => Some("pagedown"),
         Keycode::Return => Some("return"),
         Keycode::KpEnter => Some("kpenter"),
         Keycode::Space => Some("space"),
@@ -505,7 +507,14 @@ fn love_key(key: Keycode) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::native_render_dimensions;
+    use super::{love_key, native_render_dimensions};
+    use sdl2::keyboard::Keycode;
+
+    #[test]
+    fn shoulder_page_keys_reach_lua() {
+        assert_eq!(love_key(Keycode::PageUp), Some("pageup"));
+        assert_eq!(love_key(Keycode::PageDown), Some("pagedown"));
+    }
 
     #[test]
     fn native_resolution_wins_over_platform_fallback() {

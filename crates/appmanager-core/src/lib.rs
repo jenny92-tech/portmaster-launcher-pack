@@ -4,6 +4,7 @@
 //! PortMaster installer live here. The launcher only orchestrates these native
 //! operations; no config text is executed as shell code.
 
+mod archive_bundle;
 pub mod artifact;
 pub mod context;
 pub mod device;

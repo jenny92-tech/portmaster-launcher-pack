@@ -175,6 +175,9 @@ done
 for mapping in 'a = enter' 'b = enter' 'x = esc' 'y = esc'; do
   grep -Fxq "$mapping" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
 done
+for mapping in 'l1 = pageup' 'r1 = pagedown'; do
+  grep -Fxq "$mapping" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
+done
 for ignored_mapping in 'start = f10' 'back = f10'; do
   grep -Fxq "$ignored_mapping" "$ROOT/ports/appmanager/dist/jenny92-appmanager/love_ui/ui.gptk"
 done

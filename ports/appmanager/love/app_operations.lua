@@ -375,7 +375,7 @@ function Operations.new(model)
         kit.set_busy(true,L("Scanning storage cards…","正在扫描存储卡……"),{
             progress=0,indeterminate=true,
             stage=L("Scanning storage cards…","正在扫描存储卡……"),
-            detail=L("Looking for ZIP install packages in the card roots.","正在存储卡根目录查找 ZIP 安装包。"),
+            detail=L("Looking for ZIP and 7z install packages in the card roots.","正在存储卡根目录查找 ZIP 和 7z 安装包。"),
             footer_left=L("Scanning…","扫描中…"),footer_right=L("Scanning…","扫描中…"),
             on_cancel=self.request_portmaster_cancel,on_exit=self.busy_exit})
         local ok,task_id=pcall(model.native.start,"scan-zips")
@@ -396,15 +396,16 @@ function Operations.new(model)
         local plan={}
         for _,bundle in ipairs(bundles or {}) do
             if type(bundle.path)=="string" and bundle.path~="" then
-                plan[#plan+1]={
+                local action={
                     kind="INSTALL_ZIP",arg=bundle.path,
                     source_identity=tostring(bundle.source_identity or ""),
                     replace_existing=replace_existing==true,
                 }
+                if type(bundle._password)=="string" then action.password=bundle._password end
+                plan[#plan+1]=action
             end
         end
         if #plan==0 then return false end
-        self.confirm_plan=plan
         self.confirm_return=pages.ZIP
         kit.set_busy(true,L("Installing bundles…","正在安装压缩包……"),{
             progress=0,indeterminate=true,
@@ -415,11 +416,14 @@ function Operations.new(model)
             footer_right=L("Working…","处理中……"),
             on_cancel=self.request_portmaster_cancel,on_exit=self.busy_exit})
         local ok,task_id=pcall(model.native.start,"install-zips",plan)
+        for _,action in ipairs(plan) do action.password=nil end
+        for _,bundle in ipairs(bundles or {}) do bundle._password=nil end
         if not ok then
             kit.set_busy(false)
             kit.toast(L("Cannot start bundle installation.","无法开始安装压缩包。"),{kind="error"})
             return false
         end
+        self.confirm_plan=plan
         self.task={id=task_id,elapsed=0,poll=0,timeout=1800,kind="install-zips",plan=plan}
         return true
     end

@@ -136,6 +136,7 @@ appmanager = {
         if method=="start" then
             LAST_START_KIND=payload.kind
             LAST_START_ACTIONS=payload.actions
+            LAST_START_PASSWORD=payload.actions and payload.actions[1] and payload.actions[1].password
             LAST_START_REVISION=payload.revision
             if payload.kind=="config-refresh-if-newer" or payload.kind=="update-check-if-stale" then
                 return {ok=false,error={code="offline",message="offline fixture"}}
@@ -920,6 +921,66 @@ zip_replace.execute(r'''
     assert(LAST_START_ACTIONS[1].arg=="/mnt/sdcard/existing.zip")
 ''')
 
+zip_password = run_case("healthy")
+zip_password.execute('require("kit").close_guide()')
+goto_sidebar_tool(zip_password, "一键安装")
+zip_password.globals().POLL_EVENT = zip_password.table_from({
+    "task_id": zip_password.globals().TASK_ID, "kind": "scan-zips", "status": "complete",
+    "data": {"bundles": [
+        {"path": "/mnt/sdcard/encrypted.7z", "size": 8192, "format": "7z",
+         "password_required": True, "kind": "locked", "source_identity": "scan-id-locked",
+         "entry_script": "", "entry_data": "", "app_name": "",
+         "diagnostic": "压缩包已加密，需要输入密码后识别"},
+    ]},
+}, recursive=True)
+zip_password.execute(r'''
+    local k=require("kit")
+    k.update(0.2)
+    LAST_START_KIND=nil; LAST_START_ACTIONS=nil; LAST_START_PASSWORD=nil
+    k.input("confirm")
+    k.input("right")
+    while k.debug_focus().sidebar_i>1 do k.input("up") end
+    k.input("confirm")
+    k.input("left"); k.input("confirm")
+    assert(k.debug_password_dialog().open)
+    k.input("confirm"); k.input("right"); k.input("confirm")
+    k.input("down"); k.input("down"); k.input("down"); k.input("down")
+    k.input("right"); k.input("right"); k.input("right"); k.input("confirm")
+    assert(LAST_START_KIND=="install-zips" and LAST_START_PASSWORD=="12")
+    assert(LAST_START_ACTIONS[1].arg=="/mnt/sdcard/encrypted.7z")
+    assert(LAST_START_ACTIONS[1].password==nil)
+    assert(k.debug_busy().busy and not k.debug_password_dialog().open)
+''')
+
+zip_unsupported = run_case("healthy")
+zip_unsupported.execute('require("kit").close_guide()')
+goto_sidebar_tool(zip_unsupported, "一键安装")
+zip_unsupported.globals().POLL_EVENT = zip_unsupported.table_from({
+    "task_id": zip_unsupported.globals().TASK_ID, "kind": "scan-zips", "status": "complete",
+    "data": {"bundles": [
+        {"path": "/mnt/sdcard/ppmd.zip", "size": 4096, "format": "zip",
+         "password_required": False, "kind": "invalid", "source_identity": "scan-id-ppmd",
+         "entry_script": "", "entry_data": "", "app_name": "",
+         "diagnostic": "压缩包使用了当前版本不支持的压缩算法：PPMd (method 98)",
+         "issue": {"code": "unsupported_method", "format": "zip",
+                   "summary": "压缩包使用了当前版本不支持的压缩算法",
+                   "detail": "PPMd (method 98)", "report": "copyable report"}},
+    ]},
+}, recursive=True)
+zip_unsupported.execute(r'''
+    local k=require("kit")
+    k.update(0.2)
+    local page=k.debug_page()
+    assert(page.title=="压缩包安装")
+    assert(page.row_labels[2]=="ppmd.zip")
+    k.input("confirm")
+    local dialog=k.debug_dialog()
+    assert(dialog.open and dialog.focus=="confirm")
+    assert(dialog.title=="安装包诊断")
+    assert(dialog.message:find("PPMd (method 98)",1,true))
+    assert(dialog.item_count==3)
+''')
+
 
 # ── App launcher merges games and standalone apps, launch asks to quit ────────
 launcher_case = run_case("healthy", inventory={
@@ -952,6 +1013,7 @@ launcher_case.execute(r'''
 d = launcher_case.eval('require("kit").debug_dialog()')
 assert d["open"]
 assert "启动" in d["title"]
+assert d["focus"] == "confirm"
 launcher_case.execute(r'''
     local k=require("kit")
     k.input("left"); k.input("confirm")

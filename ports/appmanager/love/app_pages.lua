@@ -220,6 +220,7 @@ function Pages.new(model,operations)
                 message=L("Port App Manager will close and "..label.." will start.",
                     "Port App Manager 将退出并启动"..label.."。"),
                 confirm=L("Launch","启动"),cancel=L("Back","返回"),danger=false,
+                default_focus="confirm",
                 on_confirm=function()
                     local ok=pcall(model.native.run,script)
                     if ok then kit.quit(kit.EXIT_START) return end
@@ -290,6 +291,7 @@ function Pages.new(model,operations)
                 message=L("Port App Manager will close and "..label.." will start.",
                     "Port App Manager 将退出并启动"..label.."。"),
                 confirm=L("Launch","启动"),cancel=L("Back","返回"),danger=false,
+                default_focus="confirm",
                 on_confirm=function()
                     local ok=pcall(model.native.run,script)
                     if ok then
@@ -722,41 +724,65 @@ function Pages.new(model,operations)
         local rows,selected_zip={},selected_zip
         local bundles=model.zip_bundles or {}
         rows[#rows+1]=note(L("Bundle install","压缩包安装"),L(
-            "Select zip files found on the storage card. Supported packages are recognized automatically; unsupported or ambiguous files stay disabled.",
-            "选择存储卡根目录中的 zip。系统会自动识别可安装内容；不支持、损坏或存在歧义的文件会直接提示。"),"zip:rules")
+            "Select ZIP or 7z files found on the storage card. Supported packages are recognized automatically; encrypted packages ask for a password when installed.",
+            "选择存储卡根目录中的 ZIP 或 7z。系统会自动识别可安装内容；加密包会在安装时询问密码。"),"zip:rules")
         local function zip_label(bundle)
             local name=bundle.path:match("([^/]+)$") or bundle.path
             return name
         end
         local function zip_detail(bundle)
             local parts={model.human(bundle.size)}
-            if bundle.kind~="port" and bundle.kind~="trimui_app" then
+            if bundle.kind~="port" and bundle.kind~="trimui_app" and bundle.kind~="locked" then
                 parts[#parts+1]=tostring(bundle.diagnostic or L("Unsupported package","不支持的安装包"))
+            elseif bundle.password_required then
+                parts[#parts+1]=L("Password required","需要密码")[kit.get_state().ui_lang]
             end
             return table.concat(parts," · ")
         end
         if #bundles==0 then
             rows[#rows+1]=note(L("Status","状态"),
-                L("No ZIP install packages were found on the storage card roots. Put .zip files in the card root and rescan.",
-                    "存储卡根目录没有发现 ZIP 安装包。把 .zip 放到存储卡根目录后重新扫描。"),"zip:empty")
+                L("No install packages were found on the storage card roots. Put a .zip or .7z file in a card root and rescan.",
+                    "存储卡根目录没有发现安装包。把 .zip 或 .7z 放到存储卡根目录后重新扫描。"),"zip:empty")
         end
         for _,bundle in ipairs(bundles) do
             local key="zip:"..bundle.path
-            rows[#rows+1]=kit.checkbox(zip_label(bundle),{
-                id=key,detail=zip_detail(bundle),checked=model.selected_zip and model.selected_zip[key] or false,
-                disabled=bundle.kind~="port" and bundle.kind~="trimui_app",
-                meta={key=key},
-                on_change=function(value,meta)
-                    if meta and model.selected_zip then model.selected_zip[meta.key]=value end
-                end,
-            })
+            local installable=bundle.kind=="port" or bundle.kind=="trimui_app" or bundle.kind=="locked"
+            if installable then
+                rows[#rows+1]=kit.checkbox(zip_label(bundle),{
+                    id=key,detail=zip_detail(bundle),checked=model.selected_zip and model.selected_zip[key] or false,
+                    meta={key=key},
+                    on_change=function(value,meta)
+                        if meta and model.selected_zip then model.selected_zip[meta.key]=value end
+                    end,
+                })
+            else
+                rows[#rows+1]=button(zip_label(bundle),function()
+                    local issue=type(bundle.issue)=="table" and bundle.issue or {}
+                    local items={}
+                    if tostring(issue.code or "")~="" then
+                        items[#items+1]="code: "..tostring(issue.code)
+                    end
+                    if tostring(issue.format or "")~="" then
+                        items[#items+1]="format: "..tostring(issue.format)
+                    end
+                    items[#items+1]=L(
+                        "The Web installer can copy the complete feedback report.",
+                        "可在网页安装端一键复制完整反馈信息。")
+                    kit.dialog({
+                        title=L("Package diagnostic","安装包诊断"),
+                        message=tostring(bundle.diagnostic or L("Unsupported package","不支持的安装包")),
+                        items=items,confirm=L("OK","知道了"),cancel=L("Back","返回"),
+                        danger=false,default_focus="confirm",
+                    })
+                end,{id=key,detail=zip_detail(bundle)})
+            end
         end
         local function install_selected()
             local chosen={}
             for _,bundle in ipairs(model.zip_bundles or {}) do
                 local key="zip:"..bundle.path
                 if model.selected_zip and model.selected_zip[key] and
-                    (bundle.kind=="port" or bundle.kind=="trimui_app") then
+                    (bundle.kind=="port" or bundle.kind=="trimui_app" or bundle.kind=="locked") then
                     chosen[#chosen+1]=bundle
                 end
             end
@@ -770,8 +796,8 @@ function Pages.new(model,operations)
             end
             kit.dialog({
                 title=L("Install selected bundles","安装所选压缩包"),
-                message=L("Install these bundles now? The zip files are moved to Trash on success.",
-                    "现在安装这些压缩包？成功后 zip 会移入回收站。"),
+                message=L("Install these bundles now? The archive files are moved to Trash on success.",
+                    "现在安装这些压缩包？成功后安装包会移入回收站。"),
                 items=labels,confirm=L("Install","安装"),cancel=L("Back","返回"),danger=false,
                 checkbox={label=L("Replace an existing APP or data folder with the same name",
                     "覆盖同名 APP 或游戏数据目录"),checked=false,danger=true},
@@ -779,7 +805,34 @@ function Pages.new(model,operations)
                     "Existing APP or data folders with the same name will be replaced. Duplicate SH launchers still receive a numeric suffix.",
                     "同名 APP 或游戏数据目录会被覆盖；重复的 SH 启动项仍会自动添加数字编号。"),
                 on_confirm=function(_,replace_existing)
-                    operations.install_zip_bundles(chosen,replace_existing)
+                    local install_bundles={}
+                    for _,bundle in ipairs(chosen) do
+                        local copy={}
+                        for key,value in pairs(bundle) do copy[key]=value end
+                        install_bundles[#install_bundles+1]=copy
+                    end
+                    local function continue_at(index)
+                        if index>#install_bundles then
+                            operations.install_zip_bundles(install_bundles,replace_existing)
+                            return
+                        end
+                        local bundle=install_bundles[index]
+                        if not bundle.password_required and bundle.kind~="locked" then
+                            continue_at(index+1)
+                            return
+                        end
+                        local name=bundle.path:match("([^/]+)$") or bundle.path
+                        kit.password_dialog({
+                            title=L("Archive password","压缩包密码"),
+                            message=L("Enter the password for "..name..".","请输入 “"..name.."” 的密码。"),
+                            max_length=1024,
+                            on_confirm=function(password)
+                                bundle._password=password
+                                continue_at(index+1)
+                            end,
+                        })
+                    end
+                    continue_at(1)
                 end,
             })
         end

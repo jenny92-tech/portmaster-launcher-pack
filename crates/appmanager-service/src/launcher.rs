@@ -124,7 +124,7 @@ struct WebServerTask {
     thread: std::thread::JoinHandle<Result<u16, String>>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmbeddedAction {
     pub kind: String,
@@ -133,6 +133,30 @@ pub struct EmbeddedAction {
     pub source_identity: Option<String>,
     #[serde(default)]
     pub replace_existing: bool,
+    /// Ephemeral archive password. It is accepted only by INSTALL_ZIP,
+    /// redacted from Debug output, never serialized, and zeroized on drop.
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+impl std::fmt::Debug for EmbeddedAction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EmbeddedAction")
+            .field("kind", &self.kind)
+            .field("arg", &self.arg)
+            .field("source_identity", &self.source_identity)
+            .field("replace_existing", &self.replace_existing)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
+impl Drop for EmbeddedAction {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.password.zeroize();
+    }
 }
 
 #[derive(Debug)]
@@ -531,6 +555,18 @@ impl EmbeddedService {
                 return Err(format!("task {kind:?} does not accept a payload"));
             }
             return self.start_background_update_check();
+        }
+        if let Some(actions) = actions.as_deref()
+            && actions.iter().any(|action| {
+                action.password.as_ref().is_some_and(|password| {
+                    kind != "install-zips" || action.kind != "INSTALL_ZIP" || password.len() > 1024
+                })
+            })
+        {
+            return Err(
+                "archive passwords are accepted only by INSTALL_ZIP and must be at most 1024 bytes"
+                    .into(),
+            );
         }
         if kind == "update-check" && self.background_busy.load(Ordering::Acquire) {
             return Err("the automatic PortMaster update check is already running".into());
@@ -1050,6 +1086,7 @@ fn run_embedded_task(
                         true,
                         action.source_identity.as_deref(),
                         action.replace_existing,
+                        action.password.as_deref(),
                     ) {
                         Ok(result) => {
                             if result.installed.is_empty() && !result.conflicts.is_empty() {
@@ -1060,10 +1097,15 @@ fn run_embedded_task(
                             installed_items += result.installed.len();
                             conflicts += result.conflicts.len();
                         }
-                        Err(message) => failures.push(json!({
-                            "path": action.arg,
-                            "message": message,
-                        })),
+                        Err(message) => {
+                            let diagnostic =
+                                appmanager_core::port_zip::archive_issue(&action.arg, "", &message);
+                            failures.push(json!({
+                                "path": action.arg,
+                                "message": diagnostic.message(),
+                                "diagnostic": diagnostic,
+                            }));
+                        }
                     }
                 }
                 zip_install = Some(json!({
@@ -1216,8 +1258,9 @@ impl Session {
         &self,
         path: String,
         replace_existing: bool,
+        password: Option<&str>,
     ) -> Result<Value, String> {
-        let outcome = self.install_zip_unlocked(&path, false, None, replace_existing)?;
+        let outcome = self.install_zip_unlocked(&path, false, None, replace_existing, password)?;
         serde_json::to_value(outcome).map_err(|error| error.to_string())
     }
 
@@ -1227,10 +1270,15 @@ impl Session {
         retire_source: bool,
         expected_identity: Option<&str>,
         replace_existing: bool,
+        password: Option<&str>,
     ) -> Result<appmanager_core::port_zip::BundleInstallOutcome, String> {
         let script_path = PathBuf::from(&path);
         let cancel = || self.cancelled();
-        let bundle = appmanager_core::port_zip::inspect_zip_bundle(&script_path, &cancel)?;
+        let bundle = appmanager_core::port_zip::inspect_archive_bundle_with_password(
+            &script_path,
+            password,
+            &cancel,
+        )?;
         if expected_identity.is_some_and(|expected| expected != bundle.source_identity) {
             return Err("ZIP changed after it was scanned; please scan it again".to_owned());
         }
@@ -1239,7 +1287,7 @@ impl Session {
         let work = roots.app_state.join("zip-work");
         let app_roots = app_install_targets(&roots.apps);
         if retire_source {
-            appmanager_core::port_zip::install_bundle_replacing(
+            appmanager_core::port_zip::install_bundle_replacing_with_password(
                 &bundle,
                 &roots.scripts,
                 &roots.game_dirs,
@@ -1248,10 +1296,11 @@ impl Session {
                 &work,
                 &appmanager_core::port_zip::BundleLimits::default(),
                 replace_existing,
+                password,
                 &cancel,
             )
         } else {
-            appmanager_core::port_zip::install_uploaded_bundle_replacing(
+            appmanager_core::port_zip::install_uploaded_bundle_replacing_with_password(
                 &bundle,
                 &roots.scripts,
                 &roots.game_dirs,
@@ -1260,6 +1309,7 @@ impl Session {
                 &work,
                 &appmanager_core::port_zip::BundleLimits::default(),
                 replace_existing,
+                password,
                 &cancel,
             )
         }
@@ -3304,6 +3354,7 @@ mod tests {
                     .to_string(),
                 source_identity: None,
                 replace_existing: false,
+                password: None,
             }],
             Some(&stale),
         )
@@ -3463,6 +3514,7 @@ mod tests {
             arg: "/ports/Game.sh\nDELETE_MANAGED\t/ports/Game".into(),
             source_identity: None,
             replace_existing: false,
+            password: None,
         };
         assert!(ServiceAction::try_from(&unsafe_action).is_err());
 
@@ -3471,10 +3523,25 @@ mod tests {
             arg: "/ports/Game.sh".into(),
             source_identity: None,
             replace_existing: false,
+            password: None,
         };
         let parsed = ServiceAction::try_from(&valid_action).unwrap();
         assert_eq!(parsed.kind, "TRASH");
         assert_eq!(parsed.argument, "/ports/Game.sh");
+    }
+
+    #[test]
+    fn embedded_archive_password_is_redacted_from_debug_output() {
+        let action = EmbeddedAction {
+            kind: "INSTALL_ZIP".into(),
+            arg: "/media/encrypted.7z".into(),
+            source_identity: Some("identity".into()),
+            replace_existing: false,
+            password: Some("never-print-this-password".into()),
+        };
+        let debug = format!("{action:?}");
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("never-print-this-password"));
     }
 
     #[test]
@@ -3557,7 +3624,13 @@ mod tests {
         )
         .unwrap();
         let error = session
-            .install_zip_unlocked(&scanned.path, true, Some(&scanned.source_identity), false)
+            .install_zip_unlocked(
+                &scanned.path,
+                true,
+                Some(&scanned.source_identity),
+                false,
+                None,
+            )
             .unwrap_err();
         assert!(error.contains("changed after it was scanned"), "{error}");
     }

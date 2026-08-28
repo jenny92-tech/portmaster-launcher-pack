@@ -45,6 +45,7 @@ fn action(kind: &str, path: impl AsRef<Path>) -> EmbeddedAction {
         arg: path.as_ref().to_string_lossy().into_owned(),
         source_identity: None,
         replace_existing: false,
+        password: None,
     }
 }
 
@@ -80,6 +81,7 @@ fn install_candidate(
                 arg: candidate["path"].as_str().unwrap().to_owned(),
                 source_identity: Some(candidate["source_identity"].as_str().unwrap().to_owned()),
                 replace_existing,
+                password: None,
             }]),
         )
         .unwrap();

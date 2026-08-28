@@ -12,8 +12,34 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use crate::archive_bundle::{
+    self, ArchiveCatalog, INVALID_PASSWORD, PASSWORD_REQUIRED, RESOURCE_LIMIT, UNSUPPORTED_FEATURE,
+    UNSUPPORTED_METHOD,
+};
 use serde::{Deserialize, Serialize};
-use zip::ZipArchive;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArchiveIssue {
+    /// Stable machine-readable category. This is not a schema version.
+    pub code: String,
+    /// Detected or inferred archive format: "zip", "7z", or "unknown".
+    pub format: String,
+    pub summary: String,
+    /// Sanitized detail suitable for display and bug reports.
+    pub detail: String,
+    /// Copyable report containing no password or device-absolute path.
+    pub report: String,
+}
+
+impl ArchiveIssue {
+    pub fn message(&self) -> String {
+        if self.detail.is_empty() || self.detail == self.summary {
+            self.summary.clone()
+        } else {
+            format!("{}：{}", self.summary, self.detail)
+        }
+    }
+}
 
 /// A recognized bundle found on a storage card root.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -23,6 +49,11 @@ pub struct ZipCandidate {
     /// Opaque filesystem identity captured during recognition. Installation
     /// must open the same object; a same-path replacement requires a rescan.
     pub source_identity: String,
+    /// Physical archive format detected from the file signature: "zip" or "7z".
+    pub format: String,
+    /// True when extraction requires a password. A locked archive may not be
+    /// classifiable until the password also unlocks its file names or launcher.
+    pub password_required: bool,
     /// "port" (standard .sh + data folder), "trimui_app" (folder with
     /// launcher.sh + config.json), or "unknown".
     pub kind: String,
@@ -35,6 +66,8 @@ pub struct ZipCandidate {
     pub app_name: String,
     /// Empty for a recognized bundle; otherwise explains why it cannot be installed.
     pub diagnostic: String,
+    /// Structured, sanitized information for displaying or copying a failure report.
+    pub issue: Option<ArchiveIssue>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +92,7 @@ impl ZipKind {
 const MAX_ZIP_ENTRIES: usize = 4096;
 const MAX_LAUNCHER_INSPECTION_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Scan the given root directories for `*.zip` files in their top level and
+/// Scan the given root directories for `*.zip` and `*.7z` files in their top level and
 /// recognize each bundle's structure (read-only, entries are not extracted).
 pub fn scan_zip_bundles(
     roots: &[&Path],
@@ -79,7 +112,9 @@ pub fn scan_zip_bundles(
                     && path
                         .extension()
                         .and_then(|ext| ext.to_str())
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+                        .is_some_and(|ext| {
+                            ext.eq_ignore_ascii_case("zip") || ext.eq_ignore_ascii_case("7z")
+                        })
             })
             .collect::<Vec<_>>();
         names.sort();
@@ -90,18 +125,43 @@ pub fn scan_zip_bundles(
             if !seen.insert(file_identity(&path)) {
                 continue;
             }
-            match inspect_zip_bundle(&path, cancel) {
+            match inspect_archive_bundle_with_password(&path, None, cancel) {
                 Ok(candidate) => out.push(candidate),
-                Err(message) => out.push(ZipCandidate {
-                    path: path.to_string_lossy().into_owned(),
-                    size: path.metadata().map(|metadata| metadata.len()).unwrap_or(0),
-                    source_identity: source_identity_token(&path).unwrap_or_default(),
-                    kind: "invalid".to_owned(),
-                    entry_script: String::new(),
-                    entry_data: String::new(),
-                    app_name: String::new(),
-                    diagnostic: message,
-                }),
+                Err(message) if is_password_required_error(&message) => {
+                    let mut file = open_archive(&path)?;
+                    let identity = SourceIdentity::from_file(&file)?;
+                    let format =
+                        archive_bundle::detect_format(&mut file, &path.display().to_string())?;
+                    out.push(ZipCandidate {
+                        path: path.to_string_lossy().into_owned(),
+                        size: identity.length,
+                        source_identity: identity.token(),
+                        format: format.name().to_owned(),
+                        password_required: true,
+                        kind: "locked".to_owned(),
+                        entry_script: String::new(),
+                        entry_data: String::new(),
+                        app_name: String::new(),
+                        diagnostic: "压缩包已加密，需要输入密码后识别".to_owned(),
+                        issue: None,
+                    });
+                }
+                Err(message) => {
+                    let issue = archive_issue(&path.to_string_lossy(), "", &message);
+                    out.push(ZipCandidate {
+                        path: path.to_string_lossy().into_owned(),
+                        size: path.metadata().map(|metadata| metadata.len()).unwrap_or(0),
+                        source_identity: source_identity_token(&path).unwrap_or_default(),
+                        format: issue.format.clone(),
+                        password_required: false,
+                        kind: "invalid".to_owned(),
+                        entry_script: String::new(),
+                        entry_data: String::new(),
+                        app_name: String::new(),
+                        diagnostic: issue.message(),
+                        issue: Some(issue),
+                    });
+                }
             }
         }
     }
@@ -114,19 +174,251 @@ pub fn scan_zip_bundles(
 /// directories. Upload and one-tap install callers already know the exact zip
 /// path and must not accidentally pass that file to `read_dir`.
 pub fn inspect_zip_bundle(path: &Path, cancel: &dyn Fn() -> bool) -> Result<ZipCandidate, String> {
+    inspect_archive_bundle_with_password(path, None, cancel)
+}
+
+/// Inspect a ZIP or 7z archive with an optional password.
+pub fn inspect_archive_bundle_with_password(
+    path: &Path,
+    password: Option<&str>,
+    cancel: &dyn Fn() -> bool,
+) -> Result<ZipCandidate, String> {
     let mut file = open_archive(path)?;
     let identity = SourceIdentity::from_file(&file)?;
-    let candidate = recognize_zip_file(&mut file, &path.display().to_string(), cancel)?;
+    let (candidate, catalog) =
+        recognize_archive_file(&mut file, &path.display().to_string(), password, cancel)?;
+    let issue = (!candidate.diagnostic.is_empty()).then(|| {
+        archive_issue(
+            &path.to_string_lossy(),
+            catalog.format.name(),
+            &candidate.diagnostic,
+        )
+    });
     Ok(ZipCandidate {
         path: path.to_string_lossy().into_owned(),
         size: identity.length,
         source_identity: identity.token(),
+        format: catalog.format.name().to_owned(),
+        password_required: catalog.encrypted,
         kind: candidate.kind.name().to_owned(),
         entry_script: candidate.entry_script,
         entry_data: candidate.entry_data,
         app_name: candidate.app_name,
         diagnostic: candidate.diagnostic,
+        issue,
     })
+}
+
+pub fn is_password_required_error(message: &str) -> bool {
+    message == PASSWORD_REQUIRED || message.starts_with(&format!("{PASSWORD_REQUIRED}:"))
+}
+
+pub fn is_invalid_password_error(message: &str) -> bool {
+    message == INVALID_PASSWORD || message.starts_with(&format!("{INVALID_PASSWORD}:"))
+}
+
+/// Convert an internal archive error into a stable, path- and password-free report.
+pub fn archive_issue(display_name: &str, format_hint: &str, message: &str) -> ArchiveIssue {
+    let marked_method = marker_detail(message, UNSUPPORTED_METHOD);
+    let marked_feature = marker_detail(message, UNSUPPORTED_FEATURE);
+    let marked_limit = marker_detail(message, RESOURCE_LIMIT);
+    let marked = marked_method.or(marked_feature).or(marked_limit);
+    let marker_format = marked.and_then(|value| value.split_once(':').map(|(format, _)| format));
+    let mut format = normalize_report_format(marker_format.unwrap_or(format_hint));
+    if format == "unknown" && message != "只支持 ZIP 或 7z 压缩包" {
+        format = infer_report_format(display_name);
+    }
+    let (code, summary, detail) = if let Some(value) = marked_method {
+        (
+            "unsupported_method",
+            "压缩包使用了当前版本不支持的压缩算法",
+            marked_value(value),
+        )
+    } else if let Some(value) = marked_feature {
+        (
+            "unsupported_feature",
+            "压缩包使用了当前版本不支持的格式功能",
+            marked_value(value),
+        )
+    } else if let Some(value) = marked_limit {
+        (
+            "resource_limit",
+            "解压这个压缩包需要超出当前限制的内存",
+            marked_value(value),
+        )
+    } else if is_password_required_error(message) {
+        (
+            "password_required",
+            "压缩包已加密",
+            "需要输入密码后继续识别",
+        )
+    } else if is_invalid_password_error(message) {
+        ("invalid_password", "压缩包密码不正确", "请重新输入密码")
+    } else if message == "只支持 ZIP 或 7z 压缩包" {
+        format = "unknown".to_owned();
+        (
+            "unsupported_format",
+            "当前只支持 ZIP 或 7z 压缩包",
+            "文件内容不是受支持的 ZIP 或 7z 格式",
+        )
+    } else if message.starts_with("7z anti-item is not supported") {
+        (
+            "unsupported_feature",
+            "压缩包使用了当前版本不支持的 7z 功能",
+            "7z anti-item",
+        )
+    } else if message.contains("installation is disabled by device configuration") {
+        (
+            "device_unsupported",
+            "当前设备配置不支持此类安装包",
+            "请复制诊断信息反馈设备型号与安装包类型",
+        )
+    } else if is_rejected_archive_error(message) {
+        (
+            "rejected_archive",
+            "压缩包未通过安全或资源限制检查",
+            rejected_archive_detail(message),
+        )
+    } else if is_unsupported_layout_error(message) {
+        (
+            "unsupported_layout",
+            "没有识别到可安装的 APP 或 Port",
+            layout_detail(message),
+        )
+    } else if message.contains("changed after") || message.contains("changed while") {
+        (
+            "archive_changed",
+            "扫描后压缩包发生了变化",
+            "请重新扫描或重新上传后再试",
+        )
+    } else if message.contains("cancelled") || message.contains("canceled") {
+        ("cancelled", "操作已取消", "现有文件保持不变")
+    } else {
+        (
+            "invalid_archive",
+            "压缩包损坏或无法读取",
+            "请重新下载或重新压缩后再试",
+        )
+    };
+    let filename = report_filename(display_name);
+    let detail = clean_report_value(detail, 240);
+    let report = format!(
+        "APP Manager 压缩包诊断\n文件: {filename}\n格式: {format}\n代码: {code}\n说明: {summary}\n详情: {detail}\n支持范围: ZIP / 7z 常用单卷压缩算法"
+    );
+    ArchiveIssue {
+        code: code.to_owned(),
+        format,
+        summary: summary.to_owned(),
+        detail,
+        report,
+    }
+}
+
+fn marker_detail<'a>(message: &'a str, marker: &str) -> Option<&'a str> {
+    message
+        .strip_prefix(marker)
+        .map(|value| value.strip_prefix(": ").unwrap_or(value).trim())
+}
+
+fn marked_value(value: &str) -> &str {
+    value
+        .split_once(':')
+        .map_or(value, |(_, detail)| detail)
+        .trim()
+}
+
+fn normalize_report_format(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "zip" => "zip".to_owned(),
+        "7z" => "7z".to_owned(),
+        _ => "unknown".to_owned(),
+    }
+}
+
+fn infer_report_format(value: &str) -> String {
+    let name = value.replace('\\', "/");
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "zip" => "zip".to_owned(),
+        "7z" => "7z".to_owned(),
+        _ => "unknown".to_owned(),
+    }
+}
+
+fn report_filename(value: &str) -> String {
+    let normalized = value.replace('\\', "/");
+    let filename = normalized.rsplit('/').next().unwrap_or("").trim();
+    let filename = clean_report_value(filename, 120);
+    if filename.is_empty() {
+        "unknown".to_owned()
+    } else {
+        filename
+    }
+}
+
+fn clean_report_value(value: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    let mut pending_space = false;
+    for character in value.chars() {
+        if output.chars().count() >= max_chars {
+            break;
+        }
+        if character.is_control() || character.is_whitespace() {
+            pending_space = !output.is_empty();
+            continue;
+        }
+        if pending_space {
+            output.push(' ');
+            pending_space = false;
+        }
+        output.push(character);
+    }
+    output.trim().to_owned()
+}
+
+fn is_rejected_archive_error(message: &str) -> bool {
+    message.contains("too many entries")
+        || message.contains("exceeds limit")
+        || message.contains("expansion exceeds")
+        || message.contains("duplicate entry")
+        || message.contains("entry conflicts")
+        || message.contains("unsafe path")
+        || message.contains("reserved transaction path")
+}
+
+fn rejected_archive_detail(message: &str) -> &'static str {
+    if message.contains("too many entries") {
+        "压缩包条目数量超过安全上限"
+    } else if message.contains("exceeds limit") || message.contains("expansion exceeds") {
+        "单个文件或解压后的总大小超过安全上限"
+    } else if message.contains("duplicate entry") || message.contains("entry conflicts") {
+        "压缩包内存在重复或冲突路径"
+    } else {
+        "压缩包内存在不安全路径"
+    }
+}
+
+fn is_unsupported_layout_error(message: &str) -> bool {
+    message == "unsupported zip bundle"
+        || message.contains("installable payload")
+        || message.contains("supported APP or Port payload")
+        || message.contains("launcher or manifest candidates")
+        || message.contains("launcher references more than one")
+        || message.contains("launcher is missing from the archive")
+        || message.contains("data folder is missing from the archive")
+}
+
+fn layout_detail(message: &str) -> &'static str {
+    if message.contains("more than one") || message.contains("installable payloads") {
+        "压缩包中存在多个候选安装内容，无法安全决定安装哪一个"
+    } else {
+        "需要一个可识别的 launch.sh APP，或一个 SH 启动脚本及其脚本中引用的数据目录"
+    }
 }
 
 struct Recognized {
@@ -143,11 +435,7 @@ struct PortPackageManifest {
 }
 
 fn normalize(entry: &str) -> String {
-    let mut out = entry.replace('\\', "/");
-    while out.starts_with("./") {
-        out = out[2..].to_owned();
-    }
-    out.trim_matches('/').to_owned()
+    archive_bundle::normalize_name(entry)
 }
 
 fn depth(entry: &str) -> usize {
@@ -183,17 +471,27 @@ fn file_identity(path: &Path) -> String {
         .into_owned()
 }
 
-/// Look inside the zip (entry names only) and classify the bundle within the
-/// first three directory levels.
-fn recognize_zip_file(
+/// Look inside a ZIP or 7z archive and classify the bundle within the first
+/// three directory levels.
+fn recognize_archive_file(
     file: &mut File,
     label: &str,
+    password: Option<&str>,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(Recognized, ArchiveCatalog), String> {
+    let catalog = archive_bundle::catalog(file, label, password)?;
+    let recognized = recognize_catalog(file, label, &catalog, password, cancel)?;
+    Ok((recognized, catalog))
+}
+
+fn recognize_catalog(
+    file: &mut File,
+    label: &str,
+    catalog: &ArchiveCatalog,
+    password: Option<&str>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Recognized, String> {
-    file.seek(SeekFrom::Start(0))
-        .map_err(|error| format!("seek {label}: {error}"))?;
-    let mut archive = ZipArchive::new(file).map_err(|error| format!("{label}: {error}"))?;
-    if archive.len() > MAX_ZIP_ENTRIES {
+    if catalog.entries.len() > MAX_ZIP_ENTRIES {
         return Ok(Recognized {
             kind: ZipKind::Unknown,
             entry_script: String::new(),
@@ -202,44 +500,52 @@ fn recognize_zip_file(
             diagnostic: "archive contains too many entries".to_owned(),
         });
     }
-    let mut entries = Vec::with_capacity(archive.len());
-    let mut package_manifests = Vec::new();
-    let mut launcher_text = BTreeMap::new();
-    for index in 0..archive.len() {
+    let mut entries = Vec::with_capacity(catalog.entries.len());
+    let mut selected = BTreeMap::new();
+    for entry in &catalog.entries {
         if cancel() {
-            return Err("zip inspection cancelled".to_owned());
+            return Err("archive inspection cancelled".to_owned());
         }
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|error| format!("{label}: {error}"))?;
-        let name = normalize(entry.name());
-        let is_dir = entry.is_dir();
-        if !is_dir
+        let name = normalize(&entry.name);
+        if name.is_empty() || archive_bundle::is_ignored_metadata_path(&name) {
+            continue;
+        }
+        if !entry.directory
             && depth(&name) <= 3
             && name.rsplit('/').next() == Some("port.json")
-            && entry.size() <= 64 * 1024
+            && entry.size <= 64 * 1024
         {
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("cannot read {name:?}: {error}"))?;
+            selected.insert(name.clone(), 64 * 1024);
+        }
+        if !entry.directory
+            && name.ends_with(".sh")
+            && depth(&name) <= 3
+            && entry.size <= MAX_LAUNCHER_INSPECTION_BYTES
+        {
+            selected.insert(name.clone(), MAX_LAUNCHER_INSPECTION_BYTES);
+        }
+        entries.push((name, entry.directory));
+    }
+    if selected.len() > 64 {
+        return Ok(Recognized {
+            kind: ZipKind::Unknown,
+            entry_script: String::new(),
+            entry_data: String::new(),
+            app_name: String::new(),
+            diagnostic: "archive contains too many launcher or manifest candidates".to_owned(),
+        });
+    }
+    let selected_bytes =
+        archive_bundle::read_selected(file, label, catalog, &selected, password, cancel)?;
+    let mut package_manifests = Vec::new();
+    let mut launcher_text = BTreeMap::new();
+    for (name, bytes) in selected_bytes {
+        if name.rsplit('/').next() == Some("port.json") {
             if let Ok(manifest) = serde_json::from_slice::<PortPackageManifest>(&bytes) {
                 package_manifests.push((name.clone(), manifest));
             }
-        }
-        if !is_dir
-            && name.ends_with(".sh")
-            && depth(&name) <= 3
-            && entry.size() <= MAX_LAUNCHER_INSPECTION_BYTES
-        {
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("cannot read launcher {name:?}: {error}"))?;
+        } else if name.ends_with(".sh") {
             launcher_text.insert(name.clone(), String::from_utf8_lossy(&bytes).into_owned());
-        }
-        if !name.is_empty() {
-            entries.push((name, is_dir));
         }
     }
     let mut scripts = Vec::new();
@@ -473,6 +779,45 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[test]
+    fn archive_issue_keeps_method_details_but_removes_absolute_paths() {
+        let issue = archive_issue(
+            "/private/device/zip-upload/secret-game.7z",
+            "",
+            "archive_unsupported_method: 7z:LZMA2 method 21",
+        );
+        assert_eq!(issue.code, "unsupported_method");
+        assert_eq!(issue.format, "7z");
+        assert!(issue.report.contains("LZMA2 method 21"));
+        assert!(issue.report.contains("secret-game.7z"));
+        assert!(!issue.report.contains("/private/device"));
+        assert!(!issue.report.contains("zip-upload"));
+    }
+
+    #[test]
+    fn generic_archive_errors_do_not_copy_raw_error_or_password_text() {
+        let issue = archive_issue(
+            "/mnt/card/game.zip",
+            "zip",
+            "cannot read /mnt/card/game.zip with password=hunter2",
+        );
+        assert_eq!(issue.code, "invalid_archive");
+        assert!(!issue.report.contains("/mnt/card"));
+        assert!(!issue.report.contains("hunter2"));
+        assert!(!issue.report.contains("password="));
+    }
+
+    #[test]
+    fn unsupported_layout_has_a_stable_feedback_category() {
+        let issue = archive_issue(
+            "two-games.zip",
+            "zip",
+            "archive contains 2 installable payloads",
+        );
+        assert_eq!(issue.code, "unsupported_layout");
+        assert!(issue.detail.contains("多个候选"));
+    }
+
     fn current_test_executable() -> PathBuf {
         std::env::var_os("PAM_LAB_TEST_EXECUTABLE")
             .map(PathBuf::from)
@@ -498,8 +843,206 @@ mod tests {
         path
     }
 
+    fn set_zip_compression_method(path: &Path, method: u16) {
+        let mut bytes = fs::read(path).unwrap();
+        let encoded = method.to_le_bytes();
+        for index in 0..bytes.len().saturating_sub(12) {
+            if bytes[index..].starts_with(b"PK\x03\x04") {
+                bytes[index + 8..index + 10].copy_from_slice(&encoded);
+            } else if bytes[index..].starts_with(b"PK\x01\x02") {
+                bytes[index + 10..index + 12].copy_from_slice(&encoded);
+            }
+        }
+        fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn scan_reports_the_exact_unsupported_zip_method() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = make_zip(
+            &temp,
+            "ppmd.zip",
+            &[
+                ("game.sh", false, b"#!/bin/sh\nGAMEDIR=/ports/game\n"),
+                ("game/data.bin", false, b"data"),
+            ],
+        );
+        set_zip_compression_method(&path, 98);
+
+        let found = scan_zip_bundles(&[temp.path()], &|| false).unwrap();
+
+        assert_eq!(found.len(), 1);
+        let issue = found[0].issue.as_ref().unwrap();
+        assert_eq!(issue.code, "unsupported_method");
+        assert_eq!(issue.format, "zip");
+        assert!(issue.detail.contains("PPMd (method 98)"));
+    }
+
+    fn make_encrypted_zip(
+        dir: &TempDir,
+        name: &str,
+        password: &str,
+        entries: &[(&str, &[u8])],
+    ) -> PathBuf {
+        let path = dir.path().join(name);
+        let file = fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        for (entry_name, content) in entries {
+            let options = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .with_aes_encryption(zip::AesMode::Aes256, password);
+            zip.start_file(*entry_name, options).unwrap();
+            zip.write_all(content).unwrap();
+        }
+        zip.finish().unwrap();
+        path
+    }
+
+    fn make_7z(dir: &TempDir, name: &str, password: Option<&str>) -> PathBuf {
+        let source = dir.path().join(format!("{name}-source"));
+        fs::create_dir_all(source.join("seven-game")).unwrap();
+        fs::create_dir_all(source.join("__MACOSX")).unwrap();
+        fs::write(
+            source.join("Seven_Game.sh"),
+            b"#!/bin/sh\nGAMEDIR=/ports/seven-game\n",
+        )
+        .unwrap();
+        fs::write(source.join("seven-game/data.bin"), b"game data").unwrap();
+        fs::write(source.join(".DS_Store"), b"junk").unwrap();
+        fs::write(
+            source.join("__MACOSX/ignored.sh"),
+            b"GAMEDIR=/ports/wrong\n",
+        )
+        .unwrap();
+        let path = dir.path().join(name);
+        let mut writer = sevenz_rust2::ArchiveWriter::create(&path).unwrap();
+        if let Some(password) = password {
+            writer.set_content_methods(vec![
+                sevenz_rust2::encoder_options::AesEncoderOptions::new(sevenz_rust2::Password::new(
+                    password,
+                ))
+                .into(),
+                sevenz_rust2::EncoderMethod::LZMA2.into(),
+            ]);
+        }
+        writer.push_source_path(&source, |_| true).unwrap();
+        writer.finish().unwrap();
+        path
+    }
+
     fn no_cancel() -> impl Fn() -> bool {
         move || false
+    }
+
+    #[test]
+    fn encrypted_zip_requires_a_password_and_installs_after_unlocking() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = make_encrypted_zip(
+            &temp,
+            "encrypted.zip",
+            "s3cret",
+            &[
+                ("Encrypted.sh", b"#!/bin/sh\nGAMEDIR=/ports/encrypted\n"),
+                ("encrypted/data.bin", b"game data"),
+                ("__MACOSX/ignored.sh", b"GAMEDIR=/ports/wrong\n"),
+            ],
+        );
+        let scanned = scan_zip_bundles(&[temp.path()], &no_cancel()).unwrap();
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].kind, "locked");
+        assert_eq!(scanned[0].format, "zip");
+        assert!(scanned[0].password_required);
+        assert!(is_password_required_error(
+            &inspect_archive_bundle_with_password(&path, None, &no_cancel()).unwrap_err()
+        ));
+        assert!(is_invalid_password_error(
+            &inspect_archive_bundle_with_password(&path, Some("wrong"), &no_cancel()).unwrap_err()
+        ));
+
+        let scripts = temp.path().join("scripts");
+        let games = temp.path().join("games");
+        let trash = temp.path().join("trash");
+        let work = temp.path().join("work");
+        for root in [&scripts, &games, &trash, &work] {
+            fs::create_dir(root).unwrap();
+        }
+        install_bundle_replacing_with_password(
+            &scanned[0],
+            &scripts,
+            &games,
+            &[],
+            &trash,
+            &work,
+            &BundleLimits::default(),
+            false,
+            Some("s3cret"),
+            &no_cancel(),
+        )
+        .unwrap();
+        assert!(scripts.join("Encrypted.sh").is_file());
+        assert_eq!(
+            fs::read(games.join("encrypted/data.bin")).unwrap(),
+            b"game data"
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn plain_and_encrypted_7z_are_recognized_and_mac_metadata_is_ignored() {
+        let temp = tempfile::tempdir().unwrap();
+        let plain = make_7z(&temp, "plain.7z", None);
+        let candidate = inspect_archive_bundle_with_password(&plain, None, &no_cancel()).unwrap();
+        assert_eq!(candidate.kind, "port");
+        assert_eq!(candidate.format, "7z");
+        assert_eq!(candidate.entry_script, "Seven_Game.sh");
+        assert_eq!(candidate.entry_data, "seven-game");
+
+        let encrypted = make_7z(&temp, "encrypted.7z", Some("7z-pass"));
+        let scanned = scan_zip_bundles(&[temp.path()], &no_cancel()).unwrap();
+        let locked = scanned
+            .iter()
+            .find(|bundle| bundle.path == encrypted.to_string_lossy())
+            .unwrap()
+            .clone();
+        assert_eq!(locked.kind, "locked");
+        assert_eq!(locked.format, "7z");
+        assert!(locked.password_required);
+        assert!(is_invalid_password_error(
+            &inspect_archive_bundle_with_password(&encrypted, Some("wrong"), &no_cancel())
+                .unwrap_err()
+        ));
+        let unlocked =
+            inspect_archive_bundle_with_password(&encrypted, Some("7z-pass"), &no_cancel())
+                .unwrap();
+        assert_eq!(unlocked.kind, "port");
+        assert_eq!(unlocked.entry_data, "seven-game");
+
+        let scripts = temp.path().join("seven-scripts");
+        let games = temp.path().join("seven-games");
+        let trash = temp.path().join("seven-trash");
+        let work = temp.path().join("seven-work");
+        for root in [&scripts, &games, &trash, &work] {
+            fs::create_dir(root).unwrap();
+        }
+        install_bundle_replacing_with_password(
+            &locked,
+            &scripts,
+            &games,
+            &[],
+            &trash,
+            &work,
+            &BundleLimits::default(),
+            false,
+            Some("7z-pass"),
+            &no_cancel(),
+        )
+        .unwrap();
+        assert!(scripts.join("Seven_Game.sh").is_file());
+        assert_eq!(
+            fs::read(games.join("seven-game/data.bin")).unwrap(),
+            b"game data"
+        );
+        assert!(!encrypted.exists());
     }
 
     #[test]
@@ -1175,6 +1718,7 @@ GAMEDIR="/$directory/ports/game"
             &mut file,
             "duplicate.zip",
             &BundleLimits::default(),
+            None,
             &no_cancel(),
         )
         .unwrap_err();
@@ -2351,6 +2895,34 @@ pub fn install_bundle_replacing(
     replace_existing: bool,
     cancel: &dyn Fn() -> bool,
 ) -> Result<BundleInstallOutcome, String> {
+    install_bundle_replacing_with_password(
+        bundle,
+        scripts_dir,
+        game_dirs,
+        app_install_targets,
+        trash_dir,
+        work,
+        limits,
+        replace_existing,
+        None,
+        cancel,
+    )
+}
+
+/// Password-aware local archive installation.
+#[allow(clippy::too_many_arguments)]
+pub fn install_bundle_replacing_with_password(
+    bundle: &ZipCandidate,
+    scripts_dir: &Path,
+    game_dirs: &Path,
+    app_install_targets: &[&Path],
+    trash_dir: &Path,
+    work: &Path,
+    limits: &BundleLimits,
+    replace_existing: bool,
+    password: Option<&str>,
+    cancel: &dyn Fn() -> bool,
+) -> Result<BundleInstallOutcome, String> {
     install_bundle_with_source(
         bundle,
         scripts_dir,
@@ -2361,6 +2933,7 @@ pub fn install_bundle_replacing(
         limits,
         true,
         replace_existing,
+        password,
         cancel,
     )
 }
@@ -2405,6 +2978,34 @@ pub fn install_uploaded_bundle_replacing(
     replace_existing: bool,
     cancel: &dyn Fn() -> bool,
 ) -> Result<BundleInstallOutcome, String> {
+    install_uploaded_bundle_replacing_with_password(
+        bundle,
+        scripts_dir,
+        game_dirs,
+        app_install_targets,
+        trash_dir,
+        work,
+        limits,
+        replace_existing,
+        None,
+        cancel,
+    )
+}
+
+/// Password-aware remote archive installation.
+#[allow(clippy::too_many_arguments)]
+pub fn install_uploaded_bundle_replacing_with_password(
+    bundle: &ZipCandidate,
+    scripts_dir: &Path,
+    game_dirs: &Path,
+    app_install_targets: &[&Path],
+    trash_dir: &Path,
+    work: &Path,
+    limits: &BundleLimits,
+    replace_existing: bool,
+    password: Option<&str>,
+    cancel: &dyn Fn() -> bool,
+) -> Result<BundleInstallOutcome, String> {
     install_bundle_with_source(
         bundle,
         scripts_dir,
@@ -2415,6 +3016,7 @@ pub fn install_uploaded_bundle_replacing(
         limits,
         false,
         replace_existing,
+        password,
         cancel,
     )
 }
@@ -2453,6 +3055,7 @@ fn install_bundle_with_source(
     limits: &BundleLimits,
     retire_source: bool,
     replace_existing: bool,
+    password: Option<&str>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<BundleInstallOutcome, String> {
     check_cancelled(cancel)?;
@@ -2462,40 +3065,47 @@ fn install_bundle_with_source(
     let mut source = open_archive(source_path)?;
     let source_identity = SourceIdentity::from_file(&source)?;
     if source_identity.token() != bundle.source_identity {
-        return Err("ZIP changed after it was scanned; please scan it again".to_owned());
+        return Err("archive changed after it was scanned; please scan it again".to_owned());
     }
-    let recognized = recognize_zip_file(&mut source, &bundle.path, cancel)?;
-    if recognized.kind.name() != bundle.kind
-        || recognized.entry_script != bundle.entry_script
-        || recognized.entry_data != bundle.entry_data
-        || recognized.app_name != bundle.app_name
+    let (recognized, catalog) =
+        recognize_archive_file(&mut source, &bundle.path, password, cancel)?;
+    if catalog.format.name() != bundle.format && !bundle.format.is_empty() {
+        return Err("archive changed after it was scanned; please scan it again".to_owned());
+    }
+    let unlocks_classification = bundle.kind == "locked" && bundle.password_required;
+    if !unlocks_classification
+        && (recognized.kind.name() != bundle.kind
+            || recognized.entry_script != bundle.entry_script
+            || recognized.entry_data != bundle.entry_data
+            || recognized.app_name != bundle.app_name)
     {
-        return Err("ZIP changed after it was scanned; please scan it again".to_owned());
+        return Err("压缩包在扫描后发生了变化，请重新扫描".to_owned());
     }
-    let expanded_bytes = validate_archive_file(&mut source, &bundle.path, limits, cancel)?;
+    let expanded_bytes =
+        validate_archive_file(&mut source, &bundle.path, limits, password, cancel)?;
     let mut port_script_target = None;
-    let intended_targets = match bundle.kind.as_str() {
+    let intended_targets = match recognized.kind.name() {
         "trimui_app" => {
             let [app_install_target] = app_install_targets else {
                 return Err(
                     "device configuration must resolve exactly one APP install target".into(),
                 );
             };
-            vec![app_install_target.join(&bundle.app_name)]
+            vec![app_install_target.join(&recognized.app_name)]
         }
         "port" => {
-            let script_target = next_port_launcher_target(scripts_dir, &bundle.entry_script)?;
+            let script_target = next_port_launcher_target(scripts_dir, &recognized.entry_script)?;
             port_script_target = Some(script_target.clone());
             let mut targets = vec![script_target];
-            if !bundle.entry_data.is_empty() {
-                let data_name = Path::new(&bundle.entry_data)
+            if !recognized.entry_data.is_empty() {
+                let data_name = Path::new(&recognized.entry_data)
                     .file_name()
                     .ok_or_else(|| "Port data folder has no name".to_owned())?;
                 targets.push(game_dirs.join(data_name));
             }
             targets
         }
-        _ => return Err("无法识别这个 ZIP 安装包，请确认文件完整且受支持".into()),
+        _ => return Err("无法识别这个压缩包，请确认文件完整且受支持".into()),
     };
     for target in &intended_targets {
         let parent = target
@@ -2525,14 +3135,14 @@ fn install_bundle_with_source(
     // a power loss cannot leak an unowned 1-2 GiB staging tree.
     let mut transaction = InstallTransaction::begin(work)?;
     let stage = transaction.stage().to_path_buf();
-    extract_safe_file(&mut source, &bundle.path, &stage, cancel)?;
+    extract_safe_file(&mut source, &bundle.path, &stage, password, cancel)?;
     test_crash_point("after-extract");
 
     let mut plan = Vec::new();
-    match bundle.kind.as_str() {
+    match recognized.kind.name() {
         "trimui_app" => {
             let app_dir = stage
-                .join(&bundle.entry_script)
+                .join(&recognized.entry_script)
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| stage.clone());
@@ -2546,12 +3156,12 @@ fn install_bundle_with_source(
             }
             plan.push(InstallTarget::directory(
                 app_dir,
-                app_install_target.join(&bundle.app_name),
+                app_install_target.join(&recognized.app_name),
                 Some(PathBuf::from("launch.sh")),
             ));
         }
         "port" => {
-            let script_src = stage.join(&bundle.entry_script);
+            let script_src = stage.join(&recognized.entry_script);
             if !script_src.is_file() {
                 return Err("Port launcher is missing from the archive".into());
             }
@@ -2566,8 +3176,8 @@ fn install_bundle_with_source(
                     .ok_or_else(|| format!("Port launcher target was not resolved: {:?}", name))?,
                 true,
             ));
-            if !bundle.entry_data.is_empty() {
-                let data_src = stage.join(&bundle.entry_data);
+            if !recognized.entry_data.is_empty() {
+                let data_src = stage.join(&recognized.entry_data);
                 if !data_src.is_dir() {
                     return Err("Port data folder is missing from the archive".into());
                 }
@@ -2583,7 +3193,7 @@ fn install_bundle_with_source(
             }
         }
         _ => {
-            return Err("无法识别这个 ZIP 安装包，请确认文件完整且受支持".into());
+            return Err("无法识别这个压缩包，请确认文件完整且受支持".into());
         }
     }
 
@@ -3833,35 +4443,32 @@ fn validate_archive_file(
     file: &mut File,
     label: &str,
     limits: &BundleLimits,
+    password: Option<&str>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<u64, String> {
-    file.seek(SeekFrom::Start(0))
-        .map_err(|error| format!("seek {label}: {error}"))?;
-    let mut zip = ZipArchive::new(file).map_err(|e| format!("{label:?}: {e}"))?;
-    if zip.len() > limits.entries {
-        return Err("zip contains too many entries".into());
+    let catalog = archive_bundle::catalog(file, label, password)?;
+    if catalog.entries.len() > limits.entries {
+        return Err("archive contains too many entries".into());
+    }
+    if catalog.encrypted && password.is_none() {
+        return Err(PASSWORD_REQUIRED.to_owned());
     }
     let mut total = 0_u64;
-    let mut entries = BTreeMap::<String, bool>::new();
-    for index in 0..zip.len() {
+    let entries = archive_bundle::validate_catalog_uniqueness(&catalog.entries)?;
+    for entry in &catalog.entries {
         check_cancelled(cancel)?;
-        let entry = zip.by_index(index).map_err(|e| e.to_string())?;
-        let raw = std::str::from_utf8(entry.name_raw())
-            .map_err(|_| "non-UTF-8 entry name".to_string())?
-            .to_owned();
+        if entry.anti_item {
+            return Err(format!("7z anti-item is not supported: {}", entry.name));
+        }
+        let raw = &entry.name;
         let relative = raw.trim_start_matches("./").to_owned();
         validate_path(&relative)?;
-        let normalized = relative.trim_end_matches('/').to_owned();
-        let directory = entry.is_dir() || raw.ends_with('/');
-        if entries.insert(normalized.clone(), directory).is_some() {
-            return Err(format!("zip contains duplicate entry: {normalized}"));
-        }
-        if !entry.is_dir() && !raw.ends_with('/') && entry.size() > limits.entry_bytes {
+        if !entry.directory && !raw.ends_with('/') && entry.size > limits.entry_bytes {
             return Err(format!("entry exceeds limit: {raw}"));
         }
-        total = total.saturating_add(entry.size());
+        total = total.saturating_add(entry.size);
         if total > limits.total_bytes {
-            return Err("zip expansion exceeds total limit".into());
+            return Err("archive expansion exceeds total limit".into());
         }
     }
     for (path, directory) in &entries {
@@ -3872,7 +4479,9 @@ fn validate_archive_file(
             }
             let parent = parent.to_string_lossy();
             if entries.get(parent.as_ref()) == Some(&false) {
-                return Err(format!("zip entry conflicts with a file ancestor: {path}"));
+                return Err(format!(
+                    "archive entry conflicts with a file ancestor: {path}"
+                ));
             }
             ancestor = Path::new(parent.as_ref()).parent().map(Path::to_path_buf);
         }
@@ -3883,7 +4492,7 @@ fn validate_archive_file(
                 .any(|candidate| candidate.starts_with(&prefix))
             {
                 return Err(format!(
-                    "zip file entry conflicts with child entries: {path}"
+                    "archive file entry conflicts with child entries: {path}"
                 ));
             }
         }
@@ -3895,30 +4504,10 @@ fn extract_safe_file(
     file: &mut File,
     label: &str,
     target: &Path,
+    password: Option<&str>,
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    file.seek(SeekFrom::Start(0))
-        .map_err(|error| format!("seek {label}: {error}"))?;
-    let mut zip = ZipArchive::new(file).map_err(|e| format!("{label:?}: {e}"))?;
-    for index in 0..zip.len() {
-        check_cancelled(cancel)?;
-        let mut entry = zip.by_index(index).map_err(|e| e.to_string())?;
-        let raw = std::str::from_utf8(entry.name_raw())
-            .map_err(|_| "non-UTF-8 entry name".to_string())?
-            .to_owned();
-        let relative = raw.trim_start_matches("./").to_owned();
-        let output = target.join(relative.trim_end_matches('/'));
-        if entry.is_dir() || raw.ends_with('/') {
-            fs::create_dir_all(&output).map_err(|e| e.to_string())?;
-            continue;
-        }
-        if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        let mut out = fs::File::create(&output).map_err(|e| e.to_string())?;
-        copy_stream(&mut entry, &mut out, cancel)?;
-    }
-    Ok(())
+    archive_bundle::extract(file, label, target, password, cancel)
 }
 
 fn validate_path(value: &str) -> Result<(), String> {

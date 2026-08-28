@@ -9,6 +9,8 @@ y = esc
 start = f10
 back = f10
 guide = esc
+l1 = pageup
+r1 = pagedown
 
 up = up
 up = repeat

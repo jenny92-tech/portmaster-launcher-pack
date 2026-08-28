@@ -921,6 +921,29 @@ with tempfile.TemporaryDirectory() as source:
         assert(k.debug_focus().zone=="sidebar")
         k.goto_page(1)
     ''')
+    # L1/R1 emit PageUp/PageDown. A page jump advances by the number of
+    # currently visible focusable rows and works for both lists and grids.
+    lua.execute(r'''
+        local k=require("kit"); local rows={}
+        for i=1,30 do rows[i]=k.button("Row "..i,function() end) end
+        local long_list=k.add_page("Long list",rows)
+        k.goto_page(long_list); love.draw()
+        local visible=k.debug_layout().last-k.debug_layout().first+1
+        assert(visible>1 and k.debug_focus().focus_i==1)
+        love.keypressed("pagedown")
+        assert(k.debug_focus().focus_i==1+visible)
+        love.draw(); love.keypressed("pageup")
+        assert(k.debug_focus().focus_i==1)
+
+        local grid=k.add_page("Grid",rows,{row_layout={mode="grid",columns=2}})
+        k.goto_page(grid); love.draw()
+        local first=k.debug_focus().focus_i
+        love.keypressed("pagedown")
+        assert(k.debug_focus().focus_i>first+1)
+        love.draw(); love.keypressed("pageup")
+        assert(k.debug_focus().focus_i==first)
+        k.goto_page(1)
+    ''')
     # preserve_focus follows a stable row id across insertions rather than
     # retaining an index that now names another action.
     lua.execute(r'''
@@ -948,12 +971,13 @@ with tempfile.TemporaryDirectory() as source:
         k.goto_page(1)
     ''')
     # Home is the launcher: selecting a real scanned port opens a safe launch
-    # confirmation, and cancelling keeps the user on Home.
+    # confirmation with the recommended Launch action focused; cancelling still
+    # keeps the user on Home.
     lua.execute(r'''
         local k=require("kit")
         love.draw(); love.keypressed("return")
         local launch=k.debug_dialog()
-        assert(launch.open and launch.focus=="cancel" and not launch.danger)
+        assert(launch.open and launch.focus=="confirm" and not launch.danger)
         love.keypressed("escape"); love.draw()
         assert(not k.debug_dialog().open and k.debug_page().index==1)
     ''')
@@ -974,5 +998,35 @@ with tempfile.TemporaryDirectory() as source:
         os.environ.pop("PAM_ENV", None)
     else:
         os.environ["PAM_ENV"] = previous
+
+# The controller-only password keyboard never exposes the entered value through
+# diagnostics, supports every semantic navigation action, and clears itself on
+# both completion and cancellation.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},build_pages=function()
+            k.add_page("Home",{k.button("Open",function() end)})
+        end})
+        love.load()
+        local submitted=nil
+        assert(k.password_dialog({on_confirm=function(value) submitted=value end}))
+        assert(k.debug_password_dialog().open and k.debug_password_dialog().length==0)
+        k.input("confirm"); k.input("right"); k.input("confirm")
+        assert(k.debug_password_dialog().length==2)
+        k.input("page_down"); assert(k.debug_password_dialog().mode==2)
+        k.input("down"); k.input("down"); k.input("down"); k.input("down")
+        k.input("right"); k.input("right"); k.input("right"); k.input("confirm")
+        assert(submitted=="12" and not k.debug_password_dialog().open)
+        local cancelled=false
+        assert(k.password_dialog({on_confirm=function() error("must not submit") end,
+            on_cancel=function() cancelled=true end}))
+        k.input("confirm"); k.input("cancel")
+        assert(cancelled and not k.debug_password_dialog().open)
+    ''')
 
 print("love Lua module tests: PASS")

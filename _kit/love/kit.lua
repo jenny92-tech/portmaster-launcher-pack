@@ -59,6 +59,7 @@ local busy, busy_message, busy_info, busy_elapsed = false, nil, nil, 0
 local busy_display_progress = 0
 local toast_state = nil
 local dialog_state, dialog_focus = nil, 2
+local password_state = nil
 local guide_state = nil
 local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
@@ -69,6 +70,7 @@ local needs_redraw = true
 
 local DEFAULT_INPUT_MAP = {
     up="up", down="down", left="left", right="right",
+    pageup="page_up", pagedown="page_down",
     ["return"]="confirm", kpenter="confirm", space="confirm", escape="cancel",
     -- These aliases let a future native gamepad adapter dispatch semantic
     -- actions without manufacturing keyboard names.
@@ -514,6 +516,33 @@ function kit.debug_dialog()
         message=dialog_state and t(checked and dialog_state.message_checked or dialog_state.message or "") or "",
         scope_depth=#focus_stack}
 end
+function kit.password_dialog(opts)
+    if type(opts)~="table" or type(opts.on_confirm)~="function" then return false end
+    if password_state then return false end
+    focus_stack[#focus_stack+1]=capture_focus()
+    password_state={
+        title=opts.title or {en="Archive password",zh="压缩包密码"},
+        message=opts.message or {en="Enter the password to continue.",zh="输入密码后继续安装。"},
+        value="",focus=1,mode=1,max_length=math.max(1,math.min(1024,tonumber(opts.max_length) or 128)),
+        on_confirm=opts.on_confirm,on_cancel=opts.on_cancel,
+    }
+    kit.mark_dirty()
+    return true
+end
+function kit.close_password_dialog()
+    if not password_state then return false end
+    password_state.value=""
+    password_state=nil
+    local snapshot=table.remove(focus_stack)
+    restore_focus(snapshot)
+    kit.mark_dirty()
+    return true
+end
+function kit.debug_password_dialog()
+    return {open=password_state~=nil,focus=password_state and password_state.focus or 0,
+        mode=password_state and password_state.mode or 0,
+        length=password_state and #password_state.value or 0,scope_depth=#focus_stack}
+end
 function kit.guide(opts)
     if type(opts)~="table" or type(opts.callouts)~="table" then return false end
     if #opts.callouts==0 then return false end
@@ -743,6 +772,60 @@ local function move_v(d)
     if pos < 1 then zone="bar"; bar_i=1; return
     elseif pos > #fs then pos=#fs end
     focus_i=fs[pos]
+end
+
+local function focus_position(items,index)
+    for position,value in ipairs(items) do
+        if value==index then return position end
+    end
+    return 1
+end
+
+local function visible_row_count(items)
+    if not layout then return 1 end
+    local L=layout()
+    if not L then return 1 end
+    local count=0
+    if L.geometry then
+        local top=L.scroll_y or 0
+        local bottom=top+(L.band or 0)
+        for _,index in ipairs(items) do
+            local geometry=L.geometry[index]
+            if geometry and geometry.content_y+geometry.h>top and geometry.content_y<bottom then
+                count=count+1
+            end
+        end
+    else
+        for _,index in ipairs(items) do
+            if index>=(L.first or 1) and index<=(L.last or #cur()) then count=count+1 end
+        end
+    end
+    return math.max(1,count)
+end
+
+local function move_page(d)
+    if zone=="bar" then
+        if d>0 then
+            local rows=focusables(cur())
+            if #rows>0 then zone="rows"; focus_i=rows[1] end
+        end
+        return
+    end
+    local items,current,step
+    if zone=="sidebar" then
+        items=focusables(sidebar())
+        current=sidebar_i
+        local geometry=layout and sidebar_geometry and sidebar_geometry(layout()) or nil
+        step=geometry and geometry.per or #items
+    else
+        items=focusables(cur())
+        current=focus_i
+        step=visible_row_count(items)
+    end
+    if #items==0 then return end
+    local position=focus_position(items,current)
+    position=math.max(1,math.min(#items,position+d*math.max(1,step)))
+    if zone=="sidebar" then sidebar_i=items[position] else focus_i=items[position] end
 end
 local function switch_current(row)
     if row.key~=nil then return state[row.key] end
@@ -1083,7 +1166,7 @@ function kit.load()
     if fw and fh then W,H=fw,fh; offX,offY=math.floor((realW-fw)/2),math.floor((realH-fh)/2); letterbox=true
     else W,H=realW,realH; offX,offY=0,0; letterbox=false end
     love.graphics.setBackgroundColor(0.02,0.02,0.03)
-    dialog_state,dialog_focus=nil,2; guide_state=nil; focus_stack={}; navigation_stack={}; toast_state=nil
+    dialog_state,dialog_focus=nil,2; password_state=nil; guide_state=nil; focus_stack={}; navigation_stack={}; toast_state=nil
     busy_elapsed=0; busy_display_progress=0
     needs_redraw=true
     input_map={}; for key,action in pairs(DEFAULT_INPUT_MAP) do input_map[key]=action end
@@ -1472,6 +1555,70 @@ sidebar_geometry=function(L)
         if lg then geometry.scroll_last_y=lg.y+lg.h end
     end
     return geometry
+end
+
+local PASSWORD_PAGES={
+    "1234567890qwertyuiopasdfghjkl-zxcvbnm_.@",
+    "1234567890QWERTYUIOPASDFGHJKL-ZXCVBNM_.@",
+    "!@#$%^&*()[]{}<>?/\\|:;\"'`~+=-_ ,01234567",
+}
+
+local function password_key(page,index)
+    return page:sub(index,index)
+end
+
+local function draw_password_dialog(L)
+    local d=password_state
+    if not d then return end
+    local cs=math.max(APP_MINCS,math.min(1,H/720))
+    local dw=math.min(W-28*cs,760*cs)
+    local dh=math.min(H-28*cs,470*cs)
+    local dx,dy=(W-dw)/2,(H-dh)/2
+    local pad,gap=24*cs,7*cs
+    love.graphics.setColor(0,0,0,0.82); love.graphics.rectangle("fill",0,0,W,H)
+    love.graphics.setColor(0.055,0.035,0.085,0.995); love.graphics.rectangle("fill",dx,dy,dw,dh,10,10)
+    love.graphics.setColor(1,1,1,0.48); love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line",dx,dy,dw,dh,10,10)
+    outlined(t(d.title),dx+pad,dy+20*cs,27*cs,{1,1,1},"left",dw-pad*2)
+    plain(t(d.message),dx+pad,dy+58*cs,18*cs,{0.76,0.74,0.82},"left",dw-pad*2)
+
+    local input_y=dy+91*cs
+    love.graphics.setColor(0.035,0.025,0.055,1)
+    love.graphics.rectangle("fill",dx+pad,input_y,dw-pad*2,48*cs,8,8)
+    love.graphics.setColor(0.45,0.36,0.70,1); love.graphics.rectangle("line",dx+pad,input_y,dw-pad*2,48*cs,8,8)
+    local shown=math.min(#d.value,28)
+    local masked=string.rep("•",shown)..(#d.value>shown and "…" or "")
+    plain(masked,dx+pad+13*cs,input_y+vcen(23*cs,48*cs),23*cs,{1,1,1},"left",dw-pad*2-100*cs)
+    local length_label=(state.ui_lang=="zh" and "长度 " or "Length ")..tostring(#d.value)
+    plain(length_label,dx+pad,input_y+vcen(17*cs,48*cs),17*cs,{0.65,0.62,0.72},"right",dw-pad*2-12*cs)
+
+    local page=PASSWORD_PAGES[d.mode]
+    local grid_y=input_y+61*cs
+    local kw=(dw-pad*2-gap*9)/10
+    local kh=42*cs
+    for index=1,40 do
+        local row=math.floor((index-1)/10)
+        local col=(index-1)%10
+        local x=dx+pad+col*(kw+gap)
+        local y=grid_y+row*(kh+gap)
+        panel(x,y,kw,kh,d.focus==index,false,L.app)
+        local label=password_key(page,index)
+        if label==" " then label=state.ui_lang=="zh" and "空" or "SP" end
+        plain(label,x,y+vcen(20*cs,kh),20*cs,{1,1,1},"center",kw)
+    end
+
+    local action_y=grid_y+4*(kh+gap)+4*cs
+    local aw=(dw-pad*2-gap*3)/4
+    local mode_labels={{en="abc / ABC / #+=",zh="abc / ABC / #+="},{en="Delete",zh="退格"},{en="Clear",zh="清空"},{en="Install",zh="安装"}}
+    for action=1,4 do
+        local index=40+action
+        local x=dx+pad+(action-1)*(aw+gap)
+        panel(x,action_y,aw,48*cs,d.focus==index,false,L.app)
+        plain(t(mode_labels[action]),x,action_y+vcen(18*cs,48*cs),18*cs,{1,1,1},"center",aw)
+    end
+    local hint=state.ui_lang=="zh" and "方向键选择 · A/B 输入 · L1/R1 切换字符 · X/Y 取消" or
+        "D-pad select · A/B type · L1/R1 change characters · X/Y cancel"
+    plain(hint,dx+pad,dy+dh-25*cs,16*cs,{0.62,0.60,0.70},"center",dw-pad*2)
 end
 
 local function draw_dialog(L)
@@ -2092,6 +2239,7 @@ function kit.draw()
     if dialog_state and dialog_state.over_busy~=true then draw_dialog(L) end
     if busy then draw_busy_overlay(L) end
     if dialog_state and dialog_state.over_busy==true then draw_dialog(L) end
+    if password_state then draw_password_dialog(L) end
 
     -- Toasts report short-lived outcomes without changing page content or
     -- stealing controller focus. They slide up from the bottom, remain visible
@@ -2158,9 +2306,49 @@ local function dialog_input(action)
     return true
 end
 
+local function password_input(action)
+    local d=password_state
+    if not d then return false end
+    local focus=d.focus
+    if action=="page_up" then d.mode=(d.mode+1)%#PASSWORD_PAGES+1
+    elseif action=="page_down" then d.mode=d.mode%#PASSWORD_PAGES+1
+    elseif action=="left" then
+        if focus<=40 then d.focus=math.floor((focus-1)/10)*10+(focus-2)%10+1
+        else d.focus=41+(focus-42)%4 end
+    elseif action=="right" then
+        if focus<=40 then d.focus=math.floor((focus-1)/10)*10+focus%10+1
+        else d.focus=41+(focus-40)%4 end
+    elseif action=="up" then
+        if focus>40 then
+            local columns={2,5,7,9}; d.focus=30+columns[focus-40]
+        elseif focus>10 then d.focus=focus-10 end
+    elseif action=="down" then
+        if focus<=30 then d.focus=focus+10
+        elseif focus<=40 then d.focus=41+math.min(3,math.floor(((focus-31)*4)/10)) end
+    elseif action=="confirm" then
+        if focus<=40 then
+            if #d.value<d.max_length then d.value=d.value..password_key(PASSWORD_PAGES[d.mode],focus) end
+        elseif focus==41 then d.mode=d.mode%#PASSWORD_PAGES+1
+        elseif focus==42 then d.value=d.value:sub(1,math.max(0,#d.value-1))
+        elseif focus==43 then d.value=""
+        else
+            local callback,value=d.on_confirm,d.value
+            kit.close_password_dialog()
+            callback(value)
+        end
+    elseif action=="cancel" then
+        local callback=d.on_cancel
+        kit.close_password_dialog()
+        if callback then callback() end
+    else return false end
+    return true
+end
+
 function kit.input(action)
     local handled
-    if dialog_state and dialog_state.over_busy==true then
+    if password_state then
+        handled=password_input(action)
+    elseif dialog_state and dialog_state.over_busy==true then
         handled=dialog_input(action)
     elseif busy then
         if action=="confirm" and busy_info and type(busy_info.on_cancel)=="function" and
@@ -2187,6 +2375,8 @@ function kit.input(action)
         handled=dialog_input(action)
     elseif action=="up" then move_v(-1); handled=true
     elseif action=="down" then move_v(1); handled=true
+    elseif action=="page_up" then move_page(-1); handled=true
+    elseif action=="page_down" then move_page(1); handled=true
     elseif action=="left" then move_h(-1); handled=true
     elseif action=="right" then move_h(1); handled=true
     elseif action=="confirm" then

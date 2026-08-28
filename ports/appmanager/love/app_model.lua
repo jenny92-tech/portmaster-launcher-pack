@@ -170,15 +170,28 @@ function Model.new(kit,native)
         if type(bundles)~="table" then self.zip_bundles={} return true end
         local out={}
         for _,bundle in ipairs(bundles) do
+            local issue=nil
+            if type(bundle.issue)=="table" then
+                issue={
+                    code=tostring(bundle.issue.code or ""),
+                    format=tostring(bundle.issue.format or ""),
+                    summary=tostring(bundle.issue.summary or ""),
+                    detail=tostring(bundle.issue.detail or ""),
+                    report=tostring(bundle.issue.report or ""),
+                }
+            end
             out[#out+1]={
                 path=tostring(bundle.path or ""),
                 size=tonumber(bundle.size) or 0,
                 source_identity=tostring(bundle.source_identity or ""),
+                format=tostring(bundle.format or ""),
+                password_required=bundle.password_required==true,
                 kind=tostring(bundle.kind or "unknown"),
                 entry_script=tostring(bundle.entry_script or ""),
                 entry_data=tostring(bundle.entry_data or ""),
                 app_name=tostring(bundle.app_name or ""),
                 diagnostic=tostring(bundle.diagnostic or ""),
+                issue=issue,
             }
         end
         self.zip_bundles=out

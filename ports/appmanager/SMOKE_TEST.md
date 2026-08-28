@@ -12,8 +12,10 @@ resolution and any controller/display difference with the result.
 - [ ] A completed repair requests an explicit exit. Reopening blocks on automatic validation before Home appears.
 - [ ] Environment Management shows current/latest versions, device, health and paths; Runtime Repair and Environment Details open normally.
 - [ ] Port list scanning, selection, uninstall-to-Trash, restore, leftovers and exit confirmation still work.
-- [ ] Enable Remote Management while APP Manager remains open, pair from another LAN device and upload a 1–2 GiB zip. Close APP Manager and confirm the endpoint stops; lock-screen behavior is firmware-defined and unsupported.
-- [ ] From the web UI install one Port zip and one APP zip, uninstall each, restore both from Trash, and confirm a successful upload does not leave the original zip in Trash.
+- [ ] Enable Remote Management while APP Manager remains open, pair from another LAN device and upload a 1–2 GiB ZIP or 7z. Close APP Manager and confirm the endpoint stops; lock-screen behavior is firmware-defined and unsupported.
+- [ ] From the web UI install one Port ZIP, one APP ZIP and one password-protected 7z. A wrong password must remain retryable without another upload; cancel must remove the pending upload. Uninstall each, restore both kinds from Trash, and confirm a successful upload does not leave the transport archive in Trash.
+- [ ] Put password-protected ZIP and 7z packages in a storage-card root. Install both with the controller keyboard and confirm `__MACOSX`, `.DS_Store`, and `._*` metadata neither affects recognition nor appears in installed content.
+- [ ] Upload an unsupported-method ZIP/7z and a damaged archive. Confirm the web page shows the format, stable diagnostic code and specific method when known; “Copy feedback” must work over LAN HTTP and must not include a password, pairing token or device-absolute path. On-device scan results must open a diagnostic dialog instead of acting like selectable packages.
 
 ## TrimUI / chuimi
 
@@ -26,3 +28,4 @@ resolution and any controller/display difference with the result.
 - [ ] Record any clipped text, font blur, focus offset, controller mismatch or display-driver difference.
 - [ ] Enable Remote Management while APP Manager remains open, complete a 1–2 GiB upload, then close APP Manager and verify the web endpoint stops. Lock-screen behavior is firmware-defined and is not a supported transfer mode.
 - [ ] Pair from desktop and mobile browser widths; install, uninstall, restore and empty Trash, checking that no control overflows horizontally.
+- [ ] Repeat the unsupported-method and damaged-archive diagnostic check; verify copied feedback is sanitized and the package remains uninstalled.

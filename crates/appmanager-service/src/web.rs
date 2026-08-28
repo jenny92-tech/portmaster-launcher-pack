@@ -26,6 +26,9 @@ const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_CONNECTIONS: usize = 8;
 const HEADER_TIMEOUT: Duration = Duration::from_secs(8);
 const SERVER_ID: &str = "port-app-manager";
+const PENDING_UPLOAD_TTL: Duration = Duration::from_secs(10 * 60);
+const MAX_PENDING_UPLOADS: usize = 4;
+const MAX_PASSWORD_BYTES: usize = 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebEndpoint {
@@ -40,7 +43,6 @@ struct RequestHead {
     content_length: Option<u64>,
     filename: String,
     token: String,
-    replace_existing: bool,
 }
 
 struct AuthState {
@@ -49,6 +51,7 @@ struct AuthState {
     pairing: Mutex<HashMap<IpAddr, PairingRate>>,
     upload_active: AtomicBool,
     upload_cancel: Mutex<Option<appmanager_core::CancellationToken>>,
+    pending_uploads: Mutex<HashMap<String, PendingUpload>>,
 }
 
 pub(crate) struct PreparedWebServer {
@@ -89,6 +92,38 @@ struct ManageRequest {
     revision: String,
     #[serde(default)]
     paths: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UploadInstallRequest {
+    upload_id: String,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    replace_existing: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingUploadRequest {
+    upload_id: String,
+}
+
+impl Drop for UploadInstallRequest {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        if let Some(password) = self.password.as_mut() {
+            password.zeroize();
+        }
+    }
+}
+
+struct PendingUpload {
+    guard: UploadGuard,
+    display_name: String,
+    expires_at: Instant,
+    failures: u8,
 }
 
 /// Bind the first available LAN port and create the pairing secret before the
@@ -362,14 +397,18 @@ fn handle(
                 return respond_error(reader.get_mut(), 400, "missing Content-Length");
             };
             if length == 0 || length > MAX_UPLOAD_BODY {
-                return respond_error(reader.get_mut(), 413, "zip 文件必须小于 4 GiB");
+                return respond_error(reader.get_mut(), 413, "压缩包必须小于 4 GiB");
             }
             if head.filename.is_empty() {
                 return respond_error(reader.get_mut(), 400, "missing X-Filename");
             }
-            let mut request = request;
-            request.cancel_token = Some(cancel_token.clone());
-            let session = match Session::new_pinned(request.clone(), resolved, health) {
+            let upload_name = match safe_upload_name(&percent_decode(&head.filename)) {
+                Ok(name) => name,
+                Err(message) => return respond_error(reader.get_mut(), 400, &message),
+            };
+            let mut upload_request = request.clone();
+            upload_request.cancel_token = Some(cancel_token.clone());
+            let session = match Session::new_pinned(upload_request, resolved, health) {
                 Ok(session) => session,
                 Err(message) => return respond_error(reader.get_mut(), 423, &message),
             };
@@ -377,27 +416,162 @@ fn handle(
                 Ok(reservation) => reservation,
                 Err(message) => return respond_error(reader.get_mut(), 423, &message),
             };
-            let (zip_path, _upload) = match receive_upload(
+            let (archive_path, upload) = match receive_upload(
                 &mut reader,
                 &request.app_root,
-                &head.filename,
+                &upload_name,
                 length,
                 &cancel_token,
             ) {
                 Ok(upload) => upload,
                 Err(message) => return respond_error(reader.get_mut(), 400, &message),
             };
-            match session.install_zip_reserved(
-                zip_path.to_string_lossy().into_owned(),
-                head.replace_existing,
-            ) {
+            let password_required =
+                match appmanager_core::port_zip::inspect_archive_bundle_with_password(
+                    &archive_path,
+                    None,
+                    &|| cancel_token.is_cancelled(),
+                ) {
+                    Ok(bundle) if bundle.kind == "port" || bundle.kind == "trimui_app" => {
+                        bundle.password_required
+                    }
+                    Ok(bundle) => {
+                        let message = if bundle.diagnostic.is_empty() {
+                            "unsupported zip bundle"
+                        } else {
+                            &bundle.diagnostic
+                        };
+                        return respond_archive_error(reader.get_mut(), 400, &upload_name, message);
+                    }
+                    Err(message)
+                        if appmanager_core::port_zip::is_password_required_error(&message) =>
+                    {
+                        true
+                    }
+                    Err(message) => {
+                        return respond_archive_error(
+                            reader.get_mut(),
+                            400,
+                            &upload_name,
+                            &message,
+                        );
+                    }
+                };
+            match auth.store_pending_upload(upload, upload_name) {
+                Ok(upload_id) => respond_json(
+                    reader.get_mut(),
+                    200,
+                    &json!({
+                        "ok": true,
+                        "code": if password_required {"password_required"} else {"ready"},
+                        "password_required": password_required,
+                        "upload_id": upload_id,
+                    }),
+                ),
+                Err(error) => respond_error(reader.get_mut(), 503, &error),
+            }
+        }
+        ("POST", "/api/install") => {
+            let cancel_token = appmanager_core::CancellationToken::default();
+            let Some(_upload_lease) = UploadLease::try_acquire(
+                &auth.upload_active,
+                &auth.upload_cancel,
+                cancel_token.clone(),
+            ) else {
+                return respond_error(reader.get_mut(), 409, "已有安装包正在上传或安装");
+            };
+            let mut body = match read_small_body(&mut reader, head.content_length) {
+                Ok(body) => body,
+                Err(message) => return respond_error(reader.get_mut(), 400, &message),
+            };
+            let decoded = serde_json::from_slice(&body);
+            use zeroize::Zeroize;
+            body.zeroize();
+            let payload: UploadInstallRequest = match decoded {
+                Ok(payload) => payload,
+                Err(_) => return respond_error(reader.get_mut(), 400, "安装请求格式无效"),
+            };
+            if payload
+                .password
+                .as_ref()
+                .is_some_and(|password| password.len() > MAX_PASSWORD_BYTES)
+            {
+                return respond_error(reader.get_mut(), 400, "密码过长");
+            }
+            let Some(mut pending) = auth.take_pending_upload(&payload.upload_id) else {
+                return respond_error(reader.get_mut(), 410, "上传已取消或已过期，请重新选择文件");
+            };
+            let mut request = request;
+            request.cancel_token = Some(cancel_token);
+            let session = match Session::new_pinned(request, resolved, health) {
+                Ok(session) => session,
+                Err(message) => {
+                    auth.restore_pending_upload(payload.upload_id.clone(), pending);
+                    return respond_error(reader.get_mut(), 423, &message);
+                }
+            };
+            let _reservation = match session.reserve_operation() {
+                Ok(reservation) => reservation,
+                Err(message) => {
+                    auth.restore_pending_upload(payload.upload_id.clone(), pending);
+                    return respond_error(reader.get_mut(), 423, &message);
+                }
+            };
+            let result = session.install_zip_reserved(
+                pending.guard.path.to_string_lossy().into_owned(),
+                payload.replace_existing,
+                payload.password.as_deref(),
+            );
+            match result {
                 Ok(result) => respond_json(
                     reader.get_mut(),
                     200,
                     &json!({"ok": true, "result": result}),
                 ),
-                Err(message) => respond_error(reader.get_mut(), 400, &message),
+                Err(message)
+                    if appmanager_core::port_zip::is_invalid_password_error(&message)
+                        || appmanager_core::port_zip::is_password_required_error(&message) =>
+                {
+                    let invalid = appmanager_core::port_zip::is_invalid_password_error(&message);
+                    if invalid {
+                        pending.failures = pending.failures.saturating_add(1);
+                    }
+                    if invalid && pending.failures >= 8 {
+                        respond_error(reader.get_mut(), 429, "密码错误次数过多，请重新上传")
+                    } else {
+                        auth.restore_pending_upload(payload.upload_id.clone(), pending);
+                        respond_json(
+                            reader.get_mut(),
+                            400,
+                            &json!({
+                                "ok": false,
+                                "code": if invalid {"invalid_password"} else {"password_required"},
+                                "error": if invalid {"密码不正确，请重试"} else {"压缩包需要密码"},
+                                "upload_id": payload.upload_id,
+                            }),
+                        )
+                    }
+                }
+                Err(message) => {
+                    respond_archive_error(reader.get_mut(), 400, &pending.display_name, &message)
+                }
             }
+        }
+        ("POST", "/api/upload/cancel") => {
+            let body = match read_small_body(&mut reader, head.content_length) {
+                Ok(body) => body,
+                Err(message) => return respond_error(reader.get_mut(), 400, &message),
+            };
+            let payload: PendingUploadRequest = match serde_json::from_slice(&body) {
+                Ok(payload) => payload,
+                Err(_) => return respond_error(reader.get_mut(), 400, "取消请求格式无效"),
+            };
+            let cancelled = auth.take_pending_upload(&payload.upload_id).is_some();
+            respond_json(
+                reader.get_mut(),
+                200,
+                &json!({"ok": true, "cancelled": cancelled}),
+            )
         }
         _ => respond_error(reader.get_mut(), 404, "not found"),
     }
@@ -433,7 +607,6 @@ fn read_head_with_timeout(
     let mut content_length = None;
     let mut filename = String::new();
     let mut token = String::new();
-    let mut replace_existing = false;
     loop {
         let remaining = MAX_HEADER_BYTES.saturating_sub(used);
         let line = read_limited_line(reader, remaining, started, timeout)?;
@@ -465,13 +638,6 @@ fn read_head_with_timeout(
             }
             "x-filename" => filename = value.trim().to_owned(),
             "x-appmanager-token" => token = value.trim().to_owned(),
-            "x-appmanager-replace" => {
-                replace_existing = match value.trim() {
-                    "1" => true,
-                    "0" | "" => false,
-                    _ => return Err("invalid X-AppManager-Replace header".to_owned()),
-                };
-            }
             _ => {}
         }
     }
@@ -481,7 +647,6 @@ fn read_head_with_timeout(
         content_length,
         filename,
         token,
-        replace_existing,
     })
 }
 
@@ -535,16 +700,15 @@ fn read_small_body(reader: &mut impl Read, length: Option<u64>) -> Result<Vec<u8
 fn receive_upload(
     reader: &mut impl Read,
     app_root: &Path,
-    encoded_filename: &str,
+    filename: &str,
     length: u64,
     cancel_token: &appmanager_core::CancellationToken,
 ) -> Result<(PathBuf, UploadGuard), String> {
-    let filename = safe_upload_name(&percent_decode(encoded_filename))?;
     let directory = ensure_upload_directory(app_root)?;
     if available_bytes(&directory)
         .is_some_and(|bytes| bytes < length.saturating_add(64 * 1024 * 1024))
     {
-        return Err("存储空间不足，无法接收这个 zip 文件".to_owned());
+        return Err("存储空间不足，无法接收这个压缩包".to_owned());
     }
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -707,9 +871,14 @@ impl Drop for UploadGuard {
 
 fn safe_upload_name(value: &str) -> Result<String, String> {
     let base = value.rsplit(['/', '\\']).next().unwrap_or("").trim();
-    if !base.to_ascii_lowercase().ends_with(".zip") {
-        return Err("只支持 .zip 安装包".to_owned());
-    }
+    let lower = base.to_ascii_lowercase();
+    let extension = if lower.ends_with(".zip") {
+        ".zip"
+    } else if lower.ends_with(".7z") {
+        ".7z"
+    } else {
+        return Err("只支持 .zip 或 .7z 安装包".to_owned());
+    };
     let mut safe = base
         .chars()
         .filter(|character| {
@@ -717,8 +886,8 @@ fn safe_upload_name(value: &str) -> Result<String, String> {
         })
         .take(96)
         .collect::<String>();
-    if safe.is_empty() || safe == ".zip" {
-        safe = "bundle.zip".to_owned();
+    if safe.is_empty() || safe == extension {
+        safe = format!("bundle{extension}");
     }
     Ok(safe)
 }
@@ -774,6 +943,7 @@ fn manage(session: &mut Session, payload: ManageRequest) -> Result<(), String> {
                 arg,
                 source_identity: None,
                 replace_existing: false,
+                password: None,
             })
             .collect(),
         "restore" if !payload.paths.is_empty() => payload
@@ -784,6 +954,7 @@ fn manage(session: &mut Session, payload: ManageRequest) -> Result<(), String> {
                 arg,
                 source_identity: None,
                 replace_existing: false,
+                password: None,
             })
             .collect(),
         "restore_replace" if !payload.paths.is_empty() => payload
@@ -794,6 +965,7 @@ fn manage(session: &mut Session, payload: ManageRequest) -> Result<(), String> {
                 arg,
                 source_identity: None,
                 replace_existing: false,
+                password: None,
             })
             .collect(),
         "delete" if !payload.paths.is_empty() => payload
@@ -804,6 +976,7 @@ fn manage(session: &mut Session, payload: ManageRequest) -> Result<(), String> {
                 arg,
                 source_identity: None,
                 replace_existing: false,
+                password: None,
             })
             .collect(),
         "empty_trash" if payload.paths.is_empty() => vec![crate::launcher::EmbeddedAction {
@@ -811,6 +984,7 @@ fn manage(session: &mut Session, payload: ManageRequest) -> Result<(), String> {
             arg: "-".to_owned(),
             source_identity: None,
             replace_existing: false,
+            password: None,
         }],
         _ => return Err("invalid management action".to_owned()),
     };
@@ -964,7 +1138,58 @@ impl AuthState {
             pairing: Mutex::new(HashMap::new()),
             upload_active: AtomicBool::new(false),
             upload_cancel: Mutex::new(None),
+            pending_uploads: Mutex::new(HashMap::new()),
         })
+    }
+
+    fn store_pending_upload(
+        &self,
+        guard: UploadGuard,
+        display_name: String,
+    ) -> Result<String, String> {
+        let now = Instant::now();
+        let mut pending = self
+            .pending_uploads
+            .lock()
+            .unwrap_or_else(|value| value.into_inner());
+        pending.retain(|_, upload| upload.expires_at > now);
+        if pending.len() >= MAX_PENDING_UPLOADS {
+            return Err("等待输入密码的上传过多，请取消旧任务后重试".to_owned());
+        }
+        let upload_id = random_hex(24)?;
+        pending.insert(
+            upload_id.clone(),
+            PendingUpload {
+                guard,
+                display_name,
+                expires_at: now + PENDING_UPLOAD_TTL,
+                failures: 0,
+            },
+        );
+        Ok(upload_id)
+    }
+
+    fn take_pending_upload(&self, upload_id: &str) -> Option<PendingUpload> {
+        if upload_id.len() != 48 || !upload_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let now = Instant::now();
+        let mut pending = self
+            .pending_uploads
+            .lock()
+            .unwrap_or_else(|value| value.into_inner());
+        pending.retain(|_, upload| upload.expires_at > now);
+        pending.remove(upload_id)
+    }
+
+    fn restore_pending_upload(&self, upload_id: String, upload: PendingUpload) {
+        if upload.expires_at <= Instant::now() {
+            return;
+        }
+        self.pending_uploads
+            .lock()
+            .unwrap_or_else(|value| value.into_inner())
+            .insert(upload_id, upload);
     }
 
     fn verify_pairing_code(&self, peer: IpAddr, candidate: &str) -> PairingResult {
@@ -995,6 +1220,14 @@ impl AuthState {
         rate.retry_after = now + Duration::from_millis(delay_ms.min(8_000));
         PairingResult::Rejected
     }
+}
+
+fn random_hex(bytes: usize) -> Result<String, String> {
+    let mut random = vec![0_u8; bytes];
+    File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut random))
+        .map_err(|error| format!("generate upload secret: {error}"))?;
+    Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 impl ConnectionGate {
@@ -1068,6 +1301,25 @@ fn respond_error(stream: &mut TcpStream, status: u16, message: &str) -> Result<(
     respond_json(stream, status, &json!({"ok": false, "error": message}))
 }
 
+fn respond_archive_error(
+    stream: &mut TcpStream,
+    status: u16,
+    display_name: &str,
+    message: &str,
+) -> Result<(), String> {
+    let diagnostic = appmanager_core::port_zip::archive_issue(display_name, "", message);
+    respond_json(
+        stream,
+        status,
+        &json!({
+            "ok": false,
+            "code": diagnostic.code,
+            "error": diagnostic.message(),
+            "diagnostic": diagnostic,
+        }),
+    )
+}
+
 fn respond(
     stream: &mut TcpStream,
     status: u16,
@@ -1133,17 +1385,42 @@ const INDEX_HTML: &str = include_str!("web/index.html");
 mod tests {
     use super::*;
 
-    fn try_http(port: u16, request: &str) -> std::io::Result<String> {
+    fn try_http_bytes(port: u16, request: &[u8]) -> std::io::Result<String> {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream.write_all(request.as_bytes()).unwrap();
+        stream.write_all(request).unwrap();
         stream.shutdown(std::net::Shutdown::Write).unwrap();
         let mut response = String::new();
         stream.read_to_string(&mut response)?;
         Ok(response)
     }
 
+    fn try_http(port: u16, request: &str) -> std::io::Result<String> {
+        try_http_bytes(port, request.as_bytes())
+    }
+
     fn http(port: u16, request: &str) -> String {
         try_http(port, request).unwrap()
+    }
+
+    fn upload_file(port: u16, token: &str, filename: &str, body: &[u8]) -> String {
+        let header = format!(
+            "POST /api/upload HTTP/1.1\r\nHost: localhost\r\nX-AppManager-Token: {token}\r\nX-Filename: {filename}\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let mut request = header.into_bytes();
+        request.extend_from_slice(body);
+        try_http_bytes(port, &request).unwrap()
+    }
+
+    fn install_upload(port: u16, token: &str, payload: Value) -> String {
+        let body = payload.to_string();
+        http(
+            port,
+            &format!(
+                "POST /api/install HTTP/1.1\r\nHost: localhost\r\nX-AppManager-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+        )
     }
 
     fn response_json(response: &str) -> serde_json::Value {
@@ -1152,14 +1429,13 @@ mod tests {
 
     #[test]
     fn parses_headers_case_insensitively() {
-        let input = b"POST /api/upload HTTP/1.1\r\ncontent-length: 12\r\nX-FILENAME: game.zip\r\nx-appmanager-token: abc\r\nX-AppManager-Replace: 1\r\n\r\n";
+        let input = b"POST /api/upload HTTP/1.1\r\ncontent-length: 12\r\nX-FILENAME: game.zip\r\nx-appmanager-token: abc\r\n\r\n";
         let mut reader = BufReader::new(&input[..]);
         let head = read_head(&mut reader).unwrap();
         assert_eq!(head.path, "/api/upload");
         assert_eq!(head.content_length, Some(12));
         assert_eq!(head.filename, "game.zip");
         assert_eq!(head.token, "abc");
-        assert!(head.replace_existing);
     }
 
     #[test]
@@ -1167,6 +1443,7 @@ mod tests {
         let input = b"POST /api/upload HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert!(read_head(&mut BufReader::new(&input[..])).is_err());
         assert!(safe_upload_name("../../game.zip").is_ok());
+        assert!(safe_upload_name("../../game.7Z").is_ok());
         assert!(safe_upload_name("game.tar").is_err());
         assert_eq!(
             safe_upload_name("%E6%B8%B8%E6%88%8F.zip").unwrap(),
@@ -1205,6 +1482,7 @@ mod tests {
             pairing: Mutex::new(HashMap::new()),
             upload_active: AtomicBool::new(false),
             upload_cancel: Mutex::new(None),
+            pending_uploads: Mutex::new(HashMap::new()),
         };
         let first = "10.0.0.2".parse().unwrap();
         let second = "10.0.0.3".parse().unwrap();
@@ -1240,6 +1518,79 @@ mod tests {
         std::fs::write(&path, b"partial").unwrap();
         drop(UploadGuard::new(path.clone()).unwrap());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn pending_upload_uses_an_opaque_id_and_cancel_drops_the_exact_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("encrypted.7z");
+        std::fs::write(&path, b"pending upload").unwrap();
+        let auth = AuthState::new().unwrap();
+        let upload_id = auth
+            .store_pending_upload(
+                UploadGuard::new(path.clone()).unwrap(),
+                "encrypted.7z".to_owned(),
+            )
+            .unwrap();
+        assert_eq!(upload_id.len(), 48);
+        assert!(upload_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(path.exists());
+        let pending = auth.take_pending_upload(&upload_id).unwrap();
+        assert_eq!(pending.display_name, "encrypted.7z");
+        drop(pending);
+        assert!(!path.exists());
+        assert!(auth.take_pending_upload(&upload_id).is_none());
+    }
+
+    #[test]
+    fn embedded_web_page_installs_an_upload_with_an_optional_password() {
+        assert!(INDEX_HTML.contains("accept=\".zip,.7z"));
+        assert!(INDEX_HTML.contains("id=\"passwordDialog\""));
+        assert!(INDEX_HTML.contains("/api/install"));
+        assert!(INDEX_HTML.contains("/api/upload/cancel"));
+        assert!(INDEX_HTML.contains("replace_existing:state.replaceExisting"));
+        assert!(!INDEX_HTML.contains("/api/upload/password"));
+        assert!(!INDEX_HTML.contains("X-AppManager-Replace"));
+        assert!(INDEX_HTML.contains("id=\"archiveDiagnostic\""));
+        assert!(INDEX_HTML.contains("id=\"copyDiagnostic\""));
+        assert!(!INDEX_HTML.contains("localStorage"));
+    }
+
+    #[test]
+    fn install_request_accepts_an_optional_password() {
+        let without: UploadInstallRequest =
+            serde_json::from_str(r#"{"upload_id":"plain"}"#).unwrap();
+        assert!(without.password.is_none());
+        assert!(!without.replace_existing);
+        let with: UploadInstallRequest = serde_json::from_str(
+            r#"{"upload_id":"locked","password":"secret","replace_existing":true}"#,
+        )
+        .unwrap();
+        assert_eq!(with.password.as_deref(), Some("secret"));
+        assert!(with.replace_existing);
+    }
+
+    #[test]
+    fn archive_error_response_is_structured_and_does_not_expose_internal_paths() {
+        let issue = appmanager_core::port_zip::archive_issue(
+            "/private/upload/game.7z",
+            "",
+            "archive_unsupported_method: 7z:PPMd",
+        );
+        let response = json!({
+            "ok": false,
+            "code": issue.code,
+            "error": issue.message(),
+            "diagnostic": issue,
+        });
+        assert_eq!(response["code"], "unsupported_method");
+        assert!(
+            response["diagnostic"]["report"]
+                .as_str()
+                .unwrap()
+                .contains("PPMd")
+        );
+        assert!(!response.to_string().contains("/private/upload"));
     }
 
     #[test]
@@ -1436,6 +1787,71 @@ mod tests {
             .find(|item| item["kind"] == "port")
             .unwrap();
         assert_eq!(port_item["name"], "Z_植物大战僵尸年度版[中]");
+
+        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        archive.start_file("Web_Game.sh", options).unwrap();
+        archive
+            .write_all(b"#!/bin/sh\nGAMEDIR=/ports/web-game\n")
+            .unwrap();
+        archive.start_file("web-game/data.bin", options).unwrap();
+        archive.write_all(b"web game").unwrap();
+        let archive = archive.finish().unwrap().into_inner();
+        let upload = upload_file(port, &token, "web.zip", &archive);
+        assert!(upload.starts_with("HTTP/1.1 200"), "{upload}");
+        let uploaded = response_json(&upload);
+        assert_eq!(uploaded["code"], "ready");
+        assert_eq!(uploaded["password_required"], false);
+        let upload_id = uploaded["upload_id"].as_str().unwrap();
+        let install = install_upload(port, &token, json!({"upload_id": upload_id}));
+        assert!(install.starts_with("HTTP/1.1 200"), "{install}");
+        assert_eq!(response_json(&install)["ok"], true);
+        assert!(device.join("mnt/SDCARD/Roms/PORTS/Web_Game.sh").is_file());
+
+        let mut encrypted = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let encrypted_options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .with_aes_encryption(zip::AesMode::Aes256, "web-secret");
+        encrypted
+            .start_file("Locked_Game.sh", encrypted_options)
+            .unwrap();
+        encrypted
+            .write_all(b"#!/bin/sh\nGAMEDIR=/ports/locked-game\n")
+            .unwrap();
+        encrypted
+            .start_file("locked-game/data.bin", encrypted_options)
+            .unwrap();
+        encrypted.write_all(b"locked game").unwrap();
+        let encrypted = encrypted.finish().unwrap().into_inner();
+        let upload = upload_file(port, &token, "locked.zip", &encrypted);
+        assert!(upload.starts_with("HTTP/1.1 200"), "{upload}");
+        let uploaded = response_json(&upload);
+        assert_eq!(uploaded["ok"], true);
+        assert_eq!(uploaded["code"], "password_required");
+        assert_eq!(uploaded["password_required"], true);
+        let upload_id = uploaded["upload_id"].as_str().unwrap();
+        let wrong = install_upload(
+            port,
+            &token,
+            json!({"upload_id": upload_id, "password": "wrong"}),
+        );
+        assert!(wrong.starts_with("HTTP/1.1 400"), "{wrong}");
+        let wrong = response_json(&wrong);
+        assert_eq!(wrong["code"], "invalid_password");
+        assert_eq!(wrong["upload_id"], upload_id);
+        let install = install_upload(
+            port,
+            &token,
+            json!({"upload_id": upload_id, "password": "web-secret"}),
+        );
+        assert!(install.starts_with("HTTP/1.1 200"), "{install}");
+        assert_eq!(response_json(&install)["ok"], true);
+        assert!(
+            device
+                .join("mnt/SDCARD/Roms/PORTS/Locked_Game.sh")
+                .is_file()
+        );
 
         // Saturating the request gate must not stop the owning worker.
         let mut busy_connections = Vec::new();
