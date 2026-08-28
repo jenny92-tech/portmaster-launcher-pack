@@ -220,6 +220,18 @@ class ControllerTests(unittest.TestCase):
         finally:
             transport.close()
 
+    def test_adb_agent_uses_noninteractive_shell_command(self) -> None:
+        transport = handheld_lab.AdbTransport("device:5555")
+        completed = handheld_lab.Result([], 0, b"ok\n", b"", 1)
+        with mock.patch.object(handheld_lab, "run_process", return_value=completed) as run:
+            result = transport.agent(["snapshot"])
+        self.assertEqual(result.returncode, 0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], ["adb", "-s", "device:5555", "shell"])
+        self.assertEqual(command[4], "sh -s -- snapshot")
+        self.assertNotIn("exec-out", command)
+        self.assertEqual(run.call_args.kwargs["stdin"], handheld_lab.AGENT_PATH.read_bytes())
+
     def test_composite_target_routes_capabilities_and_artifacts(self) -> None:
         common = (
             "exec\tyes\tsh\tok\n"

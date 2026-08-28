@@ -309,7 +309,7 @@ class AdbTransport(Transport):
     def agent(self, arguments: Sequence[str], timeout: int = DEFAULT_TIMEOUT) -> Result:
         remote = "sh -s -- " + " ".join(shlex.quote(word) for word in arguments)
         return run_process(
-            [*self.adb_base(), "exec-out", "sh", "-c", remote],
+            [*self.adb_base(), "shell", remote],
             stdin=AGENT_PATH.read_bytes(),
             timeout=timeout,
         )
