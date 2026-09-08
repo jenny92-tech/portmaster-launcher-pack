@@ -1,3 +1,6 @@
+// INPUT:  std 文件/流、sevenz_rust2、zip、archive_names 与取消检查回调
+// OUTPUT: crate 内归档格式识别、目录校验、选择性读取和有界解压接口
+// POS:    ZIP/7z 共用归档后端，为包识别与安装提供安全读取边界
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -7,6 +10,8 @@ use std::path::Path;
 use sevenz_rust2::{Archive, ArchiveReader, EncoderMethod, Error as SevenZError, Password};
 use zip::result::ZipError;
 use zip::{CompressionMethod, ZipArchive};
+
+use crate::archive_names::zip_entry_names;
 
 pub(crate) const PASSWORD_REQUIRED: &str = "archive_password_required";
 pub(crate) const INVALID_PASSWORD: &str = "archive_invalid_password";
@@ -79,13 +84,10 @@ fn zip_catalog(file: &mut File, label: &str) -> Result<ArchiveCatalog, String> {
     let mut archive = ZipArchive::new(file).map_err(|error| format!("{label}: {error}"))?;
     let mut entries = Vec::with_capacity(archive.len());
     let mut encrypted = false;
-    for index in 0..archive.len() {
+    for (index, name) in zip_entry_names(&mut archive)?.into_iter().enumerate() {
         let entry = archive
             .by_index_raw(index)
             .map_err(|error| map_zip_error(error, false))?;
-        let name = std::str::from_utf8(entry.name_raw())
-            .unwrap_or_else(|_| entry.name())
-            .to_owned();
         #[allow(deprecated)]
         if !is_ignored_metadata_path(&name)
             && let CompressionMethod::Unsupported(method) = entry.compression()
@@ -97,7 +99,7 @@ fn zip_catalog(file: &mut File, label: &str) -> Result<ArchiveCatalog, String> {
         }
         encrypted |= entry.encrypted();
         entries.push(ArchiveEntry {
-            directory: entry.is_dir() || name.ends_with('/'),
+            directory: name.ends_with('/') || name.ends_with('\\'),
             size: entry.size(),
             anti_item: false,
             name,
@@ -168,7 +170,7 @@ fn read_selected_zip(
         .map_err(|error| format!("seek {label}: {error}"))?;
     let mut archive = ZipArchive::new(file).map_err(|error| format!("{label}: {error}"))?;
     let mut output = BTreeMap::new();
-    for index in 0..archive.len() {
+    for (index, raw) in zip_entry_names(&mut archive)?.into_iter().enumerate() {
         if cancel() {
             return Err("archive inspection cancelled".to_owned());
         }
@@ -176,8 +178,7 @@ fn read_selected_zip(
             let entry = archive
                 .by_index_raw(index)
                 .map_err(|error| map_zip_error(error, password.is_some()))?;
-            let raw = std::str::from_utf8(entry.name_raw()).unwrap_or_else(|_| entry.name());
-            (normalize_name(raw), entry.encrypted())
+            (normalize_name(&raw), entry.encrypted())
         };
         let Some(limit) = selected.get(&name).copied() else {
             continue;
@@ -304,18 +305,15 @@ fn extract_zip(
     file.seek(SeekFrom::Start(0))
         .map_err(|error| format!("seek {label}: {error}"))?;
     let mut archive = ZipArchive::new(file).map_err(|error| format!("{label}: {error}"))?;
-    for index in 0..archive.len() {
+    for (index, raw) in zip_entry_names(&mut archive)?.into_iter().enumerate() {
         if cancel() {
             return Err("archive extraction cancelled".to_owned());
         }
-        let (raw, encrypted) = {
+        let encrypted = {
             let entry = archive
                 .by_index_raw(index)
                 .map_err(|error| map_zip_error(error, password.is_some()))?;
-            let raw = std::str::from_utf8(entry.name_raw())
-                .unwrap_or_else(|_| entry.name())
-                .to_owned();
-            (raw, entry.encrypted())
+            entry.encrypted()
         };
         let relative = normalize_name(&raw);
         if is_ignored_metadata_path(&relative) {
@@ -334,7 +332,7 @@ fn extract_zip(
                 .map_err(|error| map_zip_error(error, password.is_some()))?
         };
         let output = target.join(relative.trim_end_matches('/'));
-        if entry.is_dir() || raw.ends_with('/') {
+        if raw.ends_with('/') || raw.ends_with('\\') {
             fs::create_dir_all(&output).map_err(|error| error.to_string())?;
             continue;
         }

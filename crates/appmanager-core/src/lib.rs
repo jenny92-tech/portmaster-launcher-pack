@@ -5,6 +5,7 @@
 //! operations; no config text is executed as shell code.
 
 mod archive_bundle;
+mod archive_names;
 pub mod artifact;
 pub mod context;
 pub mod device;
