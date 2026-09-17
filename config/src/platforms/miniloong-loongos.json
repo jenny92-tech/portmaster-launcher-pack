@@ -29,7 +29,8 @@
     "library.v1",
     "python.v1"
   ],
-  "paths": {
+ "paths": {
+   "shell_directory": {"strategy": "parent", "of": "game_data"},
     "scripts": {
       "strategy": "launcher_dir"
     },
@@ -38,7 +39,8 @@
     },
     "game_data": {
       "strategy": "literal",
-      "value": "/roms/ports"
+      "value": "/roms/ports",
+      "canonicalize_existing": true
     },
     "portmaster_core": {
       "strategy": "relative_to",
@@ -71,7 +73,7 @@
     "frontend_executable": "PortMaster.sh",
     "install_map": [
       {
-        "source": "miniloong/PortMaster.txt",
+        "source": "PortMaster.sh",
         "target": "PortMaster.sh",
         "executable": true
       }
@@ -101,8 +103,13 @@
     }
   },
   "python": {
-    "mode": "runtime_mount",
-    "runtime": "python_3.11"
+    "mode": "system",
+    "imports": [
+      "sys",
+      "encodings",
+      "zipfile",
+      "hashlib"
+    ]
   },
   "health": [
     {
@@ -132,16 +139,6 @@
       "kind": "archive_or_nonempty_directory",
       "archive": "{portmaster_core}/pylibs.zip",
       "directory": "{portmaster_core}/pylibs"
-    },
-    {
-      "kind": "python_imports_or_runtime",
-      "imports": [
-        "sys",
-        "encodings",
-        "zipfile",
-        "hashlib"
-      ],
-      "runtime": "python_3.11"
     }
   ],
   "preserved_dirs": [
@@ -178,7 +175,7 @@
     "default_height": 720
   },
   "input": {
-    "analog_sticks": 2,
+    "analog_sticks": 1,
     "tty": "/dev/tty0"
   },
   "locations": [

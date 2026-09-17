@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、反射 Godot 节点、QualityProfile
+// OUTPUT: ParticleDietPatches.Apply()、AddChildPostfix()
+// POS:    按画质档位限制新加入节点树中的粒子发射数量
 using System;
 using System.Reflection;
 using HarmonyLib;

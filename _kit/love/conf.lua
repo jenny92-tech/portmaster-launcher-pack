@@ -1,3 +1,6 @@
+-- INPUT:  LÖVE 配置回调、LOVE_IDENTITY 与 LOVE_WINDOW_TITLE
+-- OUTPUT: love.conf(t)；全屏窗口与模块开关
+-- POS:    统一启动器显示配置并将手柄输入收敛到 gptokeyb 键盘映射
 function love.conf(t)
     local identity = os.getenv("LOVE_IDENTITY") or "portmaster_launcher"
     local title = os.getenv("LOVE_WINDOW_TITLE") or "PortMaster Launcher"

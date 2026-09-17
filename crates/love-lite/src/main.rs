@@ -1,3 +1,6 @@
+// INPUT:  命令行/设备环境、EmbeddedService、Engine、GpuRenderer 与 SDL2 事件
+// OUTPUT: love-lite 桌面/掌机窗口、事件驱动帧循环和 Lua 请求的退出码
+// POS:    APP Manager 专用运行时入口，协调显示、输入、GPU 与软件回退
 use std::collections::BTreeMap;
 use std::env;
 use std::process::ExitCode;
@@ -17,6 +20,8 @@ use sdl2::video::{FullscreenType, Window, WindowBuilder};
 
 mod gpu;
 use gpu::GpuRenderer;
+
+const INPUT_POLL_INTERVAL_MS: u32 = 33;
 
 const BUILD_REVISION: &str = match option_env!("LOVE_LITE_SOURCE_REVISION") {
     Some(revision) => revision,
@@ -313,15 +318,22 @@ fn event_wait_timeout_ms(engine: &Engine, animation_interval: Duration) -> Resul
     if engine.is_animating()? {
         return Ok(duration_to_timeout_ms(animation_interval));
     }
-    match engine.wake_interval()? {
-        Some(seconds) if seconds <= 0.0 => Ok(duration_to_timeout_ms(animation_interval)),
+    Ok(idle_event_wait_timeout_ms(
+        engine.wake_interval()?,
+        animation_interval,
+    ))
+}
+
+fn idle_event_wait_timeout_ms(wake_interval: Option<f64>, animation_interval: Duration) -> u32 {
+    match wake_interval {
+        Some(seconds) if seconds <= 0.0 => duration_to_timeout_ms(animation_interval),
         Some(seconds) => {
             let millis = (seconds * 1000.0).ceil();
-            Ok(millis.clamp(1.0, 600_000.0) as u32)
+            (millis.clamp(1.0, 600_000.0) as u32).min(INPUT_POLL_INTERVAL_MS)
         }
-        // Fully idle: block until input. One-minute heartbeat keeps the process
-        // responsive to external signals without periodic redraw.
-        None => Ok(60_000),
+        // Some handheld SDL backends do not wake for gptokeyb's uinput events.
+        // Poll input at a low fixed rate; unchanged frames still are not drawn.
+        None => INPUT_POLL_INTERVAL_MS,
     }
 }
 
@@ -507,13 +519,24 @@ fn love_key(key: Keycode) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{love_key, native_render_dimensions};
+    use std::time::Duration;
+
+    use super::{idle_event_wait_timeout_ms, love_key, native_render_dimensions};
     use sdl2::keyboard::Keycode;
 
     #[test]
     fn shoulder_page_keys_reach_lua() {
         assert_eq!(love_key(Keycode::PageUp), Some("pageup"));
         assert_eq!(love_key(Keycode::PageDown), Some("pagedown"));
+    }
+
+    #[test]
+    fn idle_input_polling_is_capped_without_shortening_earlier_wakes() {
+        let frame = Duration::from_millis(33);
+        assert_eq!(idle_event_wait_timeout_ms(None, frame), 33);
+        assert_eq!(idle_event_wait_timeout_ms(Some(10.0), frame), 33);
+        assert_eq!(idle_event_wait_timeout_ms(Some(0.02), frame), 20);
+        assert_eq!(idle_event_wait_timeout_ms(Some(0.0), frame), 33);
     }
 
     #[test]

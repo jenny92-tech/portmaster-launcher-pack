@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、MemoryBudget、Diag、/proc 内存数据
+// OUTPUT: LifecyclePreloadPatches.Apply()、预加载前置钩子、MemSnap.Log()
+// POS:    为低内存设备跳过启动预加载并保留战斗入口资源加载
 using System;
 using System.Diagnostics;
 using System.IO;

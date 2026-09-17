@@ -1,3 +1,6 @@
+// INPUT:  Linux uinput、信号/FIFO 接口与模式/按键参数
+// OUTPUT: main()；probe/tap/serve 虚拟输入命令
+// POS:    以短时按键或持久虚拟设备为掌机提供原生输入注入
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>

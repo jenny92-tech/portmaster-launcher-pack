@@ -1,3 +1,6 @@
+// INPUT:  ValidatedInstallPlan、ZIP 包、ManagedRoot、文件锁与任务取消/进度通道
+// OUTPUT: InstallRequest/Outcome、install_portmaster()、recover_portmaster_transactions()
+// POS:    PortMaster 有界解压、前端适配、事务替换与崩溃恢复实现
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -70,6 +73,12 @@ pub enum InstallError {
     Locked,
     #[error("unsafe or invalid PortMaster archive: {0}")]
     Archive(String),
+    #[error("storage card is not writable: cannot create directory {path}: {source}")]
+    StorageNotWritable {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error("installation failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -141,12 +150,13 @@ pub fn recover_portmaster_transactions(
 
 fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, InstallError> {
     validate_request(request)?;
-    fs::create_dir_all(&request.state_dir)?;
-    progress(request, "extracting", 10, "Extracting PortMaster core");
     cancel(request)?;
+    ensure_install_directory(&request.plan.scripts)?;
+    ensure_install_directory(&request.plan.frontend_dir)?;
+    ensure_install_directory(&request.plan.target)?;
+    ensure_install_directory(&request.state_dir)?;
+    progress(request, "extracting", 10, "Extracting PortMaster core");
 
-    fs::create_dir_all(&request.plan.target)?;
-    fs::create_dir_all(&request.plan.frontend_dir)?;
     let (transaction_id, core_work, frontend_work) =
         allocate_work_pair(&request.plan.target, &request.plan.frontend_dir)?;
     let mut core_work_guard = WorkGuard::new(core_work.clone());
@@ -177,8 +187,6 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
     let _lock = acquire_lock(&request.state_dir)?;
     sweep_stale_artifacts(&request.plan, &[&core_work, &frontend_work])?;
     cancel(request)?;
-
-    fs::create_dir_all(&request.plan.scripts)?;
 
     let mode = if ["control.txt", "pugwash", "harbourmaster"]
         .iter()
@@ -277,6 +285,23 @@ fn install_portmaster_inner(request: &InstallRequest) -> Result<InstallOutcome, 
         manifest_count: staged_files.len(),
         frontend_manifest_count: request.plan.frontend_names.len(),
     })
+}
+
+fn ensure_install_directory(path: &Path) -> Result<(), InstallError> {
+    fs::create_dir_all(path).map_err(|source| InstallError::StorageNotWritable {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !path.is_dir() {
+        return Err(InstallError::StorageNotWritable {
+            path: path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "the configured path is not a directory",
+            ),
+        });
+    }
+    Ok(())
 }
 
 // Removes per-run work directories left by a crashed install.
@@ -645,14 +670,6 @@ fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> 
             target_device.display()
         )));
     }
-    if !plan.target.parent().is_some_and(Path::is_dir)
-        || (plan.target.exists() && !plan.target.is_dir())
-    {
-        return Err(InstallError::Invalid(
-            "PortMaster target must be a directory or a new direct child of an existing directory"
-                .to_owned(),
-        ));
-    }
     for (name, root) in [("app state", &state_resolved), ("trash", &trash_resolved)] {
         let device = device_path(root, request.probe_root.as_deref());
         if protected_system_namespace(&device) {
@@ -662,11 +679,11 @@ fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> 
             )));
         }
     }
-    if protected_system_namespace(&scripts_device) || !plan.scripts.is_dir() {
-        return Err(InstallError::Invalid(
-            "scripts root must be an existing declared directory outside protected system namespaces"
-                .to_owned(),
-        ));
+    if protected_system_namespace(&scripts_device) {
+        return Err(InstallError::Invalid(format!(
+            "scripts root {} is in a protected system namespace",
+            scripts_device.display()
+        )));
     }
 
     let frontend_device = device_path(&frontend_resolved, request.probe_root.as_deref());
@@ -678,13 +695,6 @@ fn validate_install_roots(request: &InstallRequest) -> Result<(), InstallError> 
             "frontend root {} is in a protected system namespace",
             frontend_device.display()
         )));
-    }
-    let new_frontend =
-        !plan.frontend_dir.exists() && plan.frontend_dir.parent().is_some_and(Path::is_dir);
-    if !plan.frontend_dir.is_dir() && !new_frontend {
-        return Err(InstallError::Invalid(
-            "frontend root must be an existing directory or a new direct child of one".to_owned(),
-        ));
     }
     Ok(())
 }
@@ -1309,7 +1319,11 @@ fn unique_counter() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::io::Write;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
 
     use tempfile::TempDir;
 
@@ -1396,6 +1410,148 @@ mod tests {
             progress_channel: None,
             probe_root: Some(temp.path().to_path_buf()),
             plan,
+        }
+    }
+
+    fn resolved_miniloong_request(
+        root: &Path,
+        profile: &str,
+    ) -> (crate::ResolvedDeviceContext, ValidatedInstallPlan) {
+        let launcher = match profile {
+            "miniloong" => PathBuf::from("/mnt/sdcard/roms/ports/APP Manager.sh"),
+            "miniloong-loongos" => PathBuf::from("/roms/ports/APP Manager.sh"),
+            other => panic!("unsupported release fixture profile {other}"),
+        };
+        let launcher_on_disk = root.join(launcher.strip_prefix("/").unwrap());
+        fs::create_dir_all(launcher_on_disk.parent().unwrap()).unwrap();
+        fs::write(&launcher_on_disk, b"#!/bin/sh\n").unwrap();
+
+        fs::create_dir_all(root.join("loong")).unwrap();
+        fs::write(
+            root.join("loong/loong_version"),
+            b"{\"verShow\":\"1.3.0.32\"}\n",
+        )
+        .unwrap();
+        if profile == "miniloong-loongos" {
+            fs::create_dir_all(root.join("etc")).unwrap();
+            fs::write(
+                root.join("etc/os-release"),
+                b"NAME=LoongOS\nID=loong\nVERSION_ID=\"1.4.0.27\"\n",
+            )
+            .unwrap();
+        }
+
+        let config_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+        let resolution = crate::resolve_device(crate::DeviceResolutionRequest {
+            launcher,
+            app_state: root.join("pam-state"),
+            trash: root.join("pam-trash"),
+            target_override: None,
+            probe_root: Some(root.to_path_buf()),
+            environment: BTreeMap::new(),
+            config: crate::DeviceConfigSources {
+                embedded_root: fs::read(config_dir.join("config.json")).unwrap(),
+                embedded_dir: config_dir,
+                remote_root: None,
+                remote_dir: None,
+            },
+        })
+        .unwrap();
+        assert_eq!(resolution.context.profile, profile);
+        let plan = crate::InstallPlan::from_context(&resolution.context)
+            .unwrap()
+            .validate(&resolution.context)
+            .unwrap();
+        (resolution.context, plan)
+    }
+
+    #[test]
+    fn maintained_portmaster_candidate_installs_for_miniloong_profiles() {
+        let Some(candidate) = std::env::var_os("PAM_PORTMASTER_CANDIDATE") else {
+            eprintln!("PAM_PORTMASTER_CANDIDATE is not set; maintained-candidate test skipped");
+            return;
+        };
+        let candidate = PathBuf::from(candidate);
+        assert!(
+            candidate.is_file(),
+            "candidate is missing: {}",
+            candidate.display()
+        );
+
+        for profile in ["miniloong", "miniloong-loongos"] {
+            let temp = tempfile::tempdir().unwrap();
+            let (_context, plan) = resolved_miniloong_request(temp.path(), profile);
+            let request = InstallRequest {
+                archive: candidate.clone(),
+                state_dir: temp.path().join("state"),
+                trash_dir: temp.path().join("trash"),
+                cancel_token: None,
+                progress_channel: None,
+                probe_root: Some(temp.path().to_path_buf()),
+                plan,
+            };
+
+            let installed = install_portmaster(&request).unwrap();
+            assert_eq!(installed.mode, InstallMode::Install, "{profile}");
+            assert!(
+                request.plan.target.join("control.txt").is_file(),
+                "{profile}"
+            );
+            assert!(
+                request.plan.target.join("PortMaster.sh").is_file(),
+                "{profile}"
+            );
+            assert!(
+                request.plan.frontend_dir.join("PortMaster.sh").is_file(),
+                "{profile}"
+            );
+            let core_launcher = fs::read(request.plan.target.join("PortMaster.sh")).unwrap();
+            let frontend_launcher =
+                fs::read(request.plan.frontend_dir.join("PortMaster.sh")).unwrap();
+            if profile == "miniloong-loongos" {
+                assert_eq!(
+                    frontend_launcher, core_launcher,
+                    "current LoongOS must use the standard PortMaster launcher"
+                );
+            } else {
+                assert_ne!(
+                    frontend_launcher, core_launcher,
+                    "legacy LoongOS must keep its Python runtime wrapper"
+                );
+                assert!(
+                    String::from_utf8(frontend_launcher)
+                        .unwrap()
+                        .contains("python_3.11.squashfs"),
+                    "legacy LoongOS launcher must mount the maintained Python runtime"
+                );
+            }
+            #[cfg(unix)]
+            for launcher in [
+                request.plan.target.join("PortMaster.sh"),
+                request.plan.frontend_dir.join("PortMaster.sh"),
+            ] {
+                assert_ne!(
+                    fs::metadata(&launcher).unwrap().permissions().mode() & 0o111,
+                    0,
+                    "launcher is not executable for {profile}: {}",
+                    launcher.display()
+                );
+            }
+
+            for entry in ["libs", "config", "themes", "logs", "cache"] {
+                let directory = request.plan.target.join(entry);
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(directory.join("keep.sentinel"), profile.as_bytes()).unwrap();
+            }
+            let updated = install_portmaster(&request).unwrap();
+            assert_eq!(updated.mode, InstallMode::Update, "{profile}");
+            for entry in ["libs", "config", "themes", "logs", "cache"] {
+                assert_eq!(
+                    fs::read(request.plan.target.join(entry).join("keep.sentinel")).unwrap(),
+                    profile.as_bytes(),
+                    "preserved entry was replaced for {profile}: {entry}"
+                );
+            }
         }
     }
 
@@ -1936,7 +2092,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_system_namespace_and_missing_scripts_root() {
+    fn rejects_protected_system_namespaces() {
         let temp = tempfile::tempdir().unwrap();
         let mut candidate = request(&temp);
         candidate.plan.frontend_dir = temp.path().join("etc/PortMaster");
@@ -1947,11 +2103,45 @@ mod tests {
         candidate.state_dir = temp.path().join("etc/appmanager-state");
         let error = validate_request(&candidate).unwrap_err();
         assert!(error.to_string().contains("protected system namespace"));
+    }
 
-        let mut candidate = request(&temp);
-        candidate.plan.scripts = temp.path().join("media/other/ports");
-        let error = validate_request(&candidate).unwrap_err();
-        assert!(error.to_string().contains("existing declared directory"));
+    #[test]
+    fn fresh_install_creates_all_configured_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut plan = plan(&temp);
+        plan.scripts = temp.path().join("mnt/card/Roms/PORTS");
+        fs::create_dir_all(temp.path().join("mnt/card")).unwrap();
+        let request = InstallRequest {
+            archive: archive(&temp, None),
+            state_dir: temp.path().join("state"),
+            trash_dir: temp.path().join("trash"),
+            cancel_token: None,
+            progress_channel: None,
+            probe_root: Some(temp.path().to_path_buf()),
+            plan,
+        };
+
+        install_portmaster(&request).unwrap();
+
+        assert!(request.plan.scripts.is_dir());
+        assert!(request.plan.frontend_dir.is_dir());
+        assert!(request.plan.target.is_dir());
+        assert!(request.plan.target.join("control.txt").is_file());
+        assert!(request.plan.frontend_dir.join("launch.sh").is_file());
+    }
+
+    #[test]
+    fn existing_file_at_configured_directory_reports_storage_not_writable() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut request = request(&temp);
+        let file = temp.path().join("not-a-directory");
+        fs::write(&file, b"occupied").unwrap();
+        request.plan.scripts = file.clone();
+
+        let error = install_portmaster(&request).unwrap_err();
+
+        assert!(matches!(&error, InstallError::StorageNotWritable { path, .. } if path == &file));
+        assert!(error.to_string().contains("storage card is not writable"));
     }
 
     #[test]
@@ -2029,19 +2219,19 @@ mod tests {
     }
 
     #[test]
-    fn declared_roots_still_require_bounded_existing_parents() {
+    fn declared_roots_can_be_created_recursively() {
         let temp = tempfile::tempdir().unwrap();
         let mut candidate = request(&temp);
         candidate.plan.target = temp.path().join("vendor/missing/PortMaster");
-        let error = validate_request(&candidate).unwrap_err();
-        assert!(error.to_string().contains("existing directory"));
+        install_portmaster(&candidate).unwrap();
+        assert!(candidate.plan.target.join("control.txt").is_file());
 
         let mut candidate = request(&temp);
         let parent = temp.path().join("vendor/menu");
         fs::create_dir_all(&parent).unwrap();
         candidate.plan.frontend_dir = parent.join("nested/missing");
-        let error = validate_request(&candidate).unwrap_err();
-        assert!(error.to_string().contains("new direct child"));
+        install_portmaster(&candidate).unwrap();
+        assert!(candidate.plan.frontend_dir.join("launch.sh").is_file());
     }
 
     #[test]

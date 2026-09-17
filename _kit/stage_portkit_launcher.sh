@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  目标数据目录、预置 PortKit 二进制、revision 文件与 portkit_launcher_revision.py
+# OUTPUT: 目标目录内经源码身份校验的 bin/portkit-launcher
+# POS:    在分发前拒绝过期或错误架构的启动辅助程序
 # Copy the validated PortKit launcher helper into generated game data.
 
 set -euo pipefail

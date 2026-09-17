@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  json, os, sys；端口 manifest.json、dist 目录与端口目录名
+# OUTPUT: main()；生成可分发的 PortMaster port.json
+# POS:    将仓库内部端口构建元数据转换为 PortMaster 安装描述
 import json
 import os
 import sys

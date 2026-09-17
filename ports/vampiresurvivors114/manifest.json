@@ -15,6 +15,7 @@
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "vampiresurvivors114",
   "script": "V_吸血鬼幸存者_114.sh",
+  "portable_dir": "vampiresurvivors114",
   "gptk": "love/ui.gptk",
   "launcher_tools": [
     "font-provision",
@@ -23,6 +24,12 @@
     "artwork"
   ],
   "portmaster": {
+    "items": [
+      "V_吸血鬼幸存者_114.sh",
+      "vampiresurvivors114",
+      "screenshot.png",
+      "V_吸血鬼幸存者_114.png"
+    ],
     "image": {
       "screenshot": "screenshot.png",
       "names": [
@@ -34,5 +41,5 @@
     "https://github.com/jenny92-tech/Bogodroid (unityloader)",
     "PortMaster runtimes/love_11.5"
   ],
-  "notes": "Direct Unity launch. gptokeyb is intentionally disabled for the game stage so BUTTON_A/B reach Unity as Android gamepad keycodes."
+  "notes": "Direct Unity launch. A game-specific gptokeyb bridge supplies Rewired menu input without replacing Bogodroid's Android gamepad path."
 }

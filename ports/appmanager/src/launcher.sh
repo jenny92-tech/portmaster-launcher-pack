@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  PAM_* 路径配置、LOVE-lite runtime、原生服务写出的游戏交接文件
+# OUTPUT: APP Manager 子进程、轮转日志与选定启动脚本的 exec 交接
+# POS:    APP Manager 保留前端父进程关系的轻量启动入口
 # PORTMASTER: jenny92-appmanager, APP Manager.sh
 # Thin bootstrap only. The shell remains as the frontend-owned parent while
 # LOVE-lite runs as its child, matching ordinary PortMaster LÖVE launchers.
@@ -37,10 +40,6 @@ pam_run_ui() {
     "${DISPLAY_WIDTH:-960}" "${DISPLAY_HEIGHT:-720}"
 }
 
-pam_file_identity() {
-  stat -Lc '%d:%i' "$1" 2>/dev/null || stat -f '%i' "$1" 2>/dev/null
-}
-
 if [ "$PAM_LOG_READY" = "1" ]; then
   pam_run_ui >> "$PAM_LOG" 2>&1
   PAM_STATUS=$?
@@ -55,28 +54,25 @@ fi
 # with the exact selected script so no APP Manager process remains alive.
 if [ "$PAM_STATUS" = "42" ]; then
   PAM_GAME=""
-  PAM_EXPECTED=""
+  PAM_GAME_KIND=""
   PAM_GAME_XDG_DATA_HOME=""
   [ -f "$PAM_APP_ROOT/game_to_launch.txt" ] && PAM_GAME="$(cat "$PAM_APP_ROOT/game_to_launch.txt")"
-  [ -f "$PAM_APP_ROOT/game_to_launch.fingerprint" ] && PAM_EXPECTED="$(cat "$PAM_APP_ROOT/game_to_launch.fingerprint")"
+  [ -f "$PAM_APP_ROOT/game_to_launch.kind" ] && PAM_GAME_KIND="$(cat "$PAM_APP_ROOT/game_to_launch.kind")"
   [ -f "$PAM_APP_ROOT/game_to_launch.xdg_data_home" ] && PAM_GAME_XDG_DATA_HOME="$(cat "$PAM_APP_ROOT/game_to_launch.xdg_data_home")"
   rm -f "$PAM_APP_ROOT/game_to_launch.txt" \
+    "$PAM_APP_ROOT/game_to_launch.kind" \
     "$PAM_APP_ROOT/game_to_launch.fingerprint" \
     "$PAM_APP_ROOT/game_to_launch.xdg_data_home"
-  if [ -n "$PAM_GAME" ] && [ -n "$PAM_EXPECTED" ] && [ -f "$PAM_GAME" ] && exec 9<"$PAM_GAME"; then
-    PAM_OPEN_SCRIPT=/proc/self/fd/9
-    [ -e "$PAM_OPEN_SCRIPT" ] || PAM_OPEN_SCRIPT=/dev/fd/9
-    PAM_ACTUAL=$(pam_file_identity "$PAM_OPEN_SCRIPT")
-  else
-    PAM_ACTUAL=""
-  fi
-  if [ -n "$PAM_ACTUAL" ] && [ "$PAM_ACTUAL" = "$PAM_EXPECTED" ]; then
+  if [ -n "$PAM_GAME" ] && [ -f "$PAM_GAME" ] && \
+      { [ "$PAM_GAME_KIND" = "port" ] || [ "$PAM_GAME_KIND" = "trimui_app" ]; }; then
     PAM_TARGET=$PAM_GAME
-    printf '%s\n' "[PAM] launching game: $PAM_TARGET" >> "$PAM_LOG" 2>/dev/null
-    if [ -n "$PAM_GAME_XDG_DATA_HOME" ] && \
+    printf '%s\n' "[PAM] launching $PAM_GAME_KIND: $PAM_TARGET" >> "$PAM_LOG" 2>/dev/null
+    if [ "$PAM_GAME_KIND" = "port" ] && [ -n "$PAM_GAME_XDG_DATA_HOME" ] && \
         [ -f "$PAM_GAME_XDG_DATA_HOME/PortMaster/control.txt" ]; then
       export XDG_DATA_HOME="$PAM_GAME_XDG_DATA_HOME"
-      printf '%s\n' "[PAM] game PortMaster base: $XDG_DATA_HOME" >> "$PAM_LOG" 2>/dev/null
+      printf '%s\n' "[PAM] PortMaster base: $XDG_DATA_HOME" >> "$PAM_LOG" 2>/dev/null
+    elif [ "$PAM_GAME_KIND" = "trimui_app" ]; then
+      unset XDG_DATA_HOME
     fi
     # PAM_* is private to this manager. Preserve the native launcher and
     # PortMaster environment, but never leak manager overrides or test knobs
@@ -84,11 +80,17 @@ if [ "$PAM_STATUS" = "42" ]; then
     for PAM_ENV_NAME in $(env | sed -n 's/^\(PAM_[A-Za-z0-9_]*\)=.*/\1/p'); do
       unset "$PAM_ENV_NAME"
     done
-    # Execute the already-opened inode while preserving the original path as
-    # $0 for normal PortMaster scripts that derive their data directory from it.
-    exec /bin/sh -c '. "$1"' "$PAM_TARGET" "$PAM_OPEN_SCRIPT"
+    PAM_TARGET_DIR=${PAM_TARGET%/*}
+    [ "$PAM_TARGET_DIR" = "$PAM_TARGET" ] && PAM_TARGET_DIR=.
+    cd "$PAM_TARGET_DIR" || exit 72
+    # Replace this shell with the exact selected launcher. Direct execution
+    # preserves its original path as $0 and lets the kernel honor its shebang.
+    exec "$PAM_TARGET"
+    PAM_EXEC_STATUS=$?
+    printf '%s\n' "[PAM] cannot execute $PAM_GAME_KIND launcher: $PAM_TARGET (status=$PAM_EXEC_STATUS)" >> "$PAM_LOG" 2>/dev/null
+    exit "$PAM_EXEC_STATUS"
   else
-    printf '%s\n' '[PAM] EXIT_START without a matching validated game file; exiting.' >&2
+    printf '%s\n' '[PAM] EXIT_START without an exact typed launcher; exiting.' >&2
     exit 42
   fi
 fi

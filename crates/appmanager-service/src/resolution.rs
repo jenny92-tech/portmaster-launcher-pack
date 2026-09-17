@@ -1,3 +1,6 @@
+// INPUT:  内嵌 config/config.json、配置目录参数与 appmanager_core::resolve_device
+// OUTPUT: crate 内 ConfigDirectories、DeviceResolution 和 resolve_device_context()
+// POS:    将服务启动参数与配置文件位置接入共享设备解析器
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

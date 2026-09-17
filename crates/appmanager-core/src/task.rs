@@ -1,3 +1,6 @@
+// INPUT:  std Arc/Mutex/AtomicBool 与 serde
+// OUTPUT: CancellationToken、TaskProgress、ProgressChannel
+// POS:    嵌入式界面与工作线程之间的进程内取消信号和最新进度通道
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,3 +1,6 @@
+-- INPUT:  全局 appmanager.request Rust 服务桥接接口
+-- OUTPUT: Native.new()，snapshot/start/poll/web_set/run/cancel 方法
+-- POS:    APP Manager 唯一的 Lua 到 Rust 调用边界与响应校验层
 local Native = {}
 
 function Native.new()

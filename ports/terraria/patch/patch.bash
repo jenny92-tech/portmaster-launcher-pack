@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  GAMEDIR/gamedata 中的玩家 APK、unzip 或 PortMaster 7z
+# OUTPUT: Unity/IL2CPP 游戏资源与 .gamedata_ready 标记，成功后移除已解包 APK
+# POS:    泰拉瑞亚首次启动时的幂等 APK 解包与核心文件校验脚本
 # Terraria first-launch gamedata setup. Idempotent.
 #
 # Invoked under PortMaster's patcher UI (stdout → full-screen progress) at

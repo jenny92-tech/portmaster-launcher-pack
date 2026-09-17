@@ -1,3 +1,6 @@
+// INPUT:  System.Reflection/Runtime.Loader、同目录 sts2.dll 与依赖
+// OUTPUT: Probe.Main() 的程序集加载和 GodotPlugins 入口探测日志
+// POS:    复现 Godot 托管程序集解析环境以诊断初始化入口加载
 using System;
 using System.IO;
 using System.Reflection;

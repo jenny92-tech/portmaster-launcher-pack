@@ -1,3 +1,6 @@
+// INPUT:  libdl、EGL/GL 符号、EGL_SHIM_LOG_FILE/BLACKLIST
+// OUTPUT: eglGetProcAddress、eglQueryString、glGetString、glGetIntegerv 包装
+// POS:    通过 LD_PRELOAD 记录并按黑名单屏蔽 Mali GL 函数查询
 /*
  * shim_egl.c — diagnostic shim: hooks eglGetProcAddress + eglQueryString,
  *              captures every GL function name / extension string godot

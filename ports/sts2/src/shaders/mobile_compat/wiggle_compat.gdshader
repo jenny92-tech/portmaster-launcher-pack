@@ -1,3 +1,6 @@
+// INPUT:  Godot canvas_item 着色器环境
+// OUTPUT: fragment() 输出透明 COLOR 并保留材质参数接口
+// POS:    关闭热浪屏幕扭曲以免复制屏幕纹理
 shader_type canvas_item;
 
 // Original: fullscreen SCREEN_TEXTURE heat-wave distortion. Compat: output transparent, no SCREEN_TEXTURE copy.

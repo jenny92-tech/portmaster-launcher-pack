@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、反射 NTransition/AssetCache 材质 API
+// OUTPUT: TransitionMaterialPatches.Apply()、转场及材质后置钩子
+// POS:    复制共享转场材质以避免缓存清理期间出现已释放对象
 using System;
 using System.Reflection;
 using HarmonyLib;

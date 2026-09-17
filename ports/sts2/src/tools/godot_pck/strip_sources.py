@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/pathlib、恢复项目、源图片 glob 与 --also
+# OUTPUT: 源图片清理统计或 dry-run 报告
+# POS:    在重打包前移除已被导入资源替代的冗余源图片
 """
 Strip source files that GDRE recovered but the runtime doesn't need.
 

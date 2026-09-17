@@ -1,3 +1,6 @@
+-- INPUT:  launcher 共享声明式启动器框架
+-- OUTPUT: 空洞骑士设置页面及 HKL_* 启动参数
+-- POS:    空洞骑士分辨率、渲染比例、画质和按键选项定义
 local launcher = require("launcher")
 
 launcher.define {

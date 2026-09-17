@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  manifest.json、LÖVE 模板、共享 _kit、dotnet、着色器及运行时
+# OUTPUT: STS2 dist；UI_ONLY 时仅更新启动器界面
+# POS:    构建核心兼容 DLL、覆盖包与可部署启动器
 # Build the STS2 deployable dist/ directory.
 #
 # This produces the same top-level convention as the other ports:

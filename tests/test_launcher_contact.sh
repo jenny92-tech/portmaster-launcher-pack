@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  共享 kit.lua、各端口 Lua 入口与 portmaster_common.sh
+# OUTPUT: 联系方式、共享 UI 引用和中文字体供应断言结果
+# POS:    启动器公共联系信息与中文显示依赖的静态回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -1,3 +1,6 @@
+// INPUT:  启动脚本/图片目录、ProbeMarkers 和设备文件系统布局
+// OUTPUT: probe_image_dir()、sync_launcher_artwork()、SyncOutcome
+// POS:    为已验证的 MiniLoong/TrimUI 前端定位并安全同步启动器封面
 //! Frontend-owned Port artwork placement for tested handheld layouts.
 //!
 //! The device-layout knowledge used to live in `_kit/launcher_artwork.sh`;

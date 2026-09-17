@@ -1,3 +1,6 @@
+# INPUT:  unittest.mock、临时目录、handheld_lab 控制器与本地 Probe
+# OUTPUT: ControllerTests, CliTests；RecordingTransport 测试替身
+# POS:    验证传输边界、能力路由、场景预校验及诊断产物安全性
 from __future__ import annotations
 
 import importlib.util

@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  Python unittest、Shell 语法检查与 devtools 本地能力探测
+# OUTPUT: 通用掌机工具自测结果
+# POS:    串联控制器回归、Python 编译和 POSIX 脚本检查
 set -eu
 
 component_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)

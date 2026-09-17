@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster control.txt、HSH_* 配置、unityloader
+# OUTPUT: 更新后的 config.toml 与像素黑神话游戏进程
+# POS:    像素黑神话 LÖVE 设置到 Unity 配置和游戏启动的衔接模板
 # PORTMASTER: heishenhua, [中]黑神话悟空-像素版.sh
 #
 # Stage-1: shared love settings UI writes launch_config.env.
@@ -15,12 +18,10 @@ PORT_NAME="heishenhua"; LOG_PREFIX="[HSH-LOVE]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 source "$KIT/launcher_artwork.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 
 GAMEDIR="/$directory/ports/$PORT_NAME"
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
@@ -92,10 +93,7 @@ else
   echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
 
-resolve_display_resolution "${HSH_WIDTH:-auto}" "${HSH_HEIGHT:-auto}"
-apply_display_resolution "$PORT_TOML"
-resolve_render_scale "${HSH_RENDER_PERCENT:-100}"
-apply_render_scale "$PORT_TOML"
+configure_unity_display "$PORT_TOML" "${HSH_WIDTH:-auto}" "${HSH_HEIGHT:-auto}" "${HSH_RENDER_PERCENT:-100}" || exit 1
 
 # ══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game "$PORT_TOML"

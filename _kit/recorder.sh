@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  ffmpeg kmsgrab、DRM 设备与 REC_* 录屏参数
+# OUTPUT: recorder_probe/start/stop/assemble/status/frame_count()；JPEG 帧与 MP4
+# POS:    提供无顶层执行副作用的共享掌机录屏引擎
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #

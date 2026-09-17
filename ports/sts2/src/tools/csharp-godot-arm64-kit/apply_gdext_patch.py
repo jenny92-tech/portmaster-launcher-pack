@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  sys/os/json/hashlib、PCK、patch_meta.json 与 FMOD 替换 blob
+# OUTPUT: 原位更新的 gdextension 内容及 PCK 目录 MD5
+# POS:    经原内容哈希校验为 FMOD 扩展加入 Linux ARM64 映射
 """
 In-place patch of a Godot .pck's .gdextension file to add linux.arm64 entries.
 Updates only the gdextension blob + its directory MD5.

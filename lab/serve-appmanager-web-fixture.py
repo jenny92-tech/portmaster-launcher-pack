@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  http.server, json, pathlib；实际发行 HTML 与固定 API 夹具
+# OUTPUT: Handler, main()；本地浏览器评估 HTTP 服务
+# POS:    以确定性数据展示真实管理页面而不模拟安装或回收站业务规则
 """Serve the real APP Manager web UI with deterministic evaluation data.
 
 This fixture intentionally does not reproduce install, trash, or restore

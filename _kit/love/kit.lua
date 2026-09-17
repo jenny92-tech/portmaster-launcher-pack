@@ -1,3 +1,6 @@
+-- INPUT:  LÖVE 图形/输入/文件接口、focus_view、端口页面声明与本地化状态
+-- OUTPUT: kit 组件、页面导航、对话框、状态持久化及绘制/输入/更新接口
+-- POS:    为普通启动器与 App Manager 提供共享的手柄优先 UI 骨架
 -- kit.lua —— shared launcher skeleton for handhelds (LÖVE).
 --
 -- What the skeleton provides (ports never reimplement this):
@@ -126,6 +129,23 @@ end
 local function valid_focus(items,index)
     local row=items and items[index]
     return row and row.focusable and not disabled(row)
+end
+-- A page owns two child focus scopes. Empty/display-only scopes never own
+-- focus; fall back to the sibling scope, then to the page header.
+local function normalize_focus()
+    local page=pages[page_i]
+    if not page then return end
+    if zone=="rows" and not valid_focus(page.rows,focus_i) then
+        focus_i=first_focusable(page.rows)
+        if not valid_focus(page.rows,focus_i) then zone="sidebar" end
+    end
+    if zone=="sidebar" and not valid_focus(page.sidebar,sidebar_i) then
+        sidebar_i=first_focusable(page.sidebar)
+        if not valid_focus(page.sidebar,sidebar_i) then
+            focus_i=first_focusable(page.rows)
+            zone=valid_focus(page.rows,focus_i) and "rows" or "bar"
+        end
+    end
 end
 local function nearest_focus(items,index)
     local count=#(items or {})
@@ -359,13 +379,14 @@ end
 function kit.switch(l,key,opts)
     return apply_options({kind="switch",label=l,key=key,off_value="off",on_value="on",focusable=true},opts)
 end
-function kit.info(l,value,meta) return {kind="info",label=l,value=value,meta=meta,focusable=true} end
+function kit.info(l,value,meta) return {kind="info",label=l,value=value,meta=meta,focusable=false} end
 function kit.list_item(value,opts)
     return apply_options({kind="list_item",value=value,focusable=true,compact=true},opts)
 end
 function kit.textview(l,value,opts)
     local row={kind="textview",label=l,value=value,focusable=true,max_lines=2,expanded_lines=8,expandable=true}
     for key,option in pairs(opts or {}) do row[key]=option end
+    if row.expandable==false and (not opts or opts.focusable==nil) then row.focusable=false end
     return row
 end
 function kit.section(l,opts)
@@ -385,6 +406,10 @@ function kit.needs_redraw()
 end
 function kit.add_page(title,rows,opts)
     local page=opts or {}; page.title=title; page.rows=rows or {}; page.sidebar=page.sidebar or {}
+    if page.preserve_focus and old_page then
+        page.focus_memory=old_page.focus_memory
+        page.header_return=old_page.header_return
+    end
     -- App-specific pages may reserve sparse numeric IDs. Lua's length operator
     -- is undefined for sparse tables, so #pages + 1 can overwrite a reserved
     -- page or return an existing index. Always append after the largest ID.
@@ -416,6 +441,7 @@ function kit.set_page(index,title,rows,opts)
             zone="rows"; focus_i=default_focus_index(page.rows); sidebar_i=first_focusable(page.sidebar); bar_i=1; scroll_top=1; scroll_y=0
         end
     end
+    normalize_focus()
     kit.mark_dirty()
     return index
 end
@@ -558,19 +584,20 @@ function kit.close_guide()
     return true
 end
 function kit.debug_guide()
+    local callout=guide_state and (guide_state.callouts[guide_state._index or 1] or {}) or {}
     return {open=guide_state~=nil,title=guide_state and t(guide_state.title or "") or "",
         message=guide_state and t(guide_state.message or "") or "",
         confirm=guide_state and t(guide_state.confirm or "") or "",
         callout_count=guide_state and #(guide_state.callouts or {}) or 0,
         step=guide_state and (guide_state._index or 1) or 0,
-        target=guide_state and (guide_state.callouts[guide_state._index or 1] or {}).target or nil}
+        target=callout.target,callout_title=t(callout.title or ""),body=t(callout.body or "")}
 end
 function kit.debug_focus()
     return {zone=zone,focus_i=focus_i,sidebar_i=sidebar_i,bar_i=bar_i,scroll_top=scroll_top,scroll_y=scroll_y}
 end
 function kit.debug_page()
     local page=pages[page_i] or {}; local rows=page.rows or {}; local sections=0
-    local section_labels,row_kinds,row_font_px,row_label_px,row_value_px={},{},{},{},{}
+    local section_labels,row_kinds,row_font_px,row_label_px,row_value_px,row_max_lines={},{},{},{},{},{}
     local row_labels,row_values={},{}
     local footer_lines={}
     local footer=page.sidebar_footer
@@ -580,6 +607,7 @@ function kit.debug_page()
         row_font_px[index]=row.font_px
         row_label_px[index]=row.label_px
         row_value_px[index]=row.value_px
+        row_max_lines[index]=row.max_lines
         row_labels[index]=t(row.label or "")
         row_values[index]=t(row.value or "")
         if row.kind=="section" then
@@ -593,6 +621,7 @@ function kit.debug_page()
     return {index=page_i,title=t(page.title or ""),row_count=#rows,section_count=sections,
         section_labels=section_labels,row_kinds=row_kinds,row_font_px=row_font_px,
         row_label_px=row_label_px,row_value_px=row_value_px,row_labels=row_labels,row_values=row_values,
+        row_max_lines=row_max_lines,
         header_label=header_action and t(header_action.label or "") or nil,
         header_badge=header_action and header_action.badge and t(header_action.badge.text) or nil,
         sidebar_count=#(page.sidebar or {}),
@@ -607,7 +636,7 @@ function kit.debug_sidebar_geometry()
         total=g.scroll_total,bottom=g.scroll_bottom}
     out.band_top=L.band_top; out.band=L.band; out.cs=L.cs
     local side=pages[page_i].sidebar or {}
-    for i=1,#side do if g[i] then out["y"..i]=g[i].y end end
+    for i=1,#side do if g[i] then out["y"..i]=g[i].y; out["h"..i]=g[i].h end end
     return out
 end
 
@@ -645,133 +674,76 @@ end
 local function bar_items()
     local b = {}
     if page_i ~= 1 then b[#b+1] = "back" end
-    if page_i == 1 and pages[page_i].header_action then b[#b+1] = "header" end
+    local header=pages[page_i].header_action
+    if page_i == 1 and header and header.focusable~=false and not disabled(header) then b[#b+1] = "header" end
     b[#b+1] = "lang"
     return b
 end
 
 
 -- ── Focus navigation ─────────────────────────────────────────────────
-local function spatial_row(dx,dy)
+local focus_view = require("focus_view")
+
+local function move_scope(dx,dy)
+    local L=layout()
     local page=pages[page_i]
-    if not page or not page.row_layout or not layout then return nil end
-    local L=layout(); local from=L.geometry and L.geometry[focus_i]
-    if not from then return nil end
-    local fx,fy=from.x+from.w/2,from.content_y+from.h/2
-    local best,best_score
+    local rows={id="rows",children={}}
+    if not page.row_layout then rows.axis="y" end
+    local side={id="sidebar",children={}}
     for _,index in ipairs(focusables(cur())) do
-        if index~=focus_i then
-            local g=L.geometry[index]
-            if g then
-                local vx=(g.x+g.w/2)-fx; local vy=(g.content_y+g.h/2)-fy
-                local overlaps_y=g.content_y<from.content_y+from.h and g.content_y+g.h>from.content_y
-                local eligible=(dx>0 and vx>1 and overlaps_y) or (dx<0 and vx < -1 and overlaps_y)
-                    or (dy>0 and vy>1) or (dy<0 and vy < -1)
-                if eligible then
-                    local primary=dx~=0 and math.abs(vx) or math.abs(vy)
-                    local secondary=dx~=0 and math.abs(vy) or math.abs(vx)
-                    local score=primary*10000+secondary
-                    if not best_score or score<best_score then best,best_score=index,score end
-                end
-            end
-        end
+        local g=L.geometry and L.geometry[index]
+        local rect=g and {x=g.x,y=g.y,w=g.w,h=g.h} or
+            {x=L.x,y=L.top+(index-L.first)*(L.rh+L.gap),w=L.w,h=L.rh}
+        rows.children[#rows.children+1]={id="rows:"..index,zone="rows",index=index,rect=rect,focusable=true}
     end
-    return best
-end
-
-local function spatial_sidebar(dx,dy)
-    if not layout or not sidebar_geometry then return nil end
-    local L=layout(); local geometry=sidebar_geometry(L); local from=geometry[sidebar_i]
-    if not from then return nil end
-    local fx,fy=from.x+from.w/2,from.y+from.h/2
-    local best,best_score
-    for _,index in ipairs(focusables(sidebar())) do
-        if index~=sidebar_i then
-            local g=geometry[index]
-            if g then
-                local vx=(g.x+g.w/2)-fx; local vy=(g.y+g.h/2)-fy
-                local overlaps_y=g.y<from.y+from.h and g.y+g.h>from.y
-                local eligible=(dx>0 and vx>1 and overlaps_y) or (dx<0 and vx < -1 and overlaps_y)
-                    or (dy>0 and vy>1) or (dy<0 and vy < -1)
-                if eligible then
-                    local primary=dx~=0 and math.abs(vx) or math.abs(vy)
-                    local secondary=dx~=0 and math.abs(vy) or math.abs(vx)
-                    local score=primary*10000+secondary
-                    if not best_score or score<best_score then best,best_score=index,score end
-                end
-            end
-        end
-    end
-    return best
-end
-
-local function nearest_sidebar_for_row()
-    local row_index=tonumber(focus_i)
-    if not row_index then return nil end
-    local row=cur()[row_index]
-    local preferred=row and row.sidebar_target
-    local preferred_index=find_focus_identity(sidebar(),preferred)
-    if preferred_index then return preferred_index end
-    if not layout or not sidebar_geometry then return nil end
-    local L=layout(); local from=L.geometry and L.geometry[row_index]
-    if not from then
-        if type(L.first)~="number" or type(L.last)~="number" or
-            row_index<L.first or row_index>L.last then return nil end
-        from={x=L.x,y=L.top+(row_index-L.first)*(L.rh+L.gap),w=L.w,h=L.rh}
-    end
-    local geometry=sidebar_geometry(L); local fx,fy=from.x+from.w/2,from.y+from.h/2
-    local best,best_score
+    local geometry=sidebar_geometry(L)
     for _,index in ipairs(focusables(sidebar())) do
         local g=geometry[index]
-        if g then
-            local vx=(g.x+g.w/2)-fx; local vy=(g.y+g.h/2)-fy
-            local score=math.abs(vy)*10000+math.abs(vx)
-            if not best_score or score<best_score then best,best_score=index,score end
-        end
+        if g then side.children[#side.children+1]={id="sidebar:"..index,zone="sidebar",index=index,
+            rect={x=g.x,y=g.y,w=g.w,h=g.h},focusable=true} end
     end
-    return best
+    local tree={id="page",axis="y",children={
+        {id="header",zone="bar",index=1,focusable=true,rect={x=0,y=0,w=W,h=1}},
+        {id="body",axis="x",children={rows,side}},
+    }}
+    local index=zone=="rows" and focus_i or sidebar_i
+    local target=focus_view.move(tree,zone..":"..index,dx,dy)
+    if not target then return end
+    if target.zone~=zone then
+        page.focus_memory=page.focus_memory or {}
+        local items=zone=="rows" and cur() or sidebar()
+        page.focus_memory[zone]=row_identity(items[index])
+        local destination=target.zone=="rows" and cur() or sidebar()
+        target.index=find_focus_identity(destination,page.focus_memory[target.zone]) or target.index
+    end
+    -- Explicit action association remains an override when entering tools.
+    if zone=="rows" and target.zone=="sidebar" then
+        local row=cur()[focus_i]
+        target.index=find_focus_identity(sidebar(),row and row.sidebar_target) or target.index
+    end
+    if target.zone=="bar" then page.header_return=zone; bar_i=1
+    elseif target.zone=="rows" then focus_i=target.index
+    else sidebar_i=target.index end
+    zone=target.zone
 end
 
 local function move_v(d)
-    if zone == "bar" then
-        if d > 0 then
-            local rows=focusables(cur())
-            if #rows>0 then zone="rows"; focus_i=rows[1]
-            else local side=focusables(sidebar()); zone="sidebar"; sidebar_i=side[1] or 1 end
+    if zone=="bar" then
+        if d>0 then
+            local page=pages[page_i]
+            if page.header_return=="sidebar" and valid_focus(sidebar(),sidebar_i) then
+                zone="sidebar"
+            elseif page.header_return=="rows" and valid_focus(cur(),focus_i) then
+                zone="rows"
+            elseif #focusables(cur())>0 then
+                zone="rows"; focus_i=focusables(cur())[1]
+            elseif #focusables(sidebar())>0 then
+                zone="sidebar"; sidebar_i=focusables(sidebar())[1]
+            end
         end
         return
     end
-    if zone=="sidebar" then
-        local next_index=spatial_sidebar(0,d)
-        if next_index then sidebar_i=next_index
-        elseif d<0 then zone="bar"; bar_i=1 end
-        return
-    elseif zone=="rows" and pages[page_i].row_layout then
-        local rows=focusables(cur())
-        if #rows==0 then
-            local side=focusables(sidebar())
-            if d>0 and #side>0 then zone="sidebar"; sidebar_i=side[1]
-            else zone="bar"; bar_i=1 end
-            return
-        end
-        local next_index=spatial_row(0,d)
-        if next_index then focus_i=next_index
-        elseif d<0 then zone="bar"; bar_i=1 end
-        return
-    end
-    local items = cur()
-    local fs = focusables(items); local current = focus_i; local pos=1
-    if #fs==0 then
-        local side=focusables(sidebar())
-        if d>0 and #side>0 then zone="sidebar"; sidebar_i=side[1]
-        else zone="bar"; bar_i=1 end
-        return
-    end
-    for i,idx in ipairs(fs) do if idx==current then pos=i end end
-    pos = pos + d
-    if pos < 1 then zone="bar"; bar_i=1; return
-    elseif pos > #fs then pos=#fs end
-    focus_i=fs[pos]
+    move_scope(0,d)
 end
 
 local function focus_position(items,index)
@@ -841,51 +813,19 @@ local function set_switch(row,on)
     return true
 end
 local function move_h(d)
-    if zone == "bar" then
-        local n = #bar_items()
-        bar_i = math.max(1, math.min(n, bar_i + d))
-    elseif zone == "sidebar" then
-        local next_index=spatial_sidebar(d,0)
-        if next_index then sidebar_i=next_index
-        elseif d<0 and #focusables(cur())>0 then
-            local fs=focusables(cur()); local nearest=fs[1]
-            if layout and sidebar_geometry then
-                local L=layout(); local sg=sidebar_geometry(L)[sidebar_i]
-                if sg then
-                    -- Return to the row nearest the sidebar button in Y, so a
-                    -- left press on a long list goes back near where you were
-                    -- instead of always jumping to the first row.
-                    local tx,ty=sg.x,sg.y+sg.h/2; local best_score
-                    for _,index in ipairs(fs) do
-                        local g=L.geometry and L.geometry[index]
-                        local cy=g and (g.content_y+g.h/2) or L.top+(index-L.first)*(L.rh+L.gap)+L.rh/2
-                        local score=math.abs(cy-ty)
-                        if not best_score or score<best_score then nearest,best_score=index,score end
-                    end
-                end
-            end
-            zone="rows"; focus_i=nearest
-        end
-    else
-        local r = cur()[focus_i]
-        -- On flow-layout pages (launchers, matrices) left/right must navigate
-        -- rows and the sidebar; switches there are toggled with confirm only.
-        if r and r.kind=="switch" and not pages[page_i].row_layout then
-            set_switch(r,d>0)
-        elseif r and r.kind=="picker" then
-            local v=r.values; local idx=1
-            for i,x in ipairs(v) do if x==state[r.key] then idx=i end end
-            state[r.key]=v[((idx-1+d)%#v)+1]
-        elseif pages[page_i].row_layout then
-            local next_index=spatial_row(d,0)
-            if next_index then focus_i=next_index
-            elseif d>0 and #focusables(sidebar())>0 then
-                zone="sidebar"; sidebar_i=nearest_sidebar_for_row() or focusables(sidebar())[1]
-            end
-        elseif d>0 and #focusables(sidebar())>0 then
-            zone="sidebar"; sidebar_i=nearest_sidebar_for_row() or focusables(sidebar())[1]
-        end
+    if zone=="bar" then
+        bar_i=math.max(1,math.min(#bar_items(),bar_i+d))
+        return
     end
+    local r=zone=="rows" and cur()[focus_i] or nil
+    -- Editable controls consume horizontal input before their parent view.
+    if r and r.kind=="switch" and not pages[page_i].row_layout then
+        set_switch(r,d>0)
+    elseif r and r.kind=="picker" then
+        local v=r.values; local idx=1
+        for i,x in ipairs(v) do if x==state[r.key] then idx=i end end
+        state[r.key]=v[((idx-1+d)%#v)+1]
+    else move_scope(d,0) end
 end
 
 
@@ -1030,6 +970,7 @@ end
 local function goto_page(n)
     if not pages[n] then return end
     page_i=n; zone="rows"; focus_i=default_focus_index(cur()); sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
+    normalize_focus()
     kit.mark_dirty()
 end
 function kit.goto_page(n)
@@ -2345,6 +2286,8 @@ local function password_input(action)
 end
 
 function kit.input(action)
+    normalize_focus()
+    bar_i=math.max(1,math.min(bar_i,#bar_items()))
     local handled
     if password_state then
         handled=password_input(action)

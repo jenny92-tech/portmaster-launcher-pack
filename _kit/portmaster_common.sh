@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  launcher_platform.sh、PortMaster control.txt、端口路径、portkit-launcher 与音频工具
+# OUTPUT: audio_setup(), memory_tuning(), install_exit_trap(), portkit_launcher(), run_love_launcher_ui()
+# POS:    提供跨引擎的掌机环境准备和普通 LÖVE 启动器生命周期管理
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #
@@ -21,8 +24,8 @@ audio_setup() {
   # starting pulse is unneeded, and overriding XDG_RUNTIME_DIR cuts the loader
   # off from wayland → HK black screen / heishenhua 90° rotation (game would
   # fall back to GBM-direct, bypassing weston's transform=rotate-90).
-  if [ "$CFW_NAME" = "Loong" ]; then
-    echo "$LOG_PREFIX Loong: system audio + system XDG_RUNTIME_DIR left untouched (wayland)"
+  if [ "${CFW_NAME:-}" = "Loong" ] || launcher_platform_display; then
+    echo "$LOG_PREFIX system compositor/audio environment preserved"
     return
   fi
 
@@ -65,7 +68,18 @@ audio_setup() {
   fi
 
   if [ "$pulse_ready" = 1 ]; then
-    export SDL_AUDIODRIVER=pulseaudio
+    # Some TrimUI SDL builds omit the native PulseAudio backend entirely.
+    # Use ALSA's Pulse plugin when installed: this still mixes through Pulse,
+    # and must not fall back to opening the exclusive hardware PCM directly.
+    if [ -r /usr/lib/alsa-lib/libasound_module_pcm_pulse.so ] &&
+       [ -r /usr/share/alsa/alsa.conf.d/50-pulseaudio.conf ]; then
+      export SDL_AUDIODRIVER=alsa
+      # SDL 2 reads AUDIODEV; SDL_AUDIO_ALSA_DEFAULT_DEVICE is SDL 3-only.
+      export AUDIODEV=pulse
+      echo "$LOG_PREFIX SDL audio: ALSA -> PulseAudio"
+    else
+      export SDL_AUDIODRIVER=pulseaudio
+    fi
   else
     echo "$LOG_PREFIX pulse unavailable — direct ALSA (double-open may hang)"
     return
@@ -100,6 +114,7 @@ memory_tuning() {
 # and only protected the debug log; the single sync here flushes it on exit.)
 install_exit_trap() {
   trap '
+    launcher_platform_release_display
     dmesg 2>/dev/null | tail -100 > "$GAMEDIR/dmesg_exit.log" 2>&1 || \
         echo "(dmesg unreadable)" > "$GAMEDIR/dmesg_exit.log"
     sync
@@ -160,17 +175,11 @@ run_love_launcher_ui() {
     if [ -n "${LOVE_FONT_PATH:-}" ]; then export LOVE_FONT_PATH; else unset LOVE_FONT_PATH; fi
     source "$love_txt"
     export LIBGL_ES=2 LIBGL_GL=21
-    local wl_dir="" wl_disp="${WAYLAND_DISPLAY:-wayland-0}" d
-    for d in "$XDG_RUNTIME_DIR" "/run" "/run/user/$(id -u 2>/dev/null)" "/var/run"; do
-      [ -n "$d" ] || continue
-      if [ -S "$d/$wl_disp" ]; then wl_dir="$d"; break; fi
-      if [ -S "$d/wayland-0" ]; then wl_dir="$d"; wl_disp="wayland-0"; break; fi
-    done
-    if [ -n "$wl_dir" ]; then
-      export XDG_RUNTIME_DIR="$wl_dir" WAYLAND_DISPLAY="$wl_disp" SDL_VIDEODRIVER=wayland
-      unset LIBGL_FB
+    if launcher_platform_display; then
       echo "$LOG_PREFIX love display=wayland ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY)"
     else
+      # LÖVE's runtime owns its framebuffer backend independently of the
+      # game's SDL build; keep this reset confined to the UI subshell.
       unset SDL_VIDEODRIVER WAYLAND_DISPLAY
       export LIBGL_FB=4; [ ! -e "/dev/dri/card0" ] && export LIBGL_FB=2
       echo "$LOG_PREFIX love display=kms FB=$LIBGL_FB"
@@ -188,7 +197,7 @@ run_love_launcher_ui() {
   unset LOVE_FONT_PATH
   if [ "$launcher_exit" = "0" ]; then
     echo "$LOG_PREFIX launcher: back to menu"
-    pm_finish; exit 0
+    launcher_platform_finish; exit 0
   elif [ "$launcher_exit" != "42" ]; then
     echo "$LOG_PREFIX launcher failed ($launcher_exit) — starting game anyway"
   fi

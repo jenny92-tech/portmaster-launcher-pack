@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker、portkit_launcher_revision.py、Cargo 与 portkit-launcher 源码
+# OUTPUT: runtime/portkit-launcher.aarch64 与 portkit-launcher-revision.txt
+# POS:    构建并校验普通游戏启动器使用的 ARM64 静态辅助程序
 # Build the small static aarch64 PortKit helper used by game launchers.
 
 set -euo pipefail

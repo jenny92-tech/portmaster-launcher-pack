@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/re/pathlib、project.godot、移动纹理压缩选项
+# OUTPUT: patch_project_godot() 与项目渲染导入配置修改
+# POS:    配置恢复工程的 ASTC/ETC2 压缩目标及定制编辑器参数
 """
 Patch a recovered project's project.godot to import textures for a specific
 target GPU family, dropping the variants the device can't use.

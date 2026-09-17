@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  GDRE Tools、恢复项目目录、输出 PCK 路径和可选参数
+# OUTPUT: 由恢复项目创建的新 PCK
+# POS:    为可完整重建的 Godot 项目提供直接重打包入口
 # Build a new pck from a (patched + re-imported) recovered project using
 # GDRE Tools --pck-create. Output goes next to the input pck or to the given
 # path.

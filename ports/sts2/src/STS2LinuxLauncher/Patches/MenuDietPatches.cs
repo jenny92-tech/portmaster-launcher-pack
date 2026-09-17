@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、MemoryBudget、QualityProfile、GameSettingsDefaultPatches
+// OUTPUT: MenuDietPatches.Apply()、ReadyPostfix()
+// POS:    隐藏低内存或流畅档菜单背景/Spine 节点并触发设置同步
 using System;
 using System.Reflection;
 using System.Text;

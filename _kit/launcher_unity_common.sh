@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  launcher_platform.sh、portmaster_common.sh、portkit-launcher、unityloader 与显示/按键设置
+# OUTPUT: configure_unity_display()、分辨率/缩放/按键配置函数、run_unity_game()
+# POS:    为 Unity 移植统一应用启动器设置并编排游戏运行
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #
@@ -92,6 +95,17 @@ apply_render_scale() {
     --file "$toml" --render-percent "$RENDER_SCALE_PERCENT"
 }
 
+# All Unity launchers commit output size and render scale together. Keep the
+# resolved dimensions available for game-specific settings (e.g. Hollow Knight).
+configure_unity_display() {
+  local toml="$1"
+  resolve_display_resolution "${2:-auto}" "${3:-auto}"
+  resolve_render_scale "${4:-100}"
+  portkit_launcher unity configure \
+    --file "$toml" --section device --width "$RES_W" --height "$RES_H" \
+    --render-percent "$RENDER_SCALE_PERCENT"
+}
+
 # ── [input.remap] upsert a/b/x/y without depending on device awk/sed.
 # Args: $1=toml file, $2=a $3=b $4=x $5=y values. ───────────────────────
 apply_button_remap() {
@@ -103,26 +117,7 @@ apply_button_remap() {
 # ── Stage-2: run a unityloader game with all the handheld defenses. Identical
 # across every Unity-loader port. Arg: $1 = toml passed to the loader. Pulls in
 # audio_setup + memory_tuning + install_exit_trap from portmaster_common.sh,
-# lowers the loader's OOM score (raises audio daemons'), then waits & finishes.
-restore_unity_handheld_input() {
-  # Loong input can be left stopped if a previous experimental launcher or the
-  # loader's Start+Select fast-exit path bypasses normal teardown. (/tmp/lock_loong_*
-  # is each daemon's own singleton guard, not an input lock — deleting one only
-  # broke loong_daemon's guard, so that is gone.)
-  local p pid exe cmd
-  for p in /proc/[0-9]*; do
-    pid="${p##*/}"
-    [ "$pid" = "$$" ] && continue
-    exe=$(readlink "$p/exe" 2>/dev/null || true)
-    cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null || true)
-    case "$exe:$cmd" in
-      */input-event-daemon:*|*:/usr/bin/input-event-daemon*|*/loong_input:*|*:/loong/loong_input*)
-        kill -CONT "$pid" 2>/dev/null || true
-        ;;
-    esac
-  done
-}
-
+# lowers only the loader's OOM score, then waits & finishes.
 # Keep the loader's matching C++ runtime ahead of game and firmware libraries.
 # Every current unityloader/plugin build is one deployment unit, so falling
 # back to another libstdc++ would silently defeat that contract.
@@ -139,7 +134,14 @@ prepare_unityloader_private_libs() {
 }
 
 run_unity_game() {
-  local toml="$1" game_library_paths="${2:-}"
+  local toml="$1" game_library_paths="${2:-}" unity_status
+  local game_input_pid=""
+  # get_controls populates sdl_controllerconfig, but the settings UI runs in
+  # a subshell so its SDL_GAMECONTROLLERCONFIG export cannot reach the game.
+  # Re-export the PortMaster mapping for Unity's own SDL input backend.
+  if [ -n "${sdl_controllerconfig:-}" ]; then
+    export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+  fi
   if [ -n "$game_library_paths" ]; then
     export LD_LIBRARY_PATH="$game_library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   fi
@@ -153,18 +155,32 @@ run_unity_game() {
   install_exit_trap
 
   chmod a+x "$GAMEDIR/unityloader"
-  pm_platform_helper "$GAMEDIR/unityloader"
-  restore_unity_handheld_input
+  launcher_platform_prepare_game "$GAMEDIR/unityloader"
+
+  if [ -n "${UNITY_GAME_GPTK_CONFIG:-}" ]; then
+    # PortMaster's GPTOKEYB is a trusted command prefix (it can include sudo
+    # and preload arguments), not a single executable path.
+    if [ -z "${GPTOKEYB:-}" ] || [ ! -r "$UNITY_GAME_GPTK_CONFIG" ]; then
+      echo "$LOG_PREFIX missing Unity game input bridge: $UNITY_GAME_GPTK_CONFIG"
+      return 1
+    fi
+  fi
 
   "$GAMEDIR/unityloader" "$toml" &
   local unity_pid=$!
+  if [ -n "${UNITY_GAME_GPTK_CONFIG:-}" ]; then
+    $GPTOKEYB unityloader -c "$UNITY_GAME_GPTK_CONFIG" &
+    game_input_pid=$!
+    echo "$LOG_PREFIX Unity game input bridge pid=$game_input_pid"
+  fi
   echo -500 > "/proc/$unity_pid/oom_score_adj" 2>/dev/null
-  local victim
-  for victim in $(pgrep -f 'pulseaudio|bluealsa' 2>/dev/null); do
-    echo 800 > "/proc/$victim/oom_score_adj" 2>/dev/null
-  done
 
   wait "$unity_pid"
-  restore_unity_handheld_input
-  pm_finish
+  unity_status=$?
+  if [ -n "$game_input_pid" ]; then
+    kill "$game_input_pid" 2>/dev/null
+    wait "$game_input_pid" 2>/dev/null
+  fi
+  launcher_platform_finish
+  return "$unity_status"
 }

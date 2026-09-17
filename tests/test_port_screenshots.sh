@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
+# INPUT:  各端口 manifest.json、截图文件、Python json/os
+# OUTPUT: 截图声明、PNG 文件签名和图片命名字段断言结果
+# POS:    PortMaster 包预览资源与清单一致性检查
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-for port in appmanager heishenhua hk recorder sunkendragon terraria sts2 vampiresurvivors114; do
+for port in appmanager heishenhua hk recorder silksong sunkendragon terraria sts2 vampiresurvivors114; do
   manifest="$ROOT/ports/$port/manifest.json"
   python3 - "$ROOT" "$port" "$manifest" <<'PY'
 import json
@@ -26,6 +29,12 @@ with open(path, "rb") as fh:
     magic = fh.read(8)
 if magic != b"\x89PNG\r\n\x1a\n":
     raise SystemExit(f"{manifest_path}: screenshot is not a PNG: {shot}")
+
+if port == "silksong":
+    items = manifest["portmaster"]["items"]
+    for image in ("screenshot.png", os.path.splitext(manifest["script"])[0] + ".png"):
+        if image not in items:
+            raise SystemExit(f"{manifest_path}: image missing from ZIP items: {image}")
 
 for name in manifest.get("portmaster", {}).get("image", {}).get("names", []):
     if not isinstance(name, str) or not name:

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/re/pathlib、已重导入的纹理变体和 .import
+# OUTPUT: 保留 ASTC/ETC2 的导入映射并清理桌面变体
+# POS:    在重导入后移除 Mali 无法使用的 BPTC/S3TC 资源
 """
 After `--import` has filled `.godot/imported/` with .bptc.ctex /
 .s3tc.ctex / .etc2.ctex / .astc.ctex variants, strip everything Mali

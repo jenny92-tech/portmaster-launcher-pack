@@ -1,3 +1,6 @@
+-- INPUT:  model、operations、pages_ui，kit 环境状态与原生任务接口
+-- OUTPUT: Environment.new()，环境安装/修复、更新检查及管理页面方法
+-- POS:    APP Manager 的 PortMaster 环境管理与设备风险确认流程
 local Environment = {}
 
 function Environment.new(model,operations,pages_ui)

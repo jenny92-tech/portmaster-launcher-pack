@@ -1,3 +1,6 @@
+// INPUT:  EmbeddedService、设备配置夹具、临时文件系统、ZIP 与 TCP 请求
+// OUTPUT: 选定设备配置下公开业务路径的端到端回归测试
+// POS:    验证原生任务、清单版本与 Web 管理在同一设备契约下协同工作
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::net::{Shutdown, TcpStream};
@@ -142,15 +145,23 @@ fn web_snapshot(port: u16, token: &str) -> Value {
     response_json(&response)
 }
 
-fn upload(port: u16, token: &str, filename: &str, bytes: &[u8], replace_existing: bool) -> Vec<u8> {
+fn upload(port: u16, token: &str, filename: &str, bytes: &[u8]) -> Vec<u8> {
     let mut head = format!(
-        "POST /api/upload HTTP/1.1\r\nHost: localhost\r\nX-AppManager-Token: {token}\r\nX-Filename: {filename}\r\nX-AppManager-Replace: {}\r\nContent-Length: {}\r\n\r\n",
-        u8::from(replace_existing),
-        bytes.len(),
+        "POST /api/upload HTTP/1.1\r\nHost: localhost\r\nX-AppManager-Token: {token}\r\nX-Filename: {filename}\r\nContent-Length: {}\r\n\r\n",
+        bytes.len()
     )
     .into_bytes();
     head.extend_from_slice(bytes);
     http(port, head)
+}
+
+fn install_upload(port: u16, token: &str, upload_id: &str, replace_existing: bool) -> Vec<u8> {
+    let body = serde_json::to_vec(&json!({
+        "upload_id": upload_id,
+        "replace_existing": replace_existing,
+    }))
+    .unwrap();
+    http(port, request("POST", "/api/install", Some(token), &body))
 }
 
 fn web_manage(
@@ -470,13 +481,25 @@ fn every_public_business_path_runs_in_the_selected_device_profile() {
         ],
     );
     let upload_bytes = fs::read(upload_file.path()).unwrap();
-    let uploaded = upload(endpoint.port, &token, "WebOnly.zip", &upload_bytes, false);
+    let uploaded = upload(endpoint.port, &token, "WebOnly.zip", &upload_bytes);
     assert_eq!(
         status(&uploaded),
         200,
         "{}",
         String::from_utf8_lossy(&uploaded)
     );
+    let upload_id = response_json(&uploaded)["upload_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let installed = install_upload(endpoint.port, &token, &upload_id, false);
+    assert_eq!(
+        status(&installed),
+        200,
+        "{}",
+        String::from_utf8_lossy(&installed)
+    );
+    assert_eq!(response_json(&installed)["ok"], true);
     let web = web_snapshot(endpoint.port, &token);
     let item = web["items"]
         .as_array()
@@ -540,9 +563,9 @@ fn every_public_business_path_runs_in_the_selected_device_profile() {
         b"web"
     );
 
-    // The browser asks about replacement before uploading and sends that
-    // decision with the bytes. A conflict without consent changes nothing;
-    // the same upload with consent replaces only the declared data target.
+    // The browser uploads once, then sends the replacement decision with the
+    // install request. A conflict without consent changes nothing; a new
+    // upload installed with consent replaces only the declared data target.
     let conflict_data = games.join("ConflictData");
     fs::create_dir_all(&conflict_data).unwrap();
     fs::write(conflict_data.join("old.bin"), b"old").unwrap();
@@ -555,13 +578,18 @@ fn every_public_business_path_runs_in_the_selected_device_profile() {
         ],
     );
     let conflict_bytes = fs::read(conflict_upload.path()).unwrap();
-    let refused = upload(
-        endpoint.port,
-        &token,
-        "Conflict.zip",
-        &conflict_bytes,
-        false,
+    let refused_upload = upload(endpoint.port, &token, "Conflict.zip", &conflict_bytes);
+    assert_eq!(
+        status(&refused_upload),
+        200,
+        "{}",
+        String::from_utf8_lossy(&refused_upload)
     );
+    let refused_id = response_json(&refused_upload)["upload_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let refused = install_upload(endpoint.port, &token, &refused_id, false);
     assert_eq!(
         status(&refused),
         200,
@@ -577,7 +605,18 @@ fn every_public_business_path_runs_in_the_selected_device_profile() {
     );
     assert!(conflict_data.join("old.bin").is_file());
     assert!(!scripts.join("Conflict.sh").exists());
-    let replaced = upload(endpoint.port, &token, "Conflict.zip", &conflict_bytes, true);
+    let replacement_upload = upload(endpoint.port, &token, "Conflict.zip", &conflict_bytes);
+    assert_eq!(
+        status(&replacement_upload),
+        200,
+        "{}",
+        String::from_utf8_lossy(&replacement_upload)
+    );
+    let replacement_id = response_json(&replacement_upload)["upload_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let replaced = install_upload(endpoint.port, &token, &replacement_id, true);
     assert_eq!(
         status(&replaced),
         200,

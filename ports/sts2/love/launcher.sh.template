@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  PortMaster control、共享 _kit、LÖVE 选项、玩家 gamedata
+# OUTPUT: 设置/按键映射同步与 godot.mono 游戏进程
+# POS:    隔离 LÖVE 界面与 SDL2 游戏阶段的 STS2 启动模板
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #
@@ -14,12 +17,10 @@
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 source "$KIT/launcher_artwork.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" 1280 720 || exit 1
 
 PORT_NAME=sts2
 LOG_PREFIX="[STS2-LOVE]"
@@ -46,11 +47,7 @@ export LD_LIBRARY_PATH="/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"
 #   to let the system SDL2 auto-select.
 # (love stage-1's display env is decided independently by run_love_launcher_ui
 #  inside its own subshell — unaffected by this, and it does not leak out.)
-if [ -S "/run/wayland-0" ] || [ -S "${XDG_RUNTIME_DIR:-/run}/wayland-0" ]; then
-  export SDL_VIDEODRIVER=wayland
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run}"
-  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
-else
+if ! launcher_platform_display; then
   # No compositor: pick a driver the loaded SDL actually contains, in order:
   #   1. firmware SDL2's "mali" driver (Brick-class firmware);
   #   2. the port-bundled kmsdrm SDL2 in gamedata/libs (Longan-class firmware,
@@ -74,23 +71,6 @@ else
   fi
   export SDL_VIDEODRIVER
   export SDL_AUDIODRIVER=alsa
-fi
-
-# Resolution fallback: control.txt/device_info.txt normally provides
-# DISPLAY_WIDTH/DISPLAY_HEIGHT, but some frontends (MiniLoong loong) launch
-# port scripts without that env, leaving "--resolution x" and an instant
-# godot exit. Probe the panel ourselves in that case: fb0 reports the native
-# (portrait) size, and on the wayland path weston rotates it 90°, so swap.
-if [ -z "${DISPLAY_WIDTH:-}" ] || [ -z "${DISPLAY_HEIGHT:-}" ]; then
-  FB_SIZE=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null)   # "720,960"
-  FB_W="${FB_SIZE%,*}"; FB_H="${FB_SIZE#*,}"
-  case "$FB_W:$FB_H" in ''*|*[!0-9]*) FB_W=1280; FB_H=720 ;; esac
-  if [ "$SDL_VIDEODRIVER" = "wayland" ] && [ "$FB_H" -gt "$FB_W" ]; then
-    DISPLAY_WIDTH=$FB_H; DISPLAY_HEIGHT=$FB_W
-  else
-    DISPLAY_WIDTH=$FB_W; DISPLAY_HEIGHT=$FB_H
-  fi
-  echo "$LOG_PREFIX DISPLAY_WIDTH/HEIGHT unset — probed panel ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}"
 fi
 
 export GODOT_DISABLE_PARTICLES=1
@@ -195,12 +175,12 @@ EOG
 
 audio_setup > /dev/null 2>&1
 [ -f "$GAMEDIR/.debug" ] && install_exit_trap
-pm_platform_helper "godot.mono"
+launcher_platform_prepare_game "godot.mono"
 
 ( [ -n "${STS2_SDL_DIR:-}" ] && export LD_LIBRARY_PATH="$STS2_SDL_DIR:$LD_LIBRARY_PATH"
   LANG="${SLL_LANGUAGE}.UTF-8" XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
-  exec -a unityloader ./godot.mono --display-driver sdl2 --rendering-driver opengl3 \
+  launcher_platform_exec ./godot.mono --display-driver sdl2 --rendering-driver opengl3 \
   --resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} \
   --main-pack "$GAMEDIR/gamedata/pcks/SlayTheSpire2.pck" ) > "$RUNLOG" 2>&1
 
-pm_finish
+launcher_platform_finish

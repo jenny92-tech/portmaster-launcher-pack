@@ -1,3 +1,6 @@
+// INPUT:  Godot canvas_item、mix_percentage uniform
+// OUTPUT: fragment() 输出半透明黑色 COLOR
+// POS:    以静态暗化替代昂贵的屏幕模糊
 shader_type canvas_item;
 
 uniform float lod: hint_range(0.0, 5.0) = 5.0;

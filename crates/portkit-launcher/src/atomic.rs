@@ -1,3 +1,6 @@
+// INPUT:  std 文件系统、字节内容与源/目标路径
+// OUTPUT: atomic_write()、atomic_copy()
+// POS:    避免引入网络依赖的轻量启动器持久化文件替换基础设施
 //! Local copy of the atomic file primitives this helper needs. Keeping them
 //! here avoids linking `portkit-core` (and its TLS/HTTP dependency tree) into
 //! a binary that is shipped inside every game port package.

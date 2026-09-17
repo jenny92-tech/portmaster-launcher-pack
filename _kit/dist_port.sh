@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  端口 manifest.json、love/src/portable 输入、assemble.sh 与共享打包工具
+# OUTPUT: ports/<port>/dist/ 可部署端口内容
+# POS:    调度端口专用构建或共享组装流程并收集 UI、运行时与发行元数据
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #
@@ -151,9 +154,13 @@ fi
 [ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"
 [ -f "$PORT_DIR/README.md" ] && cp "$PORT_DIR/README.md" "$APP_DIST_ROOT/"
 if [ -n "$SHOT" ] && [ -f "$PORT_DIR/$SHOT" ]; then
-  cp "$PORT_DIR/$SHOT" "$DIST/screenshot.png"
-  cp "$PORT_DIR/$SHOT" "$DIST/${SCRIPT_NAME%.sh}.png"
-  python3 - "$MANIFEST" "$PORT_DIR/$SHOT" "$DIST" <<'PY'
+  ARTWORK_DIST="$DIST"
+  if [ "$PORT" = "appmanager" ]; then
+    ARTWORK_DIST="$APP_DIST_ROOT"
+  fi
+  cp "$PORT_DIR/$SHOT" "$ARTWORK_DIST/screenshot.png"
+  cp "$PORT_DIR/$SHOT" "$ARTWORK_DIST/${SCRIPT_NAME%.sh}.png"
+  python3 - "$MANIFEST" "$PORT_DIR/$SHOT" "$ARTWORK_DIST" <<'PY'
 import json
 import os
 import shutil
@@ -174,7 +181,7 @@ python3 "$ROOT/_kit/port_json.py" "$MANIFEST" "$DIST" "$PORT"
 
 # 以下都是 src/ 里的可选运行时/输入文件; love-only 的 port 没有 src/, 跳过即可。
 if [ -d "$SRC" ]; then
-  find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$DIST/" \;
+  find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$APP_DIST_ROOT/" \;
   # A port may bundle its own runtime instead of relying on PortMaster libs/.
   [ -z "$USE_LOVE" ] && [ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
   [ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"

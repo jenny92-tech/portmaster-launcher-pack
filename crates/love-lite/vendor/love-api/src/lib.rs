@@ -1,3 +1,6 @@
+// INPUT:  mlua、SharedState 及各 love.* 子模块注册器
+// OUTPUT: LoveRuntime、new() 与 LÖVE API 模块
+// POS:    上游衍生且面向 APP Manager 定制的 LÖVE Lua API 装配入口
 // Preserve imported upstream code as-is; local adapter code is linted strictly.
 #![allow(clippy::all)]
 

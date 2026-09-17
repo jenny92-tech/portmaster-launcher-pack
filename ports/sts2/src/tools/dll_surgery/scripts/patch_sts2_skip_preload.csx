@@ -1,4 +1,7 @@
 #!/usr/bin/env dotnet-script
+// INPUT:  Mono.Cecil、输入/输出 DLL 路径与程序集参考目录
+// OUTPUT: 启动预加载方法直接返回已完成 Task 的输出 DLL
+// POS:    以离线 IL 补丁跳过 STS2 批量启动预加载
 /* Short-circuit StS2's heavy startup preload methods so the 769 common +
  * main-menu assets aren't all pinned in Mali GPU memory at once. Mirrors
  * what the community Android port does inside its rewritten PreloadManager

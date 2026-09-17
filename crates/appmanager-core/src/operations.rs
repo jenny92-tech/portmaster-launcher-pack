@@ -1,3 +1,6 @@
+// INPUT:  ResolvedDeviceContext、ManagedRoot、LocationRole、文件动作及进度通道
+// OUTPUT: FileAction/FileApplyRequest/Outcome、保护名单与 apply_file_actions()
+// POS:    在托管路径和能力边界内执行回收、恢复、删除及 AppleDouble 清理
 use std::collections::BTreeSet;
 use std::fs::{self, File, FileTimes, OpenOptions};
 use std::io::{self, Write};
@@ -1218,12 +1221,12 @@ mod tests {
         fs::create_dir(context.roots.game_dirs.join("Shared")).unwrap();
         fs::write(
             context.roots.scripts.join("Keep.sh"),
-            b"GAMEDIR=/data/ports/Shared\n",
+            format!("GAMEDIR='{}/Shared'\n", context.roots.game_dirs.display()),
         )
         .unwrap();
         fs::write(
             context.roots.scripts.join("Duplicate.sh"),
-            b"GAMEDIR=/data/ports/Shared\n",
+            format!("GAMEDIR='{}/Shared'\n", context.roots.game_dirs.display()),
         )
         .unwrap();
         fs::write(

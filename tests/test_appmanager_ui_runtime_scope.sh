@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  APP Manager manifest、Cargo 依赖闭包、LOVE-lite 与共享启动源码
+# OUTPUT: 专用 runtime 的产品身份、依赖隔离和适用范围断言结果
+# POS:    APP Manager LOVE-lite 与普通游戏 LÖVE runtime 边界回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

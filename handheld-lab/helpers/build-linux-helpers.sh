@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  Docker、Alpine 构建镜像与 build-in-alpine.sh
+# OUTPUT: build/amd64 与 build/arm64 辅助程序集合
+# POS:    为虚拟机和掌机分别生成静态 Linux 原生工具
 set -eu
 
 component_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)

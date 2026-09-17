@@ -1,0 +1,233 @@
+#!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster control.txt、SILK_* 配置、unityloader
+# OUTPUT: 丝之歌 TOML 设置、字体 fallback、显示/按键配置与游戏进程
+# POS:    丝之歌 LÖVE 设置页和 Bogodroid Unity 6 启动模板
+# PORTMASTER: silksong, K_空洞骑士_丝之歌[中].sh
+#
+# Stage-1: shared love settings UI writes launch_config.env.
+# Stage-2: choose low/original-color config, apply frame/render/input/memory
+#          policy, then run the standard plugin-based unityloader.
+
+PORT_NAME="silksong"; LOG_PREFIX="[SILK-LOVE]"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ── PortMaster preamble (controlfolder discovery + control.txt).
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
+source "$KIT/launcher_artwork.sh"
+#@KIT-END
+portmaster_init "$SCRIPT_DIR" || exit 1
+LAUNCHERDIR="/$directory/ports/$PORT_NAME"
+[ -d "$LAUNCHERDIR" ] || LAUNCHERDIR="$SCRIPT_DIR/$PORT_NAME"
+
+resolve_silksong_gamedir() {
+  local candidate
+  for candidate in \
+    "/$directory/ports/$PORT_NAME" \
+    "/userdata/silksong" \
+    "/mnt/UDISK/silksong" \
+    "/mnt/sdcard/roms/ports/$PORT_NAME" \
+    "/mnt/SDCARD/Roms/PORTS/$PORT_NAME" \
+    "/sdcard/roms/ports/$PORT_NAME"; do
+    [ -n "$candidate" ] || continue
+    [ -x "$candidate/unityloader" ] && { printf '%s\n' "$candidate"; return 0; }
+  done
+  return 1
+}
+
+GAMEDIR="$(resolve_silksong_gamedir)" || {
+  echo "$LOG_PREFIX runtime missing: expected unityloader under /$directory/ports/$PORT_NAME, /userdata/silksong or /mnt/UDISK/silksong"
+  pm_finish
+  exit 1
+}
+# Existing internal-storage installs keep the UI beside the runtime. Prefer
+# the portable launcher payload when present, otherwise retain that layout.
+[ -d "$LAUNCHERDIR/love_ui" ] || LAUNCHERDIR="$GAMEDIR"
+portmaster_sync_launcher_artwork "$SCRIPT_DIR" "$0" "$LAUNCHERDIR"
+CONFDIR="$GAMEDIR/conf"
+cd "$GAMEDIR" || exit 1
+exec > "$GAMEDIR/log_silk.txt" 2>&1
+echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
+mkdir -p "$CONFDIR" "$GAMEDIR/cache" "$GAMEDIR/cache/UnityShaderCache"
+[ -x "$LAUNCHERDIR/bin/portkit-launcher" ] &&
+  export PORTKIT_LAUNCHER_BIN_OVERRIDE="$LAUNCHERDIR/bin/portkit-launcher"
+
+# ── shared helpers (assemble.sh inlines these into the device build) ─────
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_common.sh"
+source "$KIT/launcher_unity_common.sh"
+#@KIT-END
+
+install_unity_font_fallback() {
+  local font_dir="$GAMEDIR/gamedata/fonts"
+  local font_source="$controlfolder/resources/NotoSansSC-Regular.ttf"
+  local font_config="$GAMEDIR/silksong-fonts.xml"
+  [ -s "$font_source" ] || return 0
+  mkdir -p "$font_dir" || return 0
+  if [ ! -s "$font_dir/NotoSansSC-Regular.ttf" ]; then
+    cp "$font_source" "$font_dir/NotoSansSC-Regular.ttf" || return 0
+  fi
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/Roboto-Regular.ttf"
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/Roboto-Bold.ttf"
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/DroidSans.ttf"
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/DroidSansFallback.ttf"
+  if [ -s "$font_config" ]; then
+    cp "$font_config" "$font_dir/fonts.xml"
+    cp "$font_config" "$font_dir/system_fonts.xml"
+    cp "$font_config" "$font_dir/fallback_fonts.xml"
+  fi
+}
+
+toml_set() {
+  local toml="$1" section="$2" key="$3" value="$4" tmp
+  tmp="$toml.tmp.$$"
+  awk -v section="$section" -v key="$key" -v value="$value" '
+    BEGIN {
+      inside = 0
+      found_section = 0
+      wrote = 0
+      pattern = "^[[:space:]]*" key "[[:space:]]*="
+    }
+    /^[[:space:]]*\[/ {
+      if (inside && !wrote) {
+        print key " = " value
+        wrote = 1
+      }
+      inside = 0
+      if ($0 == "[" section "]") {
+        inside = 1
+        found_section = 1
+      }
+    }
+    inside && $0 ~ pattern {
+      if (!wrote) {
+        print key " = " value
+        wrote = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!found_section) {
+        print ""
+        print "[" section "]"
+        print key " = " value
+      } else if (inside && !wrote) {
+        print key " = " value
+      }
+    }
+  ' "$toml" > "$tmp" && mv "$tmp" "$toml"
+}
+
+select_silksong_toml() {
+  case "${SILK_QUALITY:-low}" in
+    original) PORT_TOML="$GAMEDIR/config.original.toml"; SILK_MODE_LABEL="original-color" ;;
+    *) PORT_TOML="$GAMEDIR/config.low.toml"; SILK_MODE_LABEL="low" ;;
+  esac
+  [ -f "$PORT_TOML" ] || PORT_TOML="$GAMEDIR/config.toml"
+  [ -f "$PORT_TOML" ] || {
+    echo "$LOG_PREFIX no config TOML in $GAMEDIR"
+    exit 1
+  }
+}
+
+silk_effect_choice() {
+  local value="$1" low_default="$2" original_default="$3"
+  case "$value" in
+    on|off) printf '%s\n' "$value" ;;
+    *)
+      case "${SILK_QUALITY:-low}" in
+        original) printf '%s\n' "$original_default" ;;
+        *) printf '%s\n' "$low_default" ;;
+      esac
+      ;;
+  esac
+}
+
+silk_disable_value() {
+  case "$1" in
+    on) printf 'false\n' ;;
+    *) printf 'true\n' ;;
+  esac
+}
+
+apply_silksong_quality() {
+  local toml="$1" decorative="${SILK_DECORATIVE_PERCENT:-75}"
+  local ambient bloom camera_blur light_blur uber unload_bundles
+  case "$decorative" in 50|75|100) ;; *) decorative=75 ;; esac
+  ambient="$(silk_effect_choice "${SILK_AMBIENT_PARTICLES:-auto}" off on)"
+  bloom="$(silk_effect_choice "${SILK_BLOOM:-auto}" off on)"
+  camera_blur="$(silk_effect_choice "${SILK_CAMERA_BLUR_PLANE:-auto}" off on)"
+  light_blur="$(silk_effect_choice "${SILK_LIGHT_BLUR:-auto}" off on)"
+  uber="$(silk_effect_choice "${SILK_UBER_POSTPROCESS:-auto}" on on)"
+  case "${SILK_ASSETBUNDLE_UNLOAD:-on}" in on) unload_bundles=true ;; *) unload_bundles=false ;; esac
+
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_touch_camera" "true"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_touch_controls" "true"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_watermark_canvas" "true"
+  toml_set "$toml" "game_patches.silksong_unity6" "freeze_decorative_behaviours" "true"
+  toml_set "$toml" "game_patches.silksong_unity6" "decorative_sprite_percent" "$decorative"
+  toml_set "$toml" "game_patches.silksong_unity6" "unload_assetbundles_after_title" "$unload_bundles"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_audio_preloader" "true"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_ambient_particles" "$(silk_disable_value "$ambient")"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_heavy_postprocess" "false"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_bloom" "$(silk_disable_value "$bloom")"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_camera_blur_plane" "$(silk_disable_value "$camera_blur")"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_light_blur" "$(silk_disable_value "$light_blur")"
+  toml_set "$toml" "game_patches.silksong_unity6" "disable_uber_postprocess" "$(silk_disable_value "$uber")"
+  echo "$LOG_PREFIX effects: ambient=$ambient bloom=$bloom camera_blur=$camera_blur light_blur=$light_blur uber=$uber unload_bundles=$unload_bundles"
+
+  case "${SILK_FILE_BACKED_ELF:-on}" in
+    on)
+      toml_set "$toml" "loader.file_backed_elf" "enabled" "true"
+      toml_set "$toml" "loader.file_backed_elf" "modules" "[\"libil2cpp.so\", \"libunity.so\"]"
+      ;;
+    *) toml_set "$toml" "loader.file_backed_elf" "enabled" "false" ;;
+  esac
+}
+
+apply_silksong_fps() {
+  local toml="$1" interval
+  case "${SILK_FPS:-45}" in
+    60) interval=16667 ;;
+    45) interval=22222 ;;
+    30) interval=33333 ;;
+    25) interval=40000 ;;
+    *) interval=22222 ;;
+  esac
+  toml_set "$toml" "unity" "render_sleep_us" "0"
+  toml_set "$toml" "unity" "frame_sync_interval_us" "$interval"
+  toml_set "$toml" "unity" "signal_vsync_before_render" "false"
+  echo "$LOG_PREFIX frame cap=${SILK_FPS:-45} interval_us=$interval"
+}
+
+# ═══════════════ STAGE 1: love settings UI → writes launch_config.env ════
+run_love_launcher_ui "$LAUNCHERDIR/love_ui"
+
+# ═══════════════ STAGE 2: patch config TOML from launcher choices ════════
+SILK_ENV="$LAUNCH_ENV"
+if [ -f "$SILK_ENV" ]; then
+  source "$SILK_ENV"
+  echo "$LOG_PREFIX env: quality=${SILK_QUALITY:-low} fps=${SILK_FPS:-45} output=${SILK_WIDTH:-auto}x${SILK_HEIGHT:-auto} render_percent=${SILK_RENDER_PERCENT:-75} decorative=${SILK_DECORATIVE_PERCENT:-75} file_elf=${SILK_FILE_BACKED_ELF:-on} effects=${SILK_AMBIENT_PARTICLES:-auto}/${SILK_BLOOM:-auto}/${SILK_CAMERA_BLUR_PLANE:-auto}/${SILK_LIGHT_BLUR:-auto}/${SILK_UBER_POSTPROCESS:-auto} unload=${SILK_ASSETBUNDLE_UNLOAD:-on} swap_ab=${SILK_SWAP_AB:-off} swap_xy=${SILK_SWAP_XY:-off}"
+
+  if [ "${SILK_SWAP_AB:-off}" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
+  if [ "${SILK_SWAP_XY:-off}" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
+else
+  echo "$LOG_PREFIX no launch_config.env — using low/45fps defaults"
+  A_V=BUTTON_A; B_V=BUTTON_B; X_V=BUTTON_X; Y_V=BUTTON_Y
+fi
+
+select_silksong_toml
+echo "$LOG_PREFIX config=$PORT_TOML mode=$SILK_MODE_LABEL"
+configure_unity_display "$PORT_TOML" "${SILK_WIDTH:-auto}" "${SILK_HEIGHT:-auto}" "${SILK_RENDER_PERCENT:-75}" || exit 1
+apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
+apply_silksong_fps "$PORT_TOML"
+apply_silksong_quality "$PORT_TOML"
+install_unity_font_fallback
+export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+
+# Unity Loader resolves Android base assets and PAD asset packs internally.
+run_unity_game "$PORT_TOML"

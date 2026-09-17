@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  原始游戏 PCK、GDRE/Godot 与上级纹理处理工具
+# OUTPUT: work/sts2 中的恢复资源、覆盖目录及 output.pck
+# POS:    编排保留原始扩展资源的 STS2 Mali 纹理覆盖构建
 # One-shot StS2 build: take the original game pck and produce a Mali-ready
 # pck via `gdre_tools --pck-patch`. The patch layers ASTC textures and
 # game-specific overlays ON TOP of the unmodified original, which

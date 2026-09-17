@@ -15,7 +15,8 @@
   "library.v1",
   "python.v1"
  ],
- "paths": {
+"paths": {
+  "shell_directory": {"strategy": "parent", "of": "game_data"},
   "scripts": {
    "strategy": "launcher_dir"
   },

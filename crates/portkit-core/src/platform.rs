@@ -1,3 +1,6 @@
+// INPUT:  Config/ParserLimits、Predicate、检测上下文和文件路径策略
+// OUTPUT: Platform/Model、DetectionContext、Resolution、Location 及解析接口
+// POS:    数据驱动的设备识别、能力约束和托管位置解析引擎
 use crate::config::{Config, ConfigLoader, ParserLimits, validate_literal_path};
 use crate::predicate::Predicate;
 use crate::{Error, Result};
@@ -36,9 +39,18 @@ pub struct PathStrategy {
 
 impl PathStrategy {
     pub fn validate(&self, limits: &ParserLimits) -> Result<()> {
+        if self
+            .arguments
+            .get("canonicalize_existing")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(Error::InvalidConfig(
+                "canonicalize_existing must be a boolean".into(),
+            ));
+        }
         match self.strategy.as_str() {
             "literal" => {
-                self.require_arguments(&["value"])?;
+                self.require_arguments(&["value", "canonicalize_existing"])?;
                 validate_absolute_path(self.string("value")?, limits, "literal path")
             }
             "first_existing" => {
@@ -113,15 +125,6 @@ impl PathStrategy {
                 self.string_any(&["base", "path"])?;
                 let relative = self.string_any(&["relative", "value", "suffix"])?;
                 validate_literal_path(relative, limits)?;
-                if self
-                    .arguments
-                    .get("canonicalize_existing")
-                    .is_some_and(|value| !value.is_boolean())
-                {
-                    return Err(Error::InvalidConfig(
-                        "relative_to canonicalize_existing must be a boolean".into(),
-                    ));
-                }
                 Ok(())
             }
             other => Err(Error::InvalidConfig(format!(
@@ -1261,6 +1264,39 @@ fn resolve_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loongos_game_data_resolves_firmware_symlink() {
+        let fixture = tempfile::tempdir().unwrap();
+        let real = fixture.path().join("mnt/sdcard/roms/ports");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir(fixture.path().join("roms")).unwrap();
+        std::os::unix::fs::symlink(&real, fixture.path().join("roms/ports")).unwrap();
+        let context = DetectionContext {
+            root: Some(fixture.path().to_path_buf()),
+            launcher_path: "/roms/ports/APP Manager.sh".into(),
+            environment: BTreeMap::new(),
+            os_release: BTreeMap::new(),
+            target_override: None,
+        };
+        let config: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../config/src/platforms/miniloong-loongos.json"
+        ))
+        .unwrap();
+        let mut strategy: PathStrategy =
+            serde_json::from_value(config["paths"]["game_data"].clone()).unwrap();
+        strategy.validate(&ParserLimits::default()).unwrap();
+        assert_eq!(
+            strategy
+                .resolve("game_data", &context, &BTreeMap::new())
+                .unwrap(),
+            std::fs::canonicalize(real).unwrap()
+        );
+        strategy
+            .arguments
+            .insert("canonicalize_existing".into(), serde_json::json!("true"));
+        assert!(strategy.validate(&ParserLimits::default()).is_err());
+    }
 
     #[test]
     fn root_maps_absolute_device_paths_into_a_fixture() {

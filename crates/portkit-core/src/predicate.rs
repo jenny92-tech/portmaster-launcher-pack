@@ -1,3 +1,6 @@
+// INPUT:  DetectionContext、serde 谓词定义与有限检测参数
+// OUTPUT: Predicate 的递归校验、参数读取与 evaluate()
+// POS:    平台和型号选择使用的有限、无脚本执行检测表达式
 use crate::platform::DetectionContext;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};

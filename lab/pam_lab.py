@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  Python 标准库、仓库配置、预置运行时与 lab 测试入口
+# OUTPUT: main() doctor/test/diagnose；report.json、summary.md 与分项日志
+# POS:    汇总 App Manager 主机条件、配置绑定、用户态输入和评估结果
 """AI-facing evaluator for the APP Manager device matrix."""
 
 from __future__ import annotations

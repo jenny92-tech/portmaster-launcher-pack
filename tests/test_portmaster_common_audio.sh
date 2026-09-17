@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit/portmaster_common.sh、临时 Pulse socket、pactl/pgrep 替身
+# OUTPUT: 已运行音频服务定位与 SDL 音频环境断言结果
+# POS:    PortMaster 共享音频初始化的主机侧回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -69,11 +72,18 @@ export PATH CFW_NAME PORT_NAME LOG_PREFIX XDG_RUNTIME_DIR
 unset PULSE_SERVER SDL_AUDIODRIVER
 
 source "$ROOT/_kit/portmaster_common.sh"
+launcher_platform_display() { return 1; }
 audio_setup > "$tmp/output"
 output="$(< "$tmp/output")"
 
 [ "$PULSE_SERVER" = "unix:$TEST_VALID_SOCKET" ]
-[ "$SDL_AUDIODRIVER" = "pulseaudio" ]
+if [ -r /usr/lib/alsa-lib/libasound_module_pcm_pulse.so ] &&
+   [ -r /usr/share/alsa/alsa.conf.d/50-pulseaudio.conf ]; then
+  [ "$SDL_AUDIODRIVER" = "alsa" ]
+  [ "$AUDIODEV" = "pulse" ]
+else
+  [ "$SDL_AUDIODRIVER" = "pulseaudio" ]
+fi
 grep -Fq "pulse socket -> $TEST_VALID_SOCKET" <<<"$output"
 grep -Fq 'pulse/pipewire daemon already up; locating its socket' <<<"$output"
 

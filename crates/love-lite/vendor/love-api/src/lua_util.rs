@@ -1,3 +1,6 @@
+// INPUT:  mlua 参数值、Lua 表与颜色分量
+// OUTPUT: parse_color()、parse_color_offset()、color_f32_to_u8()、register_noop_fns()
+// POS:    LÖVE API 绑定共用的颜色参数转换与空操作注册辅助层
 use mlua::prelude::*;
 
 /// Parse LÖVE color from either (r,g,b,a) args or ({r,g,b,a}) table arg

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  config/config.json、APP Manager Shell 入口与 Rust 服务源码
+# OUTPUT: 发布源 URL、路由和原生配置归属的静态断言结果
+# POS:    APP Manager 配置驱动发布源契约回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

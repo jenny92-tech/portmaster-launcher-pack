@@ -1,3 +1,6 @@
+// INPUT:  appmanager_core 业务操作、portkit_core 配置/下载/健康检查和设备请求
+// OUTPUT: EmbeddedService/Bootstrap/Request/Action、ServiceEvent 与快照/任务接口
+// POS:    编排 APP Manager 进程内会话、后台任务、原生启动及局域网管理
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::fs;
@@ -824,14 +827,15 @@ impl EmbeddedService {
     /// Validate a current inventory launcher and publish a shell handoff.
     /// The frontend-owned launcher consumes it only after SDL has exited.
     pub fn run_script(&self, path: String) -> Result<(), String> {
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        use std::os::unix::fs::OpenOptionsExt;
 
         let script = PathBuf::from(&path);
         let handoff = self.request.app_root.join("game_to_launch.txt");
-        let fingerprint = self.request.app_root.join("game_to_launch.fingerprint");
+        let kind_handoff = self.request.app_root.join("game_to_launch.kind");
         let xdg_data_home = self.request.app_root.join("game_to_launch.xdg_data_home");
         let _ = fs::remove_file(&handoff);
-        let _ = fs::remove_file(&fingerprint);
+        let _ = fs::remove_file(&kind_handoff);
+        let _ = fs::remove_file(self.request.app_root.join("game_to_launch.fingerprint"));
         let _ = fs::remove_file(&xdg_data_home);
         let file = fs::OpenOptions::new()
             .read(true)
@@ -843,12 +847,16 @@ impl EmbeddedService {
             return Err(format!("launcher script not found: {path}"));
         }
         let inventory = Inventory::scan(&self.resolved.context).map_err(display_error)?;
-        if !inventory.ports.iter().any(|port| port.path == script)
-            && !inventory.apps.iter().any(|app| app.launch == script)
-        {
-            return Err("launcher is not a current managed inventory item".to_owned());
-        }
-        let identity = format!("{}:{}\n", metadata.dev(), metadata.ino());
+        let is_port = inventory.ports.iter().any(|port| port.path == script);
+        let is_app = inventory.apps.iter().any(|app| app.launch == script);
+        let launch_kind = match (is_port, is_app) {
+            (true, false) => "port",
+            (false, true) => "trimui_app",
+            (false, false) => {
+                return Err("launcher is not a current managed inventory item".to_owned());
+            }
+            (true, true) => return Err("launcher has an ambiguous inventory type".to_owned()),
+        };
         let write_atomic = |target: &Path, bytes: &[u8]| -> Result<(), String> {
             let temporary = target.with_extension(format!(
                 "handoff-{}-{}",
@@ -873,29 +881,30 @@ impl EmbeddedService {
         // frontend's launch environment. Derive the same value from the
         // resolved Config root; this covers both old and new filesystem
         // layouts without teaching individual game scripts about devices.
-        if let Some(value) = portmaster_xdg_data_home(
-            self.resolved.context.roots.portmaster.as_deref(),
-            Some(&self.resolved.context.roots.scripts),
-        ) {
+        if launch_kind == "port"
+            && let Some(value) = portmaster_xdg_data_home(
+                self.resolved.context.roots.portmaster.as_deref(),
+                Some(&self.resolved.context.roots.scripts),
+            )
+        {
             let value = value
                 .to_str()
                 .ok_or_else(|| "PortMaster launch environment is not UTF-8".to_owned())?;
             write_atomic(&xdg_data_home, value.as_bytes())?;
         }
-        // Environment and fingerprint first; publishing the path is the
-        // handoff commit point.
-        write_atomic(&fingerprint, identity.as_bytes())?;
+        // Type and environment first; publishing the exact path is the handoff
+        // commit point consumed after the UI process has fully exited.
+        write_atomic(&kind_handoff, launch_kind.as_bytes())?;
         if let Err(error) = write_atomic(&handoff, path.as_bytes()) {
-            let _ = fs::remove_file(&fingerprint);
+            let _ = fs::remove_file(&kind_handoff);
             let _ = fs::remove_file(&xdg_data_home);
             return Err(error);
         }
         append_task_log(
             &self.request.app_root.join("log.txt"),
             &format!(
-                "launch_handoff platform_id={} path={path} identity={}",
-                self.resolved.resolution.platform_id,
-                identity.trim()
+                "launch_handoff platform_id={} kind={launch_kind} path={path}",
+                self.resolved.resolution.platform_id
             ),
         );
         Ok(())
@@ -1835,7 +1844,14 @@ impl Session {
             .into_iter()
             .map(str::to_owned)
             .collect(),
-            directory: self.launcher_directory().display().to_string(),
+            // Legacy Shell `directory` semantics are declared by the profile,
+            // independently of the launcher and managed data directories.
+            directory: self
+                .resolved
+                .resolution
+                .paths
+                .get("shell_directory")
+                .map_or_else(String::new, |path| path.display().to_string()),
             controlfolder: self
                 .portmaster_root()
                 .map_or_else(String::new, |path| path.display().to_string()),
@@ -2151,7 +2167,7 @@ impl Session {
             return;
         }
         for extension in ["png", "PNG", "jpg", "JPG", "jpeg", "JPEG", "webp", "WEBP"] {
-            let source = self.paths.source_dir.join(format!("{stem}.{extension}"));
+            let source = self.paths.app_root.join(format!("{stem}.{extension}"));
             let target = images.join(format!("{stem}.{extension}"));
             if source.is_file() && !source.is_symlink() && !target.exists() {
                 let _ = fs::copy(source, target);
@@ -2856,6 +2872,10 @@ fn install_portmaster_action(
             Ok(OperationOutcome {
                 failed: !cancelled,
                 handled: 1,
+                failures: (!cancelled)
+                    .then(|| error.to_string())
+                    .into_iter()
+                    .collect(),
                 cancelled,
                 ..OperationOutcome::default()
             })
@@ -3104,6 +3124,115 @@ mod tests {
     }
 
     #[test]
+    fn artwork_is_loaded_from_app_data_and_preserves_existing_frontend_image() {
+        let (temp, service) = embedded_fixture();
+        let paths = Paths::new(&service.request);
+        let resolved = crate::resolution::resolve_device_context(
+            PathBuf::from("/mnt/SDCARD/Roms/PORTS/APP Manager.sh"),
+            paths.state.clone(),
+            paths.trash.clone(),
+            None,
+            None,
+            Some(temp.path().to_path_buf()),
+            &service.request.config_directories,
+        )
+        .unwrap();
+        let target = resolved
+            .context
+            .roots
+            .images
+            .as_ref()
+            .unwrap()
+            .join("APP Manager.png");
+        assert!(target.starts_with(temp.path()));
+        fs::write(
+            paths.source_dir.join("APP Manager.png"),
+            b"wrong-root-image",
+        )
+        .unwrap();
+        fs::write(paths.app_root.join("APP Manager.png"), b"package-image").unwrap();
+        let session = Session::from_resolution_without_recovery(
+            service.request.clone(),
+            paths,
+            Arc::new(resolved),
+            Some(temp.path().to_path_buf()),
+            Arc::new(Mutex::new(None)),
+        )
+        .unwrap();
+        session.sync_artwork();
+        assert_eq!(fs::read(&target).unwrap(), b"package-image");
+        fs::write(&target, b"user-image").unwrap();
+        session.sync_artwork();
+        assert_eq!(fs::read(&target).unwrap(), b"user-image");
+    }
+
+    #[test]
+    fn trimui_config_blocks_portmaster_install_and_update_even_with_acknowledgements() {
+        let (temp, service) = embedded_fixture();
+        let paths = Paths::new(&service.request);
+        let resolved = crate::resolution::resolve_device_context(
+            PathBuf::from("/mnt/SDCARD/Roms/PORTS/APP Manager.sh"),
+            paths.state.clone(),
+            paths.trash.clone(),
+            None,
+            None,
+            Some(temp.path().to_path_buf()),
+            &service.request.config_directories,
+        )
+        .unwrap();
+        assert_eq!(resolved.resolution.platform_id, "trimui");
+        assert_eq!(resolved.context.management, ManagementMode::System);
+        assert!(matches!(
+            appmanager_core::InstallPlan::from_context(&resolved.context),
+            Err(appmanager_core::PlanError::SystemManaged)
+        ));
+        let session = Session::from_resolution_without_recovery(
+            service.request.clone(),
+            paths,
+            Arc::new(resolved),
+            Some(temp.path().to_path_buf()),
+            Arc::new(Mutex::new(None)),
+        )
+        .unwrap();
+        assert!(!session.source().unwrap().install_allowed);
+        for capability in ["repair_runtimes", "install_ports", "install_apps"] {
+            assert!(session.capability(capability), "{capability}");
+        }
+        let core = session.portmaster_root().unwrap();
+        assert!(core.starts_with(temp.path()));
+        for existing in [false, true] {
+            if existing {
+                fs::create_dir_all(core).unwrap();
+                fs::write(core.join("control.txt"), b"firmware-owned").unwrap();
+            }
+            let outcome = install_portmaster_action(
+                &session,
+                &ServiceAction {
+                    kind: "INSTALL_PORTMASTER".to_owned(),
+                    argument: "stable".to_owned(),
+                },
+                true,
+                true,
+            )
+            .unwrap();
+            assert!(outcome.failed);
+            assert_eq!(outcome.handled, 1);
+            for force in [false, true] {
+                assert_eq!(session.check_update(force).unwrap(), 0);
+                assert!(!session.paths.update_cache.exists());
+            }
+            if existing {
+                assert_eq!(
+                    fs::read(core.join("control.txt")).unwrap(),
+                    b"firmware-owned"
+                );
+            } else {
+                assert!(!core.exists());
+            }
+        }
+    }
+
+    #[test]
     fn game_handoff_derives_frontend_environment_from_the_resolved_core() {
         assert_eq!(
             portmaster_xdg_data_home(
@@ -3127,6 +3256,36 @@ mod tests {
             Some(PathBuf::from("/roms/ports"))
         );
         assert_eq!(portmaster_xdg_data_home(None, None), None);
+    }
+
+    #[test]
+    fn inventory_shell_paths_follow_config_without_directory_name_guesses() {
+        for directory in ["/card/ports", "/card/PORTS64", "/different/root"] {
+            let (_temp, mut service) = embedded_fixture();
+            let resolved = Arc::get_mut(&mut service.resolved).unwrap();
+            resolved
+                .resolution
+                .paths
+                .insert("shell_directory".into(), PathBuf::from(directory));
+            resolved.resolution.paths.insert(
+                "launcher_directory".into(),
+                PathBuf::from("/not/the/shell/root"),
+            );
+            let expected_core = resolved.context.roots.portmaster.clone();
+            let session = Session::from_resolution_without_recovery(
+                service.request.clone(),
+                Paths::new(&service.request),
+                service.resolved.clone(),
+                None,
+                Arc::new(Mutex::new(None)),
+            )
+            .unwrap();
+            assert_eq!(session.inventory_options().directory, directory);
+            assert_eq!(
+                session.inventory_options().controlfolder,
+                expected_core.map_or_else(String::new, |p| p.display().to_string())
+            );
+        }
     }
 
     #[test]
@@ -3161,6 +3320,61 @@ mod tests {
         assert_eq!(
             fs::read_to_string(service.request.app_root.join("game_to_launch.txt")).unwrap(),
             game.to_string_lossy()
+        );
+        assert_eq!(
+            fs::read_to_string(service.request.app_root.join("game_to_launch.kind")).unwrap(),
+            "port"
+        );
+        assert!(
+            !service
+                .request
+                .app_root
+                .join("game_to_launch.fingerprint")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn trimui_app_handoff_has_its_own_kind_without_portmaster_environment() {
+        let (temp, mut service) = embedded_fixture();
+        let apps = temp.path().join("Apps");
+        let app = apps.join("Aplayer");
+        fs::create_dir_all(&app).unwrap();
+        let launch = app.join("launch.sh");
+        fs::write(&launch, b"#!/bin/sh\n").unwrap();
+
+        let resolved = Arc::get_mut(&mut service.resolved).expect("fixture owns its resolution");
+        resolved.context.capabilities.inventory_apps = appmanager_core::CapabilityState::Current;
+        resolved
+            .context
+            .roots
+            .apps
+            .push(appmanager_core::ManagedAppLocation {
+                id: "trimui-apps".to_owned(),
+                path: apps,
+                roles: vec![portkit_core::LocationRole::Inventory],
+                formats: vec![portkit_core::BundleFormat::TrimuiApp],
+                priority: 100,
+            });
+
+        service
+            .run_script(launch.to_string_lossy().into_owned())
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(service.request.app_root.join("game_to_launch.kind")).unwrap(),
+            "trimui_app"
+        );
+        assert_eq!(
+            fs::read_to_string(service.request.app_root.join("game_to_launch.txt")).unwrap(),
+            launch.to_string_lossy()
+        );
+        assert!(
+            !service
+                .request
+                .app_root
+                .join("game_to_launch.xdg_data_home")
+                .exists()
         );
     }
 

@@ -1,3 +1,6 @@
+// INPUT:  ResolvedDeviceContext、前端转换契约、ManagedRoot、serde 与 TSV 字节
+// OUTPUT: InstallPlan、ValidatedInstallPlan、PlanError 及计划构造/编解码/校验接口
+// POS:    将设备上下文收敛为可执行且路径受限的 PortMaster 安装计划
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

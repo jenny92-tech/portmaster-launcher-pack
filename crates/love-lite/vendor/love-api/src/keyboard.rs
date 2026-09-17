@@ -1,3 +1,6 @@
+// INPUT:  mlua 与 SharedState 的宿主按键状态
+// OUTPUT: register() 安装 love.keyboard 查询与兼容接口
+// POS:    将外部输入后端维护的键盘状态提供给 Lua 前端
 use mlua::prelude::*;
 use std::sync::Arc;
 

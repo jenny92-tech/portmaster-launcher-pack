@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  _kit/love、各游戏 Lua 启动声明、lupa 和模拟 LÖVE 接口
+# OUTPUT: 控件行为、启动参数、状态持久化与错误处理的断言结果
+# POS:    共享 Lua UI 与声明式游戏启动器的无设备回归测试
 """Executable shared-Lua contract tests (uses lupa when available)."""
 from pathlib import Path
 import json
@@ -52,21 +55,37 @@ expected_env = {
     "sts2": ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_SWAP_AB='on'", "SLL_LAUNCH_COUNT='1'"),
     "terraria": ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='100'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'"),
     "vampiresurvivors114": ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='100'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'"),
+    "silksong": ("SILK_WIDTH='auto'", "SILK_RENDER_PERCENT='75'", "SILK_FPS='45'", "SILK_QUALITY='low'", "SILK_LAUNCH_COUNT='1'"),
+    "sunkendragon": ("SDR_WIDTH='auto'", "SDR_RENDER_PERCENT='100'", "SDR_SWAP_AB='off'", "SDR_LAUNCH_COUNT='1'"),
 }
 
-for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):
+def prepare_launcher_core_files(port, destination):
+    files = {
+        "terraria": (
+            "gamedata/lib/arm64-v8a/libil2cpp.so",
+            "gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat",
+            "gamedata/assets/bin/Data/data.unity3d",
+        ),
+        "sunkendragon": (
+            "gamefiles/lib/arm64-v8a/libil2cpp.so",
+            "gamefiles/lib/arm64-v8a/libunity.so",
+            "gamefiles/lib/arm64-v8a/libmain.so",
+            "gamefiles/assets/bin/Data/Managed/Metadata/global-metadata.dat",
+            "gamefiles/assets/bin/Data/globalgamemanagers",
+            "gamefiles/.gamedata_ready",
+        ),
+    }
+    for relative in files.get(port, ()):
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
+
+
+for port in expected_env:
     with tempfile.TemporaryDirectory() as temp:
         source = Path(temp) / "love"
         source.mkdir()
-        if port == "terraria":
-            for relative in (
-                "gamedata/lib/arm64-v8a/libil2cpp.so",
-                "gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat",
-                "gamedata/assets/bin/Data/data.unity3d",
-            ):
-                target = Path(temp) / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.touch()
+        prepare_launcher_core_files(port, Path(temp))
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.globals().SOURCE = str(source)
         lua.execute(mock)
@@ -80,6 +99,36 @@ for port in ("heishenhua", "hk", "sts2", "terraria", "vampiresurvivors114"):
         text = (source / "launch_config.env").read_text(encoding="utf-8")
         for line in required:
             assert line in text, (port, line, text)
+
+# Every Unity port must retain shared choices across a UI restart and serialize
+# its own environment prefix, including Silksong's multi-page settings.
+for port, prefix in {
+    "heishenhua": "HSH", "hk": "HKL", "silksong": "SILK",
+    "sunkendragon": "SDR", "terraria": "TER", "vampiresurvivors114": "VS",
+}.items():
+    for percent in ("100", "75", "50"):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "love"
+            source.mkdir()
+            prepare_launcher_core_files(port, Path(temp))
+            (source / "state.txt").write_text(
+                f"ui_lang=zh\nresolution=1280x720\nrender_scale={percent}\nswap_ab=on\nswap_xy=on\n",
+                encoding="utf-8",
+            )
+            for _ in range(2):
+                lua = LuaRuntime(unpack_returned_tuples=True)
+                lua.globals().SOURCE = str(source)
+                lua.execute(mock)
+                lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+                lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+                lua.execute("love.load(); love.draw(); love.keypressed('return')")
+                assert lua.globals().LAST_QUIT == 42, (port, percent)
+                text = (source / "launch_config.env").read_text(encoding="utf-8")
+                for key, value in {
+                    "WIDTH": "1280", "HEIGHT": "720", "RENDER_PERCENT": percent,
+                    "SWAP_AB": "on", "SWAP_XY": "on",
+                }.items():
+                    assert f"{prefix}_{key}='{value}'" in text, (port, percent, key, text)
 
 # Persisted picker values are untrusted input: invalid values must fall back to
 # defaults and generated shell environments must quote every value.
@@ -140,6 +189,63 @@ with tempfile.TemporaryDirectory() as source:
     ''')
     assert old_env.read_text(encoding="utf-8") == "OLD='complete'\n"
     assert not Path(str(old_env) + ".tmp").exists()
+
+# Focus scopes: display-only pages, disabled controls, header return, and
+# rebuilding away the focused scope must never leave a phantom selection.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function() k.add_page("Focus",{}) end})
+        love.load()
+        local fv=require("focus_view")
+        local function leaf(id,x,y,enabled)
+            return {id=id,focusable=enabled~=false,rect={x=x,y=y,w=40,h=30}}
+        end
+        local a,b,c=leaf("a",0,0),leaf("diagonal",60,40),leaf("same-column",0,100)
+        local group={id="group",children={a,b,c,leaf("display",0,35,false)}}
+        local tree={id="root",axis="x",children={
+            {id="outer",axis="y",children={group}},leaf("tools",200,0)}}
+        assert(fv.move(tree,"a",0,1)==c,"vertical projection beats a closer diagonal")
+        assert(fv.move(tree,"same-column",0,-1)==a)
+        assert(fv.move(tree,"a",1,0).id=="tools","exhausted inner scopes bubble through ancestors")
+        assert(fv.move(tree,"same-column",0,1)==nil,"boundary does not wrap")
+        local note=k.textview("Status","Ready",{expandable=false})
+        assert(not note.focusable and not k.info("Info","Value").focusable)
+        assert(k.textview("Details","Long text").focusable)
+        local side=k.button("Tool",function() end,{id="tool"})
+        k.set_page(1,"Focus",{note},{sidebar={side}})
+        assert(k.debug_focus().zone=="sidebar")
+        k.input("up"); assert(k.debug_focus().zone=="bar")
+        k.input("down"); assert(k.debug_focus().zone=="sidebar")
+        k.set_page(1,"Focus",{note},{preserve_focus=true,sidebar={}})
+        assert(k.debug_focus().zone=="bar")
+        k.input("down"); assert(k.debug_focus().zone=="bar")
+        local blocked=k.button("Disabled",function() error("disabled action") end,{disabled=true})
+        k.set_page(1,"Focus",{note,blocked,k.button("Go",function() end)}, {sidebar={side}})
+        assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==3)
+        k.input("right"); assert(k.debug_focus().zone=="sidebar")
+        k.input("up"); k.input("down"); assert(k.debug_focus().zone=="sidebar")
+        k.input("left"); assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==3)
+        local rows={}
+        for i=1,40 do rows[i]=k.button("Row "..i,function() end,{id="row:"..i}) end
+        k.set_page(1,"Scrolled",rows,{row_layout={mode="flow",min_width=420,max_columns=1},sidebar={side}})
+        for i=1,20 do k.input("down") end
+        k.input("right")
+        local layout=k.debug_layout()
+        assert(layout.scroll_y>0)
+        local sg=k.debug_sidebar_geometry()
+        local best,score
+        for i,g in ipairs(layout.geometry) do
+            local distance=math.abs(g.y+g.h/2-(sg.y1+sg.h1/2))
+            if not score or distance<score then best,score=i,distance end
+        end
+        k.input("left")
+        assert(k.debug_focus().focus_i==21,"returning to a container restores its stable focus")
+    ''')
 
 # The shared component API stays small but explicit: Select is the named form
 # of the existing picker, Checkbox accepts an options table, and physical keys

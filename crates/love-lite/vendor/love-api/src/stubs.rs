@@ -1,3 +1,6 @@
+// INPUT:  mlua、SharedState、flate2 与内置编码/数学辅助实现
+// OUTPUT: register() 安装音频/线程/输入兼容桩及数据、数学、图像子集
+// POS:    为未由完整 LÖVE 后端实现的 API 提供受限兼容行为
 use mlua::prelude::*;
 
 use crate::state::SharedState;

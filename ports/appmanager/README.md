@@ -20,8 +20,10 @@ Theora 运行库，只要求固件提供基础 glibc 与 SDL2。它没有系统 
 - 安装在单次任务内完成并立即可用；失败直接报告，修复方式是重新安装。
 
 Port App Manager 不管理游戏本体内容，也不替代 PortMaster 的 Port 目录、主题、
-图片或 Runtime 数据源。系统托管 PortMaster 的平台（如 ROCKNIX）不由 APP
-安装、重装或更新核心，只保留 Runtime 修复、环境详情和 Port 游戏管理。
+图片或 Runtime 数据源。系统托管 PortMaster 的平台（如 ROCKNIX、TrimUI）不由 APP
+安装、修复、重装或更新核心，也不改写 PortMaster 启动入口；保留 Runtime 修复、
+环境详情和 Port/APP 管理。TrimUI 的官方系统、第三方底包及外置 Ubuntu 用户态环境
+各有差异，PortMaster 本体由相应环境提供方维护；APP Manager 不承诺修复这些环境。
 
 ## 页面与输入
 
@@ -141,7 +143,8 @@ jenny92-appmanager/
 MiniLoong 旧固件的 Port 根位于 `/mnt/sdcard/roms/ports`；`ID=loong` 且
 `VERSION_ID >= 1.4.0.0` 的 LoongOS 布局使用 `/roms/ports`。若固件将其中的
 `PortMaster` 做成软链接，APP Manager 会解析并验证其
-真实目标后再管理。TrimUI 官方布局默认 core
+真实目标后再管理。旧固件通过专用启动器挂载 `python_3.11.squashfs`，新版
+LoongOS 直接使用系统 Python 和标准 `PortMaster.sh`。TrimUI 官方布局默认 core
 位于 `/mnt/SDCARD/Apps/PortMaster/PortMaster`，frontend 位于它的父目录。ROCKNIX、
 JELOS 与 UnofficialOS 使用系统 frontend、core 内启动器布局，APP 不生成外层入口，
 也不修改 `gamelist.xml`。

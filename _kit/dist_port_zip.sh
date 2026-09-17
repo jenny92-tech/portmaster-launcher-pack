@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  端口名、输出目录、dist_port.sh 与 port_zip.py
+# OUTPUT: 端口 dist 内容及标准 PortMaster ZIP
+# POS:    串联端口构建与 PortMaster 安装包封装
 # Build a standard PortMaster ZIP from a port's generated dist directory.
 
 set -euo pipefail

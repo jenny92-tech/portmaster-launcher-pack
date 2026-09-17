@@ -1,3 +1,6 @@
+// INPUT:  std 文件系统、libc 文件锁、md5/sha2 与 zip
+// OUTPUT: ExclusiveFileLock、DigestAlgorithm、摘要/ZIP 检查及原子读写接口
+// POS:    原生共享层的文件完整性、互斥和持久化基础设施
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  struct、sys、命令行指定的 .NET PE 程序集
+# OUTPUT: CLR 表信息及 GodotPlugins 类型/方法查询报告
+# POS:    用最小 ECMA-335 解析器定位游戏初始化入口
 # Minimal ECMA-335 metadata reader: confirm a type+method exists in a .NET assembly.
 import struct, sys
 

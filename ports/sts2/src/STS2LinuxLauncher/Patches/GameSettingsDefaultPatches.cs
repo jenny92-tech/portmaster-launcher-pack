@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、反射 SaveManager、PortPaths、标记文件
+// OUTPUT: Apply()、ReadyPostfix() 与游戏语言/首次 MSAA 设置
+// POS:    将启动器语言及一次性节能默认值写入游戏设置
 using System;
 using System.IO;
 using System.Reflection;

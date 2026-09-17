@@ -1,3 +1,6 @@
+// INPUT:  std I/O/格式化错误与 serde_json::Error
+// OUTPUT: Error 枚举、Result<T> 别名和错误转换/展示实现
+// POS:    PortKit 配置、解析和环境处理的统一错误边界
 use std::fmt;
 
 #[derive(Debug)]

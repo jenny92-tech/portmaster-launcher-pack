@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  PortKit 构建身份、aarch64 runtime 与 _kit/dist_port.sh
+# OUTPUT: 二进制架构/大小/身份及端口工具分发范围断言结果
+# POS:    便携 PortKit 启动工具构建产物和包集成回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

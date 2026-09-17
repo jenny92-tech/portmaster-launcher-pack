@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/fnmatch/re/pathlib、纹理 .import、排除模式
+# OUTPUT: 改为 VRAM 压缩模式的导入配置或 dry-run 报告
+# POS:    为重导入提前将无损纹理切换到 GPU 压缩模式
 """
 Rewrite every texture .import file in a recovered godot project to use
 VRAM compression (compress/mode=2 = "VRAM Compressed").

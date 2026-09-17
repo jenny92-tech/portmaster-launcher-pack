@@ -1,3 +1,6 @@
+// INPUT:  ConfigLoader、FragmentSource、DetectionContext 与内嵌/远端配置候选
+// OUTPUT: ConfigCandidate/Origin、SelectedConfig、ResolvedSelection、CandidateSelector
+// POS:    在完整验证与新版本优先规则下选择配置并安全回退到内嵌来源
 use crate::config::parse_config_version;
 use crate::{Config, ConfigLoader, DetectionContext, Error, FragmentSource, Resolution, Result};
 use serde::Serialize;

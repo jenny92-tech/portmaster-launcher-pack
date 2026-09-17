@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  POSIX sh、Linux 系统接口及探测到的输入/截图/调试 provider
+# OUTPUT: 能力 TSV 与 snapshot/process/input/capture/scenario 所需命令结果
+# POS:    为主机控制器提供低依赖的通用掌机探针与动作接口
 # System-level Handheld DevTools Probe. Keep this POSIX sh and dependency-light.
 
 set -eu

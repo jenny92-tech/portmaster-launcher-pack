@@ -1,3 +1,6 @@
+// INPUT:  serde_json 对象补丁、现有配置文件与 atomic_write()
+// OUTPUT: merge_file()
+// POS:    保留未知字段并原子写回的递归 JSON 对象配置合并器
 use std::io;
 use std::path::Path;
 

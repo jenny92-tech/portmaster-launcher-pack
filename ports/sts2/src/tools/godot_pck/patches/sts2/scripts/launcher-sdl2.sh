@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  PortMaster、godot.mono、ASTC 游戏包与设备 swap/SDL2 环境
+# OUTPUT: 带设备内存和显示设置的 SDL2 游戏进程及日志
+# POS:    保留用于 STS2 移植实验的设备端 SDL2 启动入口
 # PORTMASTER: sts2, Slay the Spire 2 — SDL2 backend variant.
 # godot 4.5 mono with KMS/GBM/EGL, bypassing weston/crusty.
 

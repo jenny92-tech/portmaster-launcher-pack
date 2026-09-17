@@ -1,3 +1,6 @@
+// INPUT:  std 文件系统、Linux 挂载表/sysfs 与可选探测根目录
+// OUTPUT: StorageVolume、mounted_storage_roots()
+// POS:    从真实块设备挂载及 /mnt 别名发现用户存储，不猜测配置回退路径
 //! Removable-storage detection.
 //!
 //! Handheld Linux builds mount the SD/TF card at vendor-specific places

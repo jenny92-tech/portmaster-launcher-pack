@@ -1,3 +1,6 @@
+-- INPUT:  kit、native，Rust 服务提供的环境/库存/Runtime 快照
+-- OUTPUT: Model.new()，共享状态、能力判断、库存缓存与展示数据方法
+-- POS:    APP Manager 页面和操作共享的数据模型与缓存层
 local Model = {}
 
 local function clear(values)

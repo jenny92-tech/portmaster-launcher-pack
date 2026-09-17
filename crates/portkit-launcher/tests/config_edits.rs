@@ -1,3 +1,6 @@
+// INPUT:  portkit_launcher 配置/Runtime/同步接口、serde_json 与临时目录
+// OUTPUT: 配置编辑、自然版本选择和增量同步的集成回归测试
+// POS:    验证游戏启动辅助操作保留未知数据并拒绝无效变更
 use std::fs;
 
 use portkit_launcher::json::merge_file;

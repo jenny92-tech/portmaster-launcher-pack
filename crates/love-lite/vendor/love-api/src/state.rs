@@ -1,3 +1,6 @@
+// INPUT:  FreeType、parking_lot、PixelBuffer、文件/ZIP 资源与时钟
+// OUTPUT: SharedState、GpuCommand、LoveEvent、GameSource、FontData 和图形资源类型
+// POS:    LÖVE 子集的共享运行状态、按需字形缓存与图形资源模型
 use freetype_sys as ft;
 use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};

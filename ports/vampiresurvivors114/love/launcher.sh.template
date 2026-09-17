@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster、VS_* 配置、unityloader 及插件
+# OUTPUT: 显示所有权交接、图形/按键配置更新与吸血鬼幸存者游戏进程
+# POS:    吸血鬼幸存者 1.14 的掌机显示协调和 Unity 6 启动模板
 # PORTMASTER: vampiresurvivors114, V_吸血鬼幸存者_114.sh
 #
 # Stage-1: shared love settings UI writes launch_config.env.
@@ -9,31 +12,28 @@
 # run_love_launcher_ui subshell and never leak into stage-2.
 
 PORT_NAME="vampiresurvivors114"; LOG_PREFIX="[VS114-LOVE]"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ── PortMaster preamble (controlfolder discovery + control.txt).
-# The $(dirname $0)/PortMaster branch is required: without it controlfolder
-# resolves to the wrong path on some devices.
+# PortMaster discovery follows the official shared path order.
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 source "$KIT/launcher_artwork.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$SCRIPT_DIR" || exit 1
 
 GAMEDIR="/$directory/ports/$PORT_NAME"
-portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
+[ -x "$GAMEDIR/bin/portkit-launcher" ] &&
+  export PORTKIT_LAUNCHER_BIN_OVERRIDE="$GAMEDIR/bin/portkit-launcher"
+portmaster_sync_launcher_artwork "$SCRIPT_DIR" "$0" "$SCRIPT_DIR"
 CONFDIR="$GAMEDIR/conf"
 SHADER_CACHE_DIR="/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"
 cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$SHADER_CACHE_DIR"
-
-TRIMUI_RUNNER_PID=""
-
 
 # ── shared helpers (assemble.sh inlines these into the device build) ─────
 #@KIT-BEGIN
@@ -42,30 +42,8 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-release_frontend() {
-  if [ -n "$TRIMUI_RUNNER_PID" ] && kill -0 "$TRIMUI_RUNNER_PID" 2>/dev/null; then
-    echo "$LOG_PREFIX resume runtrimui.sh pid=$TRIMUI_RUNNER_PID"
-    kill -CONT "$TRIMUI_RUNNER_PID" 2>/dev/null
-  fi
-}
-
-acquire_display() {
-  if pidof MainUI >/dev/null 2>&1; then
-    set -- $(pidof runtrimui.sh 2>/dev/null)
-    TRIMUI_RUNNER_PID="$1"
-    if [ -n "$TRIMUI_RUNNER_PID" ]; then
-      echo "$LOG_PREFIX pause runtrimui.sh pid=$TRIMUI_RUNNER_PID"
-      kill -STOP "$TRIMUI_RUNNER_PID" 2>/dev/null
-    fi
-
-    echo "$LOG_PREFIX stop MainUI for DRM master"
-    killall -KILL MainUI 2>/dev/null
-    sleep 1
-  fi
-}
-
-trap release_frontend EXIT INT TERM
-acquire_display
+trap launcher_platform_release_display EXIT INT TERM
+launcher_platform_acquire_display
 
 resolve_port_toml
 grep -Eq '^[[:space:]]*unity_shader_cache_redirect[[:space:]]*=' "$PORT_TOML" || {
@@ -92,10 +70,7 @@ fi
 
 # Outside the env branch on purpose: without a launcher UI there is no env, and
 # the resolution must still follow this device's panel.
-resolve_display_resolution "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}"
-apply_display_resolution "$PORT_TOML"
-resolve_render_scale "${VS_RENDER_PERCENT:-100}"
-apply_render_scale "$PORT_TOML"
+configure_unity_display "$PORT_TOML" "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}" "${VS_RENDER_PERCENT:-100}" || exit 1
 
 # Unity Loader now resolves Android base assets and Play Asset Delivery pack
 # assets internally. Keep the launcher focused on UI/config; do not bind
@@ -113,6 +88,17 @@ sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 0/" "$PORT_TOML"
 # only the destructive source translation is disabled for this port.
 sed -i "s/^shaderGles2Rewrite *=.*/shaderGles2Rewrite = false/" "$PORT_TOML"
 sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
+
+# Rewired 1.1.58 disables Unity input for this Android build, while its native
+# Android helper cannot initialize without a real Android runtime. Keep the
+# Android gamepad visible to Bogodroid, and add a per-game keyboard bridge for
+# the UI actions Rewired still consumes. This is deliberately not the LÖVE UI
+# mapping: B remains Back, and the launcher's AB preference is preserved.
+if [ "${VS_SWAP_AB:-off}" = "on" ]; then
+  export UNITY_GAME_GPTK_CONFIG="$GAMEDIR/vampiresurvivors114-game-swap-ab.gptk"
+else
+  export UNITY_GAME_GPTK_CONFIG="$GAMEDIR/vampiresurvivors114-game.gptk"
+fi
 
 # Unity 6/PAD compatibility is handled by unityloader.d plugins. The second
 # argument only supplies this game's packaged native-library directories;

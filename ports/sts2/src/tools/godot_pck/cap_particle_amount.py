@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/re/pathlib、恢复项目 .tscn、--cap
+# OUTPUT: 限制 amount 行后的场景及统计或 dry-run 报告
+# POS:    在离线资源处理中降低粒子发射数量
 """
 Cap `amount = N` lines in every .tscn — godot's GpuParticles2D.Amount
 property declared in the scene file. Big particle emitters (500-particle

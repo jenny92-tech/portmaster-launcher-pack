@@ -17,7 +17,8 @@
   "library.v1",
   "python.v1"
  ],
- "paths": {
+"paths": {
+  "shell_directory": {"strategy": "literal", "value": "/mnt/sdcard/Roms/PORTS64"},
   "scripts": {
    "strategy": "launcher_dir"
   },

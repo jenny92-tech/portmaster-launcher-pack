@@ -1,3 +1,6 @@
+// INPUT:  Godot UV/COLOR、gradient_color 与 v uniforms
+// OUTPUT: fragment() 输出静态渐变覆盖色
+// POS:    以无三角函数的渐变替代动态 doom 覆盖特效
 shader_type canvas_item;
 
 // Original: per-pixel pow + dual sin pulse. Compat: static gradient, no TIME or trig.

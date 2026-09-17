@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  POSIX 工具、明确列出的系统/安装路径与设备命令
+# OUTPUT: 分节输出有界的设备身份、依赖与硬件可用性证据
+# POS:    为 App Manager 用户态评估采集有限只读设备事实
 # Read-only, bounded evidence probe for APP Manager handheld targets.
 
 set -u

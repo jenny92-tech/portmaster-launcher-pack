@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  PortMaster、Godot POC、shim_egl.so
+# OUTPUT: 20-shim 的运行/诊断/GL 查询日志
+# POS:    以 LD_PRELOAD 查询追踪定位 Mali 启动崩溃调用
 # Preset 20: LD_PRELOAD shim_egl.so to log every eglGetProcAddress query.
 # Goal: identify the GL function causing Mali NULL deref for RasterizerGLES3 patching.
 

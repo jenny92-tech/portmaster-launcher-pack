@@ -1,3 +1,6 @@
+// INPUT:  mlua 与 std::env::consts::OS
+// OUTPUT: register() 安装 love.system 的系统名称与剪贴板/URL 兼容桩
+// POS:    LÖVE 子集的操作系统信息适配，不启动外部 URL 处理程序
 use mlua::prelude::*;
 use std::sync::Arc;
 

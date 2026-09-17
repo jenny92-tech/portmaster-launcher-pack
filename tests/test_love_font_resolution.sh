@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit/portmaster_common.sh、临时字体候选与 PortKit 替身
+# OUTPUT: 公共字体候选优先级和本地回退行为断言结果
+# POS:    LÖVE 字体供应 Shell 适配层的无设备回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

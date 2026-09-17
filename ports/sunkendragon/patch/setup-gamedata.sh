@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  玩家 Windows GameData、预置 ARM64 Unity/IL2CPP 核心文件、GAMEDIR
+# OUTPUT: Android 风格游戏资源树、conf/il2cpp 与 .gamedata_ready 标记
+# POS:    龙沉异世录玩家资源到 Bogodroid 运行布局的准备脚本
 # Prepare Bogodroid's Android-style data tree from a player-owned Windows copy.
 # The input under GameData/ is read-only and is never renamed or deleted.
 

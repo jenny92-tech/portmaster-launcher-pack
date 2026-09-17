@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  _kit/portmaster_bootstrap.sh、portmaster_common.sh、PortMaster control.txt、录屏CLI
+# OUTPUT: REC_ENGINE/REC_DIR 环境及独立 LÖVE 录屏界面进程
+# POS:    录屏应用在 TrimUI APP 与 PortMaster 中的通用启动模板
 # PORTMASTER: jenny92-screenrec, Screen Recorder.sh
 # Standalone screen recorder: LÖVE UI (start/stop/status) + shell engine +
 # bundled static ffmpeg. Runs as a TrimUI MainUI APP (Apps/) or PortMaster
@@ -9,11 +12,9 @@ PORT_NAME="screenrec"; LOG_PREFIX="[REC]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 
 # GAMEDIR: TrimUI APP (REC_APP_ROOT_OVERRIDE from the generated App wrapper —
 # the data folder nests inside the App folder) / data folder next to the

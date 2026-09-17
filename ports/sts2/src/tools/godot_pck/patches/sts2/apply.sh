@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  恢复项目、静态 overlay、rsync、Python
+# OUTPUT: 覆盖后的项目与移除 Sentry 自加载/扩展的配置
+# POS:    将 STS2 ARM64 扩展替代文件应用到恢复工程
 # Apply StS2-specific patches to a recovered project directory.
 # Run after `extract.sh` + `patch_project.py` + `reimport.sh`, before `repack.sh`.
 #

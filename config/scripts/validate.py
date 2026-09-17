@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse, json, re, pathlib；配置对象或 JSON 路径
+# OUTPUT: ConfigError, validate(), validate_resolved_closure(), main()
+# POS:    在配置生产侧校验结构、路径、能力及有限声明式词汇
 """Structural validator for App Manager Config v1.
 
 Rust remains the executable authority.  This validator protects the source and
@@ -164,6 +167,8 @@ def validate_path_strategy(value: Any, path: str) -> None:
     strategy = obj.get("strategy")
     if strategy not in PATH_STRATEGIES:
         fail(f"{path}.strategy", "unsupported path strategy")
+    if "canonicalize_existing" in obj and not isinstance(obj["canonicalize_existing"], bool):
+        fail(f"{path}.canonicalize_existing", "must be a boolean")
     if strategy == "literal":
         validate_literal(obj.get("value"), f"{path}.value", absolute=True)
     elif strategy == "first_existing":
@@ -184,10 +189,6 @@ def validate_path_strategy(value: Any, path: str) -> None:
         if key is None:
             fail(path, "relative path strategy has no suffix")
         validate_literal(obj[key], f"{path}.{key}", absolute=False)
-        if "canonicalize_existing" in obj and not isinstance(
-            obj["canonicalize_existing"], bool
-        ):
-            fail(f"{path}.canonicalize_existing", "must be a boolean")
 
 
 def validate_locations(platform: dict, path: str) -> None:

@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  PortMaster、Godot POC、shim_egl.so 与预设/黑名单占位符
+# OUTPUT: 黑名单实验启动模板与设备诊断日志约定
+# POS:    定义基于 EGL 函数黑名单的 Mali 诊断启动器模板
 # Template: PRESET_NAME / PRESET_BLACKLIST placeholders.
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}

@@ -1,3 +1,6 @@
+// INPUT:  portkit_core Resolution/ResolvedLocation 与 APP 自有状态/回收站路径
+// OUTPUT: ResolvedPlatformContext、ResolvedContextInput 和设备上下文转换接口
+// POS:    将通用平台解析结果映射为 APP Manager 的管理与安装契约
 use std::path::PathBuf;
 
 use portkit_core::{

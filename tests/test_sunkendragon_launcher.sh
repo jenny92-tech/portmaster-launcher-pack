@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  龙沉异世录 manifest/模板/组装与资源准备脚本、模拟 GameData
+# OUTPUT: 包声明、资源路径和首次准备成功/失败/幂等断言结果
+# POS:    龙沉异世录启动和玩家资源准备契约回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,10 +42,9 @@ done
 
 grep -Fq 'resolve_port_toml' "$PORT/love/launcher.sh.template"
 grep -Fq 'run_love_launcher_ui' "$PORT/love/launcher.sh.template"
-grep -Fq 'apply_display_resolution' "$PORT/love/launcher.sh.template"
+grep -Fq 'configure_unity_display "$PORT_TOML"' "$PORT/love/launcher.sh.template"
 grep -Fq 'launcher.render_scale {env = "SDR_RENDER_PERCENT"}' "$PORT/love/main.lua"
-grep -Fq 'resolve_render_scale "${SDR_RENDER_PERCENT:-100}"' "$PORT/love/launcher.sh.template"
-grep -Fq 'apply_render_scale "$PORT_TOML"' "$PORT/love/launcher.sh.template"
+grep -Fq '"${SDR_RENDER_PERCENT:-100}" || exit 1' "$PORT/love/launcher.sh.template"
 grep -Fq 'apply_button_remap' "$PORT/love/launcher.sh.template"
 grep -Fq 'patch/setup-gamedata.sh' "$PORT/love/launcher.sh.template"
 grep -Fq 'LD_LIBRARY_PATH="$GAMEDIR:$GAMEDIR/gamefiles/lib/arm64-v8a' "$PORT/love/launcher.sh.template"

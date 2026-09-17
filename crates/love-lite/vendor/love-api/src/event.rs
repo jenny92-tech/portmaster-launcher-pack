@@ -1,3 +1,6 @@
+// INPUT:  mlua、SharedState 事件队列和外部平台输入后端
+// OUTPUT: register() 安装 love.event 的轮询、压入和退出接口
+// POS:    定制 LÖVE 子集的事件桥，保留退出状态并由宿主负责事件采集
 use mlua::prelude::*;
 use std::sync::Arc;
 

@@ -1,3 +1,6 @@
+// INPUT:  PortPaths.Get(SLL_QUALITY)、System
+// OUTPUT: QualityProfile.Current、ParticleCap、CutMenuAnim、LogChosen()
+// POS:    把用户画质偏好映射为粒子与菜单特效策略
 using System;
 
 namespace STS2LinuxLauncher;

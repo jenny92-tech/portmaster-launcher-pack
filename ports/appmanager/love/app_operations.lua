@@ -1,3 +1,6 @@
+-- INPUT:  model，绑定的页面构建器与环境页面，native 异步任务接口
+-- OUTPUT: Operations.new()，操作确认、任务启动/完成、库存刷新与退出方法
+-- POS:    APP Manager 的操作计划、异步任务和确认状态协调层
 local Operations = {}
 
 function Operations.new(model)
@@ -228,8 +231,11 @@ function Operations.new(model)
                         message=L("Nothing was changed. You can install again any time.","未做任何修改，可随时重新安装。"),
                         confirm=L("OK","知道了"),cancel=L("Back","返回"),danger=false})
                 else
+                    local failures=type(result.failures)=="table" and result.failures or {}
+                    local reason=type(failures[1])=="string" and failures[1] or ""
                     kit.dialog({title=L("PortMaster installation failed","PortMaster 安装失败"),
-                        message=L("Please try again later.","请稍后重试。"),
+                        message=reason~="" and (L("Reason: ","原因：")..reason) or
+                            L("Please try again later.","请稍后重试。"),
                         confirm=L("OK","知道了"),cancel=L("Back","返回"),danger=false})
                 end
             else

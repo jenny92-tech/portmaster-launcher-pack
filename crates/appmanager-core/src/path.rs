@@ -1,3 +1,6 @@
+// INPUT:  std 路径组件与文件系统元数据、thiserror
+// OUTPUT: ManagedRoot、PathSafetyError 和受管子路径校验接口
+// POS:    拒绝路径穿越、根目录越界及受管符号链接的通用安全边界
 use std::path::{Component, Path, PathBuf};
 
 use thiserror::Error;

@@ -1,3 +1,6 @@
+// INPUT:  love_api::LoveRuntime、mlua、EmbeddedService 和 Lua 前端目录
+// OUTPUT: Engine、GpuCommand、install_appmanager_api() 与绘制/输入/任务桥接接口
+// POS:    APP Manager Lua UI 的运行引擎与原生服务绑定层
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

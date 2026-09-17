@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker、Debian bullseye、SDL2 源码与 ARM64 构建工具
+# OUTPUT: runtime/sdl2-kmsdrm 的 SDL2 动态库与构建版本记录
+# POS:    构建仅供游戏阶段使用的低 glibc KMSDRM/ALSA SDL2
 # Build the port-bundled SDL2 for Longan-class TrimUI firmware.
 #
 # Why this exists: that firmware's system SDL2 ships no real video driver

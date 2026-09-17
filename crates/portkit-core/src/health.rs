@@ -1,3 +1,6 @@
+// INPUT:  Resolution、有限健康规则、文件系统和 zip_readable()
+// OUTPUT: HealthStatus/Check/Report、健康契约常量与 evaluate_health()
+// POS:    不执行配置代码的设备安装完整性与损坏诊断层
 use crate::{Error, Resolution, Result, zip_readable};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

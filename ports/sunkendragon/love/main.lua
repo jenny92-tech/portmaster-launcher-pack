@@ -1,3 +1,6 @@
+-- INPUT:  launcher 共享框架、gamefiles 核心文件与玩家 GameData
+-- OUTPUT: 龙沉异世录设置/资源检查页面及 SDR_* 启动参数
+-- POS:    龙沉异世录画面与按键选项及游戏资源就绪检查定义
 local launcher = require("launcher")
 
 launcher.define {

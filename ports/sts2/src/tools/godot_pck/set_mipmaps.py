@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/fnmatch/re/pathlib、纹理 .import、--state 与排除模式
+# OUTPUT: 更新 mipmaps/generate 的导入配置或 dry-run 报告
+# POS:    在重导入前统一控制移动端纹理 mipmap 链
 """
 Flip `mipmaps/generate` in every texture .import so the next `reimport.sh`
 either skips the mip chain (default — saves ~33 % VRAM per texture) or

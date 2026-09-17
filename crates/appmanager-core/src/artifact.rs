@@ -1,3 +1,6 @@
+// INPUT:  portkit_core GitHubTransport/原子写入、RuntimeMetadata、serde 与本地缓存
+// OUTPUT: StableRelease、发布包获取、稳定版缓存和 Runtime 元数据刷新接口
+// POS:    APP Manager 专属远端发布契约与持久缓存策略层
 //! Downloaded metadata and release artifacts owned by APP Manager.
 //!
 //! GitHub routing and byte transport remain in `portkit-core`; this module

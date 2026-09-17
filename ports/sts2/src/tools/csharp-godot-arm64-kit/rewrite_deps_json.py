@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/json/glob/shutil、deps.json、目标架构 .so 文件
+# OUTPUT: 替换 RID 和原生库映射的 deps.json 及旧 RID 备份
+# POS:    迁移自包含 .NET 应用的运行时依赖描述到目标架构
 """
 Rewrite a self-contained .NET app's deps.json for a different RID
 (e.g. win-x64 → linux-arm64).

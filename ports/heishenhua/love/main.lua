@@ -1,3 +1,6 @@
+-- INPUT:  launcher 共享声明式启动器框架
+-- OUTPUT: 像素黑神话设置/修改页面及 HSH_* 启动参数
+-- POS:    像素黑神话的画面、按键和游戏辅助选项定义
 local launcher = require("launcher")
 
 launcher.define {

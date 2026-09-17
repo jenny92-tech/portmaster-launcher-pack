@@ -1,3 +1,6 @@
+-- INPUT:  model、operations，kit 控件、环境能力和库存报告
+-- OUTPUT: Pages.new()，首页/启动项/游戏/Runtime/清理/安装/回收站/环境页面构建方法
+-- POS:    APP Manager 的业务页面、项目选择与用户操作入口
 local Pages = {}
 
 local function clear(values)
@@ -37,11 +40,12 @@ function Pages.new(model,operations)
     end
     local function start_home_tour()
         local state=kit.get_state()
+        local log_path=tostring(env.app_root or env.gamedir or "").."/log.txt"
         kit.guide({
             title=L("Welcome to Port App Manager","欢迎使用 Port App Manager"),
             message=L(
-                "A Port game maintenance tool with five tools: uninstall games, one-tap zip install, leftover cleanup, Port Runtime repair, and PortMaster management.",
-                "Port 游戏维护工具，共五个功能：卸载管理、一键安装、垃圾清理、Port Runtime 和 PortMaster 管理。"),
+                "A Port game maintenance tool with six guide topics: uninstall games, one-tap archive install, leftover cleanup, Port Runtime repair, PortMaster management, and development support.",
+                "Port 游戏维护工具，本教程共六项：卸载管理、一键安装、垃圾清理、Port Runtime、PortMaster 管理，以及开发与反馈。"),
             confirm=L("Start using","开始使用"),
             callouts={
                 {target="home:games",title=L("Uninstall manager","卸载管理"),
@@ -60,8 +64,12 @@ function Pages.new(model,operations)
                     body=env.portmaster_management=="system" and L(
                         "View the version, device and install path. PortMaster updates are handled by the system.",
                         "查看版本、设备和安装路径。PortMaster 更新由系统负责。") or L(
-                        "Check for updates, and install or repair PortMaster.",
+                    "Check for updates, and install or repair PortMaster.",
                         "检查更新，以及安装或修复 PortMaster。")},
+                {title=L("Development & feedback","开发与反馈"),
+                    body=L(
+                        "Developer: Bilibili 解腻Jenny\nJoin "..kit.CONTACT..". When reporting a problem, include the log file: "..log_path,
+                        "开发者：哔哩哔哩 解腻Jenny\n欢迎加入 "..kit.CONTACT.."。反馈问题时请同时提供日志："..log_path)},
             },
             on_confirm=function()
                 state.onboarding_seen="1"
@@ -200,9 +208,11 @@ function Pages.new(model,operations)
         end
         if state.web_enabled=="1" and state.web_port then
             local host=(env.web_url or ""):match("^[^:]+://[^:]+") or ""
-            rows[#rows+1]=kit.textview(L("Remote management","远程管理"),
-                (kit.get_state().ui_lang=="zh" and "电脑浏览器打开 " or "Open in a browser: ")..host..":"..state.web_port..
-                (state.web_code and state.web_code~="" and (kit.get_state().ui_lang=="zh" and "  ·  配对码 " or "  ·  Pairing code ")..state.web_code or ""),
+            -- Explicit line break keeps the pairing code below the address.
+            rows[#rows+1]=kit.textview(L("Remote management, open in a computer browser","远程管理，用电脑浏览器打开"),
+                host..":"..state.web_port..
+                (state.web_code and state.web_code~="" and
+                    "\n"..(kit.get_state().ui_lang=="zh" and "配对码 " or "Pairing code ")..state.web_code or ""),
                 {id="home:web-banner",focusable=false,expandable=false,max_lines=3,expanded_lines=3,
                  label_px=18,value_px=20,bg={0.32,0.22,0.06}})
         end
@@ -723,7 +733,11 @@ function Pages.new(model,operations)
     function self.build_zip_install(preserve_focus)
         local rows,selected_zip={},selected_zip
         local bundles=model.zip_bundles or {}
-        rows[#rows+1]=note(L("Bundle install","压缩包安装"),L(
+        local function zip_note(label,value,id)
+            return kit.textview(label,value,{id=id,focusable=false,expandable=false,max_lines=5,
+                expanded_lines=5,label_px=18,value_px=20,surface=false})
+        end
+        rows[#rows+1]=zip_note(L("Bundle install","压缩包安装"),L(
             "Select ZIP or 7z files found on the storage card. Supported packages are recognized automatically; encrypted packages ask for a password when installed.",
             "选择存储卡根目录中的 ZIP 或 7z。系统会自动识别可安装内容；加密包会在安装时询问密码。"),"zip:rules")
         local function zip_label(bundle)
@@ -740,7 +754,7 @@ function Pages.new(model,operations)
             return table.concat(parts," · ")
         end
         if #bundles==0 then
-            rows[#rows+1]=note(L("Status","状态"),
+            rows[#rows+1]=zip_note(L("Status","状态"),
                 L("No install packages were found on the storage card roots. Put a .zip or .7z file in a card root and rescan.",
                     "存储卡根目录没有发现安装包。把 .zip 或 .7z 放到存储卡根目录后重新扫描。"),"zip:empty")
         end
@@ -838,6 +852,7 @@ function Pages.new(model,operations)
         end
         kit.set_page(page.ZIP,L("Bundle install","压缩包安装"),rows,{
             preserve_focus=preserve_focus,
+            row_layout={mode="flow",min_width=420,max_columns=1},
             sidebar_title=L("Quick Tools","快捷工具"),sidebar={
             button(L("Install","安装"),install_selected,{id="zip-install"}),
             button(L("Rescan","重新扫描"),function() operations.scan_zip_bundles(page.ZIP) end,{id="zip-rescan"}),

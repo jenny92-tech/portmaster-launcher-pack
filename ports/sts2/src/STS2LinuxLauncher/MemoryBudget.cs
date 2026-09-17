@@ -1,3 +1,6 @@
+// INPUT:  System.IO、/proc/meminfo
+// OUTPUT: MemoryBudget.TotalMB、AvailableMB()、FullLoadAllowed
+// POS:    按物理内存决定原生全量加载或低内存延迟加载
 using System;
 using System.IO;
 

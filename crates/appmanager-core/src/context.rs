@@ -1,3 +1,6 @@
+// INPUT:  portkit_core BundleFormat/LocationRole、ManagedRoot 与 serde
+// OUTPUT: ResolvedDeviceContext、能力/根目录/前端契约类型及上下文校验
+// POS:    APP Manager 设备管理权限和安装边界的已解析领域模型
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};

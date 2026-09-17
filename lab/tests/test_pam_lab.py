@@ -1,3 +1,6 @@
+# INPUT:  unittest, tempfile, pathlib；pam_lab
+# OUTPUT: PamLabTests
+# POS:    验证评估报告的配置绑定、命令结果、摘要与 JSON 序列化
 import json
 import sys
 import tempfile

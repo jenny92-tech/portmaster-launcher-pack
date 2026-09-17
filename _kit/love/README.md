@@ -30,7 +30,7 @@ PortMaster environment.
 | `kit.select` / `kit.picker` | Cycling selection with stable values. |
 | `kit.checkbox` | Select zero or more items. |
 | `kit.switch` | Boolean setting rendered as a sliding switch. |
-| `kit.info` | Read-only focusable key/value row. |
+| `kit.info` | Non-focusable read-only key/value row. |
 | `kit.textview` | Measured, wrapping and optionally expandable content. |
 | `kit.list_item` | Compact read-only list row. |
 | `kit.section` / `kit.badge` | Non-focusable grouping and status elements. |
@@ -38,6 +38,21 @@ PortMaster environment.
 | `kit.toast` | Temporary operation result. |
 | `kit.set_busy` | Blocking progress overlay with optional cancellation. |
 | `kit.add_page` / `kit.set_page` | Create or replace page contents. |
+
+Directional focus is resolved by `focus_view.lua` against the measured layout
+tree: page (vertical) → body (horizontal) → content/tools → eligible controls.
+Each container searches its own children before bubbling to its parent. Vertical
+movement prefers horizontally overlapping targets; horizontal movement prefers
+vertically overlapping targets. Boundaries do not wrap. The resolver supports
+nested containers without page-specific key handlers; the current renderer emits
+the existing page/body/content/tools hierarchy, not an arbitrary public View API.
+Editable pickers consume left/right before container navigation. Modal focus
+remains trapped, and the header returns to the previous content scope.
+
+Sections, info rows and non-expandable textviews are display-only by default.
+Expandable textviews remain focusable; `focusable=false` explicitly opts out.
+Compact list items retain focus for gamepad scrolling through long read-only
+lists; they are scroll targets rather than actions.
 | `kit.push_page` / `kit.back_page` | History-aware drill-down navigation. |
 
 Common row options include stable `id`, `detail`, `disabled`, `half`, `group`, and

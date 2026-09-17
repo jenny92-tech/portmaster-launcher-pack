@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Godot mono 编辑器、已修改的恢复项目
+# OUTPUT: 两轮无头导入生成的 .godot/imported 资源
+# POS:    按修改后的纹理策略清理缓存并重新导入资源
 # Re-import every resource in a recovered godot project using the local godot
 # 4.5 mono editor in headless mode. This regenerates .godot/imported/*.ctex
 # according to the (patched) [rendering] textures/vram_compression/* settings.

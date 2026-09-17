@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  目标容器名、绝对工作路径与工具箱镜像
+# OUTPUT: 共享目标 PID/网络及卷的调试侧车容器
+# POS:    为显式调试任务附加 SYS_PTRACE 工具箱而不替换目标系统
 set -eu
 
 target=${1:-}

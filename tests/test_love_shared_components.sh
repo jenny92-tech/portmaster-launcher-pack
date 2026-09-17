@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit/love 共享框架、Unity 公共 Shell、端口 Lua 与 APP Manager 打包工具
+# OUTPUT: 控件接口、渲染参数和 APP Manager 共享组件发行断言结果
+# POS:    LÖVE 公共组件与端口消费及发行集成的回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,19 +52,23 @@ grep -Fq 'prepare_unityloader_private_libs()' "$unity_common"
 grep -Fq 'for library in libstdc++.so.6 libgcc_s.so.1' "$unity_common"
 grep -Fq 'LD_LIBRARY_PATH="$private_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' "$unity_common"
 grep -Fq 'local toml="$1" game_library_paths="${2:-}"' "$unity_common"
+grep -Fq 'export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"' "$unity_common"
 grep -Fq 'LD_LIBRARY_PATH="$game_library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"' "$unity_common"
 grep -Fq 'prepare_unityloader_private_libs || return 1' "$unity_common"
+grep -Fq 'UNITY_GAME_GPTK_CONFIG' "$unity_common"
+grep -Fq '$GPTOKEYB unityloader -c "$UNITY_GAME_GPTK_CONFIG" &' "$unity_common"
+grep -Fq 'game_input_pid=$!' "$unity_common"
+grep -Fq 'kill "$game_input_pid"' "$unity_common"
 grep -Fq 'resolve_render_scale()' "$unity_common"
 grep -Fq 'apply_render_scale()' "$unity_common"
 grep -Fq -- '--render-percent "$RENDER_SCALE_PERCENT"' "$unity_common"
 
 # Unity launchers expose physical output and internal rendering as independent
 # settings, then apply both through the same shared shell protocol.
-for port in hk heishenhua vampiresurvivors114; do
+for port in hk heishenhua silksong sunkendragon terraria vampiresurvivors114; do
   grep -Fq 'launcher.output_resolution' "$ROOT/ports/$port/love/main.lua"
   grep -Fq 'launcher.render_scale' "$ROOT/ports/$port/love/main.lua"
-  grep -Fq 'resolve_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
-  grep -Fq 'apply_render_scale "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template"
+  grep -Fq 'configure_unity_display "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template"
 done
 
 # Every game uses the same explicit Chinese wording for controller swaps.

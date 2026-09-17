@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  PortMaster、Godot POC、__PRESET_NAME__/__PRESET_ENVS__ 占位符
+# OUTPUT: 预设启动脚本模板与设备诊断/strace 输出约定
+# POS:    定义按 POC 环境开关生成显示链路实验脚本的模板
 # Template: `__PRESET_NAME__` / `__PRESET_ENVS__` placeholders.
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}

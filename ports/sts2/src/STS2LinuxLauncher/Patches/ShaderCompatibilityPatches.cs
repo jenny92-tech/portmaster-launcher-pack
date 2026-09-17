@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、反射 Godot 资源 API、port_compat.pck、PortPaths
+// OUTPUT: ShaderCompatibilityPatches.Apply()、NodeAddChildPostfix()
+// POS:    挂载覆盖包并将节点材质替换为 Mali 友好的着色器
 using System;
 using System.Collections.Generic;
 using System.IO;

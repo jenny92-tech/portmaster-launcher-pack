@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster patcher、玩家 APK、TER_* 配置、unityloader
+# OUTPUT: 解包资源、语言与图形配置更新及泰拉瑞亚游戏进程
+# POS:    泰拉瑞亚首次资源准备、设置应用和 Unity 启动的衔接模板
 # PORTMASTER: terraria, T_泰拉瑞亚.sh
 #
 # Stage-0: if the player has dropped an APK into gamedata/, run the patcher
@@ -19,17 +22,14 @@
 PORT_NAME="terraria"; LOG_PREFIX="[TER-LOVE]"
 
 # ── PortMaster preamble (controlfolder discovery + control.txt).
-# The $(dirname $0)/PortMaster branch is required: without it controlfolder
-# resolves to the wrong path on some devices.
+# PortMaster discovery follows the official shared path order.
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 source "$KIT/launcher_artwork.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source "$controlfolder/control.txt"
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 
 if [ -n "$directory" ] && [ -d "/$directory/ports/$PORT_NAME" ]; then
   GAMEDIR="/$directory/ports/$PORT_NAME"
@@ -128,10 +128,7 @@ fi
 
 # Outside the env branch on purpose: without a launcher UI there is no env, and
 # the resolution must still follow this device's panel.
-resolve_display_resolution "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}"
-apply_display_resolution "$PORT_TOML"
-resolve_render_scale "${TER_RENDER_PERCENT:-100}"
-apply_render_scale "$PORT_TOML"
+configure_unity_display "$PORT_TOML" "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}" "${TER_RENDER_PERCENT:-100}" || exit 1
 
 # Do NOT remap start -> ENTER here. Forcing start="ENTER" stole Start from
 # the in-game ☰ settings/pause menu, which only opens on KEYCODE_BUTTON_START,

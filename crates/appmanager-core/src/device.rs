@@ -1,3 +1,6 @@
+// INPUT:  portkit_core 配置候选/检测器、设备探测文件和 APP 自有目录
+// OUTPUT: DeviceResolutionRequest、DeviceResolution、DeviceIdentity、resolve_device()
+// POS:    将设备配置解析为服务与嵌入式界面共用的已验证上下文
 //! Resolve one device configuration into APP Manager's validated domain view.
 //!
 //! This is the shared service boundary used by both the optional diagnostic

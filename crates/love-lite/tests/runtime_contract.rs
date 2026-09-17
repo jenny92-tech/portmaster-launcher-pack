@@ -1,3 +1,6 @@
+// INPUT:  Engine/GpuCommand、mlua、临时 Lua 程序及仓库真实 UIKit/APP 前端资源
+// OUTPUT: 绘制、字体、事件调度、任务桥接和真实页面的运行时契约测试
+// POS:    验证 LOVE-lite 子集满足 APP Manager 实际前端需求
 use std::fs;
 
 use love_lite::{Engine, GpuCommand};

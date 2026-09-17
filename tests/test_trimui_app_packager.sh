@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit TrimUI 打包工具、应用/游戏包源、Python zipfile 与安全夹具
+# OUTPUT: 原生 APP 包装、可重现归档、权限和符号链接边界断言结果
+# POS:    TrimUI APP 发行结构与打包安全回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

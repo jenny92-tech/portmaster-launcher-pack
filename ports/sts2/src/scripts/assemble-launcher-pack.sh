@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  dist-port.sh、manifest.json、外部运行时、.NET 运行时缓存
+# OUTPUT: 完整 STS2 dist 及可选发布压缩包
+# POS:    将核心启动器产物与可再分发 ARM64 运行时组合
 # Build a full redistributable STS2 launcher dist.
 #
 # Normal dev flow:

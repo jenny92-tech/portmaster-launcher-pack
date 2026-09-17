@@ -27,6 +27,8 @@ Installed layout:
     sdk_unity_burst.so
     unity_6.so
   config.toml
+  vampiresurvivors114-game.gptk
+  vampiresurvivors114-game-swap-ab.gptk
   love_ui/
   gamedata/
     lib/arm64-v8a/*.so
@@ -111,8 +113,9 @@ No launcher-side bind mount is required for `assets` or `assets/aa`.
 
 `love/launcher.sh.template` is the editable template. `_kit/dist_port.sh
 vampiresurvivors114` writes the self-contained device script to
-`dist/V_吸血鬼幸存者_114.sh` and stages the LÖVE files under `dist/love_ui/`;
-the device never needs shared `_kit` scripts.
+`dist/V_吸血鬼幸存者_114.sh` and stages the LÖVE files under
+`dist/vampiresurvivors114/love_ui/`; the device never needs shared `_kit`
+scripts.
 
 The LÖVE UI updates `vs.toml` through:
 
@@ -128,8 +131,11 @@ Output resolution defaults to the detected panel size. Render resolution is a
 separate Native/75%/50% choice backed by `[gpu].renderScalePercent`; the loader
 uses a lightweight sharp upscale across the full physical output.
 
-The game stage intentionally does not run `gptokeyb`; Unity receives the
-handheld buttons as Android gamepad events.
+Bogodroid still exposes the handheld as an Android gamepad. This 1.14 build of
+Rewired disables Unity input and its native Android helper cannot initialize in
+the compatibility runtime, so the launcher additionally runs a game-specific
+`gptokeyb` mapping for confirm, back and directional UI input. It does not reuse
+the LÖVE UI mapping, and the user's AB-swap setting selects the matching map.
 
 The launcher always resets `textureMaxDim` to `0`. This game uses offline asset
 compression instead; runtime texture downscaling changes the apparent viewport.
@@ -166,7 +172,7 @@ scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
   "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/launcher.sh.new"
 scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
   "${DEVICE}:/mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new"
-rsync -a ports/vampiresurvivors114/dist/love_ui/ \
+rsync -a ports/vampiresurvivors114/dist/vampiresurvivors114/love_ui/ \
   "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/love_ui/"
 
 ssh "$DEVICE" 'set -e

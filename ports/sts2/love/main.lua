@@ -1,3 +1,6 @@
+-- INPUT:  launcher 共享 UI 模块
+-- OUTPUT: launcher.define 注册的 STS2 设置页和 SLL_* 环境交接
+-- POS:    STS2 的语言、画质与按键交换设置声明
 local launcher = require("launcher")
 
 launcher.define {

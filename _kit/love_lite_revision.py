@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  hashlib, sys, pathlib, cargo_revision；LOVE-lite 及管理核心源码和嵌入配置
+# OUTPUT: main()；标准输出 LOVE-lite 源码闭包的 SHA-256 revision
+# POS:    绑定 App Manager 预置运行时与编译输入的构建身份
 """Print the source revision of the APP Manager LOVE-lite runtime."""
 
 from __future__ import annotations

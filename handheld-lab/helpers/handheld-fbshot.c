@@ -1,3 +1,6 @@
+// INPUT:  Linux framebuffer ioctl/mmap、标准 C 库与输出路径
+// OUTPUT: main()；OUTPUT.ppm 帧缓冲截图
+// POS:    为缺少图形桌面截图工具的掌机读取实际帧缓冲
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>

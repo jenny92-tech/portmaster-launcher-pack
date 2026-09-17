@@ -1,3 +1,6 @@
+-- INPUT:  kit、app_native、app_model、app_operations、app_pages、app_environment
+-- OUTPUT: kit.run(port) 应用入口与原生任务事件轮询
+-- POS:    APP Manager 界面启动、模块装配和前后台任务调度入口
 local kit = require("kit")
 local native = require("app_native").new()
 local model = require("app_model").new(kit,native)

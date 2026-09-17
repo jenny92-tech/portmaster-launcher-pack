@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  /proc 中 godot.mono 进程信息、dmesg、date/awk
+# OUTPUT: /tmp/rss.csv 的每秒内存和 OOM 采样
+# POS:    记录设备端 STS2 进程存活与 Mali 内存压力
 # Watch the godot.mono game process (by /proc/<pid>/comm), sample every second.
 OUT=/tmp/rss.csv
 echo "epoch,pid,vm_kb,rss_kb,mali_notifier_kb,note" > "$OUT"

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit 打包工具、manifest.json、src/launcher.sh、GODOT_BIN
+# OUTPUT: 带 Godot runtime 和游戏资源说明的 Batomon dist/ 包
+# POS:    Batomon 专用 Godot 运行环境与启动脚本的发行包组装器
 # Build the Batomon deployable dist/ directory.
 # Uses the batomon-specific Godot from the 4.3-arm64-sdl2-batomon branch,
 # which has steam stub + PCK decryption built in.

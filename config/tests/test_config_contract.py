@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  unittest, importlib, subprocess；配置生成器、验证器、Schema 和生成 JSON
+# OUTPUT: ConfigContractTests 配置契约回归测试
+# POS:    验证配置生成结果与设备策略及严格校验规则一致
 """Contract tests for the generated Port App Manager device configuration."""
 
 from __future__ import annotations
@@ -235,11 +238,17 @@ class ConfigContractTests(unittest.TestCase):
             ],
         )
         self.assertEqual(trimui["libraries"]["groups"]["gles"]["candidates"], ["/usr/lib"])
-        for platform in ("miniloong", "miniloong-loongos"):
-            self.assertEqual(
-                self.config["platforms"][platform]["python"]["mode"],
-                "runtime_mount",
-            )
+        self.assertEqual(
+            self.config["platforms"]["miniloong"]["python"]["mode"],
+            "runtime_mount",
+        )
+        self.assertEqual(
+            self.config["platforms"]["miniloong-loongos"]["python"],
+            {
+                "mode": "system",
+                "imports": ["sys", "encodings", "zipfile", "hashlib"],
+            },
+        )
         for platform in ("rocknix", "jelos"):
             self.assertEqual(
                 self.config["platforms"][platform]["frontend"]["management"],
@@ -248,6 +257,30 @@ class ConfigContractTests(unittest.TestCase):
             self.assertFalse(
                 self.config["platforms"][platform]["capabilities"]["manage_portmaster"]
             )
+
+    def test_trimui_does_not_maintain_portmaster_but_keeps_game_management(self) -> None:
+        trimui = self.config["platforms"]["trimui"]
+        self.assertEqual(trimui["frontend"]["management"], "system")
+        self.assertEqual(trimui["source_route"], "system")
+        route = self.config["sources"]["release_routes"][trimui["source_route"]]
+        self.assertFalse(route["install_allowed"])
+        for capability in (
+            "manage_portmaster", "install_portmaster", "update_portmaster", "manage_frontend",
+        ):
+            self.assertFalse(trimui["capabilities"][capability], capability)
+        for capability in (
+            "repair_runtimes", "inventory_ports", "manage_ports", "install_ports",
+            "inventory_apps", "manage_apps", "install_apps", "manage_images",
+            "manage_artwork", "trash", "leftovers", "cleanup_appledouble",
+        ):
+            self.assertTrue(trimui["capabilities"][capability], capability)
+        # Both MiniLoong generations still use APP-managed PortMaster.
+        for platform in ("miniloong", "miniloong-loongos"):
+            with self.subTest(platform=platform):
+                config = self.config["platforms"][platform]
+                self.assertEqual(config["frontend"]["management"], "app")
+                for capability in ("manage_portmaster", "install_portmaster", "update_portmaster"):
+                    self.assertTrue(config["capabilities"][capability], capability)
 
     def test_health_capabilities_and_library_groups_are_complete(self) -> None:
         capability_names = {
@@ -374,6 +407,12 @@ class ConfigContractTests(unittest.TestCase):
                 name,
             )
 
+    def test_shell_directory_is_explicit_for_every_profile(self) -> None:
+        for name, platform in self.config["platforms"].items():
+            expected = ({"strategy": "literal", "value": "/mnt/sdcard/Roms/PORTS64"}
+                        if name == "miyoo" else {"strategy": "parent", "of": "game_data"})
+            self.assertEqual(platform["paths"]["shell_directory"], expected, name)
+
     def test_miniloong_accepts_old_and_loongos_layouts_declaratively(self) -> None:
         legacy = self.config["platforms"]["miniloong"]
         loongos = self.config["platforms"]["miniloong-loongos"]
@@ -385,7 +424,24 @@ class ConfigContractTests(unittest.TestCase):
             legacy["paths"]["game_data"],
             {"strategy": "literal", "value": "/mnt/sdcard/roms/ports"},
         )
+        self.assertEqual(legacy["input"]["analog_sticks"], 1)
+        self.assertEqual(
+            legacy["frontend"]["install_map"],
+            [{
+                "source": "miniloong/PortMaster.txt",
+                "target": "PortMaster.sh",
+                "executable": True,
+            }],
+        )
         self.assertGreater(loongos["priority"], legacy["priority"])
+        self.assertEqual(
+            loongos["frontend"]["install_map"],
+            [{
+                "source": "PortMaster.sh",
+                "target": "PortMaster.sh",
+                "executable": True,
+            }],
+        )
         self.assertEqual(
             loongos["recognition"],
             {
@@ -407,8 +463,9 @@ class ConfigContractTests(unittest.TestCase):
         )
         self.assertEqual(
             loongos["paths"]["game_data"],
-            {"strategy": "literal", "value": "/roms/ports"},
+            {"strategy": "literal", "value": "/roms/ports", "canonicalize_existing": True},
         )
+        self.assertEqual(loongos["input"]["analog_sticks"], 1)
         self.assertEqual(
             loongos["paths"]["portmaster_core"],
             {

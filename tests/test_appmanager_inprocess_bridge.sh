@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  APP Manager Lua 模块、love-lite 与 appmanager-service Rust 源码
+# OUTPUT: 单一原生请求边界、进程内任务通信和取消接口的静态断言结果
+# POS:    APP Manager Lua/Rust 桥接职责边界回归测试
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

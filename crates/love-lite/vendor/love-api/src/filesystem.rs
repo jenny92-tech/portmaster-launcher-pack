@@ -1,3 +1,6 @@
+// INPUT:  mlua、SharedState 游戏来源/保存目录与 std 文件系统
+// OUTPUT: register()、setup_require()、setup_preloads() 和 love.filesystem 接口
+// POS:    定制 LÖVE 子集的资源读取、保存文件、FileData 与 Lua 模块加载适配
 use mlua::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

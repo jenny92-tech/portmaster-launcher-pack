@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse, subprocess, pathlib；device-probe.sh 与显式 ADB/SSH 目标
+# OUTPUT: main()；设备证据报告与可选运行库闭包
+# POS:    采集 App Manager 指定掌机的有限只读证据以重现设备用户态
 """Run the bounded APP Manager evidence probe against one handheld."""
 
 from __future__ import annotations

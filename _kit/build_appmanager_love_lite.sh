@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker、love_lite_revision.py、build_appmanager_love_lite_in_container.sh、Rust 工作区
+# OUTPUT: ports/appmanager/portable/runtime/love.aarch64 与 love-lite-revision.txt
+# POS:    在 ARM64 容器中构建并校验 App Manager 专用 LOVE-lite 运行时
 # Build the aarch64 LOVE-lite runtime used only by Port App Manager.
 
 set -euo pipefail
@@ -42,6 +45,10 @@ grep -aFq 'liblove-11.5.so' "$OUT" && {
 }
 grep -aFq 'libfreetype.so' "$OUT" && {
   echo "LOVE-lite unexpectedly references the device FreeType runtime" >&2
+  exit 65
+}
+grep -aFq 'liblzma.so' "$OUT" && {
+  echo "LOVE-lite unexpectedly references the device liblzma runtime" >&2
   exit 65
 }
 grep -aFq "$REVISION" "$OUT" || {

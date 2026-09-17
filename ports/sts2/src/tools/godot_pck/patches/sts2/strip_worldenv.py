@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/re/pathlib、恢复项目 scenes/game.tscn
+# OUTPUT: 移除 WorldEnvironment 节点的场景或 dry-run 报告
+# POS:    为无 3D Godot 构建去除不可用的环境节点
 """
 Remove the [node name="WorldEnvironment" type="WorldEnvironment" ...]
 block from scenes/game.tscn. Stock godot template_release built with

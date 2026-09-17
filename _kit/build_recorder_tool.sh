@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit/recorder.sh 共享录屏引擎与内嵌 CLI 模板
+# OUTPUT: tools/record_screen.sh 自包含录屏命令行脚本
+# POS:    从唯一维护的录屏引擎生成可复制到设备的 CLI
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse, hashlib, json, pathlib；config/src 配置片段
+# OUTPUT: build(), encode(), main()；生成根/平台 JSON 或 --check 一致性结果
+# POS:    合并人工维护配置并绑定平台详情的长度与 SHA-256
 """Build the canonical, minified App Manager configuration from fragments."""
 
 from __future__ import annotations

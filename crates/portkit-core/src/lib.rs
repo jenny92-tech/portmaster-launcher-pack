@@ -1,3 +1,6 @@
+// INPUT:  config/environment/platform/predicate/source/refresh/file/github/health 模块
+// OUTPUT: portkit_core 公共模块、配置解析和系统基础接口重导出
+// POS:    设备配置、下载与文件基础设施的可复用 Rust 核心库入口
 pub mod config;
 pub mod environment;
 pub mod error;

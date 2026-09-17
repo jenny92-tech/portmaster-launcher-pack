@@ -1,3 +1,6 @@
+// INPUT:  ureq HTTP/SOCKS 传输、GitHub 路由配置、ExclusiveFileLock 与进度回调
+// OUTPUT: GitHubRegistry/Transport、Capability、Progress、FetchOutcome 和路由错误类型
+// POS:    按下载能力选择镜像并支持超时与回退的 GitHub 字节传输层
 //! Capability-aware GitHub download transport.
 //!
 //! Route endpoints are deliberately kept out of result and error displays. A

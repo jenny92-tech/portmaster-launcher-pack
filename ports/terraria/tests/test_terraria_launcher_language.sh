@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  ../love/main.lua、../love/launcher.sh.template、grep/sed/bash
+# OUTPUT: 语言选项、共享启动接口与 Shell 语法的回归断言结果
+# POS:    泰拉瑞亚声明式界面与启动模板契约的静态回归测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,8 +31,8 @@ grep -Fq 'source "$KIT/launcher_unity_common.sh"' "$shfile"
 grep -Fq 'run_love_launcher_ui' "$shfile"
 grep -Fq 'run_unity_game "$PORT_TOML"' "$shfile"
 grep -Fq 'apply_button_remap "$PORT_TOML"' "$shfile"
-grep -Fq 'resolve_render_scale "${TER_RENDER_PERCENT:-100}"' "$shfile"
-grep -Fq 'apply_render_scale "$PORT_TOML"' "$shfile"
+grep -Fq 'configure_unity_display "$PORT_TOML"' "$shfile"
+grep -Fq '"${TER_RENDER_PERCENT:-100}" || exit 1' "$shfile"
 ! grep -Fq 'bootstrap.pck' "$shfile"
 ! grep -Fq 'run_godot_launcher' "$shfile"
 ! grep -Fq 'run_unity_game()' "$shfile"

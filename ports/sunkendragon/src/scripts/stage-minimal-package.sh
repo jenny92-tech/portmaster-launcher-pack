@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Bogodroid ARM64 核心文件、unityloader/插件、支持文件与 _kit 打包工具
+# OUTPUT: 待玩家填充 GameData 的最小运行包与 PAYLOAD-SHA256.txt
+# POS:    龙沉异世录不包含可复用 Windows 游戏资源的最小包组装脚本
 # Build the minimal 龙沉异世录 PortMaster package.
 #
 # The package carries only the ARM64 runtime outputs that cannot come from the

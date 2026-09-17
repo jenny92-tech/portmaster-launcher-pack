@@ -1,3 +1,6 @@
+// INPUT:  EnvironmentPolicy、Platform、Predicate、serde、SHA-256 与配置片段
+// OUTPUT: Config/RootConfig、ConfigLoader、FragmentSource 及契约验证接口
+// POS:    两层设备配置的解析、完整性验证和选中平台闭包加载层
 use crate::environment::EnvironmentPolicy;
 use crate::platform::Platform;
 use crate::predicate::Predicate;

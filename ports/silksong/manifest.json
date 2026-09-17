@@ -1,0 +1,45 @@
+{
+  "name": "silksong",
+  "title": "Hollow Knight: Silksong",
+  "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
+  "runtime": "Bogodroid unityloader",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "devices": [
+    "MiniLoong Pocket One",
+    "TrimUI-class 1G handhelds"
+  ],
+  "language": [
+    "en",
+    "zh-CN"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "silksong",
+  "script": "K_空洞骑士_丝之歌[中].sh",
+  "portable_dir": "silksong",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
+  "portmaster": {
+    "items": [
+      "K_空洞骑士_丝之歌[中].sh",
+      "silksong",
+      "screenshot.png",
+      "K_空洞骑士_丝之歌[中].png"
+    ],
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "K_空洞骑士_丝之歌[中].png"
+      ]
+    }
+  },
+  "depends_on": [
+    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "PortMaster runtimes/love_11.5"
+  ],
+  "notes": "Settings launcher for an existing Bogodroid Silksong runtime. The original-color option changes postprocess/color policy only; it does not swap the compressed game assets."
+}

@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  运行态容器、I/O 容器、handheld_lab.py 与控制场景 JSON
+# OUTPUT: 能力、事件、截图和诊断等端到端验证产物
+# POS:    验证跨容器能力路由、持久输入与可见帧缓冲采集
 set -eu
 
 component_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)

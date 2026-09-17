@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  恢复项目 .godot/imported、find、xxd
+# OUTPUT: ASTC 格式字节抽样及 ASTC 8x8/ETC2 数量报告
+# POS:    只读检查移动纹理重导入是否生成预期 ASTC 8x8 格式
 # Quick check on a recovered project's imported .ctex output to confirm the
 # Bogodroid godot-editor patch landed:
 #   1. No .etc2.ctex were emitted (all mobile textures should go to ASTC).

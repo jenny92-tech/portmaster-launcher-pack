@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit 组装/打包工具、共享 Lua 资源、游戏模板与发行目录
+# OUTPUT: 模板展开、共享资源、参数及各端口包接口断言结果
+# POS:    共享 LÖVE 启动器从声明到发行包的集成契约测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,16 +54,17 @@ done
 
 # Every Unity settings launcher separates physical output from internal render
 # scale and applies the shared Native/75%/50% protocol.
-for port in heishenhua hk sunkendragon terraria vampiresurvivors114; do
+for port in heishenhua hk silksong sunkendragon terraria vampiresurvivors114; do
   grep -Fq 'launcher.output_resolution' "$ROOT/ports/$port/love/main.lua"
   grep -Fq 'launcher.render_scale' "$ROOT/ports/$port/love/main.lua"
-  grep -Fq 'resolve_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
-  grep -Fq 'apply_render_scale' "$ROOT/ports/$port/love/launcher.sh.template"
+  grep -Fq 'configure_unity_display "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template"
+  grep 'configure_unity_display "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template" | grep -Fq '|| exit 1'
 done
 
 # Pixel Wukong keeps pixel edges sharp while its existing quality picker
 # continues to own the texture dimension cap.
 grep -Fq 'textureDownsampleFilter = "nearest"' "$ROOT/ports/heishenhua/love/launcher.sh.template"
+grep -Fq '[ -d "$LAUNCHERDIR/love_ui" ] || LAUNCHERDIR="$GAMEDIR"' "$ROOT/ports/silksong/love/launcher.sh.template"
 
 # Build one representative port and assert the common files are materialized in dist.
 bash "$ROOT/_kit/dist_port.sh" hk >/dev/null

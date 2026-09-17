@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster control.txt、HKL_* 配置、unityloader
+# OUTPUT: config.toml、图形设置及指定 PlayerPrefs 合并，空洞骑士游戏进程
+# POS:    空洞骑士设置同步、视频引导修复与 Unity 启动模板
 # PORTMASTER: hollowknight, [中]空洞骑士.sh
 #
 # Stage-1: shared love settings UI writes launch_config.env.
@@ -12,17 +15,14 @@
 PORT_NAME="hollowknight"; LOG_PREFIX="[HK-LOVE]"
 
 # ── PortMaster preamble (controlfolder discovery + control.txt).
-# The $(dirname $0)/PortMaster branch is required: without it controlfolder
-# resolves to the wrong path on some devices.
+# PortMaster discovery follows the official shared path order.
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 source "$KIT/launcher_artwork.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 
 GAMEDIR="/$directory/ports/$PORT_NAME"
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
@@ -97,12 +97,9 @@ fi
 
 # Outside the env branch on purpose: without a launcher UI there is no env, and
 # the resolution must still follow this device's panel.
-resolve_display_resolution "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}"
-apply_display_resolution "$PORT_TOML"
+configure_unity_display "$PORT_TOML" "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}" "${HKL_RENDER_PERCENT:-100}" || exit 1
 HK_RUNTIME_WIDTH="$RES_W"
 HK_RUNTIME_HEIGHT="$RES_H"
-resolve_render_scale "${HKL_RENDER_PERCENT:-100}"
-apply_render_scale "$PORT_TOML"
 HK_RENDER_WIDTH="$RENDER_W"
 HK_RENDER_HEIGHT="$RENDER_H"
 hk_sync_graphics_resolution "$HK_RENDER_HEIGHT"

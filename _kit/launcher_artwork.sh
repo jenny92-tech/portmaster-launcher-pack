@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  启动脚本位置、包内图片目录与 portkit-launcher artwork sync
+# OUTPUT: portmaster_sync_launcher_artwork()
+# POS:    以不阻塞启动的方式同步受支持前端的同名封面图
 # Shared launcher artwork adapter. The device-layout knowledge lives in
 # portkit-launcher (`artwork sync`, unit-tested in crates/portkit-launcher);
 # this wrapper only locates the helper next to the installed package. Artwork

@@ -1,3 +1,6 @@
+// INPUT:  GitHubTransport、ConfigLoader、设备检测、打包配置与缓存目录
+// OUTPUT: ConfigRefreshRequest/Status、refresh_config()
+// POS:    下载并验证设备配置后原子更新缓存的共享事务服务
 //! Typed device-configuration refresh service.
 //!
 //! The optional CLI and embedded APP process both call this layer. Status-file

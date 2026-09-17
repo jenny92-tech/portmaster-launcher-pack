@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、反射 AtlasManager、MemoryBudget、MemSnap
+// OUTPUT: AtlasLazyPatches.Apply() 与图集加载钩子
+// POS:    在低内存设备保留必要图集并按首次使用延迟加载其余图集
 using System;
 using System.Collections.Generic;
 using System.Reflection;

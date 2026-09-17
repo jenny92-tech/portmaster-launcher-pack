@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Batomon manifest、Shell 启动器与专用发行脚本
+# OUTPUT: PCK 路径、Godot 入口、打包接口和语法断言结果
+# POS:    Batomon 玩家 PCK 启动与发行声明的静态契约测试
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +30,7 @@ PY
 grep -Fq 'GAME_PCK="$GAMEDIR/gamedata/batomon_showdown.pck"' "$SCRIPT"
 grep -Fq './godot.mono' "$SCRIPT"
 grep -Fq 'BATOMON_SCENE' "$SCRIPT"
-grep -Fq 'source "$controlfolder/control.txt"' "$SCRIPT"
+grep -Fq 'portmaster_init "' "$SCRIPT"
 
 grep -Fq '"$REPO_ROOT/_kit/assemble.sh" "$SRC_ROOT/launcher.sh" "$DIST/Batomon Showdown.sh"' "$DIST_SCRIPT"
 grep -Fq 'external/godot/godot.linuxbsd.template_release.arm64.mono' "$DIST_SCRIPT"

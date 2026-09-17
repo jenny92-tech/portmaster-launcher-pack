@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/subprocess/pathlib、GDRE、基础 PCK 与覆盖目录
+# OUTPUT: main() 生成仅替换指定资源的输出 PCK
+# POS:    将恢复资源覆盖到原始包并保留无法重建的扩展资源
 """
 Patch a base pck with files from an overlay directory, using gdre_tools
 --pck-patch. Replaces specific files in the original pck (textures,

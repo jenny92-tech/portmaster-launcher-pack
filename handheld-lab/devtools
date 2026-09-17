@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  POSIX sh、Python 3 与同目录 handheld_lab.py
+# OUTPUT: devtools 命令行入口
+# POS:    为通用掌机控制器提供稳定的无扩展名启动命令
 set -eu
 
 component_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)

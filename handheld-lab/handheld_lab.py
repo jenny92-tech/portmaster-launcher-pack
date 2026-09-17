@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  Python 标准库、handheld-agent.sh 与 local/Docker/SSH/ADB 命令
+# OUTPUT: Result、Transport 实现、诊断/场景接口与 main() CLI
+# POS:    统一真实和虚拟掌机的能力协商、控制路由及证据归档
 """APP-independent controller for real and virtual Linux handheld targets."""
 
 from __future__ import annotations

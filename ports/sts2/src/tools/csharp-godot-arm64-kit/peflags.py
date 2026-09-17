@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  struct、sys、待检查 PE/CLI 程序集路径
+# OUTPUT: info(path) 元数据及命令行 PE/CLI 标志报告
+# POS:    辅助检查程序集机器类型与 ReadyToRun 原生代码标记
 import struct, sys
 def info(path):
     d = open(path, "rb").read()

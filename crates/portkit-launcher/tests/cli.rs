@@ -1,3 +1,6 @@
+// INPUT:  构建后的 portkit-launcher、临时配置文件与 std::process::Command
+// OUTPUT: JSON 合并成功和 Unity 非法参数无写入的 CLI 回归测试
+// POS:    从子进程入口验证启动辅助命令的公开行为
 use std::fs;
 use std::process::Command;
 

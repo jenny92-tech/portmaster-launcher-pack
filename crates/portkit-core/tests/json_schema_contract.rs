@@ -1,3 +1,6 @@
+// INPUT:  config 根/平台 JSON、Draft 2020-12 Schema、jsonschema 与 serde_json
+// OUTPUT: 生成配置通过 Schema 且非法谓词/健康规则被拒绝的测试
+// POS:    配置文件与 JSON Schema 的可执行契约验证层
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -1,3 +1,6 @@
+// INPUT:  Rust 标准库、RGBA 像素、几何/混合参数与内置点阵字形
+// OUTPUT: PixelBuffer、DissolveParams、StencilCompare、FONT_8X8 及软件绘制接口
+// POS:    上游衍生的 CPU 光栅化后端，为 LOVE-lite 不支持的 GPU 帧提供回退
 /// Convert RGB (0..1) to HSL (h: 0..6, s: 0..1, l: 0..1).
 /// Matches the GLSL HSL() used in Balatro's shaders.
 #[inline(always)]

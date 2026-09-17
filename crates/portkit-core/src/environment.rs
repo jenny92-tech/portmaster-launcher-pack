@@ -1,3 +1,6 @@
+// INPUT:  serde 环境策略、继承变量与 std::process::Command
+// OUTPUT: EnvironmentPolicy、EnvironmentOperation、CommandEnvironment
+// POS:    按有限操作和原生阻止名单构造字面值子进程环境
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

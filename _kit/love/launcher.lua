@@ -1,3 +1,6 @@
+-- INPUT:  kit 与端口字段/页面/环境绑定声明
+-- OUTPUT: launcher.define/select/toggle/resolution/output_resolution/render_scale/button()
+-- POS:    从声明式设置生成默认状态、校验、旧设置导入及启动配置输出
 -- Declarative launcher schema built on the shared UI kit.
 -- A port describes fields/pages/env bindings; this module derives state,
 -- validation, legacy imports, widgets and launch_config.env serialization.

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Bogodroid 完整 Android payload、unityloader/插件、Steam stub 与 _kit 打包工具
+# OUTPUT: 完整 Android 基线 dist/ 包与 PAYLOAD-SHA256.txt
+# POS:    龙沉异世录硬件验证用完整资源基线包的组装脚本
 # Build the verified full Android baseline package for 龙沉异世录.
 #
 # This is intentionally the default staging path until the game is proven

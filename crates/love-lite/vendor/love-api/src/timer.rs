@@ -1,3 +1,6 @@
+// INPUT:  mlua、SharedState 计时/FPS 状态与 std 时钟
+// OUTPUT: register() 安装 love.timer 时间、帧差、FPS 和受限休眠接口
+// POS:    为 Lua 前端提供与 Rust 宿主帧调度协同的计时适配
 use mlua::prelude::*;
 use std::sync::Arc;
 

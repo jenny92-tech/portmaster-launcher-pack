@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  容器内 App Manager dist、设备运行库、识别夹具与 gptokeyb 包装器
+# OUTPUT: 服务就绪、Lua 就绪、首帧与平台选择的断言结果
+# POS:    在隔离容器内以软件渲染运行完整 App Manager 启动冒烟检查
 set -eu
 
 repo=/repo

@@ -17,7 +17,8 @@
   "library.v1",
   "python.v1"
  ],
- "paths": {
+"paths": {
+  "shell_directory": {"strategy": "parent", "of": "game_data"},
   "scripts": {
    "strategy": "launcher_dir"
   },
@@ -165,7 +166,7 @@
   "default_height": 720
  },
  "input": {
-  "analog_sticks": 2,
+  "analog_sticks": 1,
   "tty": "/dev/tty0"
  },
  "locations": [

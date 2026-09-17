@@ -1,3 +1,6 @@
+// INPUT:  ConfigureRequest、已有配置文本和 atomic_write()
+// OUTPUT: ConfigureRequest、configure()
+// POS:    在指定配置节写入 Unity 分辨率、按键映射和渲染比例并保留其他内容
 use std::io;
 use std::path::PathBuf;
 

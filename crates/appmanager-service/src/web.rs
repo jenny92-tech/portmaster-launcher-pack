@@ -1,3 +1,6 @@
+// INPUT:  launcher::Session、TCP/文件流、serde 和 appmanager_core 包管理操作
+// OUTPUT: WebEndpoint 及 crate 内配对鉴权、上传安装和管理 HTTP 服务
+// POS:    运行于工作线程的有界局域网远程管理服务，复用原生业务安全边界
 //! Small, dependency-free LAN administration server.
 //!
 //! The server runs on a worker thread, streams uploads to disk, and requires a

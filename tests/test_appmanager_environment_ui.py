@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  APP Manager Lua 模块、共享 kit、lupa、模拟环境与库存快照
+# OUTPUT: 启动状态、环境管理与交互流程的可执行契约断言结果
+# POS:    APP Manager 界面能力门禁、任务反馈和环境页面的回归测试
 """Executable startup-state and Environment Management UI contracts."""
 
 import json
@@ -14,6 +17,7 @@ source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(APP.glob(
 operations_source = (APP / "app_operations.lua").read_text(encoding="utf-8")
 assert operations_source.index("model.apply_snapshot") < operations_source.index("page_builders.reset_selection")
 assert "model.invalidate_all()" in operations_source
+assert 'L("Reason: ","原因：")..reason' in operations_source
 assert "Port App Manager 使用自带 UI 环境，因此仍可运行" not in source
 assert "无法启动提权操作助手" not in source
 assert "SquashFS 镜像" not in source
@@ -276,7 +280,7 @@ assert guide["open"]
 assert guide["title"] == "欢迎使用 Port App Manager"
 assert "Port 游戏维护工具" in guide["message"]
 assert guide["confirm"] == "开始使用"
-assert guide["callout_count"] == 5
+assert guide["callout_count"] == 6
 
 remote_restored = run_case(
     "healthy",
@@ -284,6 +288,38 @@ remote_restored = run_case(
 )
 assert remote_restored.globals().LAST_WEB_SET is True
 assert remote_restored.eval('require("kit").get_state().web_enabled') == "1"
+remote_restored.execute(r'''
+    local k=require("kit")
+    k.close_guide(); k.close_dialog()
+    local page=k.debug_page()
+    local found=0
+    local expected
+    for i,label in ipairs(page.row_labels) do
+        assert(label~="配对码")
+        if label=="远程管理，用电脑浏览器打开" then
+            expected=page.row_values[i]
+            assert(expected:match(":8080\n配对码 123456$"))
+            assert(page.row_max_lines[i]>=2)
+            found=found+1
+        end
+    end
+    assert(found==1)
+    -- Unlike the default mock, preserve explicit newlines during wrapping.
+    love.graphics.newFont().getWrap=function(_,text,limit)
+        local lines={}
+        for line in (text.."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end
+        return limit,lines
+    end
+    for _,size in ipairs({{640,480},{720,720},{1280,720}}) do
+        love.graphics.getDimensions=function() return size[1],size[2] end
+        local drawn=false
+        love.graphics.printf=function(text,x,y,width)
+            if text==expected then assert(width>=60); drawn=true end
+        end
+        love.draw()
+        assert(drawn,"complete pairing code must be drawn on small screens")
+    end
+''')
 
 remote_toggle = run_case(
     "healthy",
@@ -308,6 +344,12 @@ healthy.execute('require("kit").input("cancel")')
 assert healthy.eval('require("kit").debug_guide().step') == 3
 assert healthy.eval('require("kit").debug_guide().target') == "home:junk"
 healthy.execute('require("kit").input("confirm"); require("kit").input("confirm"); require("kit").input("confirm")')
+guide = healthy.eval('require("kit").debug_guide()')
+assert guide["step"] == 6
+assert guide["callout_title"] == "开发与反馈"
+assert "QQ 群 1047158975" in guide["body"]
+assert guide["body"].endswith("/log.txt")
+healthy.execute('require("kit").input("confirm")')
 assert not healthy.eval('require("kit").debug_guide().open')
 assert healthy.eval('require("kit").get_state().onboarding_seen') == "1"
 # Home is the feature matrix; PortMaster manager is the last card.
@@ -426,6 +468,25 @@ system_managed.execute(r'''
     k.input("confirm")
 ''')
 assert system_managed.eval('require("kit").debug_page().title') == "Runtime 修复"
+
+# Exercise the shipped TrimUI policy, not just a synthetic management flag.
+trimui_config = json.loads((ROOT / "config/platforms/trimui.json").read_text(encoding="utf-8"))
+root_config = json.loads((ROOT / "config/config.json").read_text(encoding="utf-8"))
+trimui_env = {"capability_" + key: value for key, value in trimui_config["capabilities"].items()}
+trimui_env["portmaster_release_install_allowed"] = root_config["sources"]["release_routes"][
+    trimui_config["source_route"]
+]["install_allowed"]
+for health in ("missing", "damaged", "healthy"):
+    trimui = run_case(health, management=trimui_config["frontend"]["management"], extra=trimui_env)
+    assert trimui.eval('require("kit").debug_page().title') == "Port App Manager"
+    assert trimui.eval("LAST_START_KIND") != "update-check-if-stale"
+    trimui.execute('require("kit").close_guide()')
+    goto_manage(trimui)
+    page = trimui.eval('require("kit").debug_page()')
+    assert page["row_values"][2] == "由系统管理"
+    assert page["sidebar_count"] == 2  # Only Runtime repair and environment details.
+    assert page["sidebar_labels"][1].startswith("Runtime 修复")
+    assert page["sidebar_labels"][2] == "环境详情"
 
 # Support is stated by support model: our own build (MiniLoong), the official
 # release, and unknown devices that fell back to the generic profile.
@@ -872,6 +933,11 @@ zip_case.execute('require("kit").update(0.2)')
 assert not zip_case.eval('require("kit").debug_busy().busy')
 page = zip_case.eval('require("kit").debug_page()')
 assert page["title"] == "压缩包安装"
+assert page["row_max_lines"][1] == 5
+zip_case.execute('require("kit").draw()')
+layout = zip_case.eval('require("kit").debug_layout()')
+assert layout["row_layout_mode"] == "flow"
+assert layout["columns"] == 1
 zip_labels = [page["row_labels"][i] for i in range(1, page["row_count"] + 1)]
 assert "game.zip" in zip_labels
 assert "myapp.zip" in zip_labels

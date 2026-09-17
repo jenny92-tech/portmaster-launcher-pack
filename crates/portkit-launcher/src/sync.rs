@@ -1,3 +1,6 @@
+// INPUT:  SyncRequest 的源/目标目录、允许扩展名与 atomic_copy()
+// OUTPUT: SyncRequest、sync_newer() 返回复制数量
+// POS:    按文件类型和修改时间同步较新的游戏资源文件
 use std::io;
 use std::path::PathBuf;
 

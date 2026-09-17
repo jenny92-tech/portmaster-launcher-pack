@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  端口名、输出目录、dist_port.sh 与 trimui_app.py
+# OUTPUT: 端口 dist 内容及 TrimUI MainUI APP ZIP
+# POS:    串联端口构建与 TrimUI 系统应用封装
 # Build a TrimUI MainUI application archive from an existing port manifest.
 
 set -euo pipefail

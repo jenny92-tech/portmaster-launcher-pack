@@ -1,3 +1,6 @@
+// INPUT:  archive_bundle、文件系统、serde、安装目标与取消/密码参数
+// OUTPUT: ZipCandidate/ZipKind、ArchiveIssue、安装包扫描/安装/事务恢复接口
+// POS:    按显式符号布局识别包内关联并事务化安装 Port/TrimUI APP，不提供设备清理归属
 //! Portable-game zip bundle scanning and recognition.
 //!
 //! People share PortMaster games as zip bundles. The layout varies: the zip
@@ -87,6 +90,56 @@ impl ZipKind {
             ZipKind::Unknown => "unknown",
         }
     }
+}
+
+/// Associate archive entries using explicit symbolic layouts, never host paths.
+/// This is package recognition only, not evidence for on-device deletion.
+fn launcher_data_directories(
+    text: &str,
+    real_dirs: &BTreeSet<String>,
+    script_name: &str,
+    script_dir: &str,
+) -> BTreeSet<String> {
+    // Archive inspection has no mounted card. Bind only the symbolic card-root
+    // input; this cannot establish an on-device path or deletion ownership.
+    let seed = BTreeMap::from([("directory".to_owned(), "/__portmaster_card__".to_owned())]);
+    let virtual_parent = Path::new("/__archive__").join(script_dir);
+    let analysis = crate::shell_paths::analyze(
+        text,
+        &seed,
+        &virtual_parent.join(format!("{script_name}.sh")),
+    );
+    // Explicit portable-package layouts, not guesses based on a segment named
+    // `ports`. The on-device inventory must never use these symbolic roots.
+    let roots = [
+        virtual_parent.as_path(),
+        Path::new("/__portmaster_card__/ports"),
+        Path::new("/roms/ports"),
+        Path::new("/ports"),
+    ];
+    analysis
+        .paths
+        .iter()
+        .chain(&analysis.declared_paths)
+        .chain(&analysis.sources)
+        .chain(&analysis.working_directories)
+        .flat_map(|value| {
+            roots.iter().filter_map(move |root| {
+                let relative = Path::new(value).strip_prefix(root).ok()?;
+                if relative
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+                {
+                    return None;
+                }
+                match relative.components().next()? {
+                    std::path::Component::Normal(name) => name.to_str().map(str::to_owned),
+                    _ => None,
+                }
+            })
+        })
+        .filter(|name| real_dirs.contains(name))
+        .collect()
 }
 
 const MAX_ZIP_ENTRIES: usize = 4096;
@@ -626,14 +679,7 @@ fn recognize_catalog(
             .collect::<BTreeSet<_>>();
         let referenced = launcher_text
             .get(script)
-            .map(|text| {
-                crate::inventory::launcher_data_directories(
-                    text,
-                    &real_dirs,
-                    script_stem,
-                    script_parent,
-                )
-            })
+            .map(|text| launcher_data_directories(text, &real_dirs, script_stem, script_parent))
             .unwrap_or_default();
         let data_dir = if referenced.len() == 1 {
             let name = referenced.iter().next().expect("one reference");
@@ -721,12 +767,7 @@ fn recognize_catalog(
                 let referenced = launcher_text
                     .get(&declared_script)
                     .map(|text| {
-                        crate::inventory::launcher_data_directories(
-                            text,
-                            &real_dirs,
-                            script_stem,
-                            script_parent,
-                        )
+                        launcher_data_directories(text, &real_dirs, script_stem, script_parent)
                     })
                     .unwrap_or_default();
                 if referenced.len() == 1 && referenced.contains(data_name) {
@@ -778,6 +819,38 @@ mod tests {
 
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn archive_association_uses_explicit_roots_not_magic_directory_names() {
+        let names = BTreeSet::from([
+            "ports".into(),
+            "data".into(),
+            "gamedata".into(),
+            "Game".into(),
+        ]);
+        for name in &names {
+            for root in ["/ports", "/roms/ports", "$directory/ports"] {
+                let text = format!("cd \"{root}/{name}/nested\"\n");
+                assert_eq!(
+                    launcher_data_directories(&text, &names, "renamed", "wrapper"),
+                    BTreeSet::from([name.clone()])
+                );
+            }
+        }
+        assert!(
+            launcher_data_directories("cd /unrelated/ports/Game\n", &names, "renamed", "wrapper")
+                .is_empty()
+        );
+        assert_eq!(
+            launcher_data_directories(
+                "cd \"$(dirname \"$0\")/Game\"\n",
+                &names,
+                "renamed",
+                "wrapper"
+            ),
+            BTreeSet::from(["Game".into()])
+        );
+    }
 
     #[test]
     fn archive_issue_keeps_method_details_but_removes_absolute_paths() {

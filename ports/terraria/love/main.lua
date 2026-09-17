@@ -1,3 +1,6 @@
+-- INPUT:  launcher 共享框架、gamedata 核心文件或玩家 APK
+-- OUTPUT: 泰拉瑞亚设置/资源检查页面及 TER_* 启动参数
+-- POS:    泰拉瑞亚语言、画面和按键选项及游戏资源就绪检查定义
 local launcher = require("launcher")
 
 launcher.define {

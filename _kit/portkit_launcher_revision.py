@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  hashlib, sys, pathlib, cargo_revision；portkit-launcher 源码与构建脚本
+# OUTPUT: main()；标准输出 PortKit 启动辅助程序的 SHA-256 revision
+# POS:    为普通游戏携带的静态辅助二进制建立独立源码身份
 """Print the source revision of the portable PortKit launcher helper."""
 
 from __future__ import annotations

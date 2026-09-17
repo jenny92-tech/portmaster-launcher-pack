@@ -1,3 +1,6 @@
+// INPUT:  mlua、SharedState、lua_util、PixelBuffer 与图像/字体资源
+// OUTPUT: register() 安装 love.graphics 的绘图、纹理、字体和状态接口
+// POS:    定制 LÖVE 图形实现，记录 GPU 命令并支持软件绘制回退
 use mlua::prelude::*;
 use parking_lot::Mutex;
 use std::sync::Arc;

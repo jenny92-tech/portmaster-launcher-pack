@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker、采集的设备用户态、prepare_device_fixture.py 与 Rust/Lua 测试
+# OUTPUT: 按设备执行 suite/e2e/ui/all 测试结果
+# POS:    在真实 loader/libc 下验证管理业务、Web 与 UI 首帧
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

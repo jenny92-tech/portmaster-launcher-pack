@@ -1,3 +1,6 @@
+// INPUT:  portkit_core 公开解析接口、config 配置/Schema、SHA-256 与设备夹具
+// OUTPUT: 平台识别、配置选择、环境/路径/健康契约的一致性回归测试
+// POS:    验证生成配置与 Rust 解析器的业务及安全边界保持同步
 use portkit_core::{
     CandidateSelector, ConfigCandidate, ConfigLoader, ConfigOrigin, DetectionContext,
     FragmentSource, HealthStatus, LocalFragmentSource, evaluate_health,
@@ -818,7 +821,10 @@ fn miniloong_old_and_loongos_layouts_resolve_without_a_native_branch() {
         .unwrap();
     assert_eq!(loongos.platform_id, "miniloong-loongos");
     assert_eq!(loongos.paths["scripts"], new_root.join("roms"));
-    assert_eq!(loongos.paths["game_data"], new_root.join("roms/ports"));
+    assert_eq!(
+        loongos.paths["game_data"],
+        std::fs::canonicalize(new_root.join("roms/ports")).unwrap()
+    );
     assert_eq!(
         loongos.paths["portmaster_core"],
         std::fs::canonicalize(new_root.join("data/PortMaster")).unwrap()

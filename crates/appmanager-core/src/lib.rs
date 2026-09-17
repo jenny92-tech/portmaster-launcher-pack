@@ -1,3 +1,6 @@
+// INPUT:  本 crate 的上下文、清单、安装、文件操作、下载和任务模块
+// OUTPUT: appmanager_core 公开模块及领域类型/操作接口重导出
+// POS:    APP Manager 原生业务与事务能力的共享库入口
 //! App-specific business and transaction building blocks for Port App Manager.
 //!
 //! Inventory/config logic, ordinary file mutations, Runtime repair, and the
@@ -17,6 +20,9 @@ pub mod plan;
 pub mod port_zip;
 pub mod resolution;
 pub mod runtime;
+pub mod shell_paths;
+pub mod shell_sources;
+mod shell_eval;
 pub mod storage;
 pub mod task;
 

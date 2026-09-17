@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、Diag、线程计时器、/proc 进程和内存信息
+// OUTPUT: MemoryProbePatches.Apply()、事件探针与周期内存日志
+// POS:    在调试模式记录资源加载和场景切换的内存压力
 using System;
 using System.Diagnostics;
 using System.Collections.Generic;

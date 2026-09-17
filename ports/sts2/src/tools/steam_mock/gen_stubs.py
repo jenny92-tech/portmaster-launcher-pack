@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  re、sys、pathlib、gbe_fork/dll 的 flat.cpp 与 dll.cpp
+# OUTPUT: steam_mock_gen.c 的 Steam C ABI 桩函数源码
+# POS:    按返回类型与显式覆盖生成 ARM64 离线 Steam 接口桩
 """
 Generate steam_mock_gen.c from gbe_fork's dll/flat.cpp.
 

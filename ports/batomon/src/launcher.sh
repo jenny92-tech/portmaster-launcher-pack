@@ -1,22 +1,23 @@
 #!/bin/bash
+# INPUT:  _kit/launcher_artwork.sh、PortMaster control.txt、godot.mono、玩家 PCK
+# OUTPUT: 图形兼容配置、Godot 游戏进程与运行日志
+# POS:    Batomon Showdown 的设备环境准备和 Godot 启动入口
 # PORTMASTER: batomon, Batomon Showdown.sh
 # Godot 4 runner for a prepared Batomon Showdown Demo PCK.
+
+PORT_NAME=batomon
+LOG_PREFIX="[Batomon]"
 
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/launcher_artwork.sh"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
+source "$KIT/portmaster_common.sh"
 #@KIT-END
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0"
 
-XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
-if [ -d "/opt/system/Tools/PortMaster/" ]; then controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then controlfolder="$XDG_DATA_HOME/PortMaster"
-else controlfolder="/roms/ports/PortMaster"
-fi
-source "$controlfolder/control.txt"
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 
 GAMEDIR="/$directory/ports/batomon"
 CONFDIR="$GAMEDIR/conf"
@@ -37,30 +38,12 @@ echo "[Batomon] CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDI
 
 export LD_LIBRARY_PATH="$GAMEDIR:/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"
 
-if [ -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" ]; then
-  USE_WAYLAND=1
-  export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
-  if [ "$CFW_NAME" = "Loong" ]; then
-    GODOT_LAUNCH='exec -a unityloader ./godot.mono'
-  else
-    GODOT_LAUNCH='./godot.mono'
-  fi
-else
-  USE_WAYLAND=0
+if ! launcher_platform_display; then
   export SDL_VIDEODRIVER=dummy
   export SDL_AUDIODRIVER=alsa
-  GODOT_LAUNCH='./godot.mono'
 fi
 
-if [ "$USE_WAYLAND" != "1" ]; then
-  export XDG_RUNTIME_DIR=/tmp/xdg-batomon
-  mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
-fi
-
-if command -v pulseaudio >/dev/null 2>&1 && ! pgrep -x pulseaudio >/dev/null 2>&1 && ! pgrep -x pipewire-pulse >/dev/null 2>&1; then
-  pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1 || true
-  sleep 1
-fi
+audio_setup
 
 GAME_PCK="$GAMEDIR/gamedata/batomon_showdown.pck"
 if [ ! -f "$GAME_PCK" ]; then
@@ -84,7 +67,7 @@ EOF
 
 $GPTOKEYB "godot.mono" &
 gptokeyb_pid=$!
-pm_platform_helper "godot.mono"
+launcher_platform_prepare_game "godot.mono"
 
 VERBOSE_ARG=""
 [ -f "$GAMEDIR/.debug" ] && VERBOSE_ARG="--verbose"
@@ -101,7 +84,7 @@ fi
 
 echo "[Batomon] launching $GAME_PCK ${SCENE_ARG}"
 ( XDG_CONFIG_HOME="$CONFDIR" XDG_DATA_HOME="$CONFDIR" \
-  $GODOT_LAUNCH $VERBOSE_ARG --display-driver sdl2 --rendering-driver opengl3 \
+  launcher_platform_exec ./godot.mono $VERBOSE_ARG --display-driver sdl2 --rendering-driver opengl3 \
   --resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} \
   --main-pack "$GAME_PCK" ${SCENE_ARG:+"$SCENE_ARG"} )
 code=$?
@@ -109,5 +92,5 @@ echo "[Batomon] exit code: $code"
 
 kill $gptokeyb_pid 2>/dev/null
 wait $gptokeyb_pid 2>/dev/null
-pm_finish
+launcher_platform_finish
 exit "$code"

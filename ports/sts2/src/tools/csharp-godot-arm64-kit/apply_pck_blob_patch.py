@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  sys/os/json/hashlib、PCK、偏移/长度元数据与替换 blob
+# OUTPUT: 等长替换后的 PCK 数据及目录 MD5
+# POS:    经原内容哈希校验执行幂等的 PCK 单文件原位补丁
 """
 In-place patch of a Godot .pck: replaces one file with same-length content
 (updates only the blob + its 16-byte md5 in the directory).

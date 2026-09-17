@@ -1,3 +1,6 @@
+// INPUT:  appmanager_core 任务通道、portkit_core 文件锁/下载进度与 Unix 系统接口
+// OUTPUT: 父模块可见的 ActivityGuard、DownloadProgress、路径/缓存/设备探测辅助接口
+// POS:    服务编排层的活动互斥、任务反馈和系统适配支持
 use std::env;
 use std::ffi::CString;
 use std::fs;

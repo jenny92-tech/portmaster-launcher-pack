@@ -1,4 +1,7 @@
 #!/usr/bin/env dotnet-script
+// INPUT:  Mono.Cecil、输入/输出 DLL 路径与程序集参考目录
+// OUTPUT: 写入启动方法和异步状态机跟踪语句的输出 DLL
+// POS:    为 STS2 启动卡住问题插入 Console 级 IL 追踪
 /* Inject Console.WriteLine trace breadcrumbs into a curated set of StS2
  * startup methods so we can see, from the device's log.txt, exactly where
  * the lite/no_3d build hangs.

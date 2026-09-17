@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse, json, pathlib；平台配置、运行库清单与目标 fixture 根
+# OUTPUT: main()；最小识别夹具、fixture.json 与观测到的启动路径
+# POS:    从正式配置构造用户态测试所需事实而不维护第二份设备规则
 """Materialize only the Config recognition facts needed by a lab profile."""
 
 from __future__ import annotations

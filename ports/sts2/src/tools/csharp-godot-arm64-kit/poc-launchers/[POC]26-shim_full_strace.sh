@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  PortMaster、Godot POC、shim_egl.so、strace
+# OUTPUT: 26-shim_full_strace 日志、完整 syscall 记录及末尾摘要
+# POS:    结合 EGL 查询和全量系统调用追踪采集设备启动证据
 # Preset 26: shim + full strace (no -e filter), captures all syscalls
 # for the most complete evidence of what godot does inside libmali
 # between handoff and SIGSEGV. Output can be tens of MB.

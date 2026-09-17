@@ -1,3 +1,6 @@
+// INPUT:  字体候选路径、tar.xz/ZIP 资源包、lzma_rust2、tar 与 zip
+// OUTPUT: ProvisionRequest/Source/Outcome、provision()
+// POS:    受大小和格式限制地复用或提取启动界面字体
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};

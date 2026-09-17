@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  dist-port.sh、manifest.json、DEVICE、ssh/scp/rsync
+# OUTPUT: 指定设备的启动脚本与移植包目录同步
+# POS:    在明确指定 SSH 目标后构建并部署 STS2 产物
 # Build dist/ and push it to a device over SSH.
 #
 # Usage:

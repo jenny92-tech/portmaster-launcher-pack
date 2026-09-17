@@ -1,3 +1,6 @@
+# INPUT:  unittest；lab.collect_device_evidence 的端点和证据解析接口
+# OUTPUT: DeviceEvidenceTests
+# POS:    验证设备证据解析仅接受限定区段与运行库路径
 import unittest
 
 from lab.collect_device_evidence import (

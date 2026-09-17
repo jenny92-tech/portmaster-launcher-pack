@@ -13,7 +13,8 @@ launcher fail to start.
 | `love/kit.lua` | Shared LÖVE UI: pages, items, buttons, split layout, focus, localization and busy state. |
 | `love/launcher.lua` | Declarative state/options/env/legacy schema for ordinary game launchers. |
 | `launcher_artwork.sh` | Shared tested-device adapter for launcher artwork paths and safe same-name synchronization. |
-| `portmaster_bootstrap.sh` | Shared PortMaster control-folder discovery. |
+| `portmaster_bootstrap.sh` | Shared stock/firmware/custom PortMaster discovery and initialization. |
+| `launcher_platform.sh` | Inlined display/session, resolution fallback, legacy input/exec and explicit DRM ownership adapter. |
 | `portmaster_common.sh` | **Engine-agnostic** device helpers: audio, memory, dmesg capture, LÖVE runtime/font/display startup. |
 | `launcher_unity_common.sh` | **Unity-loader only**: configuration, button remap and game launch. |
 | `assemble.sh` | Inline the `#@KIT` block of a `src/` or `love/` shell template into one self-contained device script. |
@@ -83,11 +84,9 @@ PORT_NAME="heishenhua"; LOG_PREFIX="[HSH]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 GAMEDIR="/$directory/ports/$PORT_NAME"; CONFDIR="$GAMEDIR/conf"; cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
 mkdir -p "$CONFDIR" "$GAMEDIR/cache"
@@ -103,12 +102,21 @@ source "$KIT/launcher_unity_common.sh"
 run_love_launcher_ui
 
 # ── STAGE 2: apply launcher choices + run ──
-# ... apply_display_resolution "$GAMEDIR/x.toml"
+# ... configure_unity_display "$GAMEDIR/x.toml" "$WIDTH" "$HEIGHT" "$RENDER_PERCENT" || exit 1
 # ... apply_button_remap "$GAMEDIR/x.toml" BUTTON_A BUTTON_B BUTTON_X BUTTON_Y
 run_unity_game x.toml
 # Optional second argument: colon-separated game-owned native-library dirs.
 # run_unity_game x.toml "$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a"
 ```
+
+All six Bogodroid settings launchers (hk, heishenhua, silksong, sunkendragon,
+terraria, vampiresurvivors114) use `configure_unity_display`: display size and
+100/75/50% internal render scale are committed together through PortKit. A failed
+write stops launch. Existing per-game defaults and extra settings stay with the
+port; Hollow Knight also synchronizes its own video settings to the resolved
+render size. Deploy the generated script, shared `love_ui` files and matching
+`bin/portkit-launcher` together, without replacing `state.txt`, `launch_config.env`,
+game TOML files, saves or game assets.
 
 The KIT block runs as-is in the repo and gets inlined by `assemble.sh` for the
 device. Shared modules use `source "$KIT/<file>"`; port-private modules use
@@ -142,12 +150,45 @@ It owns the fragile NotoSans extraction chain, JSON merges, shared Unity config
 updates, LOVE runtime selection and update-only file sync. It does not own device
 branches, environment setup or process orchestration and is not a launcher DSL.
 
-**One assembled script serves both devices** — `audio_setup` branches on
-`CFW_NAME`: on **MiniLoong (`Loong`, wayland/weston)** it leaves system audio +
-`XDG_RUNTIME_DIR` untouched (override would break wayland → HK black screen /
-heishenhua 90° rotation); on **TrimUI-class (KMSDRM)** it runs pulseaudio + a
-`/tmp/xdg-*` fallback. Game data (`unityloader`, `*.toml`, `gamedata/`) already
-lives in the device's game dir and is NOT part of the launcher — don't overwrite it.
+### Platform boundary (all ordinary launchers)
+
+The six Unity ports, STS2, Batomon and Screen Recorder use the same
+`portmaster_init` entry. It accepts installed stock, firmware-provided or locally
+maintained PortMaster. The compatibility code is built into the generated SH;
+the device needs neither this repository nor our custom PortMaster fork.
+This is **not** a PortMaster-free package: ordinary launchers still need its
+standard control API and, where applicable, its LÖVE runtime, font and gptokeyb.
+App Manager keeps its separate thin bootstrap and native platform configuration.
+
+Discovery follows the [official launch-script template](https://portmaster.games/packaging.html#the-launchscript-sh):
+`/opt/system/Tools/PortMaster`, `/opt/tools/PortMaster`,
+`$XDG_DATA_HOME/PortMaster`, then `/roms/ports/PortMaster`.
+`XDG_DATA_HOME` defaults to `$HOME/.local/share` when unset or empty.
+There is no launcher-adjacent override or extra SD-card path probing. The first
+existing candidate directory wins; initialization reports a missing control/API
+rather than silently switching installations.
+
+`launcher_platform_display` checks live sockets, repairs a stale runtime path and
+leaves native KMS/Mali selections alone when no compositor exists. Weston owns
+rotation; launchers do not rotate the game again. Supplied display dimensions are
+preserved. Only the known Loong raw-fb fallback swaps portrait dimensions.
+Audio setup preserves the system compositor/audio environment; non-compositor
+systems retain the existing Pulse/ALSA fallback. Unknown firmware still needs
+device validation; a new firmware version alone is not a compatibility guarantee.
+
+Unity and Godot call the shared platform lifecycle. Legacy input recovery only
+resumes the two known stopped input daemons; it does not read command lines,
+delete lock files, restart services or raise audio-daemon OOM scores. The existing
+Loong Godot process-name workaround is also isolated here. Vampire Survivors
+explicitly requests exclusive DRM access; that request is ignored under a live
+compositor and its paused frontend runner is restored by normal and trap cleanup.
+
+Game settings remain game-owned: shader workarounds, fonts, render scale, frame
+caps, allocator/GC tuning and Silksong's experimental AssetBundle policy are not
+removed by this refactor. The known AssetBundle black screen and 1 GiB memory
+budget require a separate runtime fix; launcher cleanup does not resolve them.
+Game data (`unityloader`, `*.toml`, `gamedata/`) already lives in the device's game
+directory and is NOT part of this launcher update — do not overwrite it or saves.
 
 ## LÖVE payload
 

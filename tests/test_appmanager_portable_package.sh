@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  _kit/dist_port.sh、APP Manager runtime/资源/许可与源码构建身份
+# OUTPUT: 便携包文件集合、架构、依赖隔离和构建身份断言结果
+# POS:    APP Manager 自包含发行目录完整性与范围回归测试
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/ports/appmanager/dist"
@@ -10,6 +13,10 @@ bash "$ROOT/_kit/dist_port.sh" appmanager >/dev/null
 
 [ -x "$DIST/APP Manager.sh" ]
 [ -d "$APP" ]
+[ -s "$APP/APP Manager.png" ]
+[ ! -e "$DIST/APP Manager.png" ]
+[ -s "$APP/screenshot.png" ]
+[ ! -e "$DIST/screenshot.png" ]
 [ ! -e "$APP/json_tool" ] || {
   echo "portable app: obsolete LÖVE JSON helper was packaged" >&2
   exit 1
@@ -133,6 +140,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     data = json.load(handle)
 assert data["name"] == "jenny92-appmanager.zip"
 assert data["items"] == ["APP Manager.sh", "jenny92-appmanager"]
+assert data["attr"]["image"]["screenshot"] == "jenny92-appmanager/screenshot.png"
 assert data["attr"]["runtime"] == []
 assert data["attr"]["arch"] == ["aarch64"]
 PY
@@ -145,7 +153,6 @@ done
 SPACED="$TMP/Ports With Space"
 mkdir -p "$SPACED/images"
 cp "$DIST/APP Manager.sh" "$SPACED/APP Manager.sh"
-cp "$DIST/APP Manager.png" "$SPACED/APP Manager.png"
 cp -R "$APP" "$SPACED/jenny92-appmanager"
 
 # Replace the foreign-architecture executable with a recorder. This tests only

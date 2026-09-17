@@ -1,3 +1,6 @@
+// INPUT:  运行库根目录与 std 文件系统/自然排序比较
+// OUTPUT: latest_love()
+// POS:    在已安装 love_* 目录中按自然版本顺序选择 love.txt
 use std::cmp::Ordering;
 use std::io;
 use std::path::{Path, PathBuf};

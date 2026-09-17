@@ -1,3 +1,6 @@
+// INPUT:  ResolvedDeviceContext、ManagedRoot、Shell 路径事实、文件系统与 serde
+// OUTPUT: Inventory/InventoryOptions、Port/App/Runtime/Trash 事实及 scan()/to_tsv()
+// POS:    按配置根与实际路径关联启动脚本、共享数据、Runtime 和残留，不按目录名猜归属
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs::{self, File};
@@ -444,11 +447,23 @@ fn scan_facts(
         .collect::<BTreeMap<_, _>>();
     let mut port_json_cache = BTreeMap::<String, Result<Option<Vec<String>>, String>>::new();
     let mut reported_port_json_errors = BTreeSet::new();
-    let seed = BTreeMap::from([
+    let seed = [
         ("directory".to_owned(), options.directory.clone()),
         ("controlfolder".to_owned(), options.controlfolder.clone()),
         ("HOME".to_owned(), options.home.clone()),
-    ]);
+    ]
+    .into_iter()
+    .filter(|(_, value)| !value.is_empty())
+    .collect::<BTreeMap<_, _>>();
+    let source_environment = crate::shell_sources::FileEnvironment::new(
+        [
+            Some(context.roots.scripts.clone()),
+            Some(context.roots.game_dirs.clone()),
+            context.roots.portmaster.clone(),
+        ]
+        .into_iter()
+        .flatten(),
+    );
     for entry in script_entries {
         let text = match read_script(&entry.path) {
             Ok(text) => text,
@@ -458,28 +473,81 @@ fn scan_facts(
                 continue;
             }
         };
-        let script_name = entry.name.trim_end_matches(".sh").to_owned();
-        let script_dir = entry
-            .path
-            .parent()
-            .map(|parent| parent.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let (claimed_dir, dir_exists) = port_dir_of(
+        let analysis = crate::shell_paths::analyze_with_environment(
             &text,
-            &real_dirs,
             &seed,
-            &options.ignore_dirs,
-            &script_name,
-            &script_dir,
+            &entry.path,
+            &source_environment,
         );
-        let (refs, gamedir_uncertain, script_uncertain) = parsed_existing_dir_refs(
-            &text,
-            &real_dirs,
-            &seed,
-            &options.ignore_dirs,
-            &script_name,
-            &script_dir,
-        );
+        let path_references = analysis
+            .paths
+            .iter()
+            .chain(&analysis.declared_paths)
+            .chain(&analysis.sources)
+            .chain(&analysis.working_directories)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|path| {
+                (
+                    path,
+                    managed_data_names(Path::new(path), &context.roots.game_dirs),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let candidates = path_references
+            .values()
+            .flatten()
+            .filter(|name| !options.ignore_dirs.contains(*name))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut claimed_dir = if candidates.len() == 1 {
+            candidates.iter().next().unwrap().clone()
+        } else {
+            String::new()
+        };
+        let mut dir_exists = real_dirs.contains(&claimed_dir);
+        let working_references = analysis
+            .working_directories
+            .iter()
+            .map(|path| (path, &path_references[path]))
+            .collect::<BTreeMap<_, _>>();
+        let working_dirs = working_references
+            .values()
+            .flat_map(|names| names.iter())
+            .filter(|name| !options.ignore_dirs.contains(*name))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if working_dirs.len() == 1 {
+            claimed_dir = working_dirs.into_iter().next().unwrap();
+            dir_exists = real_dirs.contains(&claimed_dir);
+        } else if working_dirs.len() > 1 {
+            claimed_dir.clear();
+            dir_exists = false;
+        }
+        let mut refs = candidates
+            .intersection(&real_dirs)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let gamedir_uncertain = analysis.uncertain();
+        let script_uncertain = analysis.uncertain();
+        // Keep lexical references as conservative protection when a child
+        // cannot be resolved. They never choose metadata or deletion targets.
+        for path in analysis
+            .paths
+            .iter()
+            .chain(&analysis.declared_paths)
+            .chain(&analysis.sources)
+        {
+            let path = Path::new(path);
+            let relative = path.strip_prefix(&context.roots.game_dirs).ok();
+            if let Some(std::path::Component::Normal(name)) =
+                relative.and_then(|p| p.components().next())
+            {
+                if let Some(name) = name.to_str().filter(|name| real_dirs.contains(*name)) {
+                    refs.insert(name.to_owned());
+                }
+            }
+        }
         parsed_dir_refs.extend(refs.iter().cloned());
         for referenced_dir in &refs {
             if let Some(path) = data_dir_paths.get(referenced_dir) {
@@ -491,34 +559,48 @@ fn scan_facts(
         if gamedir_uncertain {
             orphan_classification_uncertain = true;
             diagnostics.push(format!(
-                "orphan classification uncertain for script {}",
-                entry.name
+                "orphan classification uncertain for script {}: {}",
+                entry.name,
+                analysis
+                    .diagnostics
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
-        if !dir_exists && !claimed_dir.is_empty() && !script_uncertain {
+        let has_managed_directory_use = working_references
+            .values()
+            .any(|names| names.contains(&claimed_dir));
+        if !dir_exists && !claimed_dir.is_empty() && !script_uncertain && has_managed_directory_use
+        {
             dead_scripts.push(DeadScriptFact {
                 script: entry.name.clone(),
                 path: entry.path.clone(),
                 missing_dir: claimed_dir.clone(),
             });
         }
-        let data_path =
-            if dir_exists && !gamedir_uncertain && refs.len() == 1 && refs.contains(&claimed_dir) {
-                data_dir_paths
-                    .get(&claimed_dir)
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                if dir_exists {
-                    diagnostics.push(format!(
-                        "data directory association is not unique for script {}",
-                        entry.name
-                    ));
-                }
-                PathBuf::new()
-            };
-        let shell_runtimes = runtimes_of(&text);
-        let runtimes = if dir_exists {
+        let data_path = if dir_exists
+            && !gamedir_uncertain
+            && has_managed_directory_use
+            && refs.len() == 1
+            && refs.contains(&claimed_dir)
+        {
+            data_dir_paths
+                .get(&claimed_dir)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            if refs.len() > 1 || (dir_exists && (gamedir_uncertain || refs.len() != 1)) {
+                diagnostics.push(format!(
+                    "data directory association is not unique or confirmed for script {}",
+                    entry.name
+                ));
+            }
+            PathBuf::new()
+        };
+        let shell_runtimes = analysis.runtime_names.clone();
+        let mut runtimes = if dir_exists {
             let declaration = port_json_cache
                 .entry(claimed_dir.clone())
                 .or_insert_with(|| {
@@ -542,6 +624,15 @@ fn scan_facts(
         } else {
             shell_runtimes
         };
+        // Metadata takes precedence over legacy variable-name hints, but must
+        // not hide additional dependencies referenced at managed Runtime paths.
+        for name in
+            analysis.runtime_dependencies(context.roots.libs.as_deref(), &source_environment)
+        {
+            if !runtimes.contains(&name) {
+                runtimes.push(name);
+            }
+        }
         ports.push(PortFact {
             script: entry.name.clone(),
             path: entry.path,
@@ -876,22 +967,6 @@ fn trash_fact(context: &ResolvedDeviceContext, entry: InventoryEntry, bucket: &s
     }
 }
 
-/// Resolve the data directories actually referenced by a launcher. This is
-/// shared with ZIP recognition so installation and inventory use one rule:
-/// the launcher contents define the association; the SH filename does not.
-pub(crate) fn launcher_data_directories(
-    text: &str,
-    real_dirs: &BTreeSet<String>,
-    script_name: &str,
-    script_dir: &str,
-) -> BTreeSet<String> {
-    let seed = BTreeMap::new();
-    let ignore = BTreeSet::new();
-    let (refs, _, _) =
-        parsed_existing_dir_refs(text, real_dirs, &seed, &ignore, script_name, script_dir);
-    refs
-}
-
 /// Read `label` / `label.ch.lang` from a TrimUI-style app config.json so the
 /// launcher list can show the localized name instead of the raw folder name.
 fn read_app_labels(folder: &std::path::Path) -> (Option<String>, Option<String>) {
@@ -988,433 +1063,53 @@ fn runtime_health(path: &Path) -> Result<(RuntimeHealth, u64), InventoryError> {
     Ok((health, metadata.len()))
 }
 
-fn port_dir_of(
-    text: &str,
-    real_dirs: &BTreeSet<String>,
-    seed: &BTreeMap<String, String>,
-    ignore_dirs: &BTreeSet<String>,
-    script_name: &str,
-    script_dir: &str,
-) -> (String, bool) {
-    let vars = collect_vars(text, seed, script_name, script_dir);
-    let candidates = dir_candidates(text, &vars);
-    let mut claimed = String::new();
-    for candidate in candidates {
-        let path = expand_vars(&candidate, &vars);
-        let name = dir_from_path(&path);
-        if name.is_empty() || ignore_dirs.contains(&name) {
-            continue;
-        }
-        if real_dirs.contains(&name) {
-            return (name, true);
-        }
-        if claimed.is_empty()
-            && path.contains("/ports/")
-            && !name.bytes().any(|byte| {
-                matches!(
-                    byte,
-                    b'$' | b'('
-                        | b')'
-                        | b'`'
-                        | b'*'
-                        | b'?'
-                        | b'\''
-                        | b'"'
-                        | b' '
-                        | b'|'
-                        | b';'
-                        | b'&'
-                        | b'='
-                )
-            })
-        {
-            claimed = name;
-        }
+/// Resolve actual managed ancestors, including aliases and missing children.
+/// Directory spellings have no meaning outside this explicitly supplied root.
+fn managed_data_names(path: &Path, root: &Path) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    if path
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return names;
     }
-    (claimed, false)
-}
-
-fn dir_candidates(text: &str, vars: &BTreeMap<String, String>) -> Vec<String> {
-    let mut candidates = ["GAMEDIR", "gamedir", "rundir", "game_dir"]
-        .iter()
-        .filter_map(|name| vars.get(*name).cloned())
-        .collect::<Vec<_>>();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(value) = trimmed.strip_prefix("cd ") {
-            candidates.push(unquote(value.split("||").next().unwrap_or(value).trim()).to_owned());
-        }
-        if let Some(value) = for_values(trimmed) {
-            candidates.extend(shell_tokens(value));
-        }
-    }
-    candidates
-}
-
-fn parsed_existing_dir_refs(
-    text: &str,
-    real_dirs: &BTreeSet<String>,
-    seed: &BTreeMap<String, String>,
-    ignore_dirs: &BTreeSet<String>,
-    script_name: &str,
-    script_dir: &str,
-) -> (BTreeSet<String>, bool, bool) {
-    let vars = collect_vars(text, seed, script_name, script_dir);
-    let mut refs = BTreeSet::new();
-    // gamedir_uncertain: the primary data-folder declaration is dynamic, so
-    // this launcher's reference may be missing from the reference counts entirely
-    // (drives the global fail-closed flag).
-    let mut gamedir_uncertain = false;
-    // script_uncertain: some secondary reference line is dynamic, so this
-    // launcher must never be classified as a dead script.
-    let mut script_uncertain = false;
-    for name in ["GAMEDIR", "gamedir", "rundir", "game_dir"] {
-        let Some(candidate) = vars.get(name) else {
-            continue;
-        };
-        let candidate = expand_known_templates(candidate, script_name, script_dir);
-        if has_unresolved_shell_value(&candidate, &vars) {
-            // Port launchers commonly keep the storage-card root in a shell
-            // variable that is only known at runtime, while the component
-            // after `/ports/` is a fixed data-directory name. Resolve known
-            // variables and accept that fixed final component; never infer it
-            // from the SH filename.
-            let partial = expand_vars(&candidate, &vars);
-            let declared = dir_from_path(&partial);
-            if !declared.is_empty()
-                && !declared.bytes().any(|byte| {
-                    matches!(byte, b'$' | b'(' | b')' | b'`' | b'*' | b'?' | b'{' | b'}')
-                })
-                && real_dirs.contains(&declared)
-                && !ignore_dirs.contains(&declared)
-            {
-                refs.insert(declared);
-                continue;
-            }
-            gamedir_uncertain = true;
-            continue;
-        }
-        let expanded = expand_vars(&candidate, &vars);
-        if expanded.is_empty() {
-            continue;
-        }
-        let name = dir_from_path(&expanded);
-        if name.is_empty() {
-            gamedir_uncertain = true;
-            continue;
-        }
-        if real_dirs.contains(&name) && !ignore_dirs.contains(&name) {
-            refs.insert(name);
-        }
-    }
-    // Secondary candidates (cd lines, for-loop value lists, assignment lines)
-    // are hints only. Wildcards in a `for f in "$GAMEDIR"/*.jar` line are not
-    // directory references at all; a dynamic value elsewhere in the script
-    // means we cannot rule out a missing association (keeps dead-script
-    // classification conservative).
-    for candidate in dir_candidates(text, &vars) {
-        let candidate = expand_known_templates(&candidate, script_name, script_dir);
-        if has_unresolved_shell_value(&candidate, &vars) {
-            if !candidate.bytes().any(|byte| matches!(byte, b'*' | b'?')) {
-                script_uncertain = true;
-            }
-            continue;
-        }
-        let expanded = expand_vars(&candidate, &vars);
-        if expanded.is_empty() {
-            continue;
-        }
-        let name = dir_from_path(&expanded);
-        if name.is_empty() {
-            continue;
-        }
-        if real_dirs.contains(&name) && !ignore_dirs.contains(&name) {
-            refs.insert(name);
-        }
-    }
-    (refs, gamedir_uncertain, script_uncertain)
-}
-
-fn has_unresolved_shell_value(value: &str, vars: &BTreeMap<String, String>) -> bool {
-    let bytes = value.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if matches!(bytes[index], b'`' | b'*' | b'?') {
-            return true;
-        }
-        if bytes[index] != b'$' {
-            index += 1;
-            continue;
-        }
-        if bytes.get(index + 1) == Some(&b'(') {
-            return true;
-        }
-        let (start, end) = if bytes.get(index + 1) == Some(&b'{') {
-            let start = index + 2;
-            let Some(close) = bytes[start..].iter().position(|byte| *byte == b'}') else {
-                return true;
-            };
-            (start, start + close)
-        } else {
-            let start = index + 1;
-            let mut end = start;
-            while end < bytes.len() && (bytes[end] == b'_' || bytes[end].is_ascii_alphanumeric()) {
-                end += 1;
-            }
-            (start, end)
-        };
-        if start == end
-            || std::str::from_utf8(&bytes[start..end])
-                .ok()
-                .is_none_or(|name| !vars.contains_key(name))
-        {
-            return true;
-        }
-        index = if bytes.get(index + 1) == Some(&b'{') {
-            end + 1
-        } else {
-            end
-        };
-    }
-    false
-}
-
-fn collect_vars(
-    text: &str,
-    seed: &BTreeMap<String, String>,
-    script_name: &str,
-    script_dir: &str,
-) -> BTreeMap<String, String> {
-    let mut vars = seed.clone();
-    for line in text.lines() {
-        let line = line.trim();
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        let Some((name, raw)) = line.split_once('=') else {
-            continue;
-        };
-        if vars.contains_key(name) || !valid_variable(name) {
-            continue;
-        }
-        let mut value = raw.split(';').next().unwrap_or(raw).trim();
-        if let Some((before, _)) = value.split_once(" #") {
-            value = before.trim();
-        }
-        let bare = unquote(value);
-        if !bare.starts_with("$(") && !bare.starts_with('`') {
-            vars.insert(name.to_owned(), bare.to_owned());
-        } else {
-            // A command-substitution value is fine when it is the standard
-            // PortMaster template (dirname/basename of $0), which is fully
-            // predictable from the script path.
-            let expanded = expand_known_templates(bare, script_name, script_dir);
-            if !expanded.starts_with("$(") && !expanded.starts_with('`') {
-                vars.insert(name.to_owned(), expanded.to_owned());
-            }
-        }
-    }
-    vars
-}
-
-fn valid_variable(name: &str) -> bool {
-    !name.is_empty()
-        && name.bytes().enumerate().all(|(index, byte)| {
-            byte == b'_' || byte.is_ascii_alphanumeric() && (index > 0 || !byte.is_ascii_digit())
-        })
-}
-
-fn unquote(value: &str) -> &str {
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
-        {
-            return &value[1..value.len() - 1];
-        }
-    }
-    value
-}
-
-fn expand_vars(value: &str, vars: &BTreeMap<String, String>) -> String {
-    let mut current = value.to_owned();
-    for _ in 0..6 {
-        let characters = current.chars().collect::<Vec<_>>();
-        let mut output = String::with_capacity(current.len());
-        let mut index = 0;
-        while index < characters.len() {
-            if characters[index] != '$' {
-                output.push(characters[index]);
-                index += 1;
-                continue;
-            }
-            let (name_start, name_end, consumed) = if characters.get(index + 1) == Some(&'{') {
-                let Some(close) = characters[index + 2..]
-                    .iter()
-                    .position(|character| *character == '}')
-                else {
-                    output.push('$');
-                    index += 1;
-                    continue;
-                };
-                (index + 2, index + 2 + close, index + 3 + close)
-            } else {
-                let start = index + 1;
-                let mut end = start;
-                while end < characters.len()
-                    && (characters[end] == '_' || characters[end].is_ascii_alphanumeric())
-                {
-                    end += 1;
-                }
-                (start, end, end)
-            };
-            if name_start == name_end {
-                output.push('$');
-                index += 1;
-                continue;
-            }
-            let name = characters[name_start..name_end].iter().collect::<String>();
-            output.push_str(vars.get(&name).map_or(" ", String::as_str));
-            index = consumed;
-        }
-        if output == current {
-            break;
-        }
-        current = output;
-    }
-    current
-}
-
-fn dir_from_path(value: &str) -> String {
-    let normalized = value.replace('\\', "/");
-    let segments = normalized
-        .trim_end_matches('/')
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    // Standard PortMaster layout is <root>/ports/gamedata/<Game> (some
-    // frontends use <root>/ports/data/<Game> or <root>/ports/<Game>). The
-    // game data folder name is the segment after the optional gamedata/data
-    // middle layer, never the middle layer itself. Spaces in the name are
-    // valid (e.g. "My Game"); keep them so we never guess "gamedata".
-    for (index, part) in segments.iter().enumerate() {
-        if *part == "ports" {
-            for next in &segments[index + 1..] {
-                if *next != "gamedata" && *next != "data" {
-                    return next.to_string();
+    let Ok(root) = root.canonicalize() else {
+        return names;
+    };
+    for ancestor in path.ancestors() {
+        if let Ok(resolved) = ancestor.canonicalize() {
+            if let Ok(relative) = resolved.strip_prefix(&root) {
+                if let Some(std::path::Component::Normal(name)) = relative.components().next() {
+                    // An external alias can point into a nested game folder;
+                    // use the physical root-relative child, not the alias name.
+                    if root.join(name).is_dir() {
+                        if let Some(name) = name.to_str() {
+                            names.insert(name.to_owned());
+                        }
+                    }
                 }
             }
-            return segments.last().copied().unwrap_or_default().to_owned();
         }
-    }
-    segments.last().copied().unwrap_or_default().to_owned()
-}
-
-/// Resolve only the launcher directory portion of well-known shell templates.
-/// The basename of `$0` is deliberately not expanded into a data directory:
-/// SH names are presentation names and are never an association key.
-fn expand_known_templates(value: &str, _script_name: &str, script_dir: &str) -> String {
-    let mut out = value.to_string();
-    // Longest variants first so nested $(cd "$(dirname "$0")" && pwd) forms
-    // resolve in one pass. MiniLoong launchers use the `;` variant.
-    for (template, replacement) in [
-        ("$(cd \"$(dirname \"$0\")\" && pwd)", script_dir),
-        ("$(cd \"$(dirname \"$0\")\"; pwd)", script_dir),
-        ("$(cd \"$(dirname $0)\"; pwd)", script_dir),
-        ("$(cd $(dirname \"$0\"); pwd)", script_dir),
-        ("$(cd $(dirname $0); pwd)", script_dir),
-        ("$(cd $(dirname $0) && pwd)", script_dir),
-        ("$(dirname \"$0\")", script_dir),
-        ("$(dirname $0)", script_dir),
-    ] {
-        out = out.replace(template, replacement);
-    }
-    out
-}
-
-fn for_values(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("for ")?;
-    let (_, values) = rest.split_once(" in ")?;
-    Some(values.trim_end_matches("do").trim_end_matches(';').trim())
-}
-
-fn shell_tokens(value: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    for character in value.chars() {
-        match (quote, character) {
-            (Some(expected), actual) if actual == expected => quote = None,
-            (Some(_), actual) => current.push(actual),
-            (None, '\'' | '"') => quote = Some(character),
-            (None, actual) if actual.is_whitespace() => {
-                if !current.is_empty() {
-                    result.push(std::mem::take(&mut current));
-                }
-            }
-            (None, actual) => current.push(actual),
-        }
-    }
-    if !current.is_empty() {
-        result.push(current);
-    }
-    result
-}
-
-fn runtimes_of(text: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        if let Some((name, value)) = line.split_once('=') {
-            let name = name.to_ascii_lowercase();
-            if (name == "runtime" || name.ends_with("_runtime"))
-                && let Some(runtime) = normalize_runtime_assignment(value)
-            {
-                push_unique(&mut result, runtime);
-            }
-        }
-        for runtime in literal_runtime_paths(line) {
-            push_unique(&mut result, runtime);
-        }
-    }
-    result
-}
-
-fn normalize_runtime_assignment(value: &str) -> Option<String> {
-    let value = value.trim().trim_start_matches(['\'', '"', '/']);
-    let value = value
-        .split(|character: char| {
-            !character.is_ascii_alphanumeric() && !matches!(character, '_' | '.' | '+' | '-')
-        })
-        .next()
-        .unwrap_or_default();
-    normalize_runtime_name(value)
-}
-
-fn literal_runtime_paths(line: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut remaining = line;
-    while let Some(offset) = remaining.find("libs/") {
-        remaining = &remaining[offset + "libs/".len()..];
-        let value = remaining
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && !matches!(character, '_' | '.' | '+' | '-')
-            })
-            .next()
-            .unwrap_or_default();
-        if value.ends_with(".squashfs")
-            && let Some(runtime) = normalize_runtime_name(value)
+        if ancestor
+            .symlink_metadata()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            && ancestor
+                .parent()
+                .and_then(|p| p.canonicalize().ok())
+                .as_ref()
+                == Some(&root)
         {
-            push_unique(&mut result, runtime);
+            if let Some(name) = ancestor.file_name().and_then(|name| name.to_str()) {
+                names.insert(name.to_owned());
+            }
         }
-        if remaining.is_empty() {
-            break;
-        }
-        remaining = &remaining[remaining.len().min(value.len().saturating_add(1))..];
     }
-    result
+    names
+}
+
+#[cfg(test)]
+fn managed_data_reference(path: &Path, root: &Path, name: &str) -> bool {
+    managed_data_names(path, root).contains(name)
 }
 
 fn normalize_runtime_name(value: &str) -> Option<String> {
@@ -1430,12 +1125,6 @@ fn normalize_runtime_name(value: &str) -> Option<String> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'+' | b'-')))
     .then(|| value.to_owned())
-}
-
-fn push_unique(values: &mut Vec<String>, value: String) {
-    if !values.contains(&value) {
-        values.push(value);
-    }
 }
 
 fn stem(name: &str) -> &str {
@@ -1866,12 +1555,18 @@ PORTDIR="$directory"
         fs::create_dir(fixture.context.roots.game_dirs.join("Orphan")).unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Alpha.sh"),
-            b"GAMEDIR=\"$directory/ports/GameA\"\nruntime=mono\nhelper_runtime=godot\n",
+            format!(
+                "GAMEDIR='{}'\ncd \"$GAMEDIR\"\nruntime=mono\nhelper_runtime=godot\n",
+                fixture.context.roots.game_dirs.join("GameA").display()
+            ),
         )
         .unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Dead.sh"),
-            b"GAMEDIR=/mnt/card/ports/Missing\n",
+            format!(
+                "GAMEDIR='{}'\ncd \"$GAMEDIR\"\n",
+                fixture.context.roots.game_dirs.join("Missing").display()
+            ),
         )
         .unwrap();
         fs::write(fixture.context.roots.scripts.join("Alpha.png"), b"png").unwrap();
@@ -2063,12 +1758,123 @@ PORTDIR="$directory"
     }
 
     #[test]
+    fn managed_root_not_directory_spelling_defines_data_and_metadata() {
+        for name in ["ports", "data", "gamedata", "中文游戏"] {
+            let fixture = fixture();
+            let game = fixture.context.roots.game_dirs.join(name);
+            fs::create_dir_all(game.join("nested/libs")).unwrap();
+            fs::write(game.join("port.json"), br#"{"attr":{"runtime":"correct"}}"#).unwrap();
+            fs::write(
+                fixture.context.roots.scripts.join("renamed.sh"),
+                format!(
+                    "cd '{}'/nested\nLD_LIBRARY_PATH='{}'/nested/libs\n",
+                    game.display(),
+                    game.display()
+                ),
+            )
+            .unwrap();
+            let snapshot = Inventory::scan(&fixture.context).unwrap();
+            assert_eq!(snapshot.ports[0].dir, name);
+            assert_eq!(snapshot.ports[0].data_path, game);
+            assert_eq!(snapshot.ports[0].runtimes, ["correct"]);
+            assert!(snapshot.orphan_dirs.is_empty());
+        }
+    }
+
+    #[test]
+    fn foreign_same_named_directory_never_selects_local_metadata_or_data() {
+        let fixture = fixture();
+        let other = tempfile::tempdir().unwrap();
+        let game = fixture.context.roots.game_dirs.join("Shared");
+        let foreign = other.path().join("ports/Shared");
+        fs::create_dir(&game).unwrap();
+        fs::create_dir_all(&foreign).unwrap();
+        fs::write(game.join("port.json"), br#"{"attr":{"runtime":"wrong"}}"#).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("foreign.sh"),
+            format!("cd '{}'\n", foreign.display()),
+        )
+        .unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert!(snapshot.ports[0].dir.is_empty());
+        assert!(snapshot.ports[0].data_path.as_os_str().is_empty());
+        assert!(snapshot.ports[0].runtimes.is_empty());
+        assert!(snapshot.data_refcount.is_empty());
+        assert!(snapshot.dead_scripts.is_empty());
+        assert_eq!(snapshot.orphan_dirs[0].path, game);
+    }
+
+    #[test]
+    fn only_missing_children_of_configured_root_are_dead_launchers() {
+        let fixture = fixture();
+        fs::write(
+            fixture.context.roots.scripts.join("missing.sh"),
+            format!(
+                "cd '{}/Missing/subdir'\n",
+                fixture.context.roots.game_dirs.display()
+            ),
+        )
+        .unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert_eq!(snapshot.dead_scripts.len(), 1);
+        assert_eq!(snapshot.ports[0].claimed_dir, "Missing");
+        assert_eq!(snapshot.dead_scripts[0].missing_dir, "Missing");
+        assert!(!snapshot.ports[0].dir_exists);
+    }
+
+    #[test]
+    fn passive_wait_does_not_block_confirmed_inventory_but_mutating_loop_does() {
+        for body in ["sleep 1", "GAME=/unknown/path"] {
+            let fixture = fixture();
+            let game = fixture.context.roots.game_dirs.join("Game");
+            fs::create_dir(&game).unwrap();
+            fs::write(fixture.context.roots.scripts.join("Game.sh"),
+                format!("GAME='{}'\nwhile kill -0 \"$PID\" 2>/dev/null; do {body}; done\ncd \"$GAME\"\n", game.display())).unwrap();
+            let inventory = Inventory::scan(&fixture.context).unwrap();
+            if body == "sleep 1" {
+                assert!(
+                    !inventory.classification_uncertain,
+                    "{:?}",
+                    inventory.diagnostics
+                );
+                assert_eq!(inventory.ports[0].data_path, game);
+            } else {
+                assert!(inventory.classification_uncertain);
+                assert!(inventory.ports[0].data_path.as_os_str().is_empty());
+            }
+            assert!(inventory.orphan_dirs.is_empty());
+        }
+    }
+
+    #[test]
+    fn colocated_launcher_file_is_not_a_second_game_directory() {
+        let mut fixture = fixture();
+        fixture.context.roots.scripts = fixture.context.roots.game_dirs.clone();
+        let game = fixture.context.roots.game_dirs.join("Game");
+        fs::create_dir(&game).unwrap();
+        fs::write(game.join("port.json"), br#"{"attr":{"runtime":"correct"}}"#).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("renamed.sh"),
+            format!("SCRIPT=\"$0\"\nGAME='{}'\n", game.display()),
+        )
+        .unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert_eq!(snapshot.ports[0].dir, "Game");
+        assert_eq!(snapshot.ports[0].runtimes, ["correct"]);
+        assert!(snapshot.ports[0].data_path.as_os_str().is_empty());
+        assert!(snapshot.orphan_dirs.is_empty());
+    }
+
+    #[test]
     fn mentioning_the_app_name_never_hides_a_real_launcher() {
         let fixture = fixture();
         fs::create_dir(fixture.context.roots.game_dirs.join("Mentioned")).unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Mentioned.sh"),
-            b"GAMEDIR=/ports/Mentioned\n# compatible with jenny92-appmanager\n",
+            format!(
+                "GAMEDIR='{}/Mentioned'\n# compatible with jenny92-appmanager\n",
+                fixture.context.roots.game_dirs.display()
+            ),
         )
         .unwrap();
 
@@ -2103,11 +1909,10 @@ PORTDIR="$directory"
         .unwrap();
 
         let snapshot = Inventory::scan(&fixture.context).unwrap();
-        // GAMEDIR resolves (to a folder that does not exist), so the reference
-        // is known; but the dynamic cd line keeps dead-script classification
-        // conservative: this launcher must never be offered as a dead script.
+        // A known assignment does not make an unknown cd harmless: the latter
+        // may reference any other data directory. Both classifications fail closed.
         assert!(snapshot.dead_scripts.is_empty());
-        assert!(!snapshot.classification_uncertain);
+        assert!(snapshot.classification_uncertain);
     }
 
     #[test]
@@ -2118,12 +1923,17 @@ PORTDIR="$directory"
         }
         fs::write(
             fixture.context.roots.scripts.join("Ambiguous.sh"),
-            b"GAMEDIR=/ports/Primary\ncd /ports/Secondary\n",
+            format!(
+                "GAMEDIR='{0}/Primary'\ncd '{0}/Secondary'\n",
+                fixture.context.roots.game_dirs.display()
+            ),
         )
         .unwrap();
 
         let snapshot = Inventory::scan(&fixture.context).unwrap();
-        assert_eq!(snapshot.ports[0].dir, "Primary");
+        // The unique cwd selects metadata, but both references protect data
+        // and prevent deletion of a shared association.
+        assert_eq!(snapshot.ports[0].dir, "Secondary");
         assert!(snapshot.ports[0].data_path.as_os_str().is_empty());
         assert_eq!(
             snapshot.data_refcount[&fixture
@@ -2152,6 +1962,160 @@ PORTDIR="$directory"
                 .iter()
                 .any(|value| value.contains("association is not unique"))
         );
+    }
+
+    #[test]
+    fn unused_path_declarations_do_not_authorize_data_deletion() {
+        let fixture = fixture();
+        fs::create_dir(fixture.context.roots.game_dirs.join("Shared")).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("Note.sh"),
+            format!(
+                "NOTE='{}/Shared'\necho example\n",
+                fixture.context.roots.game_dirs.display()
+            ),
+        )
+        .unwrap();
+        let snapshot = Inventory::scan(&fixture.context).unwrap();
+        assert!(snapshot.ports[0].data_path.as_os_str().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn card_aliases_are_resolved_but_same_named_other_card_is_not_owned() {
+        use std::os::unix::fs::symlink;
+        let fixture = fixture();
+        let other = tempfile::tempdir().unwrap();
+        let name = "Shared";
+        let data = fixture.context.roots.game_dirs.join(name);
+        fs::create_dir(&data).unwrap();
+        let foreign = other.path().join(name);
+        fs::create_dir(&foreign).unwrap();
+        let alias = other.path().join("current-card");
+        symlink(&fixture.context.roots.game_dirs, &alias).unwrap();
+        fs::create_dir(data.join("nested")).unwrap();
+        let nested_alias = other.path().join("nested-alias");
+        symlink(data.join("nested"), &nested_alias).unwrap();
+        assert!(managed_data_reference(
+            &nested_alias,
+            &fixture.context.roots.game_dirs,
+            name
+        ));
+        fs::write(
+            fixture.context.roots.scripts.join("Foreign.sh"),
+            format!("cd '{}'\n", nested_alias.display()),
+        )
+        .unwrap();
+        let scan = Inventory::scan(&fixture.context).unwrap();
+        assert_eq!(scan.ports[0].data_path, data);
+        assert!(scan.orphan_dirs.is_empty());
+        assert!(managed_data_reference(
+            &alias.join(name),
+            &fixture.context.roots.game_dirs,
+            name
+        ));
+        assert!(!managed_data_reference(
+            &foreign,
+            &fixture.context.roots.game_dirs,
+            name
+        ));
+        assert!(managed_data_reference(
+            &alias.join("Missing"),
+            &fixture.context.roots.game_dirs,
+            "Missing"
+        ));
+        fs::write(
+            fixture.context.roots.scripts.join("Foreign.sh"),
+            format!("cd '{}'\n", foreign.display()),
+        )
+        .unwrap();
+        let scan = Inventory::scan(&fixture.context).unwrap();
+        assert!(scan.ports[0].data_path.as_os_str().is_empty());
+        assert!(scan.dead_scripts.is_empty());
+    }
+
+    #[test]
+    fn inventory_loads_scoped_sources_and_protects_shared_helpers() {
+        let fixture = fixture();
+        let game = fixture.context.roots.game_dirs.join("Game");
+        fs::create_dir(&game).unwrap();
+        let shared = fixture.context.roots.game_dirs.join("Shared");
+        fs::create_dir(&shared).unwrap();
+        let helper = shared.join("control.txt");
+        fs::write(
+            &helper,
+            format!("GAME='{}'\nruntime=love_11.5\n", game.display()),
+        )
+        .unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("中文.sh"),
+            format!("source '{}'\ncd \"$GAME\"\n", helper.display()),
+        )
+        .unwrap();
+        let scan = Inventory::scan(&fixture.context).unwrap();
+        assert!(!scan.classification_uncertain, "{:?}", scan.diagnostics);
+        assert!(scan.orphan_dirs.is_empty());
+        assert_eq!(
+            scan.data_refcount[&shared.to_string_lossy().into_owned()],
+            1
+        );
+        assert_eq!(scan.ports[0].runtimes, ["love_11.5"]);
+        assert!(scan.ports[0].data_path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn declared_colon_directory_is_protected_from_orphan_cleanup() {
+        let fixture = fixture();
+        let game = fixture.context.roots.game_dirs.join("Game:Edition");
+        fs::create_dir(&game).unwrap();
+        fs::write(
+            fixture.context.roots.scripts.join("Game.sh"),
+            format!("X='{}'\n", game.display()),
+        )
+        .unwrap();
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        assert!(inventory.orphan_dirs.is_empty());
+        assert_eq!(
+            inventory.data_refcount[&game.to_string_lossy().into_owned()],
+            1
+        );
+    }
+
+    #[test]
+    fn unique_working_directory_selects_metadata_not_alphabetical_shared_data() {
+        for with_cwd in [false, true] {
+            let fixture = fixture();
+            let game = fixture.context.roots.game_dirs.join("counter-strike");
+            let shared = fixture.context.roots.game_dirs.join("Half-Life");
+            for (path, name) in [(&game, "correct"), (&shared, "wrong")] {
+                fs::create_dir(path).unwrap();
+                fs::write(
+                    path.join("port.json"),
+                    format!(r#"{{"attr":{{"runtime":"{name}"}}}}"#),
+                )
+                .unwrap();
+            }
+            fs::write(
+                fixture.context.roots.scripts.join("Counter-Strike.sh"),
+                format!(
+                    "GAME='{}'\nSHARED='{}'\n{}",
+                    game.display(),
+                    shared.display(),
+                    if with_cwd { "cd \"$GAME\"\n" } else { "" },
+                ),
+            )
+            .unwrap();
+            let inventory = Inventory::scan(&fixture.context).unwrap();
+            let port = &inventory.ports[0];
+            if with_cwd {
+                assert_eq!(port.dir, "counter-strike");
+                assert_eq!(port.runtimes, ["correct"]);
+            } else {
+                assert!(port.runtimes.is_empty());
+            }
+            assert!(port.data_path.as_os_str().is_empty());
+            assert!(inventory.orphan_dirs.is_empty());
+        }
     }
 
     #[test]
@@ -2197,7 +2161,7 @@ PORTDIR="$directory"
         .unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Official Runtime.sh"),
-            b"GAMEDIR=/ports/OfficialRuntime\nruntime=stale_script_value\n",
+            format!("GAMEDIR='{}'\nruntime=stale_script_value\n", game.display()),
         )
         .unwrap();
 
@@ -2229,7 +2193,7 @@ PORTDIR="$directory"
                     .roots
                     .scripts
                     .join(format!("{directory}.sh")),
-                format!("GAMEDIR=/ports/{directory}\nruntime=script_fallback\n"),
+                format!("GAMEDIR='{}'\nruntime=script_fallback\n", game.display()),
             )
             .unwrap();
         }
@@ -2250,7 +2214,7 @@ PORTDIR="$directory"
         fs::write(game.join("port.json"), br#"{"attr":{"runtime":[42]}}"#).unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Broken Metadata.sh"),
-            b"GAMEDIR=/ports/BrokenMetadata\nruntime=ags_3.6\n",
+            format!("GAMEDIR='{}'\nruntime=ags_3.6\n", game.display()),
         )
         .unwrap();
 
@@ -2271,12 +2235,16 @@ PORTDIR="$directory"
         fs::create_dir(fixture.context.roots.game_dirs.join("LegacyRuntime")).unwrap();
         fs::write(
             fixture.context.roots.scripts.join("Legacy Runtime.sh"),
-            br#"GAMEDIR=/ports/LegacyRuntime
+            format!(
+                r#"GAMEDIR=/ports/LegacyRuntime
 RUNTIME="renpy_8.1.3"
 java_runtime="/zulu8.86.0.25-ca-jdk8.0.452-linux"
-monofile="$controlfolder/libs/mono-6.12.0.122-aarch64.squashfs"
-DOTNETFILE="$controlfolder/libs/dotnet-8.0.12.squashfs"
+monofile="{}/mono-6.12.0.122-aarch64.squashfs"
+DOTNETFILE="{}/dotnet-8.0.12.squashfs"
 "#,
+                fixture.context.roots.libs.as_ref().unwrap().display(),
+                fixture.context.roots.libs.as_ref().unwrap().display()
+            ),
         )
         .unwrap();
 
@@ -2286,10 +2254,82 @@ DOTNETFILE="$controlfolder/libs/dotnet-8.0.12.squashfs"
             [
                 "renpy_8.1.3",
                 "zulu8.86.0.25-ca-jdk8.0.452-linux",
-                "mono-6.12.0.122-aarch64",
                 "dotnet-8.0.12",
+                "mono-6.12.0.122-aarch64",
             ]
         );
+    }
+
+    #[test]
+    fn runtime_locations_supplement_metadata_and_feed_missing_image_checks() {
+        let fixture = fixture();
+        let game = fixture.context.roots.game_dirs.join("Game");
+        fs::create_dir(&game).unwrap();
+        fs::write(game.join("port.json"), r#"{"attr":{"runtime":null}}"#).unwrap();
+        let helper = game.join("deps.txt");
+        fs::write(&helper, format!(
+            "RENAMED='{}/renamed.squashfs'\nARBITRARY='{}/runtimes/java17/lib/a.jar:/elsewhere/b.jar'\n",
+            fixture.context.roots.libs.as_ref().unwrap().display(),
+            fixture.context.roots.portmaster.as_ref().unwrap().display(),
+        )).unwrap();
+        fs::write(fixture.context.roots.scripts.join("中文.sh"), format!(
+            "cd '{}'\nsource '{}'\njava -cp \"$ARBITRARY\" Main\nLOCAL='{}/libs/private.squashfs'\n",
+            game.display(), helper.display(), game.display(),
+        )).unwrap();
+        let inventory = Inventory::scan(&fixture.context).unwrap();
+        assert_eq!(inventory.ports[0].runtimes, ["renamed"]);
+        for name in ["renamed"] {
+            assert_eq!(inventory.runtimes.need[name], ["中文.sh"]);
+            assert!(
+                inventory
+                    .runtimes
+                    .facts
+                    .iter()
+                    .any(|fact| fact.name == name && fact.health == RuntimeHealth::Missing)
+            );
+        }
+        assert!(!inventory.runtimes.need.contains_key("private"));
+        assert!(!inventory.runtimes.need.contains_key("java17"));
+        assert!(
+            !inventory
+                .runtimes
+                .facts
+                .iter()
+                .any(|fact| fact.name == "java17")
+        );
+    }
+
+    #[test]
+    fn bundled_runtime_directories_never_become_missing_downloadable_images() {
+        for installed in [false, true] {
+            let fixture = fixture();
+            let game = fixture.context.roots.game_dirs.join("goldminer");
+            fs::create_dir(&game).unwrap();
+            fs::write(game.join("port.json"), r#"{"attr":{"runtime":null}}"#).unwrap();
+            let runtime = fixture
+                .context
+                .roots
+                .portmaster
+                .as_ref()
+                .unwrap()
+                .join("runtimes/love_11.5");
+            if installed {
+                fs::create_dir_all(runtime.join("libs.aarch64")).unwrap();
+                fs::write(runtime.join("love.aarch64"), b"fixture").unwrap();
+                fs::write(runtime.join("libs.aarch64/liblove-11.5.so"), b"fixture").unwrap();
+            }
+            fs::write(fixture.context.roots.scripts.join("黄金矿工.sh"), format!(
+                "cd '{}'\nRUNTIME_DIR='{}'\nLD_LIBRARY_PATH=\"$RUNTIME_DIR/libs.aarch64\"\n\"$RUNTIME_DIR/love.aarch64\"\n",
+                game.display(), runtime.display(),
+            )).unwrap();
+            let inventory = Inventory::scan(&fixture.context).unwrap();
+            assert!(
+                inventory.ports[0].runtimes.is_empty(),
+                "installed={installed}"
+            );
+            assert!(inventory.runtimes.need.is_empty());
+            assert!(inventory.runtimes.facts.is_empty());
+        }
     }
 
     #[test]

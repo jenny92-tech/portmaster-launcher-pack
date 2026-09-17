@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker、libdrm/x264/FFmpeg 源码与 Alpine 构建工具链
+# OUTPUT: _kit/runtime/ffmpeg.aarch64 静态录屏二进制
+# POS:    构建仅含 DRM 抓帧、JPEG 与离线 MP4 编码能力的掌机 FFmpeg
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #
@@ -8,6 +11,7 @@
 # The device has no ffmpeg, so the recorder needs one self-contained binary.
 # Only what the recorder needs is compiled in:
 #   - indev kmsgrab   (DRM plane capture)
+#   - wrapped_avframe decoder + hwdownload (KMS frame export to CPU)
 #   - mjpeg encoder   (frame capture to .jpg, zero video-encode load in-game)
 #   - libx264         (offline assembly of the frame sequence into .mp4)
 #   - image2/mp4 muxers/demuxers, hwdownload/format/fps filters
@@ -75,9 +79,9 @@ docker run --rm --platform linux/arm64 \
       --enable-gpl --enable-libx264 --enable-avcodec --enable-avformat \
       --enable-avfilter --enable-avutil --enable-swscale --enable-pthreads \
       --enable-indev=kmsgrab \
-      --enable-decoder=mjpeg \
-      --enable-encoder=mjpeg --enable-encoder=libx264 \
-      --enable-muxer=image2 --enable-muxer=mp4 \
+      --enable-decoder=mjpeg --enable-decoder=wrapped_avframe \
+      --enable-encoder=mjpeg --enable-encoder=libx264 --enable-encoder=rawvideo \
+      --enable-muxer=image2 --enable-muxer=mp4 --enable-muxer=rawvideo \
       --enable-demuxer=image2 \
       --enable-parser=mjpeg \
       --enable-filter=hwdownload --enable-filter=format --enable-filter=fps \
@@ -93,6 +97,8 @@ docker run --rm --platform linux/arm64 \
       echo "recorder ffmpeg missing libx264 encoder"; exit 1; }
     ./ffmpeg -hide_banner -encoders | grep -q " mjpeg " || {
       echo "recorder ffmpeg missing mjpeg encoder"; exit 1; }
+    ./ffmpeg -hide_banner -decoders | grep -q wrapped_avframe || {
+      echo "recorder ffmpeg missing wrapped_avframe decoder"; exit 1; }
   '
 
 install -m 0755 "$STAGING/ffmpeg.aarch64" "$OUT"
@@ -108,6 +114,7 @@ case "$description" in
 esac
 grep -aq kmsgrab "$OUT" || { echo "recorder ffmpeg missing kmsgrab indev" >&2; exit 65; }
 grep -aq libx264 "$OUT" || { echo "recorder ffmpeg missing libx264 encoder" >&2; exit 65; }
+grep -aq wrapped_avframe "$OUT" || { echo "recorder ffmpeg missing wrapped_avframe decoder" >&2; exit 65; }
 
 echo "$description"
 echo ">>> recorder ffmpeg -> $OUT ($(du -h "$OUT" | cut -f1))"

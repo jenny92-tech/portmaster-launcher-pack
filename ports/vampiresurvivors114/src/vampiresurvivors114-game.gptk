@@ -1,0 +1,25 @@
+# INPUT:  吹米/PortMaster SDL 手柄事件
+# OUTPUT: 吸血鬼幸存者 Rewired 可识别的键盘确认、返回与方向事件
+# POS:    仅用于 1.14 游戏阶段的输入兼容，不复用启动器 UI 映射
+
+a = enter
+b = esc
+start = esc
+back = esc
+
+up = up
+up = repeat
+down = down
+down = repeat
+left = left
+right = right
+
+left_analog_up = up
+left_analog_up = repeat
+left_analog_down = down
+left_analog_down = repeat
+left_analog_left = left
+left_analog_right = right
+
+repeat_delay = 360
+repeat_interval = 90

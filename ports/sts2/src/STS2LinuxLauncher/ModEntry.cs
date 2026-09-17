@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、.NET 程序集解析、QualityProfile 与 Patches
+// OUTPUT: InitializeGodotSharp()、Apply()、ApplyInternal()
+// POS:    供 Godot fork 调用的兼容程序集入口与补丁安装编排
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

@@ -1,4 +1,7 @@
 #!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster、setup-gamedata.sh、SDR_* 配置、unityloader
+# OUTPUT: 准备后的游戏资源、更新后的 config.toml 与龙沉异世录游戏进程
+# POS:    龙沉异世录资源准备、LÖVE 设置和 Unity 启动的衔接模板
 # PORTMASTER: sunkendragon, L_龙沉异世录[中].sh
 #
 # Stage-0: migrate resources from a player-owned Windows copy in GameData/.
@@ -10,12 +13,10 @@ PORT_NAME="sunkendragon"; LOG_PREFIX="[SDR-LOVE]"
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
 source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
 source "$KIT/launcher_artwork.sh"
 #@KIT-END
-portmaster_discover "$(cd "$(dirname "$0")" && pwd)"
-source "$controlfolder/control.txt"
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 
 if [ -n "$directory" ] && [ -d "/$directory/ports/$PORT_NAME" ]; then
   GAMEDIR="/$directory/ports/$PORT_NAME"
@@ -76,10 +77,7 @@ else
   echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
 
-resolve_display_resolution "${SDR_WIDTH:-auto}" "${SDR_HEIGHT:-auto}"
-apply_display_resolution "$PORT_TOML"
-resolve_render_scale "${SDR_RENDER_PERCENT:-100}"
-apply_render_scale "$PORT_TOML"
+configure_unity_display "$PORT_TOML" "${SDR_WIDTH:-auto}" "${SDR_HEIGHT:-auto}" "${SDR_RENDER_PERCENT:-100}" || exit 1
 
 if ! sdr_core_files_ok; then
   echo "$LOG_PREFIX core files missing at launch time"

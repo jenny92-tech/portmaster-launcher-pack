@@ -1,3 +1,6 @@
+-- INPUT:  launcher 共享声明式启动器框架
+-- OUTPUT: 吸血鬼幸存者 1.14 设置页面及 VS_* 启动参数
+-- POS:    吸血鬼幸存者 1.14 的画面和按键选项定义
 local launcher = require("launcher")
 
 launcher.define {

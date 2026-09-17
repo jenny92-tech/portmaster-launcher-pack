@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  json, os, stat, sys, zipfile, pathlib；端口清单和已生成 dist
+# OUTPUT: main()；校验后原子写入标准 PortMaster ZIP
+# POS:    按 portmaster.items 打包启动脚本与数据目录并拒绝符号链接输入
 """Build one standard PortMaster ZIP from a generated port dist directory."""
 
 from __future__ import annotations

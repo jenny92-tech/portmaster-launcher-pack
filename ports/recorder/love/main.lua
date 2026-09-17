@@ -1,3 +1,6 @@
+-- INPUT:  kit、REC_ENGINE 指向的 record_screen.sh 命令行接口
+-- OUTPUT: 录屏状态页面及 start/stop/status 调用
+-- POS:    独立录屏应用的启动、停止合成和周期状态展示界面
 -- Screen Recorder — standalone handheld recording app.
 -- LÖVE UIKit page: state + Start / Stop & Assemble / Refresh.
 -- The engine is the shell CLI at $REC_ENGINE (record_screen.sh); this UI only

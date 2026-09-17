@@ -1,4 +1,7 @@
 #!/bin/sh
+# INPUT:  C 编译器、Linux 头文件与三个 handheld-*.c 源文件
+# OUTPUT: handheld-input、handheld-fbshot、handheld-event 二进制
+# POS:    以统一编译选项构建输入、截图和事件观测辅助工具
 set -eu
 
 helper_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)

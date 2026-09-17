@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker ARM64 执行支持、Rust 镜像、Cargo 缓存卷与工作区
+# OUTPUT: smoke/config/all 测试结果或 size 存储摘要
+# POS:    在只读挂载仓库的 ARM64 容器中验证服务与配置契约
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

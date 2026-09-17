@@ -1,3 +1,6 @@
+// INPUT:  Godot UV、blur_center 与 blur_power uniforms
+// OUTPUT: fragment() 输出低透明度径向光晕
+// POS:    以静态光晕代替多次屏幕采样径向模糊
 shader_type canvas_item;
 render_mode blend_mix;
 

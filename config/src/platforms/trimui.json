@@ -31,7 +31,8 @@
   "library.v1",
   "python.v1"
  ],
- "paths": {
+"paths": {
+  "shell_directory": {"strategy": "parent", "of": "game_data"},
   "scripts": {
    "strategy": "launcher_dir"
   },
@@ -60,9 +61,9 @@
    "value": "/mnt/SDCARD/Apps"
   }
  },
- "source_route": "official",
+ "source_route": "system",
  "frontend": {
-  "management": "app",
+  "management": "system",
   "kind": "trimui",
   "names": [
    "launch.sh",
@@ -178,9 +179,9 @@
   "cache"
  ],
  "capabilities": {
-  "manage_portmaster": true,
-  "install_portmaster": true,
-  "update_portmaster": true,
+  "manage_portmaster": false,
+  "install_portmaster": false,
+  "update_portmaster": false,
   "repair_runtimes": true,
   "manage_ports": true,
   "inventory_ports": true,
@@ -188,7 +189,7 @@
   "inventory_apps": true,
   "manage_apps": true,
   "install_apps": true,
-  "manage_frontend": true,
+  "manage_frontend": false,
   "manage_images": true,
   "manage_artwork": true,
   "trash": true,

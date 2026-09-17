@@ -1,3 +1,6 @@
+// INPUT:  HarmonyLib、反射游戏平台/遥测 API、Task
+// OUTPUT: PlatformPatches.Apply() 与平台/遥测前置钩子
+// POS:    跳过掌机端不可用的 Steam 和 Sentry 初始化及数据上传
 using System;
 using System.Threading.Tasks;
 using HarmonyLib;

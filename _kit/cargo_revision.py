@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  hashlib, json, tomllib, pathlib；Cargo 清单、锁文件与源码路径
+# OUTPUT: lock_dependency_closure(), update_paths(), update_lock_closure(), update_toml_section()
+# POS:    为预置 Rust 二进制按实际依赖闭包计算内容身份提供公共散列操作
 """Content-revision helpers scoped to Cargo dependency closures."""
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
 #!/usr/bin/env dotnet-script
+// INPUT:  Mono.Cecil、输入/输出 DLL 路径与程序集参考目录
+// OUTPUT: 将 GetNode<WorldEnvironment> 替换为空值的输出 DLL
+// POS:    适配禁用 3D 的 Godot 运行时以绕过不存在的 WorldEnvironment
 /* Replace every Node.GetNode<WorldEnvironment>(...) call in sts2.dll with
  * a 3-instruction sequence that consumes the arguments and pushes null.
  * On a runtime built with disable_3d=yes, godot has no ClassDB entry for

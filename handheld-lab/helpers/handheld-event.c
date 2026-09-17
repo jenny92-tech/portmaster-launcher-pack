@@ -1,3 +1,6 @@
+// INPUT:  Linux evdev、sysfs、poll 与设备名称/超时/事件数参数
+// OUTPUT: main()；匹配输入设备的有界事件观测文本
+// POS:    为端到端测试确认真实消费者可见的按键事件
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>

@@ -1,3 +1,6 @@
+// INPUT:  Godot TEXTURE/UV/COLOR、distortion_base_intensity
+// OUTPUT: vertex() 传递颜色，fragment() 输出低透明度白色覆盖
+// POS:    以单次纹理采样替代尖叫特效的极坐标扭曲
 shader_type canvas_item;
 render_mode blend_mix;
 

@@ -1,3 +1,6 @@
+// INPUT:  官方 Runtime 元数据、GitHubTransport、ManagedRoot、文件锁与任务通道
+// OUTPUT: RuntimeMetadata、RuntimeRepairRequest/Outcome、repair_runtimes()
+// POS:    解析官方运行库清单并以校验和与可回滚替换修复 Runtime 镜像
 //! Official Runtime metadata parsing and rollback-safe Runtime repair.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -889,6 +892,48 @@ mod tests {
         value["utils"]["arbitrary-key"]["url"] =
             serde_json::json!("https://example.com/godot.squashfs");
         assert!(RuntimeMetadata::parse(&serde_json::to_vec(&value).unwrap()).is_err());
+    }
+
+    #[test]
+    fn path_inferred_runtime_repairs_only_with_matching_official_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let payload = image(b"path-inferred-runtime");
+        let mut request = request(&temp, &payload);
+        let script = format!("RENAMED='{}/godot.squashfs'\n", request.libs_root.display());
+        let analysis =
+            crate::shell_paths::analyze(&script, &BTreeMap::new(), Path::new("/ports/中文.sh"));
+        request.runtime_names = analysis
+            .runtime_dependencies(
+                Some(&request.libs_root),
+                &crate::shell_sources::FileEnvironment::new([]),
+            )
+            .into_iter()
+            .collect();
+        assert_eq!(request.runtime_names, ["godot"]);
+        let mut fetches = 0;
+        repair_with_fetcher(&request, |entry, output, _progress| {
+            fetches += 1;
+            assert_eq!(entry.name, "godot");
+            fs::write(output, &payload)?;
+            Ok("origin".to_owned())
+        })
+        .unwrap();
+        assert_eq!(fetches, 1);
+        assert_eq!(
+            fs::read(request.libs_root.join("godot.squashfs")).unwrap(),
+            payload
+        );
+        for (name, arch) in [("unlisted", "aarch64"), ("godot", "wrongarch")] {
+            request.runtime_names = vec![name.to_owned()];
+            request.arch = arch.to_owned();
+            let error = repair_with_fetcher(&request, |_, _, _| {
+                panic!("must not fetch unmatched Runtime")
+            });
+            assert!(matches!(
+                error,
+                Err(RuntimeRepairError::MissingMetadata { .. })
+            ));
+        }
     }
 
     #[test]

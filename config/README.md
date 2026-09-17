@@ -25,6 +25,14 @@ when the generated contract changes.
 
 ## Current contract and safety
 
+Shell analysis receives `directory` from the profile's explicit
+`paths.shell_directory`, not by inspecting a folder name. This legacy Shell
+value is separate from `launcher_directory` and the managed Port data location.
+`controlfolder` comes from resolved `portmaster_core`; downloadable images are
+its `libs/*.squashfs`. An absent Shell path input remains unknown rather than
+becoming a guessed card root. All bundled profiles declare `shell_directory`;
+the declaration does not imply complete Shell or real-device compatibility.
+
 The engine first checks `format` and `schema_version`, compares root
 `config_version` without downgrading, detects from the root, then verifies and
 loads one detail. The detail must match the root's format, schema version,
@@ -80,7 +88,7 @@ literally. Inheritance is default-open and blocks exactly the names and prefix
 listed in `environment`; each platform explicitly references the `love_ui`
 execution scope.
 
-`relative_to` may opt into `canonicalize_existing: true` for a firmware-owned
+`literal` and `relative_to` may opt into `canonicalize_existing: true` for a firmware-owned
 alias such as LoongOS `/roms/ports/PortMaster`. Only an already existing path is
 canonicalized; a missing install target remains the derived child. The resolved
 target still passes the native managed-root, protected-namespace and overlap
@@ -100,6 +108,14 @@ required SONAME in the named library group and replaces one explicit `export`
 line. It does not execute config text or introduce a platform-specific code
 branch; fixture roots affect probing only, while the rendered value remains the
 device path.
+
+TrimUI delegates PortMaster core maintenance to the firmware or environment
+provider: `frontend.management` and `source_route` are `system`, and
+`manage_portmaster`, `install_portmaster`, `update_portmaster`, and
+`manage_frontend` are disabled. This covers stock, custom-firmware, and external
+userland setups without replacing their core or launcher. Existing path and
+health detection, Port/APP management, and the separate `repair_runtimes`
+capability remain enabled; it does not imply support for running every setup.
 
 Parser limits cover nesting, paths, strings, and collection counts. There is
 deliberately no total config file-size limit, so future unrelated device

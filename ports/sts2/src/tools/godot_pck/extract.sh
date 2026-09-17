@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  GDRE Tools、输入 PCK 与可选输出目录
+# OUTPUT: 恢复出的 Godot 源项目目录
+# POS:    为资源压缩与覆盖补丁准备 PCK 恢复工作树
 # Recover a godot 4.x pck back to its source tree (PNG + .import + .gd etc.).
 # Usage: extract.sh <input.pck> [<output_dir>]
 #   defaults output_dir to ./work/$(basename input .pck)_recovered/

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  tools/record_screen.sh、临时 ffmpeg 替身与录屏状态夹具
+# OUTPUT: 采帧/停止/合成状态机、错误路径与 CLI 断言结果
+# POS:    录屏引擎无需真实 DRM 或编码器的生命周期回归测试
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #

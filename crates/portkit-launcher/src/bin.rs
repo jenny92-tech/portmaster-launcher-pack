@@ -1,3 +1,6 @@
+// INPUT:  命令行参数、portkit_launcher 功能模块与构建来源标识
+// OUTPUT: portkit-launcher CLI 命令分派、结果输出和退出码
+// POS:    游戏包内原生辅助程序入口，连接 Shell 启动器与 Rust 文件操作
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;

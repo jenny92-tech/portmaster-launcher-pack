@@ -1,3 +1,6 @@
+// INPUT:  mlua 与 SharedState 画布尺寸、窗口标题和事件队列
+// OUTPUT: register() 安装 love.window 的模式、尺寸和标题接口
+// POS:    将宿主管理的显示状态映射为 LÖVE 窗口兼容 API
 use mlua::prelude::*;
 use std::sync::Arc;
 

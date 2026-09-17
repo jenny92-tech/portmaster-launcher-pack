@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Docker、预置 App Manager、设备运行库与 prepare_device_fixture.py
+# OUTPUT: verify/smoke/all 动态依赖与首帧验证结果
+# POS:    用采集的固件用户态检查 App Manager 二进制启动兼容性
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

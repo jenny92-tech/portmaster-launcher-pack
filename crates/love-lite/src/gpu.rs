@@ -1,3 +1,6 @@
+// INPUT:  Engine/GpuCommand、SDL2 Canvas/Texture 与 anyhow
+// OUTPUT: GpuRenderer 的纹理缓存和 render() 接口
+// POS:    将 APP Manager 支持的图形命令转换为 SDL2 GPU 绘制
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};

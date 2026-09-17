@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  hashlib、struct、mobile_compat 的 gdshader 文件
+# OUTPUT: dist/port_compat.pck 着色器覆盖包
+# POS:    按 Godot PCK 目录与对齐规则打包移动端替代着色器
 """Build port_compat.pck — Mali-friendly shader overlay pack."""
 import hashlib
 import struct

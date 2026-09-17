@@ -1,3 +1,6 @@
+// INPUT:  程序集路径、进程环境与 launch_config.env
+// OUTPUT: PortPaths.GameDir、Get(key)
+// POS:    在启动器交接文件和进程环境之间解析移植配置
 using System;
 using System.IO;
 using System.Reflection;

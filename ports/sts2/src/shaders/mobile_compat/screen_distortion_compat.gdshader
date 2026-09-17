@@ -1,3 +1,6 @@
+// INPUT:  Godot TEXTURE/UV/COLOR、distortion_base_intensity
+// OUTPUT: vertex() 传递颜色，fragment() 输出衰减遮罩
+// POS:    以纹理红色通道遮罩代替屏幕扭曲采样
 shader_type canvas_item;
 render_mode blend_mix;
 

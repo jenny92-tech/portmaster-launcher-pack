@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  argparse/fnmatch/re/pathlib、纹理 .import、尺寸上限规则
+# OUTPUT: 更新 process/size_limit 的导入配置或 dry-run 报告
+# POS:    按全局与路径规则限制移动端纹理重导入尺寸
 """
 Cap every texture's `process/size_limit` so godot --import downscales
 sources whose largest dimension exceeds the limit.

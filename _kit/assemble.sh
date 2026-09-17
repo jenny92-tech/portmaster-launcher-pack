@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# INPUT:  Shell 模板、端口 manifest.json、#@KIT 块引用的共享或端口私有模块、Python 3
+# OUTPUT: 单个自包含设备启动脚本
+# POS:    在构建时内联模块使掌机启动不依赖仓库目录结构
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 #

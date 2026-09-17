@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# INPUT:  struct/shutil/glob、目录内 DLL、可选 --dry
+# OUTPUT: 纯 IL DLL 的 ARM64 PE 标记及 .amd64.bak 备份
+# POS:    将误标为 AMD64 的纯 IL 程序集改为 ARM64 并跳过 ReadyToRun
 """
 Patch pure-IL .NET assemblies that were built with <PlatformTarget>x64</PlatformTarget>
 (PE machine = AMD64) so arm64 coreclr will load them. The IL is arch-neutral; only the
