@@ -37,7 +37,7 @@ jobs:
           cargo +1.98.0 build --release --locked -p portkit-download --target x86_64-apple-darwin
           mkdir package
           lipo -create target/aarch64-apple-darwin/release/portkit-download target/x86_64-apple-darwin/release/portkit-download -output package/portkit-download
-          lipo -verify_arch arm64 x86_64 package/portkit-download
+          lipo package/portkit-download -verify_arch arm64 x86_64
           package/portkit-download --help
           cp crates/portkit-download/README.md LICENSE package/
           tar -czf portkit-download-macOS.tar.gz -C package .
