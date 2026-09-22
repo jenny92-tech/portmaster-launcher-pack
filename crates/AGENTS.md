@@ -25,3 +25,4 @@
 | APP 原生服务 | `appmanager-service/` | 进程内任务、快照和局域网管理，见其 AGENTS.md |
 | APP UI 运行时 | `love-lite/` | Lua/LÖVE 子集、SDL2 呈现及原生桥接，见其 AGENTS.md |
 | 游戏启动辅助 | `portkit-launcher/` | 轻量 CLI、配置/字体/封面等本地操作，见其 AGENTS.md |
+| 桌面下载 CLI | `portkit-download/` | 直接复用通用核心的薄下载命令 |

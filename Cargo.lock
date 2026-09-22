@@ -1409,6 +1409,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "portkit-download"
+version = "0.1.0"
+dependencies = [
+ "portkit-core",
+ "tempfile",
+]
+
+[[package]]
 name = "portkit-launcher"
 version = "0.1.0"
 dependencies = [

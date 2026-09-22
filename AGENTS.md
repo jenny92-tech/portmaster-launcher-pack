@@ -79,6 +79,7 @@ bump as a substitute for updating all in-tree consumers correctly.
 | 生成工具出口 | `tools/` | 从 `_kit/recorder.sh` 生成的录屏 CLI，不手工编辑 |
 | Rust 工作区 | `Cargo.toml` | crate 成员、共享依赖、版本与编译 profile |
 | Rust 依赖锁 | `Cargo.lock` | 可复现依赖解析和构建身份输入 |
+| CI | `.github/` | 桌面下载 CLI 的手动构建与两天产物保留 |
 | 仓库授权 | `LICENSE` | 项目许可与非商业分发约束 |
 | 忽略规则 | `.gitignore` | 排除生成目录、外部游戏数据及本机实验内容 |
 

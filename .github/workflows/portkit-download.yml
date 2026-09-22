@@ -1,0 +1,57 @@
+name: Desktop download CLI
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        shell: bash
+        run: rustup toolchain install 1.98.0 --profile minimal
+      - name: Test CLI and native file locking
+        run: cargo +1.98.0 test --locked -p portkit-download
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo +1.98.0 build --release --locked -p portkit-download --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Path package
+          Copy-Item target/x86_64-pc-windows-msvc/release/portkit-download.exe package/
+          Copy-Item crates/portkit-download/README.md,LICENSE package/
+      - name: Build universal macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          rustup target add --toolchain 1.98.0 aarch64-apple-darwin x86_64-apple-darwin
+          cargo +1.98.0 build --release --locked -p portkit-download --target aarch64-apple-darwin
+          cargo +1.98.0 build --release --locked -p portkit-download --target x86_64-apple-darwin
+          mkdir package
+          lipo -create target/aarch64-apple-darwin/release/portkit-download target/x86_64-apple-darwin/release/portkit-download -output package/portkit-download
+          lipo -verify_arch arm64 x86_64 package/portkit-download
+          package/portkit-download --help
+          cp crates/portkit-download/README.md LICENSE package/
+          tar -czf portkit-download-macOS.tar.gz -C package .
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: portkit-download-Windows-x64
+          path: package/
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: portkit-download-macOS-universal
+          path: portkit-download-macOS.tar.gz
+          retention-days: 2
+          if-no-files-found: error

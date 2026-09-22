@@ -1,4 +1,4 @@
-// INPUT:  std 文件系统、libc 文件锁、md5/sha2 与 zip
+// INPUT:  std 文件系统、Unix flock / Windows 独占句柄、md5/sha2 与 zip
 // OUTPUT: ExclusiveFileLock、DigestAlgorithm、摘要/ZIP 检查及原子读写接口
 // POS:    原生共享层的文件完整性、互斥和持久化基础设施
 use std::fs::{self, File, OpenOptions};
@@ -29,6 +29,29 @@ pub struct ExclusiveFileLock {
 }
 
 impl ExclusiveFileLock {
+    #[cfg(windows)]
+    pub fn try_acquire(path: &Path) -> std::io::Result<Self> {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        // Deny sharing while this handle lives; Windows releases it on exit.
+        // Open reparse points themselves, then reject them (including junctions).
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .custom_flags(0x00200000)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.file_attributes() & 0x400 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "lock must be a regular file",
+            ));
+        }
+        Ok(Self { file })
+    }
+
     #[cfg(unix)]
     pub fn try_acquire(path: &Path) -> std::io::Result<Self> {
         reject_lock_symlink(path)?;
