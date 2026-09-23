@@ -61,7 +61,7 @@ for clear_copy in (
     "PortMaster 尚未支持这台设备。请确认安装位置。",
     "自动勾选的是确认没用的内容，拿不准的一律不勾。勾选后移入回收站，可以反悔。",
     "存放菜单里的游戏启动脚本。",
-    "Port App Manager 无法启动。请重新安装后再试。",
+    "启动数据加载失败，请提供应用目录中的 log.txt。",
 ):
     assert clear_copy in source, clear_copy
 for verbose_copy in (

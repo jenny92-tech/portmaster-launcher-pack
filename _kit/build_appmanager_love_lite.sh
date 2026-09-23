@@ -16,6 +16,7 @@ python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1
   exit 69
 }
 REVISION="$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")"
+BUILD_VERSION="$(date -u +%Y.%m.%d)-${REVISION:0:12}"
 CONTAINER_NAME="pam-love-lite-build-${REVISION:0:12}"
 
 command -v docker >/dev/null 2>&1 || {
@@ -26,6 +27,7 @@ command -v docker >/dev/null 2>&1 || {
 mkdir -p "$STAGING" "$(dirname "$OUT")"
 docker run --rm --name "$CONTAINER_NAME" --platform linux/arm64 \
   -e LOVE_LITE_SOURCE_REVISION="$REVISION" \
+  -e PAM_BUILD_VERSION="$BUILD_VERSION" \
   -v "$ROOT:/work" \
   -w /work \
   "$IMAGE" \

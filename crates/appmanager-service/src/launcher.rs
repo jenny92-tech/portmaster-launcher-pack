@@ -683,6 +683,16 @@ impl EmbeddedService {
                 active_task.store(0, Ordering::Release);
                 busy.store(false, Ordering::Release);
                 let elapsed = started_at.elapsed().as_secs();
+                if event.status == "error" {
+                    append_task_log(
+                        &log_path,
+                        &format!(
+                            "task.error kind={} id={task_id} message={}",
+                            event.kind,
+                            event.data.get("message").unwrap_or(&Value::Null)
+                        ),
+                    );
+                }
                 append_task_log(
                     &log_path,
                     &format!(
@@ -781,6 +791,16 @@ impl EmbeddedService {
                 // the next background request must be able to acquire this lane.
                 background_busy.store(false, Ordering::Release);
                 let elapsed = started_at.elapsed().as_secs();
+                if event.status == "error" {
+                    append_task_log(
+                        &log_path,
+                        &format!(
+                            "task.error kind={} id={task_id} message={}",
+                            event.kind,
+                            event.data.get("message").unwrap_or(&Value::Null)
+                        ),
+                    );
+                }
                 append_task_log(
                     &log_path,
                     &format!(
@@ -1349,7 +1369,9 @@ impl Session {
         health: SharedHealth,
     ) -> Result<Self, String> {
         let session = Self::new_pinned_without_recovery(request, resolved, health)?;
-        session.recover_transactions()?;
+        session
+            .recover_transactions()
+            .map_err(|error| format!("transaction recovery: {error}"))?;
         Ok(session)
     }
 
@@ -1376,8 +1398,12 @@ impl Session {
                 paths.app_root.display()
             ));
         }
-        fs::create_dir_all(&paths.state).map_err(display_error)?;
-        fs::create_dir_all(&paths.trash).map_err(display_error)?;
+        fs::create_dir_all(&paths.state).map_err(|error| {
+            format!("prepare state directory {}: {error}", paths.state.display())
+        })?;
+        fs::create_dir_all(&paths.trash).map_err(|error| {
+            format!("prepare trash directory {}: {error}", paths.trash.display())
+        })?;
         Ok(Self {
             paths,
             resolved,
@@ -1435,6 +1461,10 @@ impl Session {
         let mut lines = vec![
             "----- startup diagnostics -----".to_owned(),
             format!("app.version={}", env!("CARGO_PKG_VERSION")),
+            format!(
+                "app.build={}",
+                option_env!("PAM_BUILD_VERSION").unwrap_or("development")
+            ),
             format!("config.origin={:?}", self.resolved.config_origin),
             format!("platform.id={}", resolution.platform_id),
             format!("platform.name={}", resolution.platform_display_name),
@@ -1890,7 +1920,9 @@ impl Session {
     }
 
     fn env_document(&self) -> Result<Value, String> {
-        let health = self.health_status()?;
+        let health = self
+            .health_status()
+            .map_err(|error| format!("snapshot health: {error}"))?;
         let (python_ok, python_imports) = self.python_health();
         let (update_checked, update_status, latest) = read_update_cache(&self.paths.update_cache);
         let portmaster = self.portmaster_root();
@@ -2023,11 +2055,17 @@ impl Session {
     }
 
     fn embedded_snapshot(&self, reusable_inventory: Option<Value>) -> Result<Value, String> {
-        let health = self.health_status()?;
+        let health = self
+            .health_status()
+            .map_err(|error| format!("snapshot health: {error}"))?;
         let inventory = if inventory_available(&self.resolved.context.management, health) {
             match reusable_inventory {
                 Some(value) => value,
-                None => serde_json::to_value(self.inventory_snapshot()?).map_err(display_error)?,
+                None => serde_json::to_value(
+                    self.inventory_snapshot()
+                        .map_err(|error| format!("snapshot inventory: {error}"))?,
+                )
+                .map_err(display_error)?,
             }
         } else {
             Value::Null
@@ -2037,7 +2075,7 @@ impl Session {
             .map(|inventory| inventory_revision(&inventory))
             .unwrap_or_default();
         Ok(json!({
-            "env": self.env_document()?,
+            "env": self.env_document().map_err(|error| format!("snapshot environment: {error}"))?,
             "inventory": inventory,
             "revision": revision,
             "runtime_metadata": self.runtime_metadata_snapshot(),
@@ -3588,6 +3626,33 @@ mod tests {
                 .unwrap_or_else(|value| value.into_inner())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn initial_snapshot_failure_logs_the_actual_error() {
+        let (_temp, service) = embedded_fixture();
+        // An invalid transaction work path is not needed: making the app
+        // directory unavailable exercises the real asynchronous error route.
+        let original = service.request.app_root.clone();
+        let moved = original.with_extension("unavailable");
+        fs::rename(&original, &moved).unwrap();
+        fs::create_dir_all(&original).unwrap();
+        fs::write(original.join("state"), b"not a directory").unwrap();
+        let task_id = service.start("initial-snapshot", None).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let event = loop {
+            if let Some(event) = service.poll()
+                && event.task_id == task_id
+                && event.status == "error"
+            {
+                break event;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        let log = fs::read_to_string(original.join("log.txt")).unwrap();
+        assert!(log.contains("task.error kind=initial-snapshot"));
+        assert!(log.contains(&event.data["message"].to_string()));
     }
 
     #[test]

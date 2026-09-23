@@ -15,12 +15,16 @@ local L,page,env=model.L,model.pages,model.env
 local finish_initial_load,start_background_update
 local initial_task
 
-local function show_startup_error()
+local function show_startup_error(reason)
+    reason=tostring(reason or "Initial snapshot returned no usable data")
+    print("[PAM] startup.error message="..string.format("%q",reason))
     kit.set_page(page.HOME,L("Cannot start Port App Manager","Port App Manager 启动失败"),{
         kit.textview(L("Status","状态"),L(
-            "Port App Manager could not start. Reinstall it and try again.",
-            "Port App Manager 无法启动。请重新安装后再试。"),{id="startup:error",focusable=false,
+            "Could not load startup data. Please send the log.txt in the app directory.",
+            "启动数据加载失败，请提供应用目录中的 log.txt。"),{id="startup:error",focusable=false,
             expandable=false,max_lines=4,expanded_lines=4,surface=false}),
+        kit.textview(L("Error details","错误详情"),reason,{id="startup:details",
+            focusable=true,expandable=true,max_lines=3,surface=false}),
         kit.button(L("Exit","退出"),operations.show_exit_dialog,{id="startup:exit"}),
     },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
 end
@@ -71,9 +75,9 @@ local function poll_task(dt)
         local data=event.data or {}
         if event.status=="complete" and type(data.snapshot)=="table" then
             local ok=model.apply_snapshot(data.snapshot)
-            if ok then finish_initial_load() else show_startup_error() end
+            if ok then finish_initial_load() else show_startup_error("Invalid startup snapshot") end
         else
-            show_startup_error()
+            show_startup_error(data.message)
         end
         return
     end
@@ -285,7 +289,7 @@ local port={
         local ok,task_id=pcall(model.native.start,"initial-snapshot",{})
         if ok then
             initial_task={id=task_id,kind="initial-snapshot",elapsed=0,poll=0,timeout=120}
-        else show_startup_error() end
+        else show_startup_error(task_id) end
     end,
     update=poll_task,
     -- Keep the host waking while native tasks need polling; otherwise block on input.
