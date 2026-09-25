@@ -49,6 +49,7 @@ portmaster_sync_launcher_artwork "$SCRIPT_DIR" "$0" "$LAUNCHERDIR"
 CONFDIR="$GAMEDIR/conf"
 cd "$GAMEDIR" || exit 1
 exec > "$GAMEDIR/log_silk.txt" 2>&1
+#@BUILD-LOG
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$GAMEDIR/cache" "$GAMEDIR/cache/UnityShaderCache"
 [ -x "$LAUNCHERDIR/bin/portkit-launcher" ] &&

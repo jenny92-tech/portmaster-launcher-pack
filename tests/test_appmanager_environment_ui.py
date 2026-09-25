@@ -122,6 +122,7 @@ love.graphics.newImage=function() return {getDimensions=function() return 1280,7
 love.graphics.setFont=function() end
 love.graphics.setColor=function() end
 love.graphics.rectangle=function() end
+love.graphics.polygon=function() end
 love.graphics.line=function() end
 love.graphics.setLineWidth=function() end
 love.graphics.printf=function() end

@@ -22,8 +22,9 @@ APP Manager 的表现层，由独立 LOVE-lite runtime 加载，共享 `_kit/lov
 |------|------------|------|
 | 应用入口 | `main.lua` | 装配模块，加载初始快照并轮询前后台任务 |
 | 原生边界 | `app_native.lua` | 请求 Rust 服务并校验响应和任务事件 |
+| 按键校准 | `app_input.lua` | 控制器示意、步骤高亮、测试与保存覆盖层；经 app_native 获取状态 |
 | 共享模型 | `app_model.lua` | 保存环境/库存，推导能力和展示数据，维护缓存 |
 | 操作协调 | `app_operations.lua` | 管理确认计划、任务生命周期、库存刷新与退出 |
 | 业务页面 | `app_pages.lua` | 构建启动、游戏管理、Runtime、清理、安装等页面 |
 | 环境管理 | `app_environment.lua` | PortMaster 安装修复、更新与设备风险确认 |
-| 控制映射 | `ui.gptk` | 应用界面的 gptokeyb 输入映射 |
+| 旧输入映射 | `ui.gptk` | 保留的 gptokeyb 操作语义参考；当前宿主直接读取 SDL，不启动助手 |

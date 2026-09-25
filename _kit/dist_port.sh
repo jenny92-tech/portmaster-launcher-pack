@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # INPUT:  端口 manifest.json、love/src/portable 输入、assemble.sh 与共享打包工具
-# OUTPUT: ports/<port>/dist/ 可部署端口内容
+# OUTPUT: ports/<port>/dist/ 可部署端口内容与统一构建身份
 # POS:    调度端口专用构建或共享组装流程并收集 UI、运行时与发行元数据
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
@@ -187,6 +187,8 @@ if [ -d "$SRC" ]; then
   [ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"
   [ -z "$USE_LOVE" ] && [ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
 fi
+
+python3 "$ROOT/_kit/build_info.py" "$MANIFEST" "$DIST"
 
 if compgen -G "$DIST/*.sh" >/dev/null; then
   bash -n "$DIST"/*.sh

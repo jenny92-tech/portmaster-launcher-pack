@@ -32,6 +32,7 @@ CONFDIR="$GAMEDIR/conf"
 SHADER_CACHE_DIR="/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"
 cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
+#@BUILD-LOG
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$SHADER_CACHE_DIR"
 

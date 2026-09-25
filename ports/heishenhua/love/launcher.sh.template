@@ -28,6 +28,7 @@ portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR
 CONFDIR="$GAMEDIR/conf"
 cd "$GAMEDIR"
 exec > "$GAMEDIR/log.txt" 2>&1
+#@BUILD-LOG
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$GAMEDIR/cache"
 

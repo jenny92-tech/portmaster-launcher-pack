@@ -29,6 +29,7 @@ if : > "$PAM_LOG" 2>/dev/null; then
 fi
 
 pam_run_ui() {
+    #@BUILD-LOG
   printf '%s\n' '[PAM] Starting Port App Manager'
   if [ ! -x "$PAM_LOVE" ]; then
     printf '%s\n' '[PAM] APP Manager UI runtime is missing; reinstall APP Manager.' >&2

@@ -31,6 +31,7 @@ cd "$GAMEDIR"
 # Direct fd redirect (no tee): tee buffers in memory and loses the last KB on
 # SIGKILL, which is exactly when we need the data most.
 exec > "$GAMEDIR/log.txt" 2>&1
+#@BUILD-LOG
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 mkdir -p "$CONFDIR" "$GAMEDIR/cache"
 HK_RUNTIME_WIDTH="$DISPLAY_WIDTH"

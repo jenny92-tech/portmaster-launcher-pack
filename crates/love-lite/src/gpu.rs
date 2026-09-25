@@ -354,19 +354,39 @@ fn fill_ellipse(
             .draw_fpoint(FPoint::new(cx, cy))
             .map_err(anyhow::Error::msg);
     }
-    let rows = ry.ceil() as i32;
-    for row in -rows..=rows {
-        let dy = row as f32 + if row >= 0 { 0.5 } else { -0.5 };
+    for row in ellipse_rows(cy, ry) {
+        let y = row as f32 + 0.5;
+        let dy = y - cy;
         let norm = 1.0 - (dy * dy) / (ry * ry);
         if norm < 0.0 {
             continue;
         }
         let dx = rx * norm.sqrt();
         canvas
-            .draw_fline(FPoint::new(cx - dx, cy + dy), FPoint::new(cx + dx, cy + dy))
+            .draw_fline(FPoint::new(cx - dx, y), FPoint::new(cx + dx, y))
             .map_err(anyhow::Error::msg)?;
     }
     Ok(())
+}
+
+fn ellipse_rows(cy: f32, ry: f32) -> std::ops::RangeInclusive<i32> {
+    (cy - ry - 0.5).ceil() as i32..=(cy + ry - 0.5).floor() as i32
+}
+
+#[cfg(test)]
+mod ellipse_tests {
+    use super::ellipse_rows;
+
+    #[test]
+    fn pixel_rows_are_contiguous_across_integer_and_fractional_centers() {
+        for cy in [0.0, 100.0, 100.25, 100.5, 100.75] {
+            let rows: Vec<_> = ellipse_rows(cy, 22.0).collect();
+            assert!(rows.windows(2).all(|pair| pair[1] == pair[0] + 1));
+            assert!(rows.contains(&(cy.floor() as i32)));
+            assert!(rows.contains(&(cy.floor() as i32 - 1)));
+            assert!((44..=45).contains(&rows.len()));
+        }
+    }
 }
 
 fn stroke_ellipse(

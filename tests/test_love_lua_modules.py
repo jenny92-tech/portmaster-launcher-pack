@@ -35,6 +35,7 @@ love.graphics.newImage=function() return {getDimensions=function() return 1280,7
 love.graphics.setFont=function() end
 love.graphics.setColor=function() end
 love.graphics.rectangle=function() end
+love.graphics.polygon=function() end
 love.graphics.line=function() end
 love.graphics.setLineWidth=function() end
 love.graphics.printf=function() end
@@ -245,6 +246,84 @@ with tempfile.TemporaryDirectory() as source:
         end
         k.input("left")
         assert(k.debug_focus().focus_i==21,"returning to a container restores its stable focus")
+    ''')
+
+# Scroll containers reveal focus in the same frame, including paired tools and
+# pinned actions; textviews keep complete content and pan only on overflow.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function() k.add_page("Scroll",{}) end})
+        love.load()
+        for _,size in ipairs({{640,480},{720,720},{960,720},{480,640},{320,240}}) do
+            love.graphics.getDimensions=function() return size[1],size[2] end
+            local side={}
+            for i=1,14 do side[i]=k.button("Tool "..i,function() end,
+                {id="tool:"..i,half=i==2 or i==3,group=i==14 and "bottom" or nil}) end
+            k.set_page(1,"Scroll",{},{sidebar=side,sidebar_footer={lines={"Version","Contact"}}})
+            local function visible(index)
+                local painted=false
+                love.graphics.printf=function(text) if text=="Tool "..index then painted=true end end
+                love.draw()
+                local f=k.debug_focus(); local g=k.debug_sidebar_geometry()
+                assert(f.zone=="sidebar" and f.sidebar_i==index,"unexpected navigation target "..f.sidebar_i.." expected "..index)
+                assert(painted,"focused button must actually be painted this frame")
+                assert(g.total==12,"half tools share one layout row")
+                if index~=14 then
+                    assert(g["y"..index]>=g.viewport_top-0.01,"focus above viewport")
+                    assert(g["y"..index]+g["h"..index]<=g.viewport_bottom+0.01,"focus below viewport")
+                end
+            end
+            visible(1)
+            k.input("down"); visible(2)
+            k.input("right"); visible(3)
+            for i=4,14 do k.input("down"); visible(i) end
+            k.input("down"); visible(14)
+            for i=13,4,-1 do k.input("up"); visible(i) end
+            k.input("up"); visible(2)
+            k.input("up"); visible(1)
+        end
+        love.graphics.getDimensions=function() return 640,480 end
+        local font=love.graphics.newFont()
+        font.getWrap=function(_,text,width)
+            local lines={}
+            for line in (text.."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end
+            return width,lines
+        end
+        local value="first line\nsecond line\nthird line\nlast line"
+        k.set_page(1,"Text",{k.textview("Label",value,{max_lines=2,expandable=false})},
+            {row_layout={mode="flow",max_columns=1}})
+        local drawn_y,drawn_clip,clip
+        love.graphics.setScissor=function(x,y,w,h) clip={x,y,w,h} end
+        love.graphics.printf=function(text,x,y)
+            assert(not text:find("…",1,true),"textview must not add ellipsis")
+            if text==value then drawn_y=y; drawn_clip=clip end
+        end
+        love.draw()
+        assert(drawn_y and drawn_clip[4]>0)
+        local initial=drawn_y
+        assert(k.wake_interval() and k.wake_interval()<=1/30)
+        k.update(1); love.draw(); assert(drawn_y==initial,"pause before scrolling")
+        k.update(2); love.draw(); assert(drawn_y<initial,"slowly reveal remaining lines")
+        assert(drawn_clip[2]>drawn_y,"moving text remains clipped to its own box")
+        k.set_page(1,"Text",{k.textview("Label","short",{max_lines=2,expandable=false})},
+            {row_layout={mode="flow",max_columns=1}})
+        love.draw(); assert(k.wake_interval()==nil,"fitting text must not keep redrawing")
+        value=string.rep("long-path-",80)
+        k.set_page(1,"Text",{k.textview("Label",value,{max_lines=1,preserve_lines=true,expandable=false})},
+            {row_layout={mode="flow",max_columns=1}})
+        local drawn_x
+        love.graphics.print=function(text,x) if text==value then drawn_x=x end end
+        love.draw(); assert(drawn_x)
+        initial=drawn_x
+        k.update(3); love.draw(); assert(drawn_x<initial,"overlong explicit line scrolls horizontally")
+        k.dialog({title="Pause",message="Pause",on_confirm=function() end})
+        k.update(3); love.draw(); assert(drawn_x<initial)
+        assert(k.wake_interval()==nil,"modal dialog pauses background text animation")
     ''')
 
 # The shared component API stays small but explicit: Select is the named form

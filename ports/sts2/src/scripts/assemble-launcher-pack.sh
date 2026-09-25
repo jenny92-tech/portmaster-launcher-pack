@@ -120,6 +120,7 @@ du -sh "$DIST"/* 2>/dev/null | sort -h | tail -12
 du -sh "$DIST"
 
 ZIP="$PORT_ROOT/dist-sts2-$(date +%Y%m%d).zip"
+python3 "$PORT_ROOT/../../_kit/build_info.py" "$PORT_ROOT/manifest.json" "$DIST"
 (cd "$PORT_ROOT" && zip -qr "$ZIP" dist)
 green "=== ready ==="
 green "  dist: $DIST"

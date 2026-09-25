@@ -213,7 +213,7 @@ function Pages.new(model,operations)
                 host..":"..state.web_port..
                 (state.web_code and state.web_code~="" and
                     "\n"..(kit.get_state().ui_lang=="zh" and "配对码 " or "Pairing code ")..state.web_code or ""),
-                {id="home:web-banner",focusable=false,expandable=false,max_lines=3,expanded_lines=3,
+                {id="home:web-banner",focusable=false,expandable=false,max_lines=2,expanded_lines=2,preserve_lines=true,
                  label_px=18,value_px=20,bg={0.32,0.22,0.06}})
         end
         if env.portmaster_health=="missing" and env.portmaster_management~="system" then
@@ -275,6 +275,9 @@ function Pages.new(model,operations)
         end
         sidebar[#sidebar+1]=tool(L("PortMaster manager","PortMaster 管理"),function() environment.build_manage(); kit.push_page(page.MANAGE) end,"home:pm")
         sidebar[#sidebar+1]=button(L("Tutorial","重新看教程"),function() start_home_tour() end,{id="home:tutorial"})
+        sidebar[#sidebar+1]=button(L("Calibrate buttons","按键校准"),function()
+            require("app_native").input_command(1)
+        end,{id="home:input"})
         sidebar[#sidebar+1]=button(L("Quit","退出"),operations.show_exit_dialog,{group="bottom"})
         kit.set_page(page.HOME,{en="Port App Manager",zh="Port App Manager"},rows,{
             preserve_focus=preserve_focus,row_layout={mode="flow",min_width=420,max_columns=1},

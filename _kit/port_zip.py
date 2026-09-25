@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# INPUT:  json, os, stat, sys, zipfile, pathlib；端口清单和已生成 dist
+# INPUT:  json, os, stat, sys, zipfile, pathlib, build_info；端口清单和已生成 dist
 # OUTPUT: main()；校验后原子写入标准 PortMaster ZIP
 # POS:    按 portmaster.items 打包启动脚本与数据目录并拒绝符号链接输入
 """Build one standard PortMaster ZIP from a generated port dist directory."""
@@ -12,6 +12,7 @@ import stat
 import sys
 import zipfile
 from pathlib import Path
+from build_info import packaging_info
 
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
@@ -41,7 +42,7 @@ def reject_symlinks(path: Path) -> None:
                 fail(f"package input contains a symlink: {candidate}")
 
 
-def add_path(archive: zipfile.ZipFile, dist: Path, path: Path) -> None:
+def add_path(archive: zipfile.ZipFile, dist: Path, path: Path, metadata: Path | None = None) -> None:
     reject_symlinks(path)
     paths = [path] if path.is_file() else [path, *sorted(path.rglob("*"))]
     for item in paths:
@@ -58,7 +59,10 @@ def add_path(archive: zipfile.ZipFile, dist: Path, path: Path) -> None:
             info.create_system = 3
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (stat.S_IFREG | stat.S_IMODE(item.stat().st_mode)) << 16
-            archive.writestr(info, item.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
+            data = item.read_bytes()
+            if item == metadata:
+                data = packaging_info(data, "portmaster")
+            archive.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
         else:
             fail(f"package input is not a regular file or directory: {item}")
 
@@ -99,7 +103,7 @@ def main() -> None:
     with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
         add_path(archive, dist, port_json)
         for item in items:
-            add_path(archive, dist, dist / item)
+            add_path(archive, dist, dist / item, dist / directories[0] / "build-info.json")
     os.replace(temporary, output)
     print(output)
 

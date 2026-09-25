@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# INPUT:  json, pathlib, shutil, zipfile 等标准库；端口清单、dist 与 TrimUI APP 配置
+# INPUT:  build_info 和 json/pathlib/shutil/zipfile 标准库；端口清单、dist 与 TrimUI APP 配置
 # OUTPUT: main()；含启动入口、图标与配置的 TrimUI MainUI APP ZIP
 # POS:    将端口发行内容封装为独立系统 APP 并过滤运行状态与不安全路径
 """Package a Port launcher as a TrimUI MainUI application."""
@@ -16,6 +16,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from build_info import packaging_info
 
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
@@ -193,6 +194,9 @@ def main() -> None:
             copy_clean(source, stage / item)
 
         icon = choose_icon(manifest, settings, port_dir, dist)
+        metadata = stage / (manifest.get("portable_dir") or "") / "build-info.json"
+        if metadata.is_file():
+            metadata.write_bytes(packaging_info(metadata.read_bytes(), "trimui-app"))
         shutil.copy2(icon, stage / "icon.png")
         config = {
             "package": package,

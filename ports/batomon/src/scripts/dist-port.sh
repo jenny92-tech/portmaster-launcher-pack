@@ -42,5 +42,6 @@ require_file "$GODOT_BIN"
 cp "$GODOT_BIN" "$DIST/godot.mono"
 chmod +x "$DIST/godot.mono"
 
+python3 "$REPO_ROOT/_kit/build_info.py" "$PORT_ROOT/manifest.json" "$DIST"
 green ">>> packaged batomon -> $DIST"
 find "$DIST" -maxdepth 4 -type f | sort | sed "s#^$DIST/##"

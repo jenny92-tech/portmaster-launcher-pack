@@ -22,6 +22,8 @@ Shell 测试读取源码或构造隔离设备/发行夹具，Python 测试用 lu
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
 | APP 环境交互 | `test_appmanager_environment_ui.py` | 模拟环境能力、启动状态、任务与管理页面交互 |
+| APP 控制器数据库 | `test_appmanager_controller_database.py` | 验证新增 GUID 的 APP 基础操作覆盖、映射语义与冲突保留 |
+| 包构建身份 | `test_build_info.py` | 验证所有端口的标识注入、负载散列与封装身份 |
 | APP 原生桥接 | `test_appmanager_inprocess_bridge.sh` | 确保 Lua 只经单一 Rust 请求边界通信 |
 | APP 标准 ZIP | `test_appmanager_port_zip.sh` | 检查 PortMaster ZIP 的可重现性、路径和权限 |
 | APP 便携包 | `test_appmanager_portable_package.sh` | 检查 runtime、依赖、许可和文件闭集 |

@@ -31,6 +31,10 @@ portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR
 CONFDIR="$GAMEDIR/conf"
 mkdir -p "$CONFDIR"
 cd "$GAMEDIR" || exit 1
+{
+    :
+    #@BUILD-LOG
+} >> "$GAMEDIR/log.txt" 2>&1
 
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"

@@ -199,3 +199,17 @@ See [`love/README.md`](love/README.md) for the component and device details.
 
 Port App Manager is packaged differently: it includes a private Rust bootstrap/runtime,
 font and input helper next to its UI.
+## 统一包构建身份
+
+`dist_port.sh` 和端口专用发行入口在负载收集完成后调用 `build_info.py`。
+数据目录中的 `build-info.json` 记录 UTC 日期、`build_version` 和完整的
+`payload_revision`。日期与散列组成 `YYYY.MM.DD-xxxxxxxxxxxx` 内部构建标识，
+不会改变游戏、配置或 API 版本。散列覆盖 manifest 与实际打包文件（含原生二进制
+和执行权限），而非整个仓库；包里的修改会改变身份，不相关仓库修改不会。
+
+启动模板在日志重定向完成处保留一个 `#@BUILD-LOG` 标记，打包时替换成
+`[BUILD] package=... build.version=...` 输出；设备不需要 Python、Git 或解析 JSON。
+重复生成会排除旧标识，避免自引用。Port 与 APP 封装消费同一份 dist 时共享
+产品构建身份，ZIP 中另记 `packaging=portmaster` 或 `trimui-app`；原生 runtime
+的 revision 和 APP 的 `app.build` 仍独立保留。只有 `assemble.sh` 的开发用单脚本
+产物不带完整包身份；发行必须经过 dist 构建入口。

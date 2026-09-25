@@ -33,6 +33,7 @@
 | TrimUI APP 入口 | `dist_trimui_app.sh` | 串联端口构建与 MainUI APP 封装 |
 | PortMaster 元数据 | `port_json.py` | 将内部 manifest 转为发行 port.json |
 | 标准 ZIP 封装 | `port_zip.py` | 校验 items、拒绝符号链接并原子生成 ZIP |
+| 包构建身份 | `build_info.py` | 对最终负载计算日期与内容散列，生成 build-info.json 并注入启动日志 |
 | TrimUI APP 封装 | `trimui_app.py` | 生成系统 APP 入口、图标、配置与 ZIP |
 | PortMaster 引导 | `portmaster_bootstrap.sh` | 查找 controlfolder，统一加载标准 control/mod 和手柄配置 |
 | 系统适配边界 | `launcher_platform.sh` | 探测真实显示会话、补齐尺寸、处理旧输入/进程名兼容和显式 DRM 所有权请求 |

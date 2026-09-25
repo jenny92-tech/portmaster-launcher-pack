@@ -7,6 +7,55 @@ use love_lite::{Engine, GpuCommand};
 use mlua::{String as LuaString, Table as LuaTable};
 use tempfile::TempDir;
 
+#[test]
+fn calibration_overlay_draws_all_steps_and_routes_buttons() {
+    let directory = game("function love.draw() normal_drawn=true end");
+    let engine = Engine::load(directory.path(), 640, 480).unwrap();
+    let source = include_str!("../../../ports/appmanager/love/app_input.lua");
+    let module: LuaTable = engine.runtime.lua.load(source).eval().unwrap();
+    engine.runtime.lua.globals().set("input_ui", module).unwrap();
+    engine.runtime.lua.load(r#"
+        status={active=false, step=0, elapsed=0}
+        input_ui.install({input_status=function() return status end,
+            input_command=function(c) command=c end})
+    "#).exec().unwrap();
+    engine.draw().unwrap();
+    assert!(engine.runtime.lua.globals().get::<bool>("normal_drawn").unwrap());
+    let font = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/portable/share/NotoSansSC-Regular.ttf");
+    engine.runtime.lua.globals().set("preview_font", font.to_string_lossy().as_ref()).unwrap();
+    engine.runtime.lua.load("love.graphics.setFont(love.graphics.newFont(preview_font,16))").exec().unwrap();
+    assert!(!source.contains("Tab") && !source.contains("Esc") && !source.contains("Enter"));
+    for step in 0..=13 {
+        engine.runtime.lua.load(format!("status={{active=true,step={step},elapsed=0.5}} normal_drawn=false")).exec().unwrap();
+        engine.draw().unwrap();
+        if step==5 {
+            let pixels=engine.frame_rgba();
+            for (index,(dx,dy)) in [(-165.,-40.),(-165.,40.),(-205.,0.),(-125.,0.),(205.,0.),(165.,40.),(165.,-40.),(125.,0.)].iter().enumerate() {
+                let cx=(320.0_f64+dx*2.0/3.0).floor()+0.5;
+                let cy=(480.0_f64*0.49+dy*2.0/3.0).floor()+0.5;
+                let mut ink=Vec::new();
+                for y in (cy as usize-11)..=(cy as usize+11) {
+                    for x in (cx as usize-11)..=(cx as usize+11) {
+                        let p=&pixels[(y*640+x)*4..][..3];
+                        if p.iter().all(|v| *v>200) { ink.push((x,y)); }
+                    }
+                }
+                assert!(!ink.is_empty(),"button {index} has no legend");
+                let ink_x=(ink.iter().map(|p|p.0).min().unwrap()+ink.iter().map(|p|p.0).max().unwrap()) as f64/2.0+0.5;
+                let ink_y=(ink.iter().map(|p|p.1).min().unwrap()+ink.iter().map(|p|p.1).max().unwrap()) as f64/2.0+0.5;
+                assert!((ink_x-cx).abs()<=1.0 && (ink_y-cy).abs()<=1.0,"button {index}: ink ({ink_x},{ink_y}), center ({cx},{cy})");
+            }
+            if let Some(path)=std::env::var_os("PAM_CALIBRATION_PREVIEW_PPM") {
+                let mut ppm=b"P6\n640 480\n255\n".to_vec();
+                for pixel in engine.frame_rgba().chunks_exact(4) { ppm.extend_from_slice(&pixel[..3]); }
+                fs::write(path,ppm).unwrap();
+            }
+        }
+        assert!(!engine.runtime.lua.globals().get::<bool>("normal_drawn").unwrap());
+    }
+    engine.runtime.lua.load("love.calibrationClick(250,370); assert(command==4); love.calibrationClick(400,370); assert(command==2)").exec().unwrap();
+}
+
 fn game(main: &str) -> TempDir {
     let directory = tempfile::tempdir().expect("temporary game directory");
     fs::write(directory.path().join("main.lua"), main).expect("write main.lua");
@@ -514,8 +563,47 @@ fn repeated_text_draws_reuse_rasterized_images() {
 }
 
 #[test]
+fn remote_banner_keeps_two_complete_lines_with_real_font() {
+    let directory = game(r#"
+        local k=require("kit")
+        local value="http://192.168.255.255:65535\n配对码 123456"
+        k.run({state={ui_lang="zh"},theme={kind="app"},build_pages=function()
+            k.add_page("APP",{k.textview("远程管理，用电脑浏览器打开",value,
+                {focusable=false,expandable=false,max_lines=2,preserve_lines=true,label_px=18,value_px=20})},
+                {row_layout={mode="flow",max_columns=1},sidebar={k.button("工具",function() end)}})
+        end})
+        local original=love.graphics.printf
+        local set_scissor=love.graphics.setScissor
+        local set_font=love.graphics.setFont
+        local clip,font
+        love.graphics.setScissor=function(x,y,w,h) clip={x=x,y=y,w=w,h=h}; set_scissor(x,y,w,h) end
+        love.graphics.setFont=function(f) font=f; set_font(f) end
+        love.graphics.printf=function(text,x,y,w,align)
+            if text==value then
+                banner_seen=true
+                assert(clip and clip.h>=font:getHeight()*2-0.01,"both lines must fit vertically")
+                assert(y>=clip.y-0.51 and y+font:getHeight()*2<=clip.y+clip.h+0.51,"banner must not pan or clip")
+                for line in (text.."\n"):gmatch("(.-)\n") do
+                    assert(font:getWidth(line)<=clip.w,"each explicit line must fit horizontally")
+                end
+            end
+            original(text,x,y,w,align)
+        end
+    "#);
+    fs::write(directory.path().join("kit.lua"), include_str!("../../../_kit/love/kit.lua")).unwrap();
+    fs::write(directory.path().join("focus_view.lua"), include_str!("../../../_kit/love/focus_view.lua")).unwrap();
+    fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ports/appmanager/portable/share/NotoSansSC-Regular.ttf"), directory.path().join("font.ttf")).unwrap();
+    for (width,height) in [(640,480),(720,720),(480,640),(960,720),(1280,720)] {
+        let engine=Engine::load(directory.path(),width,height).unwrap();
+        engine.update_and_draw(1.0/30.0).unwrap();
+        engine.runtime.lua.load("assert(banner_seen); assert(require('kit').wake_interval()==nil)").exec().unwrap();
+    }
+}
+
+#[test]
 fn loads_the_real_launcher_uikit() {
     let directory = tempfile::tempdir().expect("temporary UIKit directory");
+    fs::write(directory.path().join("focus_view.lua"), include_str!("../../../_kit/love/focus_view.lua")).unwrap();
     fs::write(
         directory.path().join("kit.lua"),
         include_str!("../../../_kit/love/kit.lua"),
@@ -557,6 +645,7 @@ fn loads_the_real_launcher_uikit() {
 #[test]
 fn urgent_dialog_can_recover_a_busy_native_task() {
     let directory = tempfile::tempdir().expect("temporary UIKit directory");
+    fs::write(directory.path().join("focus_view.lua"), include_str!("../../../_kit/love/focus_view.lua")).unwrap();
     fs::write(
         directory.path().join("kit.lua"),
         include_str!("../../../_kit/love/kit.lua"),
@@ -615,6 +704,7 @@ fn urgent_dialog_can_recover_a_busy_native_task() {
 #[test]
 fn loads_the_real_app_manager_lua_frontend_at_supported_viewports() {
     let directory = tempfile::tempdir().expect("temporary App Manager directory");
+    fs::write(directory.path().join("focus_view.lua"), include_str!("../../../_kit/love/focus_view.lua")).unwrap();
     fs::write(
         directory.path().join("kit.lua"),
         include_str!("../../../_kit/love/kit.lua"),

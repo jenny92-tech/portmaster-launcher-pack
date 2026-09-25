@@ -32,8 +32,9 @@ if [ -f "$GAMEDIR/.debug" ]; then
 else
   RUNLOG="/tmp/batomon_run.log"
   > "$RUNLOG" && exec >> "$RUNLOG" 2>&1
-  trap 'grep -iE "error|fail|fatal|exception|abort|segfault|crash|panic|script error|user error|no game pck|gdextension" "$RUNLOG" 2>/dev/null | tail -n 200 > "$ERRLOG"' EXIT
+  trap '{ head -n 1 "$RUNLOG"; grep -iE "error|fail|fatal|exception|abort|segfault|crash|panic|script error|user error|no game pck|gdextension" "$RUNLOG" 2>/dev/null | tail -n 200; } > "$ERRLOG"' EXIT
 fi
+#@BUILD-LOG
 echo "[Batomon] CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
 
 export LD_LIBRARY_PATH="$GAMEDIR:/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"

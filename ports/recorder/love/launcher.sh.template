@@ -31,6 +31,7 @@ CONFDIR="$GAMEDIR/conf"
 mkdir -p "$CONFDIR"
 cd "$GAMEDIR"
 exec >> "$GAMEDIR/log.txt" 2>&1
+#@BUILD-LOG
 
 #@KIT-BEGIN
 KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"

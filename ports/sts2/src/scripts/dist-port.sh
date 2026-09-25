@@ -56,6 +56,7 @@ stage_love_ui() {
 if [ "$UI_ONLY" = "1" ]; then
   blue "=== STS2 dist: launcher UI only ==="
   stage_love_ui
+  python3 "$KIT_ROOT/build_info.py" "$PORT_ROOT/manifest.json" "$DIST"
   green ">>> packaged STS2 launcher UI -> $DIST"
   exit 0
 fi
@@ -148,5 +149,6 @@ EOF
 
 bash -n "$DIST/$SCRIPT_NAME"
 
+python3 "$KIT_ROOT/build_info.py" "$PORT_ROOT/manifest.json" "$DIST"
 green ">>> packaged sts2 -> $DIST"
 find "$DIST" -maxdepth 3 -type f | sort | sed "s#^$DIST/##"

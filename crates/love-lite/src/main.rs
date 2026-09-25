@@ -19,6 +19,7 @@ use sdl2::render::Canvas;
 use sdl2::video::{FullscreenType, Window, WindowBuilder};
 
 mod gpu;
+mod input;
 use gpu::GpuRenderer;
 
 const INPUT_POLL_INTERVAL_MS: u32 = 33;
@@ -82,7 +83,7 @@ fn run() -> Result<i32> {
         launcher,
         config_dir: Some(app_root.join("config")),
         remote_config_dir: Some(app_root.join("state/device-config")),
-        app_root,
+        app_root: app_root.clone(),
     };
     let service_bootstrap =
         EmbeddedService::prepare(service_request).map_err(anyhow::Error::msg)?;
@@ -188,27 +189,19 @@ fn run() -> Result<i32> {
     let mut first_frame_presented = false;
     // First frame after load must present immediately for handheld frontend handoff.
     let mut wait_for_events = false;
-    let process_name = env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "love.aarch64".into());
-    service
-        .start_input_helper(&process_name)
-        .map_err(anyhow::Error::msg)
-        .context("start controller input helper")?;
-    let _input_helper = InputHelperGuard(service);
+    // One owner for controller events; never also start gptokeyb.
+    let mut input = input::Input::new(&sdl, app_root, &engine)?;
+    input.tick(&engine)?;
 
     'running: loop {
         let update_started = Instant::now();
         let mut redraw = false;
 
         if wait_for_events {
-            let timeout_ms = event_wait_timeout_ms(&engine, animation_interval)?;
+            let timeout_ms =
+                event_wait_timeout_ms(&engine, animation_interval)?.min(INPUT_POLL_INTERVAL_MS);
             if let Some(event) = events.wait_event_timeout(timeout_ms) {
-                if handle_sdl_event(&engine, event, &mut redraw)? {
+                if handle_input_event(&engine, &input, event, &mut redraw)? {
                     break 'running;
                 }
             }
@@ -216,11 +209,14 @@ fn run() -> Result<i32> {
         wait_for_events = true;
 
         for event in events.poll_iter() {
-            if handle_sdl_event(&engine, event, &mut redraw)? {
+            if handle_input_event(&engine, &input, event, &mut redraw)? {
                 break 'running;
             }
         }
 
+        let was_calibrating = input.active();
+        redraw |= input.tick(&engine)?;
+        redraw |= was_calibrating || input.active();
         let now = Instant::now();
         let dt = now.duration_since(previous).as_secs_f64().min(0.25);
         previous = now;
@@ -314,6 +310,52 @@ fn handle_sdl_event(engine: &Engine, event: Event, redraw: &mut bool) -> Result<
     }
 }
 
+fn handle_input_event(
+    engine: &Engine,
+    input: &input::Input,
+    event: Event,
+    redraw: &mut bool,
+) -> Result<bool> {
+    if let Event::KeyDown {
+        keycode: Some(Keycode::F2),
+        repeat: false,
+        ..
+    } = event
+    {
+        input.command(1);
+        *redraw = true;
+        return Ok(false);
+    }
+    if input.active() {
+        match event {
+            Event::KeyDown {
+                keycode: Some(key),
+                repeat: false,
+                ..
+            } => {
+                match key {
+                    Keycode::Escape => input.command(5),
+                    Keycode::Return => input.command(4),
+                    Keycode::Tab => input.command(3),
+                    Keycode::R => input.command(2),
+                    _ => (),
+                }
+                return Ok(false);
+            }
+            Event::KeyDown { .. } => return Ok(false),
+            Event::MouseButtonDown { x, y, .. } => {
+                let love: mlua::Table = engine.runtime.lua.globals().get("love")?;
+                if let Ok(callback) = love.get::<mlua::Function>("calibrationClick") {
+                    callback.call::<()>((x, y))?;
+                }
+                return Ok(false);
+            }
+            _ => (),
+        }
+    }
+    handle_sdl_event(engine, event, redraw)
+}
+
 fn event_wait_timeout_ms(engine: &Engine, animation_interval: Duration) -> Result<u32> {
     if engine.is_animating()? {
         return Ok(duration_to_timeout_ms(animation_interval));
@@ -339,14 +381,6 @@ fn idle_event_wait_timeout_ms(wake_interval: Option<f64>, animation_interval: Du
 
 fn duration_to_timeout_ms(duration: Duration) -> u32 {
     duration.as_millis().clamp(1, 600_000) as u32
-}
-
-struct InputHelperGuard(EmbeddedService);
-
-impl Drop for InputHelperGuard {
-    fn drop(&mut self) {
-        self.0.stop_input_helper();
-    }
 }
 
 fn apply_process_environment(resolved: BTreeMap<String, String>) {

@@ -49,6 +49,11 @@ the existing page/body/content/tools hierarchy, not an arbitrary public View API
 Editable pickers consume left/right before container navigation. Modal focus
 remains trapped, and the header returns to the previous content scope.
 
+Scrollable tools use content coordinates for vertical focus order and screen
+coordinates for cross-column navigation. Half-width siblings share one scroll
+row; pinned actions follow the list. The focused button is fully inside the
+viewport on the same frame, excluding both scroll-indicator bars.
+
 Sections, info rows and non-expandable textviews are display-only by default.
 Expandable textviews remain focusable; `focusable=false` explicitly opts out.
 Compact list items retain focus for gamepad scrolling through long read-only
@@ -72,6 +77,14 @@ sidebar is a true single-pane page; no empty column or divider is reserved.
 `sidebar_details` is keyed by the focused row's stable ID, never by a row index.
 `sidebar_footer` displays non-focusable product/contact information. Use
 `surface=false` on `kit.textview` for plain explanatory status text.
+
+TextViews retain full labels and values without adding ellipses. Overflowing
+visible text pans slowly (12 scaled pixels/second), pausing for two seconds at
+each end; fitting text stays still and does not schedule redraws. `max_lines`
+limits the visible height, not the available text. `preserve_lines=true` keeps
+explicit value lines intact and reduces their font size within bounds before
+falling back to scrolling. The remote-management banner uses this for separate
+URL and pairing-code lines.
 
 ## Input contract
 

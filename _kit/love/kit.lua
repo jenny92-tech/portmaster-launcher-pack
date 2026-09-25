@@ -64,6 +64,7 @@ local toast_state = nil
 local dialog_state, dialog_focus = nil, 2
 local password_state = nil
 local guide_state = nil
+local text_scroll_active,text_scroll_elapsed=false,0
 local layout, sidebar_geometry, current_sidebar_detail
 local input_map, focus_stack = {}, {}
 local measurement_cache = setmetatable({}, {__mode="k"})
@@ -265,6 +266,64 @@ local function wrapped_text(value,font,width,max_lines)
     if truncated then shown[count]=clip_ellipsis(shown[count].."…",font,width) end
     return table.concat(shown,"\n"),count,truncated
 end
+local function textview_value(row,width,cs)
+    local px=(row.value_px or 19)*cs
+    if row.preserve_lines then
+        local value=tostring(t(row.value) or "")
+        while px>12*cs do
+            local fits=true
+            for line in (value.."\n"):gmatch("(.-)\n") do
+                if body_fnt(px):getWidth(line)>width then fits=false; break end
+            end
+            if fits then break end
+            px=math.max(12*cs,px-cs)
+        end
+    end
+    return px,body_fnt(px)
+end
+
+local function textview_lines(value,font,width,preserve_lines)
+    local text=tostring(t(value) or "")
+    local lines
+    if preserve_lines then
+        lines={}; for line in (text.."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end
+    else local _; _,lines=font:getWrap(text,math.max(1,width)) end
+    return #lines>0 and lines or {""}
+end
+
+-- TextViews retain their full text. Only genuinely overflowing, visible blocks
+-- pan slowly, with a pause at both ends; existing clipping is restored afterwards.
+local function draw_textview_text(value,font,px,x,y,width,height,color,L,preserve_lines)
+    local lines=textview_lines(value,font,width,preserve_lines)
+    local overflow_y=math.max(0,#lines*font:getHeight()-height)
+    local overflow_x=0
+    for _,line in ipairs(lines) do overflow_x=math.max(overflow_x,font:getWidth(line)-width) end
+    local top,bottom=y,y+height
+    if L.geometry then top=math.max(top,L.band_top); bottom=math.min(bottom,L.band_top+L.band) end
+    if bottom<=top then return end
+    local moving=overflow_x>0.5 or overflow_y>0.5
+    if moving then text_scroll_active=true end
+    local function pan(distance)
+        if distance<=0.5 then return 0 end
+        local duration=distance/(12*L.cs)
+        local phase=text_scroll_elapsed%(duration*2+4)
+        if phase<2 then return 0 end
+        if phase<2+duration then return (phase-2)*12*L.cs end
+        if phase<4+duration then return distance end
+        return math.max(0,distance-(phase-4-duration)*12*L.cs)
+    end
+    love.graphics.setScissor(offX+x,offY+top,width,bottom-top)
+    if overflow_x>0.5 then
+        for i,line in ipairs(lines) do
+            plain(line,x-pan(overflow_x),y+(i-1)*font:getHeight()-pan(overflow_y),px,color)
+        end
+    -- Wrapping was already measured above. Leave one rounding pixel so the
+    -- pixel-snapped printf box cannot wrap a measured line a second time.
+    else plain(table.concat(lines,"\n"),x,y-pan(overflow_y),px,color,"left",math.ceil(width)+1) end
+    if L.geometry then love.graphics.setScissor(offX+L.x,offY+L.band_top,L.w,L.band)
+    elseif letterbox then love.graphics.setScissor(offX,offY,W,H)
+    else love.graphics.setScissor() end
+end
 local function vcen(px, h) return (h - body_fnt(px):getHeight())/2 end
 local function centred_text_y(px,y,h,optical_offset)
     return y+(h-body_fnt(px):getHeight())/2+(optical_offset or 0)
@@ -439,6 +498,7 @@ function kit.set_page(index,title,rows,opts)
             if zone=="sidebar" then sidebar_i=find_focus_identity(page.sidebar,old_sidebar_id) or nearest_focus(page.sidebar,sidebar_i) end
         else
             zone="rows"; focus_i=default_focus_index(page.rows); sidebar_i=first_focusable(page.sidebar); bar_i=1; scroll_top=1; scroll_y=0
+            text_scroll_elapsed=0
         end
     end
     normalize_focus()
@@ -633,7 +693,8 @@ function kit.debug_sidebar_geometry()
     if not layout or not sidebar_geometry then return nil end
     local L=layout(); local g=sidebar_geometry(L)
     local out={scroll=g.scroll,first=g.scroll_first,per=g.per,bar=g.scroll_bar,
-        total=g.scroll_total,bottom=g.scroll_bottom}
+        total=g.scroll_total,bottom=g.scroll_bottom,
+        viewport_top=g.viewport_top,viewport_bottom=g.viewport_bottom}
     out.band_top=L.band_top; out.band=L.band; out.cs=L.cs
     local side=pages[page_i].sidebar or {}
     for i=1,#side do if g[i] then out["y"..i]=g[i].y; out["h"..i]=g[i].h end end
@@ -700,7 +761,9 @@ local function move_scope(dx,dy)
     for _,index in ipairs(focusables(sidebar())) do
         local g=geometry[index]
         if g then side.children[#side.children+1]={id="sidebar:"..index,zone="sidebar",index=index,
-            rect={x=g.x,y=g.y,w=g.w,h=g.h},focusable=true} end
+            -- Inside the scroll container use content order, including pinned
+            -- actions after the list. Cross-container search uses screen space.
+            rect={x=g.x,y=(zone=="sidebar" and dy~=0) and (g.focus_y or g.y) or g.y,w=g.w,h=g.h},focusable=true} end
     end
     local tree={id="page",axis="y",children={
         {id="header",zone="bar",index=1,focusable=true,rect={x=0,y=0,w=W,h=1}},
@@ -969,6 +1032,7 @@ end
 -- ── Actions ──────────────────────────────────────────────────────────
 local function goto_page(n)
     if not pages[n] then return end
+    text_scroll_elapsed=0
     page_i=n; zone="rows"; focus_i=default_focus_index(cur()); sidebar_i=focusables(sidebar())[1] or 1; bar_i=1; scroll_top=1; scroll_y=0
     normalize_focus()
     kit.mark_dirty()
@@ -1125,6 +1189,9 @@ end
 
 function kit.update(dt)
     dt=tonumber(dt) or 0
+    if text_scroll_active and not (busy or dialog_state or guide_state or password_state) then
+        text_scroll_elapsed=text_scroll_elapsed+dt; kit.mark_dirty()
+    end
     if busy then busy_elapsed=busy_elapsed+dt end
     if toast_state then
         toast_state.elapsed=toast_state.elapsed+dt
@@ -1150,18 +1217,19 @@ end
 -- 0 means "wake as soon as the animation FPS budget allows".
 function kit.wake_interval()
     if kit.is_animating() then return 0 end
+    local text_wake=text_scroll_active and not (busy or dialog_state or guide_state or password_state) and 1/30 or nil
     if busy then return 0.1 end
     if toast_state then
         local edge=0.22
         local remaining=math.max(0,toast_state.duration-toast_state.elapsed)
         if remaining<=edge then return 0 end
-        return remaining-edge
+        return math.min(text_wake or remaining-edge,remaining-edge)
     end
     if port and type(port.wake_interval)=="function" then
         local ok,value=pcall(port.wake_interval,kit,state)
-        if ok and type(value)=="number" and value>=0 then return value end
+        if ok and type(value)=="number" and value>=0 then return math.min(text_wake or value,value) end
     end
-    return nil
+    return text_wake
 end
 
 
@@ -1221,13 +1289,14 @@ layout=function()
                     if row.kind~="textview" then return rh end
                     local pad=12*cs
                     local label_px=(row.label_px or 17)*cs
-                    local value_px=(row.value_px or 19)*cs
-                    local label_font,value_font=body_fnt(label_px),body_fnt(value_px); local inner_w=width-pad*2
+                    local inner_w=width-pad*2
+                    local _,value_font=textview_value(row,inner_w,cs)
+                    local label_font=body_fnt(label_px)
                     local _,label_lines=wrapped_text(row.label,label_font,inner_w,2)
                     local label_h=label_lines*label_font:getHeight()
                     local requested=row.expanded and row.expanded_lines or row.max_lines
                     local max_fit=math.max(1,math.floor((band-pad*2-label_h-5*cs)/value_font:getHeight()))
-                    local _,value_lines=wrapped_text(row.value,value_font,inner_w,math.min(requested,max_fit))
+                    local value_lines=math.min(#textview_lines(row.value,value_font,inner_w,row.preserve_lines),requested,max_fit)
                     local value_h=value_lines*value_font:getHeight()
                     return math.max(rh,pad+label_h+5*cs+value_h+pad)
                 end
@@ -1469,7 +1538,25 @@ sidebar_geometry=function(L)
         (#footer_lines*SIDEBAR_FOOTER_LINE_H+SIDEBAR_FOOTER_PAD)*L.cs or 0
     local top_limit=bottom_y-(footer_h>0 and footer_h+L.gap or 0)
     local avail=top_limit-(L.band_top+45*L.cs)
-    local total=#ordinary*rh+math.max(0,#ordinary-1)*gap
+    -- Half-width siblings share a layout row, not two scroll steps.
+    local layout_rows={}
+    for _,index in ipairs(ordinary) do
+        local g=geometry[index]
+        local last=layout_rows[#layout_rows]
+        if not last or last.y~=g.y then
+            last={y=g.y,indices={}}; layout_rows[#layout_rows+1]=last
+        end
+        last.indices[#last.indices+1]=index
+    end
+    local total=#layout_rows*rh+math.max(0,#layout_rows-1)*gap
+    for _,index in ipairs(ordinary) do geometry[index].focus_y=geometry[index].y end
+    local pinned_y=y
+    for index,row in ipairs(side) do
+        if row.group=="bottom" then
+            geometry[index].focus_y=pinned_y
+            pinned_y=pinned_y+rh+gap
+        end
+    end
     if total>avail and #ordinary>0 then
         local step=rh+gap
         -- Scroll affordance bars (18px each) at the top and bottom of the
@@ -1477,11 +1564,18 @@ sidebar_geometry=function(L)
         local scroll_bar=18*L.cs
         -- Top bar sits above the buttons (they start at +scroll_bar); the
         -- bottom bar uses the leftover space below the last visible button.
-        local per=math.max(1,math.floor((avail+gap)/step))
-        per=math.min(per,#ordinary)
-        local k=1
-        for idx,v in ipairs(ordinary) do if v==sidebar_i then k=idx end end
-        local scroll_first=math.max(1,math.min(k-per+1,#ordinary-per+1))
+        local per=math.max(1,math.floor((avail-2*scroll_bar+gap)/step))
+        per=math.min(per,#layout_rows)
+        local k
+        for idx,row in ipairs(layout_rows) do
+            for _,v in ipairs(row.indices) do if v==sidebar_i then k=idx end end
+        end
+        local scroll_first=math.max(1,math.min(page.sidebar_scroll_first or 1,#layout_rows-per+1))
+        if k then
+            if k<scroll_first then scroll_first=k
+            elseif k>=scroll_first+per then scroll_first=k-per+1 end
+        end
+        page.sidebar_scroll_first=scroll_first
         local dy=(scroll_first-1)*step
         for idx=1,#ordinary do
             local g=geometry[ordinary[idx]]; g.y=g.y-dy+scroll_bar
@@ -1489,10 +1583,12 @@ sidebar_geometry=function(L)
         geometry.scroll=step; geometry.per=per
         geometry.scroll_first=scroll_first
         geometry.scroll_bar=scroll_bar
-        geometry.scroll_total=#ordinary
+        geometry.scroll_total=#layout_rows
         geometry.scroll_bottom=top_limit
-        local last_vis=math.min(scroll_first+per-1,#ordinary)
-        local lg=geometry[ordinary[last_vis]]
+        geometry.viewport_top=L.band_top+45*L.cs+scroll_bar
+        geometry.viewport_bottom=top_limit-scroll_bar
+        local last_vis=math.min(scroll_first+per-1,#layout_rows)
+        local lg=geometry[layout_rows[last_vis].indices[1]]
         if lg then geometry.scroll_last_y=lg.y+lg.h end
     end
     return geometry
@@ -1869,6 +1965,7 @@ end
 
 
 function kit.draw()
+    text_scroll_active=false
     if letterbox then love.graphics.push(); love.graphics.translate(offX,offY); love.graphics.setScissor(offX,offY,W,H) end
 
     local L = layout()
@@ -1978,15 +2075,14 @@ function kit.draw()
             end
             local pad=12*L.cs
             local label_px=(r.label_px or 17)*L.cs
-            local value_px=(r.value_px or 19)*L.cs
-            local label_font,value_font=body_fnt(label_px),body_fnt(value_px); local inner_w=rw-pad*2
-            local label,label_lines=wrapped_text(r.label,label_font,inner_w,2)
+            local inner_w=rw-pad*2
+            local value_px,value_font=textview_value(r,inner_w,L.cs)
+            local label_font=body_fnt(label_px)
+            local _,label_lines=wrapped_text(r.label,label_font,inner_w,2)
             local label_h=label_lines*label_font:getHeight()
-            local requested=r.expanded and r.expanded_lines or r.max_lines
-            local max_fit=math.max(1,math.floor((row_h-pad*2-label_h-5*L.cs)/value_font:getHeight()))
-            local value=wrapped_text(r.value,value_font,inner_w,math.min(requested,max_fit))
-            plain(label,x+pad,y+pad,label_px,{0.72,0.72,0.82},"left",inner_w)
-            plain(value,x+pad,y+pad+label_h+5*L.cs,value_px,{1,1,1},"left",inner_w)
+            local value_h=math.max(1,row_h-pad*2-label_h-5*L.cs)
+            draw_textview_text(r.label,label_font,label_px,x+pad,y+pad,inner_w,label_h,{0.72,0.72,0.82},L)
+            draw_textview_text(r.value,value_font,value_px,x+pad,y+pad+label_h+5*L.cs,inner_w,value_h,{1,1,1},L,r.preserve_lines)
         elseif r.kind=="button" and r.detail then
             -- Two-line action card (home feature matrix): label on top,
             -- status line below, optional badge top-right.
@@ -2146,8 +2242,7 @@ function kit.draw()
             -- not paint over the title or the chevron bars (a partially
             -- visible stray item above the window used to cover the title).
             if visible and L.app and geometry.scroll and side[i].group~="bottom" then
-                local top_edge=L.band_top+45*L.cs+(geometry.scroll_bar or 18*L.cs)
-                if g.y<top_edge-1 then visible=false end
+                if g.y<geometry.viewport_top-0.01 or g.y+g.h>geometry.viewport_bottom+0.01 then visible=false end
             end
             if visible then
                 panel(g.x,g.y,g.w,g.h,zone=="sidebar" and i==sidebar_i,disabled(r),L.app)
@@ -2286,6 +2381,7 @@ local function password_input(action)
 end
 
 function kit.input(action)
+    text_scroll_elapsed=0
     normalize_focus()
     bar_i=math.max(1,math.min(bar_i,#bar_items()))
     local handled
