@@ -2,17 +2,18 @@
   "name": "heishenhua",
   "title": "Wukong pixel edition",
   "engine": "Unity 2021.3 (IL2CPP)",
-  "runtime": "Bogodroid unityloader",
+  "runtime": "Rudroid",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": [
-    "TrimUI Smart Pro/Brick"
+    "TrimUI Smart Pro/Brick",
+    "MiniLoong Pocket One"
   ],
   "language": [
     "zh-CN"
   ],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "heishenhua",
-  "script": "[中]黑神话悟空-像素版.sh",
+  "script": "H_黑神话像素版[中].sh",
   "gptk": "love/ui.gptk",
   "launcher_tools": [
     "font-provision",
@@ -29,7 +30,7 @@
     }
   },
   "depends_on": [
-    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "https://github.com/jenny92-tech/rudroid (unityloader)",
     "PortMaster runtimes/love_11.5"
   ]
 }

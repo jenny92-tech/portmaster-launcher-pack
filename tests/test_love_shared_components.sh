@@ -45,8 +45,8 @@ grep -Fq 'function launcher.select' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'k.switch(f.label_key' "$ROOT/_kit/love/launcher.lua"
 grep -Fq 'k.select(f.label_key' "$ROOT/_kit/love/launcher.lua"
 
-# All Bogodroid launchers use the matching private C++ runtime before any
-# game- or firmware-provided libraries.
+# The legacy C++ loader requires the matching private C++ runtime; Rudroid accepts
+# an optional bundle in the same position.
 unity_common="$ROOT/_kit/launcher_unity_common.sh"
 grep -Fq 'prepare_unityloader_private_libs()' "$unity_common"
 grep -Fq 'for library in libstdc++.so.6 libgcc_s.so.1' "$unity_common"
@@ -59,9 +59,8 @@ grep -Fq 'UNITY_GAME_GPTK_CONFIG' "$unity_common"
 grep -Fq '$GPTOKEYB unityloader -c "$UNITY_GAME_GPTK_CONFIG" &' "$unity_common"
 grep -Fq 'game_input_pid=$!' "$unity_common"
 grep -Fq 'kill "$game_input_pid"' "$unity_common"
-grep -Fq 'resolve_render_scale()' "$unity_common"
-grep -Fq 'apply_render_scale()' "$unity_common"
-grep -Fq -- '--render-percent "$RENDER_SCALE_PERCENT"' "$unity_common"
+grep -Fq 'configure_unity_display()' "$unity_common"
+grep -Fq -- '--render-percent "$render"' "$unity_common"
 
 # Unity launchers expose physical output and internal rendering as independent
 # settings, then apply both through the same shared shell protocol.
@@ -124,7 +123,7 @@ grep -Fq 'state.onboarding_seen~="1" and not preserve_focus' "$app_lua/app_pages
 grep -Fq 'on_home_cancel=operations.show_exit_dialog' "$app_lua/main.lua"
 grep -Fq 'onboarding_seen="0"' "$app_lua/main.lua"
 grep -Fq 'kit.guide({' "$app_lua/app_pages.lua"
-grep -Fq 'Port 游戏维护工具，共五个功能：卸载管理、一键安装、垃圾清理、Port Runtime 和 PortMaster 管理。' "$app_lua/app_pages.lua"
+grep -Fq 'Port 游戏维护工具，本教程共六项：卸载管理、一键安装、垃圾清理、Port Runtime、PortMaster 管理，以及开发与反馈。' "$app_lua/app_pages.lua"
 grep -Fq '开始使用' "$app_lua/app_pages.lua"
 grep -Fq 'target="home:junk"' "$app_lua/app_pages.lua"
 grep -Fq 'id="leftovers:rules"' "$app_lua/app_pages.lua"

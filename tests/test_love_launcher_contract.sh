@@ -23,11 +23,11 @@ for file in kit.lua launcher.lua conf.lua ui.gptk; do
   }
 done
 [ -x "$ROOT/ports/hk/dist/bin/portkit-launcher" ]
-! grep -Eq 'unzip|xz -dc|tar xf|grep -oE' "$ROOT/ports/hk/dist/[中]空洞骑士.sh"
-! grep -Fq 'python3 -' "$ROOT/ports/hk/dist/[中]空洞骑士.sh"
-grep -Fq 'portkit_launcher json merge' "$ROOT/ports/hk/dist/[中]空洞骑士.sh"
-grep -Fq 'portkit_launcher unity configure' "$ROOT/ports/hk/dist/[中]空洞骑士.sh"
-! grep -Eq '^[[:space:]]*awk -v .*a=' "$ROOT/ports/hk/dist/[中]空洞骑士.sh"
+! grep -Eq 'unzip|xz -dc|tar xf|grep -oE' "$ROOT/ports/hk/dist/K_空洞骑士[中].sh"
+! grep -Fq 'python3 -' "$ROOT/ports/hk/dist/K_空洞骑士[中].sh"
+grep -Fq 'portkit_launcher json merge' "$ROOT/ports/hk/dist/K_空洞骑士[中].sh"
+grep -Fq 'portkit_launcher unity configure' "$ROOT/ports/hk/dist/K_空洞骑士[中].sh"
+! grep -Eq '^[[:space:]]*awk -v .*a=' "$ROOT/ports/hk/dist/K_空洞骑士[中].sh"
 
 # Every migrated launcher declares its legacy Godot env so existing choices survive
 # the first LÖVE launch.
@@ -53,7 +53,7 @@ for port in heishenhua hk sts2 terraria vampiresurvivors114; do
 done
 
 # Every Unity settings launcher separates physical output from internal render
-# scale and applies the shared Native/75%/50% protocol.
+# scale and applies the shared Game preset/100%/75%/50% protocol.
 for port in heishenhua hk silksong sunkendragon terraria vampiresurvivors114; do
   grep -Fq 'launcher.output_resolution' "$ROOT/ports/$port/love/main.lua"
   grep -Fq 'launcher.render_scale' "$ROOT/ports/$port/love/main.lua"
@@ -63,7 +63,8 @@ done
 
 # Pixel Wukong keeps pixel edges sharp while its existing quality picker
 # continues to own the texture dimension cap.
-grep -Fq 'textureDownsampleFilter = "nearest"' "$ROOT/ports/heishenhua/love/launcher.sh.template"
+grep -Fq '\"textureDownsampleFilter\":\"nearest\"' "$ROOT/ports/heishenhua/love/launcher.sh.template"
+! grep -Fq "'/^\\[ui_layout\\]/,\u0024d'" "$ROOT/ports/heishenhua/love/launcher.sh.template"
 grep -Fq '[ -d "$LAUNCHERDIR/love_ui" ] || LAUNCHERDIR="$GAMEDIR"' "$ROOT/ports/silksong/love/launcher.sh.template"
 
 # Build one representative port and assert the common files are materialized in dist.

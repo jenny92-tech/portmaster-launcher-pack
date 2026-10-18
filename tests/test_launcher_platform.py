@@ -148,12 +148,141 @@ portkit_launcher() { printf '%s\n' "$runtime"; }
 _love_provide_font() { :; }
 launcher_platform_display() { return 1; }
 pm_platform_helper() { :; }
-fake_love() { printf 'ui=%s\n' "${SDL_VIDEODRIVER:-auto}"; return 42; }
+fake_love() { printf "NEW='settings'\n" > "$1/launch_config.env"; printf 'ui=%s\n' "${SDL_VIDEODRIVER:-auto}"; return 42; }
 run_love_launcher_ui "$GAMEDIR"
 printf 'game=%s|%s|%s\n' "$SDL_VIDEODRIVER" "$LIBGL_FB" "$launcher_exit"
 ''', ROOT / '_kit/portmaster_common.sh', fixture, runtime)
             self.assertIn('ui=auto', result)
             self.assertIn('game=kmsdrm|parent|42', result)
+
+    def test_unavailable_ui_does_not_return_a_stale_environment(self):
+        with tempfile.TemporaryDirectory(prefix='pk-') as tmp:
+            fixture = pathlib.Path(tmp)
+            stale = fixture / 'launch_config.env'
+            stale.write_text("STALE='do not source'\n")
+            result = self.shell(r'''
+source "$1"
+GAMEDIR="$2"; controlfolder="$2"; LOG_PREFIX=test
+portkit_launcher() { :; }
+run_love_launcher_ui "$GAMEDIR"
+printf 'env=<%s>\n' "$LAUNCH_ENV"
+''', ROOT / '_kit/portmaster_common.sh', fixture)
+            self.assertIn('env=<>', result)
+            self.assertEqual(stale.read_text(), "STALE='do not source'\n")
+
+    def test_failed_ui_or_missing_saved_environment_prevents_game_handoff(self):
+        for code, save in ((17, False), (42, False), (42, True), (0, False)):
+            with self.subTest(code=code, save=save), tempfile.TemporaryDirectory(prefix='pk-') as tmp:
+                fixture = pathlib.Path(tmp)
+                (fixture / 'main.lua').write_text('-- fixture\n')
+                (fixture / 'launch_config.env').write_text("OLD='stale'\n")
+                runtime = fixture / 'runtime.txt'
+                runtime.write_text('LOVE_GPTK=fake\nLOVE_RUN=fake_love\nGPTOKEYB=true\n')
+                body = r'''
+source "$1"
+GAMEDIR="$2"; controlfolder="$2"; runtime="$3"; code="$4"; save="$5"
+LOG_PREFIX=test
+portkit_launcher() { printf '%s\n' "$runtime"; }
+_love_provide_font() { :; }
+launcher_platform_display() { return 1; }
+launcher_platform_finish() { echo FINISHED; }
+pm_platform_helper() { :; }
+fake_love() {
+  if [ "$save" = yes ]; then printf "NEW='complete'\n" > "$1/launch_config.env"; fi
+  return "$code"
+}
+cd /
+run_love_launcher_ui "$GAMEDIR"
+printf 'HANDOFF=%s\n' "$LAUNCH_ENV"
+'''
+                result = subprocess.run(
+                    ['bash', '-c', 'source "$1"\nshift\n' + body, 'ui-test', str(PLATFORM),
+                     str(ROOT / '_kit/portmaster_common.sh'), str(fixture), str(runtime),
+                     str(code), 'yes' if save else 'no'], text=True, capture_output=True)
+                if code == 42 and save:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('HANDOFF=' + str(fixture.resolve() / 'launch_config.env'), result.stdout)
+                else:
+                    self.assertNotIn('HANDOFF=', result.stdout)
+                    self.assertIn('FINISHED', result.stdout)
+                    self.assertEqual(result.returncode, 0 if code == 0 else 1, result.stderr)
+
+    def test_rudroid_private_cpp_runtime_is_optional_and_legacy_bundle_is_checked(self):
+        with tempfile.TemporaryDirectory(prefix='pk-') as tmp:
+            fixture = pathlib.Path(tmp)
+            runtime = fixture / 'rudroid.runtime'
+            runtime.mkdir()
+            body = r'''
+source "$1"
+GAMEDIR="$2"; LOG_PREFIX=test; LD_LIBRARY_PATH=/existing
+prepare_unityloader_private_libs
+'''
+            self.shell(body, ROOT / '_kit/launcher_unity_common.sh', fixture)
+            runtime.rmdir()
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.shell(body, ROOT / '_kit/launcher_unity_common.sh', fixture)
+            private = fixture / 'unityloader.libs'
+            private.mkdir()
+            (private / 'libstdc++.so.6').touch()
+            (private / 'libgcc_s.so.1').touch()
+            result = self.shell(body + '\nprintf "%s" "$LD_LIBRARY_PATH"',
+                                ROOT / '_kit/launcher_unity_common.sh', fixture)
+            self.assertEqual(result, str(private) + ':/existing')
+
+    def test_separate_unity_runtime_keeps_game_paths_and_routes_executables(self):
+        with tempfile.TemporaryDirectory(prefix='pk-') as tmp:
+            base = pathlib.Path(tmp)
+            game = base / 'game data'
+            runtime = base / 'executable runtime'
+            game.mkdir()
+            (runtime / 'rudroid.runtime').mkdir(parents=True)
+            (runtime / 'bin').mkdir()
+            for relative in ('unityloader', 'gptokeyb', 'bin/portkit-launcher'):
+                path = runtime / relative
+                path.write_text('#!/bin/sh\nexit 0\n')
+                path.chmod(0o755)
+            result = self.shell(r'''
+source "$1"
+GAMEDIR="$2"; UNITY_RUNTIME_DIR="$3"; LOG_PREFIX=test
+resolve_unity_runtime || exit 1
+prepare_unityloader_private_libs || exit 1
+printf '%s|%s|%s|%s' "$GAMEDIR" "$UNITY_RUNTIME_DIR" "$PORTKIT_LAUNCHER_BIN_OVERRIDE" "$GPTOKEYB"
+''', ROOT / '_kit/launcher_unity_common.sh', game, runtime)
+            self.assertEqual(result, '|'.join(map(str, [game, runtime, runtime / 'bin/portkit-launcher', runtime / 'gptokeyb'])))
+            (runtime / 'unityloader').unlink()
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.shell(r'''
+source "$1"
+GAMEDIR="$2"; UNITY_RUNTIME_DIR="$3"; LOG_PREFIX=test
+resolve_unity_runtime || exit 1
+''', ROOT / '_kit/launcher_unity_common.sh', game, runtime)
+
+    def test_cached_love_runs_with_its_libraries_only_inside_ui_process(self):
+        with tempfile.TemporaryDirectory(prefix='pk-') as tmp:
+            fixture = pathlib.Path(tmp)
+            (fixture / 'main.lua').write_text('-- fixture\n')
+            runtime = fixture / 'executable runtime'
+            (runtime / 'love/libs.aarch64').mkdir(parents=True)
+            executable = runtime / 'love/love.aarch64'
+            executable.write_text('#!/bin/sh\nprintf "NEW=settings\\n" > "$1/launch_config.env"\nprintf "UI_LIBS=%s\\n" "$LD_LIBRARY_PATH"\nexit 42\n')
+            executable.chmod(0o755)
+            runtime_txt = fixture / 'love.txt'
+            runtime_txt.write_text('LOVE_GPTK=love.aarch64\nLOVE_RUN=wrong_love\nGPTOKEYB=true\n')
+            result = self.shell(r'''
+source "$1"
+GAMEDIR="$2"; controlfolder="$2"; runtime_txt="$3"; UNITY_RUNTIME_DIR="$4"
+LOG_PREFIX=test; LD_LIBRARY_PATH=/parent
+portkit_launcher() { printf '%s\n' "$runtime_txt"; }
+_love_provide_font() { :; }
+launcher_platform_display() { return 1; }
+pm_platform_helper() { :; }
+wrong_love() { echo WRONG_RUNTIME; return 17; }
+run_love_launcher_ui "$GAMEDIR"
+printf 'GAME_LIBS=%s\n' "$LD_LIBRARY_PATH"
+''', ROOT / '_kit/portmaster_common.sh', fixture, runtime_txt, runtime)
+            self.assertIn('UI_LIBS=' + str(runtime / 'love/libs.aarch64') + ':/parent', result)
+            self.assertIn('GAME_LIBS=/parent', result)
+            self.assertNotIn('WRONG_RUNTIME', result)
 
     def test_legacy_exec_identity_is_centralized(self):
         body = r'''

@@ -25,7 +25,10 @@ launcher.define {
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, default = "on", env = "SLL_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "SLL_SWAP_XY"},
     },
-    field_order = {"language", "quality", "swap_ab", "swap_xy"},
+    pages = {
+        {title = "title", rows = {"language", "quality", launcher.button("advanced", "page:2")}},
+        {title = "advanced_title", fields = {"swap_ab", "swap_xy"}, actions = {"start", "back"}},
+    },
     static_env = {{"SLL_PCK_VARIANT", "8x8"}},
     legacy = {
         path = "../conf/godot/app_userdata/STS2 Linux Launcher/launch_config.env",

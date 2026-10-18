@@ -1,11 +1,12 @@
 -- INPUT:  kit 与端口字段/页面/环境绑定声明
--- OUTPUT: launcher.define/select/toggle/resolution/output_resolution/render_scale/button()
+-- OUTPUT: declarative launchers, render/memory/API fields, capability-bound controls and effective launch values
 -- POS:    从声明式设置生成默认状态、校验、旧设置导入及启动配置输出
 -- Declarative launcher schema built on the shared UI kit.
 -- A port describes fields/pages/env bindings; this module derives state,
 -- validation, legacy imports, widgets and launch_config.env serialization.
 
 local kit = require("kit")
+local graphics = require("graphics")
 local launcher = {}
 
 local DEFAULT_RESOLUTIONS = {"auto", "640x480", "720x720", "960x540", "960x720", "1280x720"}
@@ -18,6 +19,7 @@ local DEFAULT_RESOLUTION_LABELS = {
     ["1280x720"] = "1280×720",
 }
 local DEFAULT_RENDER_SCALE_OPTIONS = {
+    {"config", {en = "Game preset", zh = "跟随游戏预设"}},
     {"100", {en = "Native (100%)", zh = "原生 (100%)"}},
     {"75", {en = "Balanced (75%)", zh = "平衡 (75%)"}},
     {"50", {en = "Performance (50%)", zh = "性能 (50%)"}},
@@ -68,10 +70,40 @@ end
 function launcher.render_scale(spec)
     spec = copy(spec)
     spec.key = spec.key or "render_scale"
-    spec.label = spec.label or {en = "Render Scale:", zh = "渲染比例:"}
+    spec.label = spec.label or {en = "Render Resolution:", zh = "渲染分辨率:"}
     spec.options = spec.options or DEFAULT_RENDER_SCALE_OPTIONS
-    spec.default = spec.default or "100"
+    spec.default = spec.default or "config"
     return field("select", spec)
+end
+
+function launcher.memory_mode(spec)
+    spec = copy(spec)
+    spec.key = spec.key or "memory_mode"
+    spec.label = spec.label or {en = "Memory Mode:", zh = "内存模式:"}
+    spec.default = spec.default or "balanced"
+    spec.options = spec.options or {
+        {"low_memory", {en = "Low memory", zh = "低内存"}},
+        {"balanced", {en = "Balanced", zh = "均衡"}},
+        {"performance", {en = "High memory", zh = "高内存"}},
+    }
+    return field("select", spec)
+end
+
+-- The selected backend is the launched backend; unsupported values are disabled.
+function launcher.graphics_api(spec)
+    spec = copy(spec)
+    spec.key = spec.key or "graphics_api"
+    spec.label = spec.label or {en="Graphics Backend:",zh="图形后端:"}
+    spec.graphics = graphics.detect(spec.vulkan,spec.preferred)
+    spec.default = spec.graphics.default_api()
+    spec.options = {{"gles","OpenGL ES"}}
+    spec.disabled_values = {gles=not spec.graphics.supports("gles")}
+    if spec.vulkan then
+        local available=spec.graphics.supports("vulkan")
+        spec.disabled_values.vulkan=not available
+        spec.options[#spec.options+1]={"vulkan","Vulkan"}
+    end
+    return field("select",spec)
 end
 
 function launcher.button(label, action)
@@ -110,7 +142,8 @@ end
 local function write_pair(out, name, value)
     value=tostring(value)
     local quoted="'"..value:gsub("'","'\"'\"'").."'"
-    out:write(name .. "=" .. quoted .. "\n")
+    local ok, err = out:write(name .. "=" .. quoted .. "\n")
+    if not ok then error(err or "could not write launcher settings", 0) end
 end
 
 function launcher.define(spec)
@@ -118,6 +151,8 @@ function launcher.define(spec)
     local fields, by_key = {}, {}
 
     port.strings.title = spec.title
+    port.strings.advanced = {en = "Advanced  >", zh = "高级设置  >"}
+    port.strings.advanced_title = {en = "Advanced", zh = "高级设置"}
     for key, value in pairs(spec.strings or {}) do port.strings[key] = value end
 
     for _, original in ipairs(spec.fields or {}) do
@@ -143,6 +178,26 @@ function launcher.define(spec)
         end
     end
 
+    local field_rows={}
+    local function effective(state)
+        local f=by_key.graphics_api
+        return f and f.graphics.resolve(state) or nil
+    end
+    local function refresh(k)
+        local resolved=effective(k.get_state())
+        if not resolved then return end
+        for key,row in pairs(field_rows) do
+            local f=by_key[key]
+            local control=resolved.controls[key] or {}
+            local unsupported=f.requires_feature and not resolved.features[f.requires_feature]
+            row.disabled=control.disabled or unsupported or false
+            row.display_value=row.disabled and {en="Disabled",zh="禁用"} or nil
+        end
+        k.mark_dirty()
+    end
+    port.refresh_graphics=refresh
+    port.effective_graphics=effective
+
     port.build_pages = function(k)
         local default_order={}; for _,f in ipairs(fields) do default_order[#default_order+1]=f.key end
         local pages = spec.pages or {{title = "title", fields = spec.field_order or default_order}}
@@ -151,12 +206,15 @@ function launcher.define(spec)
             for _, entry in ipairs(page.rows or page.fields or {}) do
                 local f = type(entry) == "string" and by_key[entry] or nil
                 if f then
+                    local row
                     if f.kind=="toggle" then
-                        rows[#rows + 1] = k.switch(f.label_key, f.key,
-                            {id=f.key,off_value=f.values[1],on_value=f.values[2]})
+                        row=k.switch(f.label_key,f.key,{id=f.key,off_value=f.values[1],on_value=f.values[2]})
                     else
-                        rows[#rows + 1] = k.select(f.label_key, f.values, f.labels, f.key, {id=f.key})
+                        row=k.select(f.label_key,f.values,f.labels,f.key,{id=f.key,disabled_values=f.disabled_values})
                     end
+                    row.on_change=function() refresh(k) end
+                    rows[#rows+1]=row
+                    field_rows[f.key]=row
                 elseif type(entry) == "table" and entry.kind == "button" then
                     local key = add_localized(port.strings, "page_" .. page_index .. "_button_" .. (#rows + 1), entry.label)
                     rows[#rows + 1] = k.button(key, entry.action)
@@ -165,7 +223,7 @@ function launcher.define(spec)
             for _, action in ipairs(page.actions or {"start", "quit"}) do
                 if action == "start" then rows[#rows + 1] = k.button("start_game", "start")
                 elseif action == "quit" then rows[#rows + 1] = k.button("quit_menu", "quit")
-                elseif action == "back" then rows[#rows + 1] = k.button("back", "page:1")
+                elseif action == "back" then rows[#rows + 1] = k.button("back", k.back_page)
                 elseif type(action) == "table" then
                     local key = add_localized(port.strings, "page_" .. page_index .. "_action_" .. (#rows + 1), action.label)
                     rows[#rows + 1] = k.button(key, action.action)
@@ -174,9 +232,17 @@ function launcher.define(spec)
             local title = add_localized(port.strings, "page_" .. page_index .. "_title", page.title or "title")
             k.add_page(title, rows)
         end
+        refresh(k)
     end
 
     port.write_env = function(out, state, k)
+        for _, f in ipairs(fields) do
+            if f.graphics then
+                local ok,reason=f.graphics.validate(state)
+                if not ok then return false,reason end
+            end
+        end
+        local resolved=effective(state)
         for _, item in ipairs(spec.static_env or {}) do write_pair(out, item[1], item[2]) end
         for _, f in ipairs(fields) do
             if f.env_kind == "resolution" then
@@ -184,11 +250,24 @@ function launcher.define(spec)
                 write_pair(out, f.env[1], w)
                 write_pair(out, f.env[2], h)
             elseif type(f.env) == "string" then
-                write_pair(out, f.env, encoded_value(f, state[f.key]))
+                local value=state[f.key]
+                if resolved then
+                    if f.key=="graphics_api" then value=resolved.api
+                    elseif f.key=="render_scale" then value=resolved.render_scale
+                    elseif f.requires_feature and not resolved.features[f.requires_feature] then
+                        assert(f.unavailable_value~=nil,"capability-bound field needs an unavailable value")
+                        value=f.unavailable_value
+                    end
+                end
+                write_pair(out, f.env, encoded_value(f, value))
             end
         end
         if spec.launch_count_env then write_pair(out, spec.launch_count_env, state.launch_count) end
-        if spec.write_env then spec.write_env(out, state, k) end
+        if spec.write_env then
+            local ok, err = spec.write_env(out, state, k)
+            if ok == false then return false, err end
+        end
+        return true
     end
 
     port.validate_state = function(state)
@@ -198,7 +277,9 @@ function launcher.define(spec)
             for _,value in ipairs(f.values) do
                 if state[f.key]==value then valid=true; break end
             end
-            if not valid then state[f.key]=f.default; changed=true end
+            if not valid or (f.graphics and not f.graphics.supports(state[f.key])) then
+                if state[f.key]~=f.default then state[f.key]=f.default; changed=true end
+            end
         end
         return changed
     end

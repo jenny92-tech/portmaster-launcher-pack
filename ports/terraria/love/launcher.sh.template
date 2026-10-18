@@ -51,8 +51,11 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-# One toml name across all ports; legacy installs are renamed in place.
-resolve_port_toml
+resolve_unity_runtime || exit 1
+prepare_unity_graphics_options 0
+
+# Resolve the fixed game-local config path before any settings are written.
+resolve_port_toml || exit 1
 
 # ═══════════════ STAGE 0: first-launch APK extract (only if APK present) ══
 # If the player has dropped an APK into gamedata/ and setup hasn't run yet,
@@ -116,20 +119,21 @@ apply_terraria_language() {
 
 # ═══════════════ STAGE 2: patch config.toml from launcher choices ══════════
 TER_ENV="$LAUNCH_ENV"
+[ ! -f "$TER_ENV" ] || source "$TER_ENV"
+resolve_unity_graphics_api "${TER_GRAPHICS_API:-gles}" gles || exit 1
 if [ -f "$TER_ENV" ]; then
-  source "$TER_ENV"
-  echo "$LOG_PREFIX env: output=${TER_WIDTH}x${TER_HEIGHT} render_percent=${TER_RENDER_PERCENT:-100} language=$TER_LANGUAGE swap_ab=$TER_SWAP_AB swap_xy=$TER_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${TER_WIDTH}x${TER_HEIGHT} render_percent=${TER_RENDER_PERCENT:-config} language=$TER_LANGUAGE swap_ab=$TER_SWAP_AB swap_xy=$TER_SWAP_XY"
 
   if [ "$TER_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$TER_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V" || exit 1
 else
   echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
 
 # Outside the env branch on purpose: without a launcher UI there is no env, and
 # the resolution must still follow this device's panel.
-configure_unity_display "$PORT_TOML" "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}" "${TER_RENDER_PERCENT:-100}" || exit 1
+configure_unity_display "$PORT_TOML" "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}" "${TER_RENDER_PERCENT:-config}" "${TER_MEMORY_MODE:-}" "$UNITY_GRAPHICS_API" || exit 1
 
 # Do NOT remap start -> ENTER here. Forcing start="ENTER" stole Start from
 # the in-game ☰ settings/pause menu, which only opens on KEYCODE_BUTTON_START,
@@ -137,7 +141,7 @@ configure_unity_display "$PORT_TOML" "${TER_WIDTH:-auto}" "${TER_HEIGHT:-auto}" 
 # the name on the soft-input keyboard and BD_SOFT_INPUT_CONFIRM_KEYS accepts
 # ENTER and BUTTON_START alike.
 
-apply_terraria_language
+apply_terraria_language || exit 1
 
 # No BD_SOFT_INPUT_DEFAULT: the name is typed, not prefilled. A default here
 # used to hand the loader a fixed name because the keyboard could not produce

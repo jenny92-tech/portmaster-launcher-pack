@@ -1,6 +1,6 @@
 -- INPUT:  launcher 共享声明式启动器框架
 -- OUTPUT: 像素黑神话设置/修改页面及 HSH_* 启动参数
--- POS:    像素黑神话的画面、按键和游戏辅助选项定义
+-- POS:    像素黑神话的画面、按键和游戏辅助选项定义，包含 Rudroid 三档内存
 local launcher = require("launcher")
 
 launcher.define {
@@ -18,13 +18,15 @@ launcher.define {
     fields = {
         launcher.output_resolution {env = {"HSH_WIDTH", "HSH_HEIGHT"}},
         launcher.render_scale {env = "HSH_RENDER_PERCENT"},
+        launcher.memory_mode {env = "HSH_MEMORY_MODE"},
+        launcher.graphics_api {env = "HSH_GRAPHICS_API"},
         launcher.select {
-            key = "texmax", label = {en = "Graphics:", zh = "画面质量:"}, default = "480", env = "HSH_TEXMAX",
+            key = "texmax", requires_feature = "texture_limits", unavailable_value = "0", label = {en = "Texture Quality:", zh = "纹理质量:"}, default = "480", env = "HSH_TEXMAX",
             options = {
-                {"384", {en = "Low (384)", zh = "低 (384)"}},
-                {"480", {en = "Medium (480)", zh = "中 (480)"}},
-                {"720", {en = "High (720)", zh = "高 (720)"}},
-                {"0", {en = "Ultra", zh = "极致 (不限)"}},
+                {"384", {en = "Low", zh = "低"}},
+                {"480", {en = "Medium", zh = "中"}},
+                {"720", {en = "High", zh = "高"}},
+                {"0", {en = "Original", zh = "原画"}},
             },
         },
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "HSH_SWAP_AB"},
@@ -45,7 +47,8 @@ launcher.define {
         launcher.toggle {key = "skill_cd", label = {en = "No Immob. CD:", zh = "定身无冷却:"}, env = "HSH_SKILL_CD"},
     },
     pages = {
-        {title = "title", rows = {"resolution", "render_scale", "texmax", "swap_ab", "swap_xy", launcher.button("cheats", "page:2")}, actions = {"start", "quit"}},
+        {title = "title", rows = {"render_scale", "memory_mode", launcher.button("advanced", "page:2")}, actions = {"start", "quit"}},
+        {title = "advanced_title", rows = {"resolution", "texmax", "swap_ab", "swap_xy", launcher.button("cheats", "page:3")}, actions = {"start", "back"}},
         {title = "cheat_title", fields = {"reduce", "inf_mp", "inf_sta", "inf_wine", "skill_cd"}, actions = {"start", "back"}},
     },
     legacy = {

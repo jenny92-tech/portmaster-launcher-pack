@@ -2,7 +2,7 @@
   "name": "silksong",
   "title": "Hollow Knight: Silksong",
   "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
-  "runtime": "Bogodroid unityloader",
+  "runtime": "Rudroid",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": [
     "MiniLoong Pocket One",
@@ -38,8 +38,8 @@
     }
   },
   "depends_on": [
-    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "https://github.com/jenny92-tech/rudroid (unityloader)",
     "PortMaster runtimes/love_11.5"
   ],
-  "notes": "Settings launcher for an existing Bogodroid Silksong runtime. The original-color option changes postprocess/color policy only; it does not swap the compressed game assets."
+  "notes": "Settings launcher for an existing Rudroid Silksong runtime. The original-color option changes postprocess/color policy only; it does not swap the compressed game assets."
 }

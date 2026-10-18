@@ -30,18 +30,12 @@ batomon/
 ## Game data
 
 The original Windows demo PCK is encrypted and only declares GodotSteam
-libraries for desktop platforms. Prepare a handheld PCK first:
+libraries for desktop platforms. This runner expects a separately prepared,
+unencrypted Godot 4.3 PCK from the player's own copy. The earlier
+`prepare-batomon-pck.py` helper is absent from this repository, so the launcher
+does not currently provide an automatic preparation command.
 
-```bash
-ports/batomon/src/scripts/prepare-batomon-pck.py \
-  --input "/path/to/Batomon Showdown Demo/batomon_showdown.pck" \
-  --output ports/batomon/dist/gamedata/batomon_showdown.pck \
-  --key "$BATOMON_PCK_KEY" \
-  --patch-godotsteam-arm64
-```
-
-The script writes an unencrypted Godot 4.3 PCK and patches
-`addons/godotsteam/godotsteam.gdextension` inside the pack to add:
+The prepared pack's `addons/godotsteam/godotsteam.gdextension` must declare:
 
 `linux.release.arm64 = "res://addons/godotsteam/linuxarm64/libgodotsteam.linux.template_release.arm64.so"`
 

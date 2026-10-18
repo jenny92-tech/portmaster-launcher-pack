@@ -16,7 +16,10 @@ launcher.define {
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "SDR_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "SDR_SWAP_XY"},
     },
-    field_order = {"resolution", "render_scale", "swap_ab", "swap_xy"},
+    pages = {
+        {title = "title", rows = {"render_scale", launcher.button("advanced", "page:2")}},
+        {title = "advanced_title", fields = {"resolution", "swap_ab", "swap_xy"}, actions = {"start", "back"}},
+    },
     launch_count_env = "SDR_LAUNCH_COUNT",
     prelaunch = {
         core_files = {

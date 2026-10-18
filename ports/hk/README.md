@@ -1,66 +1,23 @@
-# Hollow Knight launcher
+# 空洞骑士启动器
 
-Two-stage PortMaster launcher for the Bogodroid Hollow Knight port. Stage 1 is
-the shared LÖVE 11.5 settings UI; stage 2 applies the selected output and render
-resolutions, texture cap, and ABXY layout before running `unityloader`.
+LÖVE 设置界面应用用户选择后运行 Rudroid 的 `unityloader` 入口。
+通用构建、运行目录及配置契约见[共享工具](../../_kit/README.md)。
 
-## Distribution model
-
-```text
-ports/hollowknight/
-├── love_ui/                       ← this repository's dist
-├── unityloader, unityloader.libs/ ← one Bogodroid build unit
-├── unityloader.d/
-│   ├── android_base.so
-│   ├── unity_2021_3.so
-│   ├── platform_sdl_runtime.so
-│   ├── sdk_fmod.so
-│   └── hollow_knight_viewport.so
-├── config.toml                    ← Bogodroid port configuration
-├── gamecontrollerdb.txt, conf/ …  ← runtime/generated
-└── gamedata/                      ← user-supplied game data
-```
-
-`sdk_fmod.so` supplies the Android FMOD/AudioTrack bridge; without it the game
-runs silently. `hollow_knight_viewport.so` owns the 4:3 camera and tk2d hooks.
-The loader, private libraries and all selected plugins must come from the same
-Bogodroid build because the loader rejects mixed runtime fingerprints.
-
-The settings runtime is supplied by PortMaster at
-`runtimes/love_11.5`; this port no longer ships or mounts a Godot/frt runtime,
-`bootstrap.pck`, hacksdl, or a launcher font.
-
-## Files
-
-| File | Role |
-|---|---|
-| `love/main.lua` | Declares resolution, graphics, ABXY options, persistence, and env output. |
-| `love/conf.lua` | Fullscreen LÖVE configuration with duplicate joystick input disabled. |
-| `love/ui.gptk` | Gamepad-to-keyboard navigation mapping for stage 1 only. |
-| `love/launcher.sh.template` | Two-stage PortMaster shell template. |
-| `dist/` | Deployable assembled shell, `love_ui/`, metadata, and screenshots. |
-
-Existing Godot-launcher choices are imported once from the legacy
-`conf/godot/app_userdata/Hollow Knight Launcher/launch_config.env`; subsequent
-state lives in `love_ui/state.txt`.
-
-## Options
-
-| UI option | Runtime field |
-|---|---|
-| Output Resolution | `[device].displayWidth` / `displayHeight`; Auto follows the panel |
-| Render Resolution | `[gpu].renderScalePercent`: Native / 75% / 50% with sharp upscale; Hollow Knight graphics settings use the resolved render size |
-| Graphics | `textureMaxDim`: 384 / 512 / 720 / 0 |
-| Swap A/B, Swap X/Y | `[input.remap]` absolute button values |
-
-## Build and deploy
-
-```bash
+```sh
 _kit/dist_port.sh hk
 ```
 
-Copy `dist/[中]空洞骑士.sh` to `Roms/PORTS/` and the rest of `dist/` to
-`Data/ports/hollowknight/`.
+部署生成的 SH 和端口负载；loader 与 `rudroid.runtime/` 必须来自同一审计 kit。
+不要按旧 C 版 `unityloader.d/` 示例单独拼库。资源和存档保留原位置。
+FMOD 桥和 Hollow Knight 视口插件分别负责音频与 4:3 相机/tk2d 适配。
 
-Device QA should cover both bare-KMS TrimUI and Wayland MiniLoong: UI rendering,
-single-step D-pad focus, persistence, env logging, and in-game button mapping.
+| 设置 | 行为 |
+|---|---|
+| 渲染尺寸 | Game preset 保留精确/比例尺寸；100/75/50 保留滤镜，并同步游戏视频设置 |
+| 内存 | `[runtime].memory_mode`：low_memory / balanced / performance |
+| 高级 → 纹理质量 | 低 / 中 / 高 / 原画，对应 textureMaxDim：384 / 512 / 720 / 0 |
+| 高级其他项 | 输出尺寸、A/B、X/Y 交换 |
+
+状态保存在实际 `love_ui/state.txt`，旧设置仅首次导入。
+视频配置同步保留语言、音频和非启动器字段。实测应覆盖界面单步导航、设置持久化、
+游戏移动/动作、视口、声音与正常退出。

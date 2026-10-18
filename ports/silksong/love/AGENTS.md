@@ -8,18 +8,21 @@
 
 ## 逻辑
 
-Lua 声明输出 SILK_* 参数；Shell 模板定位既有游戏目录，安装字体 fallback，选择低画/原彩 TOML，写入 Unity、GPU、game patch 和 file-backed ELF 配置，再调用共享 Unity 启动器。
+Lua 声明输出 SILK_* 参数；Shell 模板定位既有游戏目录，安装字体 fallback，选择低画/原彩 TOML，以结构化原子合并写入 Unity、GPU、runtime 和 game patch 配置，再调用共享 Unity 启动器。
 
 ## 约束
 
 - UI 的显示环境与 Unity 游戏环境隔离；通用运行逻辑交由 `_kit/`。
-- 模板必须兼容既有 `/userdata/silksong` 与 `/mnt/UDISK/silksong` 部署路径。
+- 模板必须兼容既有 `/userdata/silksong` 与 `/mnt/UDISK/silksong` 部署路径；游戏目录只需已有资源和选定运行目录中的 Rust loader，不要求保留旧 C loader。
 - 优先使用端口包内的 `love_ui`；未安装独立 UI 包时使用游戏目录内的 UI 与 PortKit，保留原设置位置。
-- 内存相关选项必须明确标实验；默认开启以优先适配 1 GiB 设备，内存充足时可由用户手动关闭。
+- 常用页只放渲染和内存档；画面模式、帧率、装饰物、显示与按键交换放高级页；底层效果跟随画面模式，不单独设子页。
+- 高级页直接选择 OpenGL ES / Vulkan；默认 GLES 3.2，完整 kit 和原生探测通过才允许 Vulkan。已存不可用值在显示前更正；启动后端与所选一致，不适用项显示“禁用”。滤波由程序决定。
+- 模板为丝之歌启用 unity.fast_exit；仅引擎正常请求停止且偏好设置写入成功后快速结束，不在菜单回调或固定超时强杀。
+- 实验性资源包卸载固定关闭，不设菜单；内存档是正式 Rudroid 策略，不冒充整个游戏的内存上限。帧率写 unity.target_fps，不写旧 frame_sync_interval_us。
 
 ## 业务域清单
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 选项定义 | `main.lua` | 声明画面模式、帧率、渲染比例、装饰比例、效果开关、file-backed ELF 和按键配置 |
-| 启动模板 | `launcher.sh.template` | 定位游戏目录、写 TOML 设置、应用效果开关并启动 UnityLoader |
+| 选项定义 | `main.lua` | 声明画面模式、帧率、渲染比例、装饰比例、三档内存和按键配置 |
+| 启动模板 | `launcher.sh.template` | 定位游戏目录、写 TOML 设置、按画面模式应用效果并启动 Rudroid |

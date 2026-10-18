@@ -2,7 +2,7 @@
 # INPUT:  _kit 启动/Unity 公共库、PortMaster control.txt、HKL_* 配置、unityloader
 # OUTPUT: config.toml、图形设置及指定 PlayerPrefs 合并，空洞骑士游戏进程
 # POS:    空洞骑士设置同步、视频引导修复与 Unity 启动模板
-# PORTMASTER: hollowknight, [中]空洞骑士.sh
+# PORTMASTER: hollowknight, K_空洞骑士[中].sh
 #
 # Stage-1: shared love settings UI writes launch_config.env.
 # Stage-2: rewrite hk.toml, sync GraphicsSettings, seed PlayerPrefs, run the
@@ -27,7 +27,7 @@ portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 GAMEDIR="/$directory/ports/$PORT_NAME"
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
-cd "$GAMEDIR"
+cd "$GAMEDIR" || exit 1
 # Direct fd redirect (no tee): tee buffers in memory and loses the last KB on
 # SIGKILL, which is exactly when we need the data most.
 exec > "$GAMEDIR/log.txt" 2>&1
@@ -44,8 +44,11 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-# One toml name across all ports; legacy installs are renamed in place.
-resolve_port_toml
+resolve_unity_runtime || exit 1
+prepare_unity_graphics_options 0
+
+# Resolve the fixed game-local config path before any settings are written.
+resolve_port_toml || exit 1
 
 hk_sync_graphics_resolution() {
   local height="$1"
@@ -78,27 +81,28 @@ run_love_launcher_ui              # sets launcher_exit + LAUNCH_ENV (=love_ui/la
 
 # ═══════════════ STAGE 2: patch config.toml from launcher choices ═══════════
 HKL_ENV="$LAUNCH_ENV"
+[ ! -f "$HKL_ENV" ] || source "$HKL_ENV"
+resolve_unity_graphics_api "${HKL_GRAPHICS_API:-gles}" gles || exit 1
 if [ -f "$HKL_ENV" ]; then
-  source "$HKL_ENV"
-  echo "$LOG_PREFIX env: output=${HKL_WIDTH}x${HKL_HEIGHT} render_percent=${HKL_RENDER_PERCENT:-100} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${HKL_WIDTH}x${HKL_HEIGHT} render_percent=${HKL_RENDER_PERCENT:-config} texmax=$HKL_TEXMAX swap_ab=$HKL_SWAP_AB swap_xy=$HKL_SWAP_XY"
 
   # Quality → textureMaxDim: 384/512/720/0 (low/medium/high/ultra; same values
   # as the heishenhua port).
   case "$HKL_TEXMAX" in
-    384|512|720|0) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${HKL_TEXMAX}/" "$PORT_TOML" ;;
+    384|512|720|0) portkit_launcher toml merge --file "$PORT_TOML" --patch "{\"gpu\":{\"textureMaxDim\":$HKL_TEXMAX}}" || exit 1 ;;
   esac
 
-  # [input.remap] a/b/x/y upsert (self-healing awk; see launcher_unity_common.sh)
+  # Atomically update only [input.remap].
   if [ "$HKL_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$HKL_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V" || exit 1
 else
   echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
 
 # Outside the env branch on purpose: without a launcher UI there is no env, and
 # the resolution must still follow this device's panel.
-configure_unity_display "$PORT_TOML" "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}" "${HKL_RENDER_PERCENT:-100}" || exit 1
+configure_unity_display "$PORT_TOML" "${HKL_WIDTH:-auto}" "${HKL_HEIGHT:-auto}" "${HKL_RENDER_PERCENT:-config}" "${HKL_MEMORY_MODE:-}" "$UNITY_GRAPHICS_API" || exit 1
 HK_RUNTIME_WIDTH="$RES_W"
 HK_RUNTIME_HEIGHT="$RES_H"
 HK_RENDER_WIDTH="$RENDER_W"
@@ -123,7 +127,7 @@ hk_merge_playerprefs() {
   fi
 }
 
-hk_merge_playerprefs
+hk_merge_playerprefs || exit 1
 
 # ═══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game "$PORT_TOML"

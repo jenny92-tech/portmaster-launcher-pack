@@ -12,12 +12,19 @@ import sys
 try:
     from lupa import LuaRuntime
 except ImportError:
+    if os.environ.get("PAM_REQUIRE_LUPA") == "1":
+        raise SystemExit("love Lua module tests: lupa is required")
     print("love Lua module tests: SKIP (lupa unavailable)")
     raise SystemExit(0)
 
 root = Path(__file__).resolve().parents[1]
 
 mock = r'''
+local getenv=os.getenv
+os.getenv=function(k)
+    if k=="PORTKIT_GRAPHICS_FEATURES" then return "sdl2,gles,gles-scale,gles-sharp,gles-shader,gles-texture" end
+    return getenv(k)
+end
 love = {graphics={}, filesystem={}, event={}}
 local font = {
     getHeight=function() return 20 end,
@@ -51,13 +58,13 @@ love.event.quit=function(code) LAST_QUIT=code end
 '''
 
 expected_env = {
-    "heishenhua": ("HSH_WIDTH='auto'", "HSH_RENDER_PERCENT='100'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'"),
-    "hk": ("HKL_WIDTH='auto'", "HKL_RENDER_PERCENT='100'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'"),
+    "heishenhua": ("HSH_WIDTH='auto'", "HSH_RENDER_PERCENT='config'", "HSH_MEMORY_MODE='balanced'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'"),
+    "hk": ("HKL_WIDTH='auto'", "HKL_RENDER_PERCENT='config'", "HKL_MEMORY_MODE='balanced'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'"),
     "sts2": ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_SWAP_AB='on'", "SLL_LAUNCH_COUNT='1'"),
-    "terraria": ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='100'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'"),
-    "vampiresurvivors114": ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='100'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'"),
-    "silksong": ("SILK_WIDTH='auto'", "SILK_RENDER_PERCENT='75'", "SILK_FPS='45'", "SILK_QUALITY='low'", "SILK_LAUNCH_COUNT='1'"),
-    "sunkendragon": ("SDR_WIDTH='auto'", "SDR_RENDER_PERCENT='100'", "SDR_SWAP_AB='off'", "SDR_LAUNCH_COUNT='1'"),
+    "terraria": ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='config'", "TER_MEMORY_MODE='balanced'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'"),
+    "vampiresurvivors114": ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='config'", "VS_MEMORY_MODE='balanced'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'"),
+    "silksong": ("SILK_WIDTH='auto'", "SILK_RENDER_PERCENT='config'", "SILK_MEMORY_MODE='balanced'", "SILK_FPS='config'", "SILK_QUALITY='low'", "SILK_LAUNCH_COUNT='1'"),
+    "sunkendragon": ("SDR_WIDTH='auto'", "SDR_RENDER_PERCENT='config'", "SDR_SWAP_AB='off'", "SDR_LAUNCH_COUNT='1'"),
 }
 
 def prepare_launcher_core_files(port, destination):
@@ -131,6 +138,175 @@ for port, prefix in {
                 }.items():
                     assert f"{prefix}_{key}='{value}'" in text, (port, percent, key, text)
 
+# Common settings stay on page one; one-time display/button choices live on
+# the advanced page. Exercise navigation as well as the declared row layout.
+for port in ("heishenhua", "hk", "silksong", "sunkendragon", "terraria", "vampiresurvivors114"):
+    with tempfile.TemporaryDirectory() as source:
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals().SOURCE = source
+        lua.globals().EXPECT_MEMORY = port != "sunkendragon"
+        lua.globals().EXPECT_BACKEND = port in ("silksong", "vampiresurvivors114")
+        lua.execute(mock)
+        lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+        lua.execute('''
+            local k=require("kit")
+            CAPTURED_PAGES={}
+            local add=k.add_page
+            k.add_page=function(title,rows,...)
+                CAPTURED_PAGES[#CAPTURED_PAGES+1]=rows
+                return add(title,rows,...)
+            end
+        ''')
+        lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+        lua.execute('''
+            love.load()
+            local k=require("kit")
+            local keys={}
+            local advanced
+            for i,row in ipairs(CAPTURED_PAGES[1]) do
+                if row.key then keys[row.key]=true end
+                if row.action=="page:2" then advanced=i end
+            end
+            assert(keys.render_scale and (not EXPECT_MEMORY or keys.memory_mode))
+            assert(not keys.resolution and not keys.swap_ab and not keys.swap_xy)
+            assert(advanced)
+            keys={}
+            for _,row in ipairs(CAPTURED_PAGES[2]) do if row.key then keys[row.key]=true end end
+            assert(keys.resolution and keys.swap_ab and keys.swap_xy)
+            assert((keys.graphics_api==true)==EXPECT_BACKEND)
+            assert(not keys.render_filter and not keys.assetbundle_unload)
+            assert(not keys.ambient_particles and not keys.bloom and not keys.camera_blur_plane)
+            assert(not keys.light_blur and not keys.uber_postprocess)
+            for _=1,20 do
+                local focus=k.debug_focus().focus_i
+                if focus==advanced then break end
+                k.input(focus>advanced and "up" or "down")
+            end
+            assert(k.debug_focus().focus_i==advanced)
+            k.input("confirm")
+            assert(k.debug_page().index==2)
+            k.input("cancel")
+            assert(k.debug_page().index==1)
+        ''')
+
+# All three Rudroid memory modes survive restart; invalid saved values fall
+# back to balanced. The experimental C port does not advertise this contract.
+for port, prefix in {"heishenhua":"HSH", "hk":"HKL", "silksong":"SILK", "terraria":"TER", "vampiresurvivors114":"VS"}.items():
+    for mode in ("low_memory", "balanced", "performance", "invalid"):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "love"
+            source.mkdir()
+            prepare_launcher_core_files(port, Path(temp))
+            (source / "state.txt").write_text(f"ui_lang=en\nmemory_mode={mode}\n", encoding="utf-8")
+            expected = "balanced" if mode == "invalid" else mode
+            for _ in range(2):
+                lua = LuaRuntime(unpack_returned_tuples=True)
+                lua.globals().SOURCE = str(source)
+                lua.execute(mock)
+                lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+                lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+                lua.execute("love.load(); love.keypressed('return')")
+                assert lua.globals().LAST_QUIT == 42, (port, mode)
+                assert f"{prefix}_MEMORY_MODE='{expected}'" in (source / "launch_config.env").read_text(encoding="utf-8")
+
+# Saved unavailable APIs are normalized before display/save. The visible API
+# must equal the launch API; removed technical choices cannot affect output.
+full_features="sdl2,gles,gles-scale,gles-sharp,gles-shader,gles-texture,vulkan,vulkan-scale,vulkan-linear"
+for port,prefix in {"silksong":"SILK","vampiresurvivors114":"VS"}.items():
+    for features,installed,platform,render,api,effective_render in (
+        (full_features,True,True,"100","vulkan","100"),
+        (full_features,True,True,"75","vulkan","75"),
+        (full_features,True,True,"50","vulkan","50"),
+        (full_features,True,True,"config","vulkan","config"),
+        ("sdl2,gles,gles-scale,vulkan,vulkan-linear",True,True,"75","vulkan","100"),
+        (full_features,False,True,"75","gles","75"),
+        (full_features,True,False,"75","gles","75"),
+        ("sdl2,gles,gles-scale",True,True,"75","gles","75"),
+        ("sdl2,gles",True,True,"50","gles","100"),
+        ("sdl2",True,True,"50",None,None),
+    ):
+        with tempfile.TemporaryDirectory() as source:
+            (Path(source)/"state.txt").write_text(f"ui_lang=zh\ngraphics_api=vulkan\nrender_scale={render}\nrender_filter=sharp\n")
+            env=Path(source)/"launch_config.env";env.write_text("previous='keep'\n")
+            lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source
+            lua.globals().FEATURES=features;lua.globals().INSTALLED="1" if installed else "0"
+            lua.globals().PLATFORM="1" if platform else "0"
+            lua.execute(mock)
+            lua.execute('''local getenv=os.getenv;os.getenv=function(k)
+                if k=="PORTKIT_GRAPHICS_FEATURES" then return FEATURES end
+                if k=="PORTKIT_VULKAN_AVAILABLE" then return INSTALLED end
+                if k=="PORTKIT_VULKAN_PLATFORM_SUPPORTED" then return PLATFORM end
+                return getenv(k)
+            end''')
+            lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+            lua.execute(f"dofile({str(root/'ports'/port/'love/main.lua')!r})")
+            lua.execute("love.load(); love.keypressed('return')")
+            if api:
+                assert lua.globals().LAST_QUIT==42,(port,render,features)
+                output=env.read_text()
+                assert f"{prefix}_GRAPHICS_API='{api}'" in output,output
+                assert f"{prefix}_RENDER_PERCENT='{effective_render}'" in output,output
+                lua.execute(f"assert(require('kit').get_state().graphics_api=={api!r})")
+                assert f'graphics_api={api}' in (Path(source)/'state.txt').read_text()
+                assert 'render_filter=' not in (Path(source)/'state.txt').read_text()
+                assert f'{prefix}_RENDER_FILTER=' not in output
+            else:
+                assert lua.globals().LAST_QUIT is None,(port,render)
+                assert env.read_text()=="previous='keep'\n"
+
+# The picker changes the launched API directly. Unsupported controls are grey,
+# display Disabled and are skipped by focus; preferences return with support.
+with tempfile.TemporaryDirectory() as source:
+    lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source;lua.execute(mock)
+    lua.globals().FEATURES=full_features
+    lua.execute('''local getenv=os.getenv;os.getenv=function(k)
+        if k=="PORTKIT_GRAPHICS_FEATURES" then return FEATURES end
+        if k=="PORTKIT_VULKAN_AVAILABLE" or k=="PORTKIT_VULKAN_PLATFORM_SUPPORTED" then return "1" end
+        return getenv(k)
+    end''')
+    lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+    lua.execute('''local k=require('kit');local select=k.select;ROWS={}
+        k.select=function(...) local row=select(...);ROWS[row.id]=row;return row end
+        local l=require('launcher')
+        PORT=l.define{title={zh='测试',en='Test'},fields={
+            l.render_scale{env='RENDER'},l.graphics_api{env='API',vulkan=true},
+            l.select{key='texmax',env='TEX',values={'256','512'},default='256',
+                requires_feature='texture_limits',unavailable_value='0'},
+            l.memory_mode{env='MEMORY'}},pages={{rows={'graphics_api','render_scale','texmax','memory_mode'}}}}
+        love.load();local s=k.get_state();s.render_scale='75';PORT.refresh_graphics(k)
+        assert(not ROWS.texmax.disabled and s.graphics_api=='gles')
+        assert(#ROWS.graphics_api.values==2)
+        for _=1,20 do if k.debug_focus().zone=='rows' and k.debug_focus().focus_i==1 then break end;love.keypressed('up') end
+        love.keypressed('right')
+        assert(s.graphics_api=='vulkan' and ROWS.texmax.disabled)
+        assert(ROWS.texmax.display_value.zh=='禁用' and ROWS.texmax.display_value.en=='Disabled')
+        assert(not ROWS.memory_mode.disabled and not ROWS.render_scale.disabled)
+        local out={value=''};function out:write(t) self.value=self.value..t;return true end
+        assert(PORT.write_env(out,s,k));assert(out.value:find("TEX='0'",1,true) and out.value:find("API='vulkan'",1,true))
+        love.keypressed('down');love.keypressed('down')
+        assert(k.debug_focus().focus_i==4) -- disabled texture row is skipped
+        love.keypressed('up');love.keypressed('up');love.keypressed('left')
+        assert(s.graphics_api=='gles' and not ROWS.texmax.disabled and s.texmax=='256')
+        assert(ROWS.texmax.display_value==nil)
+        assert(require('graphics').detect(true,'vulkan').resolve({}).api=='vulkan')
+        assert(require('graphics').detect(false,'vulkan').resolve({}).api=='gles')
+    ''')
+
+# An unavailable backend cannot be selected; the stored value is also corrected
+# before display. Explicit unavailable input fails validation without substitution.
+with tempfile.TemporaryDirectory() as source:
+    (Path(source)/'state.txt').write_text('ui_lang=zh\ngraphics_api=vulkan\n')
+    lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source;lua.execute(mock)
+    lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+    lua.execute('''local k=require('kit');local l=require('launcher')
+        l.define{title='Test',fields={l.graphics_api{env='API',vulkan=true}}}
+        love.load();assert(k.get_state().graphics_api=='gles')
+        for _=1,20 do if k.debug_focus().zone=='rows' and k.debug_focus().focus_i==1 then break end;love.keypressed('up') end
+        for _=1,4 do love.keypressed('right');assert(k.get_state().graphics_api=='gles') end
+        assert(not require('graphics').detect(true).validate({graphics_api='vulkan'}))
+    ''')
+    assert 'graphics_api=gles' in (Path(source)/'state.txt').read_text()
+
 # Persisted picker values are untrusted input: invalid values must fall back to
 # defaults and generated shell environments must quote every value.
 with tempfile.TemporaryDirectory() as source:
@@ -190,6 +366,39 @@ with tempfile.TemporaryDirectory() as source:
     ''')
     assert old_env.read_text(encoding="utf-8") == "OLD='complete'\n"
     assert not Path(str(old_env) + ".tmp").exists()
+
+# Lua's file:write may return nil while file:close still succeeds. A field
+# write failure or an explicit false result must never publish a partial env.
+for failure in ("field_write", "callback_false"):
+    with tempfile.TemporaryDirectory() as source:
+        old_env = Path(source) / "launch_config.env"
+        old_env.write_text("OLD='complete'\n", encoding="utf-8")
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals().SOURCE = source
+        lua.globals().FAILURE = failure
+        lua.execute(mock)
+        lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+        lua.execute('''
+            local open=io.open
+            io.open=function(path,mode)
+                local f,err=open(path,mode)
+                if f and FAILURE=="field_write" and path==SOURCE.."/launch_config.env.tmp" then
+                    return {write=function(_,text)
+                        if text:find("QUALITY=",1,true) then return nil,"simulated full disk" end
+                        return f:write(text)
+                    end,close=function() return f:close() end}
+                end
+                return f,err
+            end
+            local launcher=require("launcher")
+            launcher.define({title={en="Test",zh="测试"},fields={
+                launcher.select({key="quality",default="safe",options={{"safe","Safe"}},env="QUALITY"})
+            },write_env=function() if FAILURE=="callback_false" then return false,"save failed" end end})
+            love.load(); love.keypressed("return")
+            assert(LAST_QUIT==nil and require("kit").debug_dialog().open)
+        ''')
+        assert old_env.read_text(encoding="utf-8") == "OLD='complete'\n"
+        assert not Path(str(old_env) + ".tmp").exists()
 
 # Focus scopes: display-only pages, disabled controls, header return, and
 # rebuilding away the focused scope must never leave a phantom selection.

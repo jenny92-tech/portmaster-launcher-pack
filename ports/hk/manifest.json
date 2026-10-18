@@ -1,8 +1,8 @@
 {
   "name": "hk",
   "title": "Hollow Knight",
-  "engine": "Unity 2020 (Mono)",
-  "runtime": "Bogodroid unityloader",
+  "engine": "Unity 2020.2 (IL2CPP)",
+  "runtime": "Rudroid",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": [
     "TrimUI Smart Pro/Brick",
@@ -14,7 +14,7 @@
   ],
   "license": "CC-BY-NC-SA-4.0",
   "port_dir": "hollowknight",
-  "script": "[中]空洞骑士.sh",
+  "script": "K_空洞骑士[中].sh",
   "gptk": "love/ui.gptk",
   "launcher_tools": [
     "font-provision",
@@ -32,7 +32,7 @@
     }
   },
   "depends_on": [
-    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "https://github.com/jenny92-tech/rudroid (unityloader)",
     "PortMaster runtimes/love_11.5"
   ]
 }

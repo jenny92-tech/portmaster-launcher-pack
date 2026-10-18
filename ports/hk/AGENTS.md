@@ -4,7 +4,7 @@
 
 ## 地位
 
-ports/ 下复用 LÖVE 启动界面与 Bogodroid UnityLoader 的游戏端口。
+ports/ 下复用 LÖVE 启动界面与 Rudroid/UnityLoader 的游戏端口。
 
 ## 逻辑
 

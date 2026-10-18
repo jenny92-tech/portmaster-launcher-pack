@@ -1,6 +1,6 @@
 # 吸血鬼幸存者 1.14 端口
 
-> 使用 Bogodroid UnityLoader 运行 Unity 6 与 PAD 资源布局的游戏版本。
+> 使用 Rudroid/UnityLoader 运行 Unity 6 与 PAD 资源布局的游戏版本。
 
 ## 地位
 

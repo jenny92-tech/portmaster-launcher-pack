@@ -2,10 +2,10 @@
 # INPUT:  _kit 启动/Unity 公共库、PortMaster control.txt、HSH_* 配置、unityloader
 # OUTPUT: 更新后的 config.toml 与像素黑神话游戏进程
 # POS:    像素黑神话 LÖVE 设置到 Unity 配置和游戏启动的衔接模板
-# PORTMASTER: heishenhua, [中]黑神话悟空-像素版.sh
+# PORTMASTER: heishenhua, H_黑神话像素版[中].sh
 #
 # Stage-1: shared love settings UI writes launch_config.env.
-# Stage-2: rewrite wsm.toml from those choices, then run the Unity game.
+# Stage-2: update config.toml from those choices, then run the Unity game.
 #
 # Critical isolation: love's display env (SDL_VIDEODRIVER/LIBGL_FB etc.) must
 # stay confined to the stage-1 subshell and never leak into the stage-2
@@ -26,7 +26,7 @@ portmaster_init "$(cd "$(dirname "$0")" && pwd)" || exit 1
 GAMEDIR="/$directory/ports/$PORT_NAME"
 portmaster_sync_launcher_artwork "$(cd "$(dirname "$0")" && pwd)" "$0" "$GAMEDIR"
 CONFDIR="$GAMEDIR/conf"
-cd "$GAMEDIR"
+cd "$GAMEDIR" || exit 1
 exec > "$GAMEDIR/log.txt" 2>&1
 #@BUILD-LOG
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
@@ -39,7 +39,10 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
-resolve_port_toml
+resolve_unity_runtime || exit 1
+prepare_unity_graphics_options 0
+
+resolve_port_toml || exit 1
 
 # ══════════════ STAGE 1: love settings UI → writes launch_config.env ═════
 # Shared logic lives in _kit (font supply / display adaptation / gptokeyb /
@@ -49,52 +52,49 @@ run_love_launcher_ui              # sets launcher_exit + LAUNCH_ENV (=love_ui/la
 
 # ══════════════ STAGE 2: patch config.toml from launcher choices ══════════
 HSH_ENV="$LAUNCH_ENV"
+[ ! -f "$HSH_ENV" ] || source "$HSH_ENV"
+resolve_unity_graphics_api "${HSH_GRAPHICS_API:-gles}" gles || exit 1
 if [ -f "$HSH_ENV" ]; then
-  source "$HSH_ENV"
-  echo "$LOG_PREFIX env: output=${HSH_WIDTH}x${HSH_HEIGHT} render_percent=${HSH_RENDER_PERCENT:-100} texmax=$HSH_TEXMAX dmg=$HSH_DMG swap_ab=$HSH_SWAP_AB swap_xy=$HSH_SWAP_XY inf_mp=$HSH_INF_MP inf_sta=$HSH_INF_STA inf_wine=$HSH_INF_WINE skill_cd=$HSH_SKILL_CD"
+  echo "$LOG_PREFIX env: output=${HSH_WIDTH}x${HSH_HEIGHT} render_percent=${HSH_RENDER_PERCENT:-config} texmax=$HSH_TEXMAX dmg=$HSH_DMG swap_ab=$HSH_SWAP_AB swap_xy=$HSH_SWAP_XY inf_mp=$HSH_INF_MP inf_sta=$HSH_INF_STA inf_wine=$HSH_INF_WINE skill_cd=$HSH_SKILL_CD"
 
-  case "$HSH_TEXMAX" in
-    0|384|480|512|720) sed -i "s/^textureMaxDim *=.*/textureMaxDim = ${HSH_TEXMAX}/" "$PORT_TOML" ;;
-  esac
-
-  if grep -q '^textureDownsampleFilter *=' "$PORT_TOML"; then
-    sed -i 's/^textureDownsampleFilter *=.*/textureDownsampleFilter = "nearest"/' "$PORT_TOML"
-  else
-    sed -i '/^\[gpu\]/a textureDownsampleFilter = "nearest"' "$PORT_TOML"
-  fi
-
-  sed -i -e '/^\[ui_layout\]/,$d' -e '/^\[\[il2cpp_patch\]\]/,$d' "$PORT_TOML"
-
-  printf '\n[ui_layout]\nclass = "UI_InGame_Main"\nmethod = "Start"\nhide = [0xB8, 0xC0, 0xC8, 0xD8, 0xE0, 0xE8, 0xF8, 0x100]\nmove_from = 0xC8\nmove_to = 0xD0\nright_margin = 70\n' >> "$PORT_TOML"
-  echo "$LOG_PREFIX ui_layout: hide touch buttons (incl. phone/AK) + move drink to heavy-attack slot"
-
+  case "$HSH_TEXMAX" in 0|384|480|512|720) ;; *) echo "$LOG_PREFIX invalid texture limit"; exit 1 ;; esac
+  HSH_PATCHES=""
+  hsh_append_patch() {
+    [ -z "$HSH_PATCHES" ] || HSH_PATCHES="$HSH_PATCHES,"
+    HSH_PATCHES="$HSH_PATCHES$1"
+  }
   case "$HSH_DMG" in
     0.0|0.2|0.4|0.6|0.8)
-      printf '\n[[il2cpp_patch]]\nclass = "PlayerController"\nmethod = "BeAttack"\nargc = 1\narg = 0\nfield = 0x10\nmult = %s\n' "$HSH_DMG" >> "$PORT_TOML"
-      echo "$LOG_PREFIX damage reduction mult=$HSH_DMG" ;;
+      hsh_append_patch "{\"class\":\"PlayerController\",\"method\":\"BeAttack\",\"argc\":1,\"arg\":0,\"field\":16,\"mult\":$HSH_DMG}" ;;
+    1.0) ;;
+    *) echo "$LOG_PREFIX invalid damage multiplier"; exit 1 ;;
   esac
-
   hsh_freeze() {
-    printf '\n[[il2cpp_patch]]\nclass = "Player_StateData"\nmethod = "%s"\nargc = 1\narg = -1\nfield = %s\nsrc_field = %s\nmode = "freeze"\ntype = "%s"\n' \
-      "$1" "$2" "$3" "$4" >> "$PORT_TOML"
+    hsh_append_patch "{\"class\":\"Player_StateData\",\"method\":\"$1\",\"argc\":1,\"arg\":-1,\"field\":$2,\"src_field\":$3,\"mode\":\"freeze\",\"type\":\"$4\"}"
   }
-  [ "$HSH_INF_MP" = "on" ]   && { hsh_freeze "set__Curr法力" 0x38 0x34 f32; echo "$LOG_PREFIX infinite mana on"; }
-  [ "$HSH_INF_STA" = "on" ]  && { hsh_freeze "set__Curr气力" 0x44 0x3C f32; echo "$LOG_PREFIX infinite stamina on"; }
-  [ "$HSH_INF_WINE" = "on" ] && { hsh_freeze "set__Curr酒"   0x68 0x64 i32; echo "$LOG_PREFIX infinite wine on"; }
-
-  [ "$HSH_SKILL_CD" = "on" ] && {
-    printf '\n[[il2cpp_patch]]\nclass = "Player_StateData"\nmethod = "get__IsOk_定身术"\nargc = 0\nmode = "force_return"\nsetval = 1\n' >> "$PORT_TOML"
-    echo "$LOG_PREFIX immobilize spell no-cooldown on"
-  }
+  [ "$HSH_INF_MP" != "on" ] || hsh_freeze "set__Curr法力" 56 52 f32
+  [ "$HSH_INF_STA" != "on" ] || hsh_freeze "set__Curr气力" 68 60 f32
+  [ "$HSH_INF_WINE" != "on" ] || hsh_freeze "set__Curr酒" 104 100 i32
+  if [ "$HSH_SKILL_CD" = "on" ]; then
+    hsh_append_patch '{"class":"Player_StateData","method":"get__IsOk_定身术","argc":0,"mode":"force_return","setval":1}'
+  fi
+  # Only these owned keys are replaced. In particular, paths/package/runtime
+  # after ui_layout or il2cpp_patch must survive unchanged.
+  portkit_launcher toml merge --file "$PORT_TOML" --patch "{
+    \"gpu\":{\"textureMaxDim\":$HSH_TEXMAX,\"textureDownsampleFilter\":\"nearest\"},
+    \"ui_layout\":{\"class\":\"UI_InGame_Main\",\"method\":\"Start\",
+      \"hide\":[184,192,200,216,224,232,248,256],\"move_from\":200,\"move_to\":208,\"right_margin\":70},
+    \"il2cpp_patch\":[$HSH_PATCHES]
+  }" || exit 1
 
   if [ "$HSH_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$HSH_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V" || exit 1
 else
   echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
 
-configure_unity_display "$PORT_TOML" "${HSH_WIDTH:-auto}" "${HSH_HEIGHT:-auto}" "${HSH_RENDER_PERCENT:-100}" || exit 1
+configure_unity_display "$PORT_TOML" "${HSH_WIDTH:-auto}" "${HSH_HEIGHT:-auto}" "${HSH_RENDER_PERCENT:-config}" "${HSH_MEMORY_MODE:-}" "$UNITY_GRAPHICS_API" || exit 1
 
 # ══════════════ STAGE 2: run the game ══════════════════════════════════
 run_unity_game "$PORT_TOML"

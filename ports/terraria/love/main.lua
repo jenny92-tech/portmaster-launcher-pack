@@ -1,6 +1,6 @@
 -- INPUT:  launcher 共享框架、gamedata 核心文件或玩家 APK
 -- OUTPUT: 泰拉瑞亚设置/资源检查页面及 TER_* 启动参数
--- POS:    泰拉瑞亚语言、画面和按键选项及游戏资源就绪检查定义
+-- POS:    泰拉瑞亚语言、画面、内存和按键选项及游戏资源就绪检查定义
 local launcher = require("launcher")
 
 launcher.define {
@@ -13,6 +13,8 @@ launcher.define {
     fields = {
         launcher.output_resolution {env = {"TER_WIDTH", "TER_HEIGHT"}},
         launcher.render_scale {env = "TER_RENDER_PERCENT"},
+        launcher.memory_mode {env = "TER_MEMORY_MODE"},
+        launcher.graphics_api {env = "TER_GRAPHICS_API"},
         launcher.select {
             key = "language", label = {en = "Game Language:", zh = "游戏语言:"}, default = "7", env = "TER_LANGUAGE",
             options = {
@@ -23,7 +25,10 @@ launcher.define {
         launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "TER_SWAP_AB"},
         launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "TER_SWAP_XY"},
     },
-    field_order = {"resolution", "render_scale", "language", "swap_ab", "swap_xy"},
+    pages = {
+        {title = "title", rows = {"render_scale", "memory_mode", "language", launcher.button("advanced", "page:2")}},
+        {title = "advanced_title", fields = {"resolution", "swap_ab", "swap_xy"}, actions = {"start", "back"}},
+    },
     legacy = {
         path = "../conf/godot/app_userdata/泰拉瑞亚启动器/launch_config.env",
         state_path = "../conf/godot/app_userdata/泰拉瑞亚启动器/terraria_launcher_state.json",

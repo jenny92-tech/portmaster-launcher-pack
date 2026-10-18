@@ -158,22 +158,33 @@ portkit_launcher() {
 # Sets launcher_exit and LAUNCH_ENV.
 run_love_launcher_ui() {
   local ui_dir="${1:-$GAMEDIR/love_ui}" love_txt
+  if [ -d "$ui_dir" ]; then
+    ui_dir="$(cd "$ui_dir" && pwd -P)" || exit 1
+  fi
   LAUNCH_ENV="$ui_dir/launch_config.env"
   love_txt=$(portkit_launcher runtime latest-love --root "$controlfolder/runtimes" 2>/dev/null || true)
   if [ -z "$love_txt" ] || [ ! -f "$ui_dir/main.lua" ]; then
     echo "$LOG_PREFIX no love runtime / main.lua — skipping settings UI, using current config"
+    LAUNCH_ENV=""
     launcher_exit=1
     return
   fi
   _love_provide_font "$ui_dir" || true
-  # The UI rewrites this file on confirm. Removing it first means a crashed UI
-  # hands stage-2 validated defaults, never the previous run's settings.
-  rm -f "$LAUNCH_ENV"
+  # The UI rewrites this file on confirm. A crash or missing saved environment
+  # stops launch; an unavailable UI keeps the current TOML without sourcing it.
+  rm -f "$LAUNCH_ENV" || { echo "$LOG_PREFIX cannot replace launcher settings: $LAUNCH_ENV"; exit 1; }
   (   # Display env stays in this subshell — leaking it breaks the stage-2 game.
     export LOVE_IDENTITY="${PORT_NAME:-portmaster}_launcher"
     export LOVE_WINDOW_TITLE="${PORT_NAME:-PortMaster} Launcher"
     if [ -n "${LOVE_FONT_PATH:-}" ]; then export LOVE_FONT_PATH; else unset LOVE_FONT_PATH; fi
     source "$love_txt"
+    # Keep LÖVE's executable and native libraries on executable storage when
+    # the selected Unity kit supplies the installed PortMaster runtime.
+    local cached_love="${UNITY_RUNTIME_DIR:-}/love/love.aarch64"
+    if [ -x "$cached_love" ]; then
+      export LOVE_BINARY="$cached_love"
+      export LD_LIBRARY_PATH="${cached_love%/*}/libs.aarch64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
     export LIBGL_ES=2 LIBGL_GL=21
     if launcher_platform_display; then
       echo "$LOG_PREFIX love display=wayland ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY)"
@@ -187,8 +198,12 @@ run_love_launcher_ui() {
     $GPTOKEYB "$LOVE_GPTK" -c "$ui_dir/ui.gptk" &
     local gpid=$!
     pm_platform_helper "$LOVE_GPTK" 2>/dev/null || true
-    cd "$ui_dir"
-    $LOVE_RUN "$ui_dir"
+    cd "$ui_dir" || exit 1
+    if [ -x "$cached_love" ]; then
+      "$cached_love" "$ui_dir"
+    else
+      $LOVE_RUN "$ui_dir"
+    fi
     local le=$?
     kill $gpid 2>/dev/null; wait $gpid 2>/dev/null
     exit $le
@@ -199,6 +214,10 @@ run_love_launcher_ui() {
     echo "$LOG_PREFIX launcher: back to menu"
     launcher_platform_finish; exit 0
   elif [ "$launcher_exit" != "42" ]; then
-    echo "$LOG_PREFIX launcher failed ($launcher_exit) — starting game anyway"
+    echo "$LOG_PREFIX launcher failed ($launcher_exit) — game not started"
+    launcher_platform_finish; exit 1
+  elif [ ! -s "$LAUNCH_ENV" ]; then
+    echo "$LOG_PREFIX launcher did not save settings at $LAUNCH_ENV — game not started"
+    launcher_platform_finish; exit 1
   fi
 }

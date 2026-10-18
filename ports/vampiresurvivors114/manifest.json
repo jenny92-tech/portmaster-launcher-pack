@@ -2,7 +2,7 @@
   "name": "vampiresurvivors114",
   "title": "Vampire Survivors 1.14.111",
   "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
-  "runtime": "Bogodroid unityloader",
+  "runtime": "Rudroid",
   "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
   "devices": [
     "TrimUI Smart Pro/Brick",
@@ -38,8 +38,8 @@
     }
   },
   "depends_on": [
-    "https://github.com/jenny92-tech/Bogodroid (unityloader)",
+    "https://github.com/jenny92-tech/rudroid (unityloader)",
     "PortMaster runtimes/love_11.5"
   ],
-  "notes": "Direct Unity launch. A game-specific gptokeyb bridge supplies Rewired menu input without replacing Bogodroid's Android gamepad path."
+  "notes": "Direct Unity launch. A game-specific gptokeyb bridge supplies Rewired menu input without replacing Rudroid's Android gamepad path."
 }

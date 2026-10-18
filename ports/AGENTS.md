@@ -26,7 +26,7 @@
 | 空洞骑士 | `hk/` | Unity 设置与视频引导/PlayerPrefs 适配 |
 | Screen Recorder | `recorder/` | 独立后台采帧控制和停止后视频合成应用 |
 | Slay the Spire 2 | `sts2/` | C# Godot 掌机兼容补丁、资源工具与启动流程 |
-| 空洞骑士：丝之歌 | `silksong/` | Unity 6/Bogodroid 启动设置、帧率/画质/内存选项与游戏配置适配 |
+| 空洞骑士：丝之歌 | `silksong/` | Unity 6/Rudroid 启动设置、帧率/画质/内存选项与游戏配置适配 |
 | 龙沉异世录 | `sunkendragon/` | 实验性 Unity 移植、玩家资源准备与基线包流程 |
 | 泰拉瑞亚 | `terraria/` | 玩家 APK 提取、语言设置和 Unity 启动适配 |
 | 吸血鬼幸存者 1.14 | `vampiresurvivors114/` | Unity 6/PAD 游戏的显示、图形兼容与按键适配 |

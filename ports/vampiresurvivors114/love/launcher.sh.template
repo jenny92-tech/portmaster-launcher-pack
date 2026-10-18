@@ -14,6 +14,18 @@
 PORT_NAME="vampiresurvivors114"; LOG_PREFIX="[VS114-LOVE]"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# The installed helper is an explicit per-device opt-in. It gives the native
+# libraries a private executable view on noexec game media, then execs this
+# launcher once. No copies, global remounts or resident Python supervisor.
+if [ "${RUDROID_EXEC_VIEW_ONCE:-}" != "$SCRIPT_DIR/$PORT_NAME" ] &&
+   [ -r "/userdata/$PORT_NAME-runtime/guest-exec-view.py" ] &&
+   command -v python3 >/dev/null 2>&1; then
+  export RUDROID_EXEC_VIEW_ONCE="$SCRIPT_DIR/$PORT_NAME"
+  exec python3 "/userdata/$PORT_NAME-runtime/guest-exec-view.py" \
+    --game-root "$SCRIPT_DIR/$PORT_NAME" --library-dir gamedata/lib/arm64-v8a \
+    -- /bin/bash "$0" "$@"
+fi
+
 # ── PortMaster preamble (controlfolder discovery + control.txt).
 # PortMaster discovery follows the official shared path order.
 #@KIT-BEGIN
@@ -29,8 +41,8 @@ GAMEDIR="/$directory/ports/$PORT_NAME"
   export PORTKIT_LAUNCHER_BIN_OVERRIDE="$GAMEDIR/bin/portkit-launcher"
 portmaster_sync_launcher_artwork "$SCRIPT_DIR" "$0" "$SCRIPT_DIR"
 CONFDIR="$GAMEDIR/conf"
-SHADER_CACHE_DIR="/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"
-cd "$GAMEDIR"
+SHADER_CACHE_DIR="/tmp/rudroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"
+cd "$GAMEDIR" || exit 1
 exec > "$GAMEDIR/log.txt" 2>&1
 #@BUILD-LOG
 echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
@@ -43,10 +55,13 @@ source "$KIT/portmaster_common.sh"
 source "$KIT/launcher_unity_common.sh"
 #@KIT-END
 
+resolve_unity_runtime || exit 1
+prepare_unity_graphics_options 1
+
 trap launcher_platform_release_display EXIT INT TERM
 launcher_platform_acquire_display
 
-resolve_port_toml
+resolve_port_toml || exit 1
 grep -Eq '^[[:space:]]*unity_shader_cache_redirect[[:space:]]*=' "$PORT_TOML" || {
   echo "$LOG_PREFIX missing paths.unity_shader_cache_redirect in $PORT_TOML"
   exit 1
@@ -58,20 +73,21 @@ grep -Eq '^[[:space:]]*unity_shader_cache_redirect[[:space:]]*=' "$PORT_TOML" ||
 run_love_launcher_ui
 
 VS_ENV="$LAUNCH_ENV"
+[ ! -f "$VS_ENV" ] || source "$VS_ENV"
+resolve_unity_graphics_api "${VS_GRAPHICS_API:-gles}" gles30 1 || exit 1
 if [ -f "$VS_ENV" ]; then
-  source "$VS_ENV"
-  echo "$LOG_PREFIX env: output=${VS_WIDTH}x${VS_HEIGHT} render_percent=${VS_RENDER_PERCENT:-100} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
+  echo "$LOG_PREFIX env: output=${VS_WIDTH}x${VS_HEIGHT} render_percent=${VS_RENDER_PERCENT:-config} swap_ab=$VS_SWAP_AB swap_xy=$VS_SWAP_XY"
 
   if [ "$VS_SWAP_AB" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
   if [ "$VS_SWAP_XY" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
-  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V"
+  apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V" || exit 1
 else
   echo "$LOG_PREFIX no launch_config.env — panel resolution, current config.toml otherwise"
 fi
 
 # Outside the env branch on purpose: without a launcher UI there is no env, and
 # the resolution must still follow this device's panel.
-configure_unity_display "$PORT_TOML" "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}" "${VS_RENDER_PERCENT:-100}" || exit 1
+configure_unity_display "$PORT_TOML" "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}" "${VS_RENDER_PERCENT:-config}" "${VS_MEMORY_MODE:-}" "$UNITY_GRAPHICS_API" || exit 1
 
 # Unity Loader now resolves Android base assets and Play Asset Delivery pack
 # assets internally. Keep the launcher focused on UI/config; do not bind
@@ -81,18 +97,14 @@ configure_unity_display "$PORT_TOML" "${VS_WIDTH:-auto}" "${VS_HEIGHT:-auto}" "$
 # Keep the real Mali context intact, but advertise ES 3.0 to Unity. Unity 6's
 # ES 3.2 world-rendering path only fills a small lower-left region on the
 # MiniLoong Mali-G52, while its ES 3.0 path renders the complete frame.
-sed -i "s/^glVersionOverride.*/glVersionOverride        = \"OpenGL ES 3.0 Bogodroid\"/" "$PORT_TOML"
-sed -i "s/^glMajorVersionOverride.*/glMajorVersionOverride   = 3/" "$PORT_TOML"
-sed -i "s/^glMinorVersionOverride.*/glMinorVersionOverride   = 0/" "$PORT_TOML"
-# Rewriting Unity's live ES 3 blit pair as ES 2 produces an opaque black
-# backbuffer on the MiniLoong Mali driver. Driver workarounds remain active;
-# only the destructive source translation is disabled for this port.
-sed -i "s/^shaderGles2Rewrite *=.*/shaderGles2Rewrite = false/" "$PORT_TOML"
-sed -i "s/^textureMaxDim *=.*/textureMaxDim = 0/" "$PORT_TOML"
+portkit_launcher toml merge --file "$PORT_TOML" --patch '{"gpu":{
+  "glVersionOverride":"OpenGL ES 3.0 Rudroid","glMajorVersionOverride":3,"glMinorVersionOverride":0,
+  "shaderGles2Rewrite":false,"textureMaxDim":0
+}}' || exit 1
 
 # Rewired 1.1.58 disables Unity input for this Android build, while its native
 # Android helper cannot initialize without a real Android runtime. Keep the
-# Android gamepad visible to Bogodroid, and add a per-game keyboard bridge for
+# Android gamepad visible to Rudroid, and add a per-game keyboard bridge for
 # the UI actions Rewired still consumes. This is deliberately not the LÖVE UI
 # mapping: B remains Back, and the launcher's AB preference is preserved.
 if [ "${VS_SWAP_AB:-off}" = "on" ]; then

@@ -1,195 +1,44 @@
-# Vampire Survivors 1.14.111 Port
+# 吸血鬼幸存者 1.14.111
 
-This port runs the Android Unity 6 / IL2CPP build through Bogodroid's standard
-`unityloader`. Unity, Google Play, GMS, asset-pack and game-specific behavior is
-provided by independent plugins in `unityloader.d/`. It is intentionally kept
-separate from newer Vampire Survivors builds.
+Android Unity 6/IL2CPP 版本，通过 Rudroid 运行；不要混用其他游戏版本资源。
+SH 入口仍为 `V_吸血鬼幸存者_114.sh`，设置/打包规则见[共享工具](../../_kit/README.md)。
 
-## Device Layout
-
-Installed layout:
+## 资源布局
 
 ```text
-/mnt/SDCARD/Data/ports/vampiresurvivors114/
-  launcher.sh
-  manifest.json
-  unityloader
-  unityloader.libs/
-    libstdc++.so.6
-    libgcc_s.so.1
-  unityloader.d/
-    android_base.so
-    platform_android_asset_packs.so
-    platform_sdl_runtime.so
-    sdk_fmod.so
-    sdk_google_gms.so
-    sdk_google_play_core.so
-    sdk_unity_burst.so
-    unity_6.so
-  config.toml
-  vampiresurvivors114-game.gptk
-  vampiresurvivors114-game-swap-ab.gptk
-  love_ui/
-  gamedata/
-    lib/arm64-v8a/*.so
-    assets/...
-    assetpacks/UnityDataAssetPack/assets/...
-
-/mnt/SDCARD/Roms/PORTS/
-  V_吸血鬼幸存者_114.sh
-```
-
-`config.toml` must point `paths.game_files` at the Android payload root and
-select the writable, per-launch shader cache prepared by the launcher:
-
-```toml
-[paths]
-game_files = "gamedata"
-unity_shader_cache_redirect = "/tmp/bogodroid-cache-com.poncle.vampiresurvivors/UnityShaderCache"
-```
-
-Bogodroid changes cwd into `game_files`, so Android-style paths are resolved
-relative to `gamedata/`. Shader-cache redirection is a generic loader config;
-Vampire Survivors no longer needs a game-specific cache plugin.
-
-## Build The Payload From An APK/APKS
-
-1. Extract the base APK.
-2. Copy base native libraries:
-
-```text
-base/lib/arm64-v8a/*.so
-  -> gamedata/lib/arm64-v8a/
-```
-
-3. Copy base APK assets:
-
-```text
-base/assets/*
-  -> gamedata/assets/
-```
-
-4. Extract the Play Asset Delivery pack named `UnityDataAssetPack`.
-5. Copy the pack assets exactly under:
-
-```text
-UnityDataAssetPack/assets/*
-  -> gamedata/assetpacks/UnityDataAssetPack/assets/
-```
-
-Do not merge the asset pack into `gamedata/assets`. Base assets and pack assets
-can contain files with the same relative name, and Unity expects both views.
-
-Expected important files:
-
-```text
+gamedata/lib/arm64-v8a/*.so
 gamedata/assets/bin/Data/data.unity3d
 gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat
 gamedata/assetpacks/UnityDataAssetPack/assets/bin/Data/datapack.unity3d
 gamedata/assetpacks/UnityDataAssetPack/assets/aa/settings.json
 ```
 
-## Loader Requirements
+从玩家自己的 base APK 和 UnityDataAssetPack 分别解出；PAD 不能合并到 base/assets，
+两边可能有同名文件。`paths.game_files` 指向 `gamedata`。Java/NDK/native 资源解析
+和 Play Core/GMS 兼容由 Rudroid 负责，不在启动器复制或增加下载流程。
 
-Use the standard Bogodroid executable:
+## 一次准备资源
 
-```text
-unityloader
+在 Rudroid 根目录执行，GPU 必须支持 ASTC：
+
+```sh
+.venv-unity/bin/python tools/unity_assets.py /games/original/gamedata /games/my-port/gamedata
 ```
 
-Place the required `.so` plugins in `unityloader.d/`. In particular,
-`sdk_google_play_core.so` and `sdk_google_gms.so` enable their SDK stubs
-independently; neither is coupled to `unity_6.so`. The plugin set handles:
+默认 1 GiB，外部程序可用 `--target astc-2g` / `astc-4g`。输出须是新目录，保留全部
+base/PAD、sidecar 和原生库；自动质量回退，不改原图尺寸或丢 mip。
+本游戏 `textureMaxDim` 固定 0；曾改变可见视口，优先用离线转换。
 
-- Google Play Games sign-in stubs.
-- Play Asset Delivery completed-state/path stubs.
-- Android base/split asset lookup through Java `AssetManager`.
-- Android asset lookup through NDK `AAssetManager`.
-- `open` / `fopen` fallback for Android asset paths.
+## 启动与验证
 
-No launcher-side bind mount is required for `assets` or `assets/aa`.
+`_kit/dist_port.sh vampiresurvivors114` 生成 dist。SH 放到固件 Ports 菜单，
+其余负载放实际端口目录；整套 loader＋`rudroid.runtime/` 按同 kit 更新，
+不使用旧 C 版 `unityloader.d/` 清单。保留配置、UI 状态、存档和玩家资源。
 
-## Launcher
-
-`love/launcher.sh.template` is the editable template. `_kit/dist_port.sh
-vampiresurvivors114` writes the self-contained device script to
-`dist/V_吸血鬼幸存者_114.sh` and stages the LÖVE files under
-`dist/vampiresurvivors114/love_ui/`; the device never needs shared `_kit`
-scripts.
-
-The LÖVE UI updates `vs.toml` through:
-
-```text
-love_ui/launch_config.env
-```
-
-On the first migrated launch, existing ABXY choices are imported from the old
-Godot userdata env file. If the UI payload is absent, the script starts with the
-current `vs.toml`.
-
-Output resolution defaults to the detected panel size. Render resolution is a
-separate Native/75%/50% choice backed by `[gpu].renderScalePercent`; the loader
-uses a lightweight sharp upscale across the full physical output.
-
-Bogodroid still exposes the handheld as an Android gamepad. This 1.14 build of
-Rewired disables Unity input and its native Android helper cannot initialize in
-the compatibility runtime, so the launcher additionally runs a game-specific
-`gptokeyb` mapping for confirm, back and directional UI input. It does not reuse
-the LÖVE UI mapping, and the user's AB-swap setting selects the matching map.
-
-The launcher always resets `textureMaxDim` to `0`. This game uses offline asset
-compression instead; runtime texture downscaling changes the apparent viewport.
-
-## Resource Compression
-
-Do not use `textureMaxDim` as the normal optimization path for this game. It can
-change the apparent viewport and move the character off center.
-
-Use offline ASTC re-tiering instead. The tested 1.14 pass was:
-
-```bash
-./tools/unity_astc/retier_all.sh "$GAME_DIR/gamedata" --keep-cap 768 --block 6x6
-```
-
-For the validated device payload, 38 files were replaced and about 187 MB were
-saved.
-
-## Deploy
-
-Copy the standard loader, plugins and launcher atomically. The plugin source
-directory below represents the matching Bogodroid build output:
-
-```bash
-DEVICE=root@HANDHELD_IP
-scp build-release/unityloader \
-  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.new"
-rsync -a --delete build-release/unityloader.libs/ \
-  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.libs/"
-rsync -a --delete build-release/unityloader.d/ \
-  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/unityloader.d/"
-_kit/dist_port.sh vampiresurvivors114
-scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
-  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/launcher.sh.new"
-scp ports/vampiresurvivors114/dist/V_吸血鬼幸存者_114.sh \
-  "${DEVICE}:/mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new"
-rsync -a ports/vampiresurvivors114/dist/vampiresurvivors114/love_ui/ \
-  "${DEVICE}:/mnt/SDCARD/Data/ports/vampiresurvivors114/love_ui/"
-
-ssh "$DEVICE" 'set -e
-cd /mnt/SDCARD/Data/ports/vampiresurvivors114
-chmod 755 unityloader.new launcher.sh.new
-mv unityloader.new unityloader
-mv launcher.sh.new launcher.sh
-chmod 755 /mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new
-mv /mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh.new /mnt/SDCARD/Roms/PORTS/V_吸血鬼幸存者_114.sh'
-```
-
-## Smoke Test
-
-A good build should pass these points:
-
-1. Launcher starts the game.
-2. Logo advances.
-3. Photosensitivity prompt accepts the confirm button.
-4. Main menu opens.
-5. Starting a run leaves the loading screen and enters gameplay.
+常用页是渲染尺寸和内存档；输出尺寸、A/B、X/Y 在高级。
+高级页按实际环境开放实验 Vulkan，支持与 GLES 共用的 100% / 75% / 50%
+渲染和内存档。默认 OpenGL ES 3.0；不支持的后端不能选择，已存无效值在
+显示前改为可用默认值。滤波自动处理，不适用项显示“禁用”，不替换系统驱动。
+Android gamepad 保留；本版本 Rewired 的额外键盘桥使用游戏专用 gptokeyb 映射，
+不能复用设置 UI 映射。验收覆盖警告确认、菜单、进入关卡、移动、音频和正常退出，
+不同页面的提交率不能直接比较。
