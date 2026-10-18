@@ -266,7 +266,6 @@ prepare_unityloader_private_libs() {
 
 run_unity_game() {
   local toml="$1" game_library_paths="${2:-}" unity_status
-  local game_input_pid=""
   resolve_unity_runtime || return 1
   # get_controls populates sdl_controllerconfig, but the settings UI runs in
   # a subshell so its SDL_GAMECONTROLLERCONFIG export cannot reach the game.
@@ -289,31 +288,13 @@ run_unity_game() {
   chmod a+x "$UNITY_RUNTIME_DIR/unityloader" || return 1
   launcher_platform_prepare_game "$UNITY_RUNTIME_DIR/unityloader"
 
-  if [ -n "${UNITY_GAME_GPTK_CONFIG:-}" ]; then
-    # PortMaster's GPTOKEYB is a trusted command prefix (it can include sudo
-    # and preload arguments), not a single executable path.
-    if [ -z "${GPTOKEYB:-}" ] || [ ! -r "$UNITY_GAME_GPTK_CONFIG" ]; then
-      echo "$LOG_PREFIX missing Unity game input bridge: $UNITY_GAME_GPTK_CONFIG"
-      return 1
-    fi
-  fi
-
   "$UNITY_RUNTIME_DIR/unityloader" "$toml" &
   local unity_pid=$!
-  if [ -n "${UNITY_GAME_GPTK_CONFIG:-}" ]; then
-    $GPTOKEYB unityloader -c "$UNITY_GAME_GPTK_CONFIG" &
-    game_input_pid=$!
-    echo "$LOG_PREFIX Unity game input bridge pid=$game_input_pid"
-  fi
   # Keep normal OOM selection so a large guest can be reclaimed under pressure.
   echo 0 > "/proc/$unity_pid/oom_score_adj" 2>/dev/null
 
   wait "$unity_pid"
   unity_status=$?
-  if [ -n "$game_input_pid" ]; then
-    kill "$game_input_pid" 2>/dev/null
-    wait "$game_input_pid" 2>/dev/null
-  fi
   launcher_platform_finish
   return "$unity_status"
 }

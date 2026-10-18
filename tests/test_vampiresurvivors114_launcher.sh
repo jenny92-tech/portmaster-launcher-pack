@@ -10,8 +10,6 @@ LOVE="$PORT/love"
 
 [ -f "$LOVE/launcher.sh.template" ] || { echo "missing love launcher template" >&2; exit 1; }
 [ -f "$LOVE/main.lua" ] || { echo "missing love main.lua" >&2; exit 1; }
-[ -f "$PORT/src/vampiresurvivors114-game.gptk" ] || { echo "missing game input map" >&2; exit 1; }
-[ -f "$PORT/src/vampiresurvivors114-game-swap-ab.gptk" ] || { echo "missing swapped game input map" >&2; exit 1; }
 
 python3 - "$PORT/manifest.json" <<'PY'
 import json
@@ -55,25 +53,11 @@ grep -Fq 'launcher.define {' "$LOVE/main.lua"
 grep -Fq 'launcher.output_resolution {env = {"VS_WIDTH", "VS_HEIGHT"}}' "$LOVE/main.lua"
 grep -Fq 'launcher.render_scale {env = "VS_RENDER_PERCENT"}' "$LOVE/main.lua"
 grep -Fq 'configure_unity_display "$PORT_TOML"' "$LOVE/launcher.sh.template"
-grep -Fq 'export UNITY_GAME_GPTK_CONFIG="$GAMEDIR/vampiresurvivors114-game.gptk"' "$LOVE/launcher.sh.template"
-grep -Fq 'export UNITY_GAME_GPTK_CONFIG="$GAMEDIR/vampiresurvivors114-game-swap-ab.gptk"' "$LOVE/launcher.sh.template"
-grep -Fq 'a = enter' "$PORT/src/vampiresurvivors114-game.gptk"
-grep -Fq 'b = esc' "$PORT/src/vampiresurvivors114-game.gptk"
-grep -Fq 'a = esc' "$PORT/src/vampiresurvivors114-game-swap-ab.gptk"
-grep -Fq 'b = enter' "$PORT/src/vampiresurvivors114-game-swap-ab.gptk"
 grep -Fq 'Vampire Survivors Launcher/launch_config.env' "$LOVE/main.lua"
 bash -n "$LOVE/launcher.sh.template"
 
 "$ROOT/_kit/dist_port.sh" vampiresurvivors114 >/dev/null
-[ -f "$PORT/dist/vampiresurvivors114/vampiresurvivors114-game.gptk" ] || {
-  echo "normal game input map must be staged inside the portable data directory" >&2
+if find "$PORT/dist" -name 'vampiresurvivors114-game*.gptk' -print | grep -q .; then
+  echo "native game input must not ship a second mapper" >&2
   exit 1
-}
-[ -f "$PORT/dist/vampiresurvivors114/vampiresurvivors114-game-swap-ab.gptk" ] || {
-  echo "swapped game input map must be staged inside the portable data directory" >&2
-  exit 1
-}
-[ ! -f "$PORT/dist/vampiresurvivors114-game.gptk" ] || {
-  echo "game input map must not be stranded at the package root" >&2
-  exit 1
-}
+fi

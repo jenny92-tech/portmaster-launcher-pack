@@ -47,5 +47,5 @@ Shell 测试读取源码或构造隔离设备/发行夹具，Python 测试用 lu
 | 龙沉异世录契约 | `test_sunkendragon_launcher.sh` | 检查包配置及玩家资源准备分支 |
 | TrimUI APP 归档 | `test_trimui_app_packager.sh` | 验证包装结构、可重现 ZIP 与符号链接防护 |
 | Unity 显示参数 | `test_unity_resolution_contract.sh` | 验证显示/渲染分离、三档内存、绝对配置路径和失败传播 |
-| Unity 设置集成 | `test_unity_launcher_settings.py` | 用隔离 PortMaster/游戏夹具和真实主机辅助程序运行五标题模板，不启动游戏 |
+| Unity 设置集成 | `test_unity_launcher_settings.py` | 用隔离夹具和真实主机辅助程序验证五标题配置、交接失败与原生退出所有权，不启动游戏 |
 | 吸血鬼幸存者契约 | `test_vampiresurvivors114_launcher.sh` | 检查 Unity 6 图形兼容、插件与存档边界 |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # INPUT:  Unity 启动模板、真实主机 PortKit 工具与隔离游戏/PortMaster 夹具
-# OUTPUT: 五标题配置写入、路径保留和 loader 交接前失败断言
+# OUTPUT: 五标题配置写入、路径保留、原生退出所有权和 loader 交接前失败断言
 # POS:    验证游戏专用设置与共享 Rudroid 参数一起应用，不启动真实游戏
 from pathlib import Path
 import re
@@ -174,6 +174,39 @@ run_unity_game() {{ printf '%s\\n' "$1" > "$GAMEDIR/loader-handoff"; }}
                 self.assertEqual(doc['gpu']['glVersionOverride'], 'OpenGL ES 3.0 Rudroid')
                 self.assertFalse(doc['gpu']['shaderGles2Rewrite'])
                 self.assertEqual(doc['gpu']['textureMaxDim'], 0)
+
+    def test_native_player_owns_exit_without_a_legacy_input_killer(self):
+        for status in (0, 42):
+            with self.subTest(status=status), tempfile.TemporaryDirectory(prefix='native-exit-') as temp:
+                base = Path(temp).resolve()
+                (base / 'rudroid.runtime').mkdir()
+                loader = base / 'unityloader'
+                loader.write_text(f'#!/bin/sh\nsleep 0.2\nexit {status}\n')
+                loader.chmod(0o755)
+                killer = base / 'legacy-input-killer'
+                called = base / 'killer-called'
+                finished = base / 'platform-finished'
+                killer.write_text('#!/bin/sh\ntouch ' + shlex.quote(str(called)) + '\n')
+                killer.chmod(0o755)
+                script = f'''
+source {shlex.quote(str(ROOT / '_kit/launcher_unity_common.sh'))}
+GAMEDIR={shlex.quote(str(base))}
+CONFDIR="$GAMEDIR/conf"
+UNITY_RUNTIME_DIR="$GAMEDIR"
+GPTOKEYB={shlex.quote(str(killer))}
+UNITY_GAME_GPTK_CONFIG="$GAMEDIR/stale-map.gptk"
+touch "$UNITY_GAME_GPTK_CONFIG"
+audio_setup() {{ :; }}
+memory_tuning() {{ :; }}
+install_exit_trap() {{ :; }}
+launcher_platform_prepare_game() {{ :; }}
+launcher_platform_finish() {{ touch {shlex.quote(str(finished))}; }}
+run_unity_game "$GAMEDIR/config.toml"
+'''
+                result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertFalse(called.exists(), 'a second input process must not kill the native player')
+                self.assertTrue(finished.exists(), 'platform cleanup must preserve the native exit status')
 
     def test_unavailable_vulkan_stops_before_config_and_guest_handoff(self):
         for port in ('silksong','vampiresurvivors114'):

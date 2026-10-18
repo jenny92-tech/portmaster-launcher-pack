@@ -102,18 +102,9 @@ portkit_launcher toml merge --file "$PORT_TOML" --patch '{"gpu":{
   "shaderGles2Rewrite":false,"textureMaxDim":0
 }}' || exit 1
 
-# Rewired 1.1.58 disables Unity input for this Android build, while its native
-# Android helper cannot initialize without a real Android runtime. Keep the
-# Android gamepad visible to Rudroid, and add a per-game keyboard bridge for
-# the UI actions Rewired still consumes. This is deliberately not the LÖVE UI
-# mapping: B remains Back, and the launcher's AB preference is preserved.
-if [ "${VS_SWAP_AB:-off}" = "on" ]; then
-  export UNITY_GAME_GPTK_CONFIG="$GAMEDIR/vampiresurvivors114-game-swap-ab.gptk"
-else
-  export UNITY_GAME_GPTK_CONFIG="$GAMEDIR/vampiresurvivors114-game.gptk"
-fi
-
-# Unity 6/PAD compatibility is handled by unityloader.d plugins. The second
+# Rudroid owns gamepad input and Select+Start exit. A second mapper can
+# duplicate pause events and kill the player before native cleanup finishes.
+# Unity 6/PAD compatibility is handled by rudroid.runtime plugins. The second
 # argument only supplies this game's packaged native-library directories;
 # process orchestration remains shared with every other Unity port.
 run_unity_game "$PORT_TOML" "$GAMEDIR/gamedata/lib:$GAMEDIR/gamedata/lib/arm64-v8a"

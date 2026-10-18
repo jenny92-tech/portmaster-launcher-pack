@@ -41,5 +41,5 @@
     "https://github.com/jenny92-tech/rudroid (unityloader)",
     "PortMaster runtimes/love_11.5"
   ],
-  "notes": "Direct Unity launch. A game-specific gptokeyb bridge supplies Rewired menu input without replacing Rudroid's Android gamepad path."
+  "notes": "Direct Unity launch with Rudroid's native Android gamepad input and exit handling."
 }

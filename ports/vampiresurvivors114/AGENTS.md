@@ -13,7 +13,7 @@ manifest 描述端口和运行依赖；love/ 输出 VS_* 选项，模板协调�
 ## 约束
 
 - PAD/Android 资源解析留在 UnityLoader 插件；不要在启动器复制该逻辑。
-- 游戏阶段保留 Android gamepad 输入；Rewired 1.14 的键盘桥只能使用独立游戏映射，不能复用 UI 映射或改变其他 Unity 端口。
+- 游戏阶段使用 Rudroid 原生 Android gamepad 输入及退出流程；gptokeyb 仅用于 LÖVE 设置 UI，不再启动第二套游戏键盘映射或外部强杀器。
 - dist/ 为构建产物，源码与文档仅维护真实模板和清单。
 
 ## 业务域清单
