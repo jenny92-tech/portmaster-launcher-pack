@@ -68,3 +68,9 @@ PortKit 的 GitHub 路由按 release/raw/archive/clone/api 等能力选择并校
 APP 通过进程内共享库使用；普通启动器只携带声明所需的静态 helper。
 最终负载由 `build_info.py` 计算内容散列和 UTC 日期；这是构建身份，不升级配置/API 版本。
 发行经过 dist 入口，单独 assemble 的脚本没有完整包身份。
+
+Unity 的可选私有 Wayland 路径使用 `wayland_session.py`：只有完整的
+`runtime/portable-wayland` 客户端包、私有 WSI 与已安装 PortMaster Weston
+通过有界预检时，才开放已验收标题的 Vulkan 选项。会话只读挂载自己的
+Weston，保留系统 GPU 驱动和音频环境，游戏退出后清理；普通 GLES 和已有
+Wayland 系统继续原流程。新增设备仍需验证出画面、输入、音频与退出。

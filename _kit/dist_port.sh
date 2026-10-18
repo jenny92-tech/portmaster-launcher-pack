@@ -126,6 +126,13 @@ if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
   cp -R "$PORT_DIR/portable/." "$APP_DIST_ROOT/"
 fi
 
+# Inline Unity launchers use this optional helper only when the separate
+# audited client bundle is installed; other engines carry no compositor helper.
+if [ -f "$DIST/$SCRIPT_NAME" ] && grep -Fq 'run_unity_game()' "$DIST/$SCRIPT_NAME"; then
+  mkdir -p "$APP_DIST_ROOT/bin"
+  cp "$ROOT/_kit/wayland_session.py" "$APP_DIST_ROOT/bin/wayland-session.py"
+fi
+
 if [ -n "$LAUNCHER_KIT_REQUIRED" ]; then
   "$ROOT/_kit/stage_portkit_launcher.sh" "$APP_DIST_ROOT"
 fi

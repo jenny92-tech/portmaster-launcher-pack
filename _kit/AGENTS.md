@@ -18,7 +18,7 @@
 - MiniLoong 的系统音频/Wayland 环境保持既有约定；已有效的显示尺寸不做二次旋转，只有已知 Loong 的原始 fb 尺寸回退才交换宽高。
 - 原生运行时与 revision 必须由对应构建流程同步生成；注释与文档变化也可能使内容散列失效。
 - 配置/清单版本保持当前值；打包不得包含运行状态、缓存或用户游戏数据。
-- Vulkan 仅由已验证标题在高级页提供；私有 WSI 随同 kit 安装到 runtime/vulkan-wsi，环境只在游戏进程生效，不更换系统 ICD/驱动。运行库能力查询、游戏声明和有界原生环境探测取交集；不可用的后端不能选择，已存无效值在显示前改为可用默认值；启动校验不暗中换后端。不适用项显示“禁用”并跳过焦点，滤波由程序处理。
+- Vulkan 仅由已验证标题在高级页提供；私有 WSI 随同 kit 安装到 runtime/vulkan-wsi，环境只在游戏进程生效，不更换系统 ICD/驱动。运行库能力查询、游戏声明和有界原生环境探测取交集；没有系统 Wayland 时仅在完整私有客户端包和已安装 PortMaster Weston 均通过验证后使用临时会话；不可用的后端不能选择，已存无效值在显示前改为可用默认值；启动校验不暗中换后端。不适用项显示“禁用”并跳过焦点，滤波由程序处理。
 - Rudroid 拥有游戏阶段的原生输入和 Select+Start 退出；gptokeyb 只服务设置 UI，不叠加游戏映射或外部退出强杀器。
 - 录屏脚本维护 `_kit/recorder.sh`，生成的 CLI 不手工修改。
 
@@ -40,6 +40,7 @@
 | PortMaster 引导 | `portmaster_bootstrap.sh` | 查找 controlfolder，统一加载标准 control/mod 和手柄配置 |
 | 系统适配边界 | `launcher_platform.sh` | 探测真实显示会话、补齐尺寸、处理旧输入/进程名兼容和显式 DRM 所有权请求 |
 | 通用设备层 | `portmaster_common.sh` | 音频、内存、退出清理及 LÖVE 启动 |
+| 私有 Wayland 会话 | `wayland_session.py` | 可选只读 Weston 挂载、独占会话、有界预检与原生退出后清理，保留系统驱动和音频环境 |
 | Unity 设备层 | `launcher_unity_common.sh` | 选择可执行运行目录，固定路径写入显示/渲染/内存并运行 Rudroid |
 | 封面同步 | `launcher_artwork.sh` | 通过原生辅助程序安全同步前端图片 |
 | 录屏引擎 | `recorder.sh` | DRM JPEG 抓帧、会话状态与离线 MP4 合成 |

@@ -145,11 +145,28 @@ EOF
   echo "$LOG_PREFIX configured output=${RES_W}x${RES_H} render=${RENDER_W}x${RENDER_H} selection=$RENDER_SCALE_PERCENT memory=${memory:-config}"
 }
 
+# The optional client bundle stays with the executable runtime, while the
+# small session helper follows the launcher payload (Silksong may split them).
+find_unity_wayland_session() {
+  local runtime="${UNITY_RUNTIME_DIR:-$GAMEDIR}" candidate
+  UNITY_WAYLAND_IMAGE="${controlfolder:-}/libs/weston_pkg_0.2.squashfs"
+  [ -s "$runtime/portable-wayland/manifest.json" ] && [ -s "$UNITY_WAYLAND_IMAGE" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  for candidate in "${LAUNCHERDIR:-$GAMEDIR}/bin/wayland-session.py" "$runtime/bin/wayland-session.py"; do
+    [ -r "$candidate" ] || continue
+    if python3 "$candidate" --runtime "$runtime" --weston-image "$UNITY_WAYLAND_IMAGE" --check >/dev/null 2>&1; then
+      UNITY_WAYLAND_HELPER="$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Query compiled runtime support once, before UI startup. Title acceptance and
-# a live platform session remain independent. Accepted Vulkan titles perform a
+# a native or optional private session remain independent. Accepted titles perform a
 # bounded disposable native preflight once; no guest or game frame is started.
 prepare_unity_graphics_options() {
-  local runtime="${UNITY_RUNTIME_DIR:-$GAMEDIR}" wsi features wayland_socket probe
+  local runtime="${UNITY_RUNTIME_DIR:-$GAMEDIR}" wsi features wayland_socket probe accepted="${1:-0}"
   [ "${UNITY_GRAPHICS_PROBED_RUNTIME:-}" != "$runtime" ] || return 0
   wsi="$runtime/vulkan-wsi"
   PORTKIT_GRAPHICS_FEATURES=sdl2,gles,gles-scale,gles-sharp
@@ -165,6 +182,7 @@ prepare_unity_graphics_options() {
   fi
   PORTKIT_VULKAN_AVAILABLE=0
   PORTKIT_VULKAN_PLATFORM_SUPPORTED=0
+  UNITY_WAYLAND_SESSION=native
   if [ -n "${WAYLAND_DISPLAY:-}" ]; then
     case "$WAYLAND_DISPLAY" in
       /*) wayland_socket="$WAYLAND_DISPLAY" ;;
@@ -172,21 +190,33 @@ prepare_unity_graphics_options() {
     esac
     [ ! -S "$wayland_socket" ] || PORTKIT_VULKAN_PLATFORM_SUPPORTED=1
   fi
+  case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan-linear,*) : ;; *) accepted=0 ;; esac
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan,*)
-    if [ "${1:-0}" = 1 ] && [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 1 ] &&
-       [ -s "$wsi/libVkLayer_window_system_integration.so" ] &&
-       [ -s "$wsi/VkLayer_window_system_integration.json" ] && command -v timeout >/dev/null 2>&1; then
-      if probe="$(DISABLE_WSI_LAYER=1 VK_LAYER_PATH="$wsi${VK_LAYER_PATH:+:$VK_LAYER_PATH}" \
-        RUDROID_VULKAN_WSI_LIBRARY="$wsi/libVkLayer_window_system_integration.so" \
-        timeout -k 1 8 "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan 2>&1)"; then
-        case "
+    if [ "$accepted" = 1 ] && [ -s "$wsi/libVkLayer_window_system_integration.so" ] &&
+       [ -s "$wsi/VkLayer_window_system_integration.json" ]; then
+      probe=""
+      if [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 1 ] && command -v timeout >/dev/null 2>&1; then
+        probe="$(DISABLE_WSI_LAYER=1 VK_LAYER_PATH="$wsi${VK_LAYER_PATH:+:$VK_LAYER_PATH}" \
+          RUDROID_VULKAN_WSI_LIBRARY="$wsi/libVkLayer_window_system_integration.so" \
+          timeout -k 1 8 "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan 2>&1)" || probe="failed: $probe"
+      elif [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 0 ] && find_unity_wayland_session; then
+        UNITY_WAYLAND_SESSION=portable
+        # The subshell owns this pre-UI display lease; it cannot leak SDL or
+        # Pulse settings into LÖVE. Gameplay creates a new private session.
+        probe="$( {
+          trap launcher_platform_release_display EXIT
+          launcher_platform_acquire_display
+          python3 "$UNITY_WAYLAND_HELPER" --runtime "$runtime" --weston-image "$UNITY_WAYLAND_IMAGE" \
+            --log-dir "$GAMEDIR/cache/wayland" --probe
+        } 2>&1)" || probe="failed: $probe"
+      fi
+      case "
 $probe
 " in *'
 RUDROID_VULKAN=1
-'*) PORTKIT_VULKAN_AVAILABLE=1 ;; esac
-      else
-        printf '%s Vulkan preflight failed: %.1024s\n' "$LOG_PREFIX" "$probe"
-      fi
+'*) case "$probe" in failed:*) : ;; *) PORTKIT_VULKAN_AVAILABLE=1; PORTKIT_VULKAN_PLATFORM_SUPPORTED=1 ;; esac ;;
+        *) [ -z "$probe" ] || printf '%s Vulkan preflight failed: %.1024s\n' "$LOG_PREFIX" "$probe" ;;
+      esac
     fi ;;
   esac
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan-linear,*) : ;; *) PORTKIT_VULKAN_AVAILABLE=0 ;; esac
@@ -202,7 +232,7 @@ prepare_unity_vulkan_environment() {
     return 1
   }
   [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 1 ] || {
-    echo "$LOG_PREFIX Vulkan requires a live Wayland display session"
+    echo "$LOG_PREFIX Vulkan requires a verified native or private Wayland session"
     return 1
   }
   # Process-local private WSI; never replace an ICD or a system driver.
@@ -288,7 +318,13 @@ run_unity_game() {
   chmod a+x "$UNITY_RUNTIME_DIR/unityloader" || return 1
   launcher_platform_prepare_game "$UNITY_RUNTIME_DIR/unityloader"
 
-  "$UNITY_RUNTIME_DIR/unityloader" "$toml" &
+  set -- "$UNITY_RUNTIME_DIR/unityloader" "$toml"
+  if [ "${UNITY_GRAPHICS_API:-}" = vulkan ] && [ "${UNITY_WAYLAND_SESSION:-}" = portable ]; then
+    launcher_platform_acquire_display
+    set -- python3 "$UNITY_WAYLAND_HELPER" --runtime "$UNITY_RUNTIME_DIR" \
+      --weston-image "$UNITY_WAYLAND_IMAGE" --log-dir "$GAMEDIR/cache/wayland" -- "$@"
+  fi
+  "$@" &
   local unity_pid=$!
   # Keep normal OOM selection so a large guest can be reclaimed under pressure.
   echo 0 > "/proc/$unity_pid/oom_score_adj" 2>/dev/null
