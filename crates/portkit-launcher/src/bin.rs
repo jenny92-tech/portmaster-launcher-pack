@@ -85,21 +85,41 @@ fn run(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         [group, command, rest @ ..] if group == "json" && command == "merge" => {
             let options = Options::parse(rest)?;
+            options.only_once(&["file", "patch"])?;
             let path = required(&options, "file")?;
             let patch = serde_json::from_str(required(&options, "patch")?)?;
             portkit_launcher::json::merge_file(path.as_ref(), &patch)?;
             Ok(())
         }
+        [group, command, rest @ ..] if group == "toml" && command == "merge" => {
+            let options = Options::parse(rest)?;
+            options.only_once(&["file", "patch"])?;
+            let patch = serde_json::from_str(required(&options, "patch")?)?;
+            portkit_launcher::toml::merge_file(required(&options, "file")?.as_ref(), &patch)?;
+            Ok(())
+        }
         [group, command, rest @ ..] if group == "unity" && command == "configure" => {
             let options = Options::parse(rest)?;
+            options.only_once(&[
+                "file",
+                "section",
+                "width",
+                "height",
+                "render-percent",
+                "memory-mode",
+                "graphics-api",
+                "render-filter",
+                "print-dimensions",
+                "a",
+                "b",
+                "x",
+                "y",
+            ])?;
             let button_values = ["a", "b", "x", "y"].map(|name| options.one(name));
             let buttons = if button_values.iter().all(Option::is_none) {
                 None
             } else if button_values.iter().all(Option::is_some) {
                 let values = button_values.map(|value| value.unwrap().to_owned());
-                if values.iter().any(|value| !safe_button(value)) {
-                    return Err("button values may contain only A-Z, 0-9 and underscore".into());
-                }
                 Some(values)
             } else {
                 return Err("--a, --b, --x and --y must be supplied together".into());
@@ -107,32 +127,34 @@ fn run(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             let width = optional_u32(&options, "width")?;
             let height = optional_u32(&options, "height")?;
             let render_scale_percent = optional_u32(&options, "render-percent")?;
-            if render_scale_percent.is_some_and(|value| !matches!(value, 100 | 75 | 50)) {
-                return Err("--render-percent must be 100, 75 or 50".into());
-            }
-            if width.is_none()
-                && height.is_none()
-                && buttons.is_none()
-                && render_scale_percent.is_none()
-            {
-                return Err(
-                    "unity configure requires dimensions, render scale or button mappings".into(),
-                );
-            }
-            // Which table a key belongs to is the reader's contract, so the
-            // caller names it; omitting it targets the root table.
+            // The library owns the device/gpu/runtime/input table contract.
+            // A missing or misspelled section must never write at root.
             let section = options.one("section").map(str::to_owned);
-            if buttons.is_some() && section.is_none() {
-                return Err("button mappings need --section (e.g. --section input.remap)".into());
-            }
-            configure(&ConfigureRequest {
+            let print_dimensions = match options.one("print-dimensions") {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("--print-dimensions must be true or false".into()),
+            };
+            let dimensions = configure(&ConfigureRequest {
                 path: required(&options, "file")?.into(),
                 section,
                 width,
                 height,
                 buttons,
                 render_scale_percent,
+                memory_mode: options.one("memory-mode").map(str::to_owned),
+                graphics_api: options.one("graphics-api").map(str::to_owned),
+                render_filter: options.one("render-filter").map(str::to_owned),
             })?;
+            if print_dimensions {
+                println!(
+                    "{} {} {} {}",
+                    dimensions.output_width,
+                    dimensions.output_height,
+                    dimensions.render_width,
+                    dimensions.render_height
+                );
+            }
             Ok(())
         }
         [group, command, rest @ ..] if group == "runtime" && command == "latest-love" => {
@@ -163,6 +185,18 @@ struct Options {
 }
 
 impl Options {
+    fn only_once(&self, allowed: &[&str]) -> Result<(), String> {
+        for (name, values) in &self.values {
+            if !allowed.contains(&name.as_str()) {
+                return Err(format!("unknown option --{name}"));
+            }
+            if values.len() != 1 {
+                return Err(format!("option --{name} may be supplied only once"));
+            }
+        }
+        Ok(())
+    }
+
     fn parse(arguments: &[String]) -> Result<Self, String> {
         let mut options = Self::default();
         let mut index = 0;
@@ -213,15 +247,8 @@ fn optional_u32(options: &Options, name: &str) -> Result<Option<u32>, String> {
         .transpose()
 }
 
-fn safe_button(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
-}
-
 fn usage() -> String {
     "usage: portkit-launcher artwork sync --script-dir DIR --launcher FILE --source-dir DIR
        portkit-launcher artwork probe --script-dir DIR
-       portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--section NAME] [--width N --height N] [--render-percent 100|75|50] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
+       portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher toml merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--section device|input.remap] [--width N --height N] [--render-percent 100|75|50] [--memory-mode low_memory|balanced|performance] [--graphics-api gles|gles30|gles32|vulkan] [--render-filter config|sharp|linear] [--print-dimensions true|false] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
 }

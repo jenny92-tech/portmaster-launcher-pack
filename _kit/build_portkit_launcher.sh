@@ -35,30 +35,40 @@ command -v docker >/dev/null 2>&1 || {
 }
 
 mkdir -p "$STAGING" "$(dirname "$OUT")"
-docker run --rm --platform linux/arm64 \
+cache_args=()
+registry="${CARGO_HOME:-$HOME/.cargo}/registry"
+[ ! -d "$registry" ] || cache_args=(-v "$registry:/usr/local/cargo/registry")
+docker run --rm --platform linux/arm64 --cpus 2 --memory 4g \
   -e PORTKIT_LAUNCHER_SOURCE_REVISION="$REVISION" \
+  "${cache_args[@]}" \
   -v "$ROOT:/work" \
   -w /work \
   "$IMAGE" \
-  sh -c '
-    set -euo pipefail
-    apk add --no-cache build-base perl >/dev/null
-    CARGO_TARGET_DIR=/tmp/portkit-launcher-target \
-      cargo build --locked --release -p portkit-launcher --bin portkit-launcher
-    install -m 0755 /tmp/portkit-launcher-target/release/portkit-launcher \
+  sh -ec '
+    if command -v apk >/dev/null 2>&1; then
+      apk add --no-cache build-base perl >/dev/null
+    fi
+    build_target=$(rustc -vV | sed -n "s/^host: //p")
+    case "$build_target" in
+      aarch64-unknown-linux-musl) ;;
+      *) echo "portable launcher helper requires an aarch64 musl toolchain" >&2; exit 65 ;;
+    esac
+    export CARGO_TARGET_DIR=/work/.tmp/portkit-launcher-build/target
+    cargo build --locked --release --target "$build_target" -p portkit-launcher --bin portkit-launcher
+    install -m 0755 "$CARGO_TARGET_DIR/$build_target/release/portkit-launcher" \
       /work/.tmp/portkit-launcher-build/portkit-launcher.aarch64
+    /work/.tmp/portkit-launcher-build/portkit-launcher.aarch64 version
   '
 
-install -m 0755 "$STAGING/portkit-launcher.aarch64" "$OUT"
-printf '%s\n' "$REVISION" > "$REVISION_FILE"
-
-description=$(file "$OUT")
+description=$(file "$STAGING/portkit-launcher.aarch64")
 case "$description" in
   *ELF*ARM\ aarch64*static*) ;;
   *) echo "PortKit launcher helper is not a static aarch64 ELF: $description" >&2; exit 65 ;;
 esac
-grep -aFq "$REVISION" "$OUT" || {
+grep -aFq "$REVISION" "$STAGING/portkit-launcher.aarch64" || {
   echo "PortKit launcher helper does not contain its source revision" >&2
   exit 65
 }
+install -m 0755 "$STAGING/portkit-launcher.aarch64" "$OUT"
+printf '%s\n' "$REVISION" > "$REVISION_FILE"
 echo "$description"

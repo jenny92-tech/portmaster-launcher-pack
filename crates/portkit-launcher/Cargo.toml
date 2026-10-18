@@ -19,6 +19,7 @@ lzma-rust2 = { version = "0.17", default-features = false, features = ["std", "x
 serde.workspace = true
 serde_json.workspace = true
 tar = { version = "0.4", default-features = false }
+toml_edit = "0.22.27"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
