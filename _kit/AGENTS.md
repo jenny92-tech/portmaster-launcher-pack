@@ -16,6 +16,7 @@
 - 平台能力与 Unity 专用逻辑分离：普通端口统一使用 `portmaster_init` 和随包内联的 `launcher_platform.sh`，不依赖定制 PortMaster；仍需已安装的 PortMaster control、UI runtime 与输入工具。
 - PortMaster 路径严格按官方模板的四项顺序查找，不添加启动脚本同目录优先或额外 SD 卡路径。
 - MiniLoong 的系统音频/Wayland 环境保持既有约定；已有效的显示尺寸不做二次旋转，只有已知 Loong 的原始 fb 尺寸回退才交换宽高。
+- 硬件专属策略用 device-tree compatible 完整条目识别；由已验收端口显式选择，不把单核编号、调频或热插拔写成公共默认。
 - 原生运行时与 revision 必须由对应构建流程同步生成；注释与文档变化也可能使内容散列失效。
 - 配置/清单版本保持当前值；打包不得包含运行状态、缓存或用户游戏数据。
 - Vulkan 仅由已验证标题在高级页提供；私有 WSI 随同 kit 安装到 runtime/vulkan-wsi，环境只在游戏进程生效，不更换系统 ICD/驱动。运行库能力查询、游戏声明和有界原生环境探测取交集；没有系统 Wayland 时仅在完整私有客户端包和已安装 PortMaster Weston 均通过验证后使用临时会话；不可用的后端不能选择，已存无效值在显示前改为可用默认值；启动校验不暗中换后端。不适用项显示“禁用”并跳过焦点，滤波由程序处理。

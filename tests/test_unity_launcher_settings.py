@@ -40,7 +40,7 @@ packageName = "fixture.keep"
 
 
 class UnityLauncherSettingsTests(unittest.TestCase):
-    def run_template(self, port, mode='balanced', choices=None, malformed=False, probe_ok=True, features=None, unavailable=False):
+    def run_template(self, port, mode='balanced', choices=None, malformed=False, probe_ok=True, features=None, unavailable=False, a523=False):
         with tempfile.TemporaryDirectory(prefix='unity launcher ') as temp:
             base = Path(temp).resolve()
             game = base / 'ports' / ('hollowknight' if port == 'hk' else port)
@@ -88,13 +88,14 @@ source {shlex.quote(str(ROOT / '_kit/launcher_unity_common.sh'))}
 portmaster_init() {{
   directory={shlex.quote(str(base).lstrip('/'))}
   controlfolder={shlex.quote(str(base / 'fake PortMaster'))}
-  DISPLAY_WIDTH=960; DISPLAY_HEIGHT=720; CFW_NAME=Fixture
+  DISPLAY_WIDTH=960; DISPLAY_HEIGHT=720; CFW_NAME={"TrimUI" if a523 else "Fixture"}
   sdl_controllerconfig=fixture
 }}
 portmaster_sync_launcher_artwork() {{ :; }}
 launcher_platform_acquire_display() {{ :; }}
 launcher_platform_release_display() {{ :; }}
 pm_finish() {{ :; }}
+launcher_platform_matches_compatible() {{ {"true" if a523 else "false"}; }}
 run_love_launcher_ui() {{ LAUNCH_ENV={shlex.quote(str(launch_env))}; }}
 portkit_launcher() {{ {shlex.quote(str(HELPER))} "$@"; }}
 run_unity_game() {{ printf '%s\\n' "$1" > "$GAMEDIR/loader-handoff"; }}
@@ -157,6 +158,8 @@ run_unity_game() {{ printf '%s\\n' "$1" > "$GAMEDIR/loader-handoff"; }}
                 for effect in ('disable_ambient_particles','disable_bloom','disable_camera_blur_plane','disable_light_blur'):
                     self.assertEqual(patch[effect],values['QUALITY']!='original')
                 self.assertFalse(patch['disable_uber_postprocess'])
+                self.assertEqual(doc['gpu']['separateRenderThread'], a523)
+                self.assertEqual(doc['gpu']['renderThreadName'], 'UnityGfxDeviceW')
                 self.assertEqual(doc['unity']['target_fps'], int(values['FPS']))
                 self.assertNotIn('frame_sync_interval_us', doc['unity'])
                 self.assertEqual((game / 'config.toml').read_text(), CONFIG)
@@ -229,6 +232,10 @@ run_unity_game "$GAMEDIR/config.toml"
 
     def test_silksong_original_mode_targets_only_its_selected_config(self):
         self.run_template('silksong', choices=dict(QUALITY='original', FPS='90',AMBIENT_PARTICLES='off',BLOOM='off',CAMERA_BLUR_PLANE='off',LIGHT_BLUR='off',UBER_POSTPROCESS='off',ASSETBUNDLE_UNLOAD='on'))
+
+    def test_silksong_a523_placement_is_independent_of_backend_and_memory(self):
+        for backend in ('gles', 'vulkan'):
+            self.run_template('silksong', mode='low_memory', choices={'GRAPHICS_API': backend}, a523=True)
 
     def test_vulkan_titles_share_render_scales_without_changing_memory_mode(self):
         for port in ('silksong', 'vampiresurvivors114'):

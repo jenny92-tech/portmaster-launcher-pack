@@ -1,5 +1,5 @@
 #!/bin/bash
-# INPUT:  系统显示环境、Wayland socket、PortMaster hooks 与 Linux 输入服务
+# INPUT:  系统显示环境、device-tree compatible、Wayland socket、PortMaster hooks 与 Linux 输入服务
 # OUTPUT: launcher_platform_* 显示/尺寸、游戏生命周期与旧固件兼容入口
 # POS:    随启动包内联的系统适配层，不依赖定制 PortMaster 版本
 
@@ -58,6 +58,13 @@ launcher_platform_resolution() {
     size="$width"; width="$height"; height="$size"
   fi
   export DISPLAY_WIDTH="$width" DISPLAY_HEIGHT="$height"
+}
+
+# Exact device-tree entries, never a firmware-name or partial-model guess.
+launcher_platform_matches_compatible() {
+  local compatible_file="${2:-/proc/device-tree/compatible}"
+  [ -r "$compatible_file" ] || return 1
+  LC_ALL=C tr '\000' '\n' < "$compatible_file" | LC_ALL=C grep -Fxq -- "$1"
 }
 
 launcher_platform_resume_input() {

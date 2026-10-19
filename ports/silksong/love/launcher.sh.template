@@ -103,6 +103,10 @@ select_silksong_toml() {
 apply_silksong_quality() {
   local toml="$1" decorative="${SILK_DECORATIVE_PERCENT:-75}"
   local disable_effects=true
+  local separate_render_thread=false
+  if [ "${CFW_NAME:-}" = TrimUI ] && launcher_platform_matches_compatible allwinner,a523; then
+    separate_render_thread=true
+  fi
   case "$decorative" in 50|75|100) ;; *) decorative=75 ;; esac
   [ "${SILK_QUALITY:-low}" != original ] || disable_effects=false
   # Keep explicit per-title audio choices; memory_mode supplies defaults only.
@@ -116,7 +120,8 @@ apply_silksong_quality() {
       \"disable_ambient_particles\":$disable_effects,\"disable_heavy_postprocess\":false,
       \"disable_bloom\":$disable_effects,\"disable_camera_blur_plane\":$disable_effects,
       \"disable_light_blur\":$disable_effects,\"disable_uber_postprocess\":false
-    }},\"unity\":{\"fast_exit\":true},\"loader\":{\"file_backed_elf\":null}
+    }},\"unity\":{\"fast_exit\":true},\"loader\":{\"file_backed_elf\":null},
+    \"gpu\":{\"separateRenderThread\":$separate_render_thread,\"renderThreadName\":\"UnityGfxDeviceW\"}
   }"
 }
 

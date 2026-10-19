@@ -13,6 +13,16 @@ PLATFORM = ROOT / '_kit/launcher_platform.sh'
 
 
 class PlatformTests(unittest.TestCase):
+    def test_device_tree_match_requires_an_exact_complete_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'compatible'
+            path.write_bytes(b'allwinner,a523\0arm,sun55iw3p1\0')
+            code = 'if launcher_platform_matches_compatible "$1" "$2"; then echo yes; else echo no; fi'
+            self.assertEqual(self.shell(code, 'allwinner,a523', path), 'yes')
+            self.assertEqual(self.shell(code, 'allwinner,a52', path), 'no')
+            self.assertEqual(self.shell(code, 'allwinner,a523-pro', path), 'no')
+            self.assertEqual(self.shell(code, 'allwinner,a523', path.with_name('missing')), 'no')
+
     def test_path_assignments_are_standalone_for_miniloong_fixer(self):
         source = (ROOT / '_kit/portmaster_bootstrap.sh').read_text()
         discovery = source.split('portmaster_discover() {', 1)[1].split('\n}', 1)[0]
