@@ -1,6 +1,6 @@
 # 空洞骑士启动界面
 
-空洞骑士移植的 LÖVE 设置层与 Unity 启动模板。Lua 声明输出 HKL_* 参数；模板更新 config.toml、GraphicsSettings 和所属 PlayerPrefs 视频引导键，再调用共享 Unity 启动器。
+本目录维护 HKL_* 参数的声明与落盘边界：Lua 只负责设置，模板通过共享辅助程序更新 config.toml、GraphicsSettings 和视频引导 PlayerPrefs，然后调用 Unity 启动器。需要改视频键时，从模板中的定点合并入口开始检查。
 
 ## 约束
 
@@ -13,5 +13,5 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 选项定义 | `main.lua` | 声明分辨率、渲染比例、画质和按键配置 |
-| 启动模板 | `launcher.sh.template` | 同步图形设置、合并视频引导偏好并启动游戏 |
+| 选项定义 | `main.lua` | 分辨率、画质、渲染比例及按键字段 |
+| 启动模板 | `launcher.sh.template` | 合并视频键、同步图形设置并交接 Unity |

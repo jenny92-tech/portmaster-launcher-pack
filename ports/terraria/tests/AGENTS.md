@@ -1,6 +1,6 @@
 # 泰拉瑞亚启动契约测试
 
-泰拉瑞亚端口专属回归测试，补充仓库通用 `_kit/` 测试。检查语言编码、参数名称、JSON 合并与共享函数调用，再执行模板的 bash 语法检查。
+此脚本读取 main.lua 和 launcher.sh.template，以固定断言核对语言默认值/枚举、TER_* 参数与 PortKit 合并调用，然后执行 Bash 语法检查。它补充共享 Kit 测试，不解包 APK，也不启动 Unity。
 
 ## 约束
 
@@ -11,4 +11,4 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 语言契约回归 | `test_terraria_launcher_language.sh` | 校验语言选项、共享接口与模板语法 |
+| 语言契约回归 | `test_terraria_launcher_language.sh` | 语言 7/1/12、结构化 JSON 更新及共享函数调用断言 |

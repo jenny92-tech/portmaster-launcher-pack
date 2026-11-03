@@ -1,6 +1,6 @@
 # 泰拉瑞亚端口
 
-ports/ 下复用 LÖVE 启动器和 Rudroid/UnityLoader 的游戏端口。patch/ 负责首次 APK 解包；love/ 提供设置和资源门禁，将 TER_* 配置应用到游戏后启动；tests/ 固定语言与共享启动接口契约。
+泰拉瑞亚把玩家 APK 准备、LÖVE 设置和 Unity 启动串为一条流程。patch 解包并核验核心文件，love 用 TER_* 参数更新语言和图形配置，再进入共享 Rudroid/UnityLoader；专属 tests 约束语言及模板接口保持一致。
 
 ## 约束
 
@@ -11,9 +11,9 @@ ports/ 下复用 LÖVE 启动器和 Rudroid/UnityLoader 的游戏端口。patch/
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 包清单 | `manifest.json` | 游戏身份、运行依赖和发行路径 |
+| 包清单 | `manifest.json` | 运行依赖和安装目录 |
 | 授权 | `LICENSE` | 端口授权声明 |
 | 预览图 | `screenshot.png` | 保留原图尺寸与构图，使用统一圆角细边框与右下紫猫角底 |
-| 启动界面 | `love/` | 语言/图形/输入选项及启动流程，见子目录 AGENTS.md |
-| 首次资源准备 | `patch/` | APK 解包和核心校验，见子目录 AGENTS.md |
-| 契约测试 | `tests/` | 语言与共享启动接口回归，见子目录 AGENTS.md |
+| 启动界面 | `love/` | TER_* 参数、资源门禁和 Unity 交接 |
+| 首次资源准备 | `patch/` | APK 提取与就绪标记 |
+| 契约测试 | `tests/` | 语言枚举、JSON 合并及共享启动契约 |

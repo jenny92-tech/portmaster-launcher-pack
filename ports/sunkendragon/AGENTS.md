@@ -1,24 +1,23 @@
 # 龙沉异世录端口
 
-ports/ 下的 Unity IL2CPP 移植实验，连接外部 Bogodroid 构建结果和玩家 Windows 游戏资源。src/ 组装完整 Android 基线或最小 runtime 包；patch/ 转换玩家可复用资源布局；love/ 检查资源、设置显示和按键后启动 Unity。
+龙沉异世录保留两条实验路径：以完整 Android payload 建立基线，或用匹配 ARM64 核心复用玩家 Windows GameData。src 负责装配，patch 准备资源，love 执行资源门禁和设置。此端口暂停维护，尚未完成 Windows → ARM64 游戏逻辑兼容，也未列入 Rudroid 已验标题。
 
 ## 约束
 
-- 当前为暂停维护的实验端口，未列入 Rudroid 已验标题。
 - 玩家 GameData 保持只读，ARM64 核心与其元数据必须来自匹配构建。
 - 完整基线与最小资源迁移路径分开验证，不能未经设备测试宣称稳定。
-- Windows → ARM64 游戏逻辑仍有转换缺口，持续渲染不能单独证明玩法正确。
+- 持续渲染不能单独证明玩法正确，完整基线结果也不能代替最小资源迁移路径的验收。
 
 ## 业务域清单
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 包清单 | `manifest.json` | 实验端口身份、依赖、目标设备和发行配置 |
-| Unity 配置 | `config.toml.template` | 默认 Bogodroid 游戏与运行配置模板 |
+| 包清单 | `manifest.json` | 实验端口身份、目标和依赖 |
+| Unity 配置 | `config.toml.template` | Bogodroid 游戏/运行配置基线 |
 | 使用说明 | `README.md` | 当前移植状态、资源准备与使用说明 |
 | 授权 | `LICENSE` | 端口授权声明 |
 | 预览图 | `screenshot.png` | 保留横版原图尺寸与构图，使用统一圆角细边框与右下紫猫角底 |
-| 玩家资源说明 | `GameData/` | 玩家 Windows 游戏放置说明，不含游戏源内容 |
-| 启动界面 | `love/` | 设置与资源门禁，见子目录 AGENTS.md |
-| 资源转换 | `patch/` | 玩家资源到运行布局的准备脚本，见子目录 AGENTS.md |
-| 开发流程 | `src/` | 完整基线和最小包组装，见子目录 AGENTS.md |
+| 玩家资源说明 | `GameData/` | Windows 玩家输入的放置说明 |
+| 启动界面 | `love/` | 资源门禁、显示及输入设置 |
+| 资源转换 | `patch/` | Windows 资源到运行布局的准备 |
+| 开发流程 | `src/` | 完整基线/最小核心包的装配 |

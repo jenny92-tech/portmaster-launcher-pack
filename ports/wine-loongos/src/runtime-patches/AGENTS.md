@@ -1,6 +1,6 @@
 # 掌机显示运行时补丁
 
-属于公共运行环境；由机型环境选用，游戏适配仅声明全屏需求。Wine 创建原生窗口前请求全屏，以启动器自己的画面填充临时背景；WSI 通过 Wayland 帧回调报告本次启动的画面交接。
+机型环境选用这里构建的私有 Wine/WSI 组件。Wine 窗口创建前请求全屏并以启动器画面作为临时背景；WSI 的 Wayland 帧回调用每次会话 token 通知启动器完成画面交接。游戏适配仅声明全屏需求，不直接选择 GPU 实现。
 
 ## 约束
 
@@ -13,8 +13,8 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |---|---|---|
-| 构建环境 | `Dockerfile.wine` | 固定本地构建基线的 Wine Unix 驱动依赖 |
-| 构建记录 | `BUILD.md` | 对应完整源码、固定工具链、配置参数和验证边界 |
-| 启动背景 | `wine_startup_card.h` | 有尺寸校验的启动器画面加载与临时背景填充 |
-| Wine 补丁 | `wine-handheld-startup.patch` | Wine 10 原生全屏及临时背景接入 |
-| WSI 补丁 | `wsi-first-frame.patch` | Wayland 帧回调向启动器发送本次会话信号 |
+| 构建环境 | `Dockerfile.wine` | Wine Unix 驱动的固定构建依赖 |
+| 构建记录 | `BUILD.md` | 源码、工具链、配置及验证范围 |
+| 启动背景 | `wine_startup_card.h` | 启动器图像尺寸检查与临时背景 |
+| Wine 补丁 | `wine-handheld-startup.patch` | Wine 10 原生全屏和背景接入 |
+| WSI 补丁 | `wsi-first-frame.patch` | 会话 token 绑定的 Wayland 首帧通知 |

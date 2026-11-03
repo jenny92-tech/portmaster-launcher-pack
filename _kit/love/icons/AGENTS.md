@@ -1,13 +1,13 @@
-# Fluent 功能图标
+# Fluent 图标来源与像素图集
 
-微软 Fluent System Icons 的官方 filled SVG 子集及离线渲染产物，由共享 `ui_icons.lua` 按当前文字颜色绘制。来源和 SHA-256 固定在 `upstream.json`，不依赖联网或图标字体。
+`upstream.json` 锁定微软 Fluent filled SVG 子集，离线构建器生成透明白色图集及布局。`ui_icons.lua` 按所需物理像素选单元并使用当前文字颜色着色，运行时不依赖图标字体或网络。
 
 ## 约束
 
-- `svg/` 保留上游原文件；项目不手绘或修改图形路径。
-- `atlas.png`、`layout.lua` 由 `_kit/build_ui_icons.cjs` 使用 Sharp 离线生成，不手工改写。环境安装 Sharp 后运行 `node _kit/build_ui_icons.cjs`。
-- 每个图标预渲染 8–48 物理像素的整数尺寸，运行时选择对应单元，不缩放纹理，保留小屏抗锯齿边缘。
-- `_kit/stage_love_ui.sh` 只分发 atlas、布局、来源和许可证，不分发 SVG 源或文档。增加图标时同步来源清单并重建；不改变格式版本。
+- `svg/` 保留官方原文件，不手绘替代或改动路径；增加图标同步维护来源摘要。
+- `atlas.png` 和 `layout.lua` 由已安装 Sharp 的 `node _kit/build_ui_icons.cjs` 生成，不手工编辑，不改变格式版本。
+- 预渲染 8–48 的整数物理像素尺寸，运行时选对应单元而不缩放纹理，保留小屏边缘质量。
+- `stage_love_ui.sh` 收集图集、布局、来源和 MIT 许可；SVG 源及开发文档不进入运行负载。
 
 ## 业务域清单
 

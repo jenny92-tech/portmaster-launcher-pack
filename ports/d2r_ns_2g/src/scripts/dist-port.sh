@@ -12,7 +12,29 @@ if [ -n "${D2R_NS_2G_ENTRY:-}" ] && [ -n "${D2R_NS_2G_PATHS:-}" ]; then
 fi
 mkdir -p "$(dirname -- "$STAGE")"
 mkdir "$STAGE" || { echo "staging directory is in use: $STAGE" >&2; exit 1; }
-trap 'if [ -d "$STAGE" ]; then rm -rf -- "$STAGE"; fi' EXIT
+STAGE_ID=$(python3 - "$STAGE" <<'PY'
+from pathlib import Path
+import sys
+identity = Path(sys.argv[1]).stat()
+print(f'{identity.st_dev}:{identity.st_ino}')
+PY
+)
+cleanup_stage() {
+    python3 - "$STAGE" "$STAGE_ID" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+stage = Path(sys.argv[1])
+try:
+    identity = stage.lstat()
+except FileNotFoundError:
+    pass
+else:
+    if f'{identity.st_dev}:{identity.st_ino}' == sys.argv[2]:
+        shutil.rmtree(stage)
+PY
+}
+trap cleanup_stage EXIT
 DATA="$STAGE/d2r_ns_2g"
 mkdir -p "$DATA/libexec"
 bash "$ROOT/_kit/assemble.sh" "$PORT/src/launcher.sh" "$STAGE/Je-暗黑破坏神II_NS（2G版）.sh"

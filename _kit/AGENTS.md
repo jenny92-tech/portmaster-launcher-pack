@@ -1,23 +1,21 @@
-# 共享启动与打包工具
+# 共享启动、原生工具与包组装
 
-各 `ports/` 的公共构建入口和运行时 Shell/Lua 基础设施，原生复杂能力由 `crates/` 实现。`dist_port.sh` 选择端口专用脚本或共享组装流程；`assemble.sh` 内联模板中的 KIT 模块，随后收集 UI、运行时和元数据。ZIP/TrimUI 封装消费 dist；预置二进制通过独立源码 revision 校验后暂存。
+各端口通过 `dist_port.sh` 选择专用构建或共享组装；`assemble.sh` 内联 Shell 模块，再收集 UI、经源码身份校验的原生工具和元数据。封装器消费暂存目录生成 PortMaster/TrimUI 交付，设备端入口独立于仓库运行。
 
 ## 约束
 
-- `ports/<port>/dist/` 仅作组包暂存；部署使用根 `dist/` 下经校验的正式包或 `dist/ports/<port>/` 交付目录。确认正式产物后清理重复暂存。专用布局以端口说明为准，设备不得依赖仓库 `_kit/` 目录。
-- 平台能力与 Unity 专用逻辑分离：普通端口统一使用 `portmaster_init` 和随包内联的 `launcher_platform.sh`，不依赖定制 PortMaster；仍需已安装的 PortMaster control、UI runtime 与输入工具。
-- Godot/SDL2 与 Unity/Rudroid 的补丁组合经 `launcher_compat.sh` 先生成计划；失败使旧计划失效。只在已有游戏子进程/命令替换内调用 `launcher_compat_exec`，以平台 exec hook 交接原 PID，不在拥有清理流程的父进程调用。原生预检、游戏特性与验收准入仍由引擎层负责，不因匹配方案就开启后端。
-- `LAUNCHER_UI_RUNTIME_DIR` 可选择端口已准备的内置存储 UI 副本；未设置时沿用 Unity sidecar 的 LÖVE 查找。
-- PortMaster 路径严格按官方模板的四项顺序查找，不添加启动脚本同目录优先或额外 SD 卡路径。
-- MiniLoong 的系统音频/Wayland 环境保持既有约定；已有效的显示尺寸不做二次旋转，只有已知 Loong 的原始 fb 尺寸回退才交换宽高。
-- 硬件专属策略用 device-tree compatible 完整条目识别；由已验收端口显式选择，不把单核编号、调频或热插拔写成公共默认。
-- 原生运行时与 revision 必须由对应构建流程同步生成；注释与文档变化也可能使内容散列失效。
-- 配置/清单版本保持当前值；打包不得包含运行状态、缓存或用户游戏数据。
-- Vulkan 仅由已验证标题在高级页提供；私有 WSI 随同 kit 安装到 runtime/vulkan-wsi，环境只在游戏进程生效，不更换系统 ICD/驱动。游戏/固件/device-tree 条目的已验收组合、运行库能力查询、游戏声明和有界原生环境探测取交集；当前登记 Silksong、Vampire Survivors 的 TrimUI/A523 与 Loong/RK3566 RK817 板路径，未知组合在原生探测前禁用，不能用 IP 或部分 SoC 名推定支持。没有系统 Wayland 时仅在完整私有客户端包和已安装 PortMaster Weston 均通过验证后使用临时会话；不可用的后端不能选择，已存无效值在显示前改为可用默认值；启动校验不暗中换后端。不适用项显示“禁用”并跳过焦点，滤波由程序处理。
-- 标题可显式选择 `RUDROID_WAYLAND_FORCE_RENDERER=1`，让私有 Weston 先合成到输出尺寸，避免缩小的客户缓冲直接扫描；不继承任意 Weston 开关，也不改变客户渲染比例。
-- Rudroid 拥有游戏阶段的原生输入和 Select+Start 退出；gptokeyb 只服务设置 UI，不叠加游戏映射或外部退出强杀器。
-- 正常会话不保留第三方 UI 启动噪声；正式模式仅在非零退出或结构化 ERROR/FATAL 时保存最多 64 KiB 上下文，并按同条件抓取退出内核日志。临时捕获使用事件驱动的有界内存缓冲，不新增定时扫描；显式诊断保留实时完整输出。正式 runtime 交付必须通过各项目 Release 身份审计。
-- 录屏脚本维护 `_kit/recorder.sh`，生成的 CLI 不手工修改。
+- 端口 `dist/` 只作暂存，正式交付归根 `dist/`；布局特殊的端口按自身说明构建，核验后清理重复暂存。打包排除运行状态、缓存与玩家数据。
+- 普通端口统一使用 `portmaster_init` 和内联 `launcher_platform.sh`，设备仍需已安装的 PortMaster control、UI runtime 与输入工具。PortMaster 按官方四路径顺序发现，不新增脚本同目录优先或额外 SD 卡猜测。
+- `launcher_compat.sh` 为 Godot/SDL2、Unity/Rudroid 先生成补丁计划，失败使旧计划失效。`launcher_compat_exec` 只在已归属的游戏子进程或命令替换中交接原 PID；拥有退出清理的父进程不能被替换。方案匹配不绕过引擎预检、标题声明与验收准入。
+- UI 库路径局限于 UI 子进程。`LAUNCHER_UI_RUNTIME_DIR` 可选择已准备的内置 UI 副本，否则沿用 Unity sidecar 的 LÖVE 查找；Rudroid 独占游戏输入和 Select+Start 退出，gptokeyb 只服务设置 UI。
+- MiniLoong 保留系统音频与 Wayland 约定；已有效尺寸不重复旋转，仅已知 Loong 的原始 fb 回退交换宽高。硬件策略匹配完整 device-tree compatible，由已验收标题显式选用，固定核心、调频与热插拔不成为公共默认。
+- Vulkan 可用性取标题、固件、完整板型、运行库能力及有界原生探测的交集。目前仅登记 Silksong/吸血鬼幸存者的 TrimUI A523 和 Loong RK3566 RK817 路径；未知组合在原生探测前禁用，不凭 IP 或 SoC 子串推定。
+- 私有 WSI 暂存到 `runtime/vulkan-wsi`，仅在游戏进程生效，不改系统 ICD/驱动。无系统 Wayland 时，完整私有客户端包和已安装的 PortMaster Weston 均通过检查才可创建临时会话。
+- 不可用后端不能选择；已存无效值在显示前归一化，启动校验仍拒绝无效选择，不暗换后端。禁用字段置灰并跳过焦点，滤波由程序处理；图形能力只在启动或选项变化时刷新。
+- 标题可显式设置 `RUDROID_WAYLAND_FORCE_RENDERER=1`，让私有 Weston 按输出尺寸合成；不继承任意 Weston 开关，不改客户渲染比例。
+- 正式会话仅在非零退出或结构化 ERROR/FATAL 时保存最多 64 KiB 上下文，并按相同条件记录退出内核日志。临时捕获使用事件驱动的有界缓冲，不做定时扫描；显式诊断才保留实时完整输出。
+- 原生交付通过对应工程的 Release 身份审计，二进制与 revision 同步真实构建；源码注释和目录文档也可能影响散列。配置与清单版本遵循根目录纪律。
+- 录屏逻辑维护在 `recorder.sh`，生成 CLI 通过生成器更新。
 
 ## 业务域清单
 

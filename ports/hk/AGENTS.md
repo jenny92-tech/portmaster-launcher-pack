@@ -1,6 +1,6 @@
 # 空洞骑士端口
 
-ports/ 下复用 LÖVE 启动界面与 Rudroid/UnityLoader 的游戏端口。manifest 描述依赖与目标包；love/ 将设置输出为 HKL_* 参数，再同步 Unity 配置、视频设置与必要的 PlayerPrefs 键。
+空洞骑士端口把 LÖVE 设置连接到 Rudroid/UnityLoader。Lua 生成 HKL_* 参数，Shell 将其同步到游戏 TOML、GraphicsSettings 与启动器拥有的 PlayerPrefs 视频键；manifest 和共享打包器负责发行布局。
 
 ## 约束
 
@@ -10,8 +10,8 @@ ports/ 下复用 LÖVE 启动界面与 Rudroid/UnityLoader 的游戏端口。man
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 包清单 | `manifest.json` | 游戏身份、运行依赖、目标路径与图标配置 |
+| 包清单 | `manifest.json` | 运行依赖、安装目标与入口 |
 | 使用说明 | `README.md` | 端口部署与运行说明 |
 | 授权 | `LICENSE` | 端口授权声明 |
-| 启动器封面 | `screenshot.png` | 保留游戏原图尺寸与构图，统一圆角细边框与右下紫猫角底 |
-| 启动界面 | `love/` | 图形/按键选项及 Unity 视频配置同步，见子目录 AGENTS.md |
+| 启动器封面 | `screenshot.png` | 包预览与启动封面的原图 |
+| 启动界面 | `love/` | HKL_* 字段、视频引导修复及 Unity 交接 |

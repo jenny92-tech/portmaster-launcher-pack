@@ -1,6 +1,6 @@
 # 像素黑神话端口
 
-ports/ 下使用通用 LÖVE UI 与 UnityLoader 的 Unity IL2CPP 游戏端口。manifest 描述包与运行依赖；love/ 输出启动参数并调整游戏图形、输入和辅助配置，共享 `_kit/` 完成打包及设备适配。
+像素黑神话复用共享 LÖVE/Unity 启动链，只在 `love/` 维护本标题的图形、输入和 IL2CPP 辅助设置。manifest 将这些模板接入通用打包器；运行时通过 HSH_* 参数更新配置后进入 Unity。
 
 ## 约束
 
@@ -10,8 +10,8 @@ ports/ 下使用通用 LÖVE UI 与 UnityLoader 的 Unity IL2CPP 游戏端口。
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 包清单 | `manifest.json` | 游戏包身份、依赖、设备与预览图配置 |
+| 包清单 | `manifest.json` | 包身份、Unity 依赖与预览资源 |
 | 使用说明 | `README.md` | 部署与运行文档 |
 | 授权 | `LICENSE` | 端口授权声明 |
-| 预览图 | `screenshot.png` | 保留原图尺寸与构图，使用统一圆角细边框与右下紫猫角底 |
-| 启动界面 | `love/` | 游戏选项、辅助配置和启动模板，见子目录 AGENTS.md |
+| 预览图 | `screenshot.png` | 发行预览和同名封面的来源图 |
+| 启动界面 | `love/` | HSH_* 设置、游戏辅助偏移及启动模板 |

@@ -1,6 +1,6 @@
 # STS2 移植辅助工具
 
-与正式启动器和兼容 DLL 分离的构建/调试工具入口。godot_pck 负责纹理和资源覆盖；csharp-godot-arm64-kit 处理跨架构兼容与内存分析；dll_surgery 提供已审离线 IL 适配；steam_mock 生成原生接口桩。
+正式构建入口 optimize_handheld.py 协调本目录的身份校验、资源转换、DLL 注入和主包合并；各子工具也可接收显式输入独立使用。运行时采样和设备传输不属于离线构建链，按下表分别进入，避免把安装动作当成资源处理。
 
 ## 约束
 
@@ -13,14 +13,14 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 手持优化入口 | `optimize_handheld.py`、`handheld_low_profile.json` | 离线扫描、身份门禁、纹理与特效构建、程序集注入、主包合并和构建报告 |
-| Windows 游戏准备 | `prepare_windows_game.py`、`handheld_low_v110_profile.json` | 锁定新版纯 IL、依赖及 Linux runtime 身份并生成 ARM64 托管输入 |
-| 运行时内存采样 | `collect_memory_snapshot.py`、`collect_runtime_counters.py` | 校验设备与进程身份，采集进程/系统聚合快照和有界 .NET 计数，不获取堆内容 |
+| 手持优化入口 | `optimize_handheld.py`、`handheld_low_profile.json` | 已准备输入的计划/构建/部署编排与报告 |
+| Windows 游戏准备 | `prepare_windows_game.py`、`handheld_low_v110_profile.json` | 绑定 Windows DLL/deps 及 Linux 基线的 ARM64 托管准备 |
+| 运行时内存采样 | `collect_memory_snapshot.py`、`collect_runtime_counters.py` | 设备/进程身份校验后的聚合内存和 .NET 计数 |
 | 隔离 VMA 试验入口 | `vma_trial_entry.py` | 仅为固定身份引擎和活动包生成独立 0/32/64 配置试验脚本，不改正式入口 |
 | 原生堆跟踪试验入口 | `vma_heap_profile_entry.py` | 在已校验私有入口的最终游戏 exec 注入固定分析器，原始记录仅写独占私有目录 |
-| csharp-godot-arm64-kit | `csharp-godot-arm64-kit/` | C#/.NET、PE/PCK 与 EGL 的跨架构诊断和补丁 |
-| device_tools | `device_tools/` | 参数化安装/传输、默认只读清理，以及正式启动器的设备/显示/日志 helper |
-| dll_surgery | `dll_surgery/` | Mono.Cecil 离线启动链路适配与结构门禁 |
+| csharp-godot-arm64-kit | `csharp-godot-arm64-kit/` | PE/deps/PCK 补丁与引擎内存分析 |
+| device_tools | `device_tools/` | 参数化传输安装、清理及正式入口 helper |
+| dll_surgery | `dll_surgery/` | Cecil 注入与结构拒绝边界 |
 | TrimUI 旧引擎桥 | `trimui_v110_bridge/` | 固定输入的独立托管回调适配，游戏侧保留官方补丁入口 |
-| godot_pck | `godot_pck/` | 纹理重导入、资源覆盖与游戏专属构建 |
+| godot_pck | `godot_pck/` | 纹理/字体转换、合并及游戏专属覆盖 |
 | steam_mock | `steam_mock/` | 从 Steam 包装源码生成动态链接符号桩 |

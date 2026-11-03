@@ -1,11 +1,12 @@
-# Godot 性能浮层
+# Godot 4 性能浮层实现
 
-轻量 Godot 4 CanvasLayer，读取内置统计并在 Linux/Android 补充当前进程 RSS。安装和各指标限制见上级 README。
+宿主安装 CanvasLayer 后，`overlay.gd` 管理显示和低频刷新，`metrics.gd` 汇总 Godot 统计，并在 Linux/Android 补充当前进程 RSS。可选编辑器插件只负责自身 autoload 注册。
 
 ## 约束
 
-- 运行时文件不依赖编辑器、C#、外部命令或原生扩展；输入动作由宿主映射，不抢事件。
-- 隐藏时不采样；只读取本进程的有界 `/proc/self/status`，不扫描其他进程。
+- 运行时不依赖编辑器、C#、外部命令或原生扩展；输入动作由宿主映射，浮层不消费事件。
+- 隐藏后停止采样；进程内存只读取有界的 `/proc/self/status`，不扫描其他进程。
+- 安装与卸载保持幂等，编辑器清理仅作用于自身注册；指标口径见上级 README。
 
 ## 业务域清单
 

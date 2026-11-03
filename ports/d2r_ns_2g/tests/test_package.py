@@ -3,8 +3,10 @@
 # POS:    验证 Pack 接入不执行准备脚本、不触碰玩家档案
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,45 @@ launcher = module('d2r_2g_launch', PORT / 'src/launch.py')
 
 
 class PackageTests(unittest.TestCase):
+    def test_stage_cleanup_only_removes_the_claimed_directory(self):
+        for fail_assembly in (False, True):
+            with self.subTest(fail_assembly=fail_assembly), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                port = root / 'ports/d2r_ns_2g'
+                shutil.copytree(PORT, port, ignore=shutil.ignore_patterns('dist', '__pycache__'))
+                kit, commands = root / '_kit', root / 'commands'
+                kit.mkdir()
+                commands.mkdir()
+                (kit / 'assemble.sh').write_text(
+                    '#!/bin/bash\n[ "${ASSEMBLE_FAIL:-0}" = 0 ] || exit 9\ncp "$1" "$2"\n')
+                (kit / 'port_json.py').write_text(
+                    'import json, pathlib, sys\n'
+                    'p = pathlib.Path(sys.argv[2]) / "port.json"\n'
+                    'p.write_text(json.dumps({"attr": {"image": {}}}))\n')
+                (kit / 'build_info.py').write_text('pass\n')
+                # Reuse the stage immediately after publication, before the shell EXIT trap.
+                python = commands / 'python3'
+                python.write_text(
+                    '#!/bin/bash\n' + shlex.quote(sys.executable) + ' "$@"\nstatus=$?\n'
+                    'if [ "$status" = 0 ] && [ "$#" = 3 ] && [ "$1" = - ] && '
+                    '[ "$3" = "$FIXTURE_PORT/dist" ]; then\n'
+                    '  mkdir "$2" && touch "$2/next-build"\nfi\nexit "$status"\n')
+                python.chmod(0o755)
+                env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ['PATH'],
+                           FIXTURE_PORT=str(port), ASSEMBLE_FAIL=str(int(fail_assembly)))
+                env.pop('D2R_NS_2G_ENTRY', None)
+                env.pop('D2R_NS_2G_PATHS', None)
+                result = subprocess.run(['bash', str(port / 'src/scripts/dist-port.sh')],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                stage = root / '.scratch/d2r-ns/stage'
+                if fail_assembly:
+                    self.assertEqual(result.returncode, 9, result.stderr)
+                    self.assertFalse(stage.exists())
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue((port / 'dist/port.json').is_file())
+                    self.assertTrue((stage / 'next-build').is_file())
+
     def entry(self, root):
         fields = {'runtime': root / 'runtime', 'game': root / 'game',
                   'profile': root / 'existing profile', 'controllers': root / 'controllers.txt',

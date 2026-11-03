@@ -1,11 +1,11 @@
-# 原生 Rust 组件
+# 原生组件与依赖边界
 
-仓库的原生实现域；上层由 Lua/UIKit、Shell 启动器和打包流程消费。`portkit-core` 提供通用配置与基础能力，`appmanager-core` 实现 APP 业务，`appmanager-service` 编排任务，`love-lite` 承载前端；独立 `portkit-launcher` 为游戏包提供轻量文件辅助。
+Rust 工作区按基础能力、应用业务、服务编排和 UI 宿主分层。Lua 与 Shell 通过这些边界消费原生能力；游戏包另用独立的轻量启动辅助程序。
 
 ## 约束
 
-- 依赖边界保持单向，游戏启动辅助不依赖 APP 服务或网络核心。
-- LOVE-lite 的 vendor 源码是受版本控制的定制输入，上游来源和授权必须保留。
+- 能力由 PortKit 经应用核心、嵌入服务提供给 LOVE-lite，调用依赖指向下层；轻量启动辅助保持本地文件能力与独立依赖树。
+- LOVE-lite 的 vendor 是维护中的定制源码，修改时保留上游来源与许可。
 
 ## 业务域清单
 

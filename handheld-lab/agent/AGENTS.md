@@ -1,12 +1,11 @@
-# 掌机端轻量探针
+# 目标端能力探针
 
-由主机 Controller 流式传送到 local/Docker/SSH/ADB 目标的 Probe 层。探测已安装 provider，返回 TSV 能力清单，再分派有界观测、输入、截图、进程和显式调试命令。
+`handheld-agent.sh` 是 Controller 流式发送的 POSIX sh 入口。它枚举已安装 provider、输出 TSV 能力表，并按命令分派观测、输入、截图和进程操作。
 
 ## 约束
 
-- 保持 POSIX sh 与低依赖，不将 APP Manager 业务写入通用 Probe。
-- 能力不支持时明确报告，不根据平台名称伪造结果。
-- core、trace 和系统日志属于显式操作，不能作为常规诊断隐式执行。
+- 保持低依赖和可移植 Shell 语义，能力结果以实际 provider 为准。
+- 常规观测采用有界命令；core、trace 和系统日志由显式操作触发。
 
 ## 业务域清单
 

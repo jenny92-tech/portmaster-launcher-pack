@@ -1,12 +1,12 @@
-# Linux 原生辅助工具
+# Linux 设备能力提供器
 
-补足目标系统原生命令不足的 provider 层，不依赖 App Manager。C 程序分别调用 uinput、evdev 与 framebuffer 接口；统一构建脚本可在 Alpine 容器中生成 amd64/arm64 静态二进制。
+以 uinput、evdev 和 framebuffer 补充目标系统能力。三个 C 工具由统一脚本编译，Alpine/Docker 包装负责生成 amd64 或 arm64 静态产物。
 
 ## 约束
 
-- 需要 Linux 设备接口与对应权限，macOS 不能直接编译运行这些系统头文件。
-- 输入辅助程序销毁虚拟设备，事件观测有时间/数量上限，截图读取实际 framebuffer。
-- 生成二进制放在 build/；容器镜像与编译器不是设备最小运行依赖。
+- 工具依赖 Linux 设备接口及对应权限；构建宿主与运行目标分开处理。
+- 虚拟输入设备由创建者释放，事件观测具有时间或数量边界，截图读取实际 framebuffer。
+- `build/` 是生成输出；编译容器及工具链不属于设备运行依赖。
 
 ## 业务域清单
 

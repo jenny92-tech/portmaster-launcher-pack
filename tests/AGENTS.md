@@ -1,14 +1,25 @@
-# 跨模块回归测试
+# 跨模块契约与封装回归
 
-仓库级主机测试入口，补充 Rust crate 单元测试和个别端口的本地测试。Shell 测试读取源码或构造隔离设备/发行夹具，Python 测试用 lupa 模拟 LÖVE 交互；包集成测试还会调用 `_kit/` 组装工具核对生成目录或 ZIP。
+本目录从仓库公开入口验证跨模块行为，补充各 Rust crate 和端口内的测试。Shell/Python 用例读取源码、构造设备与包夹具，Lua 交互通过 Lupa 驱动；包集成测试调用共享组装工具检查最终目录或 ZIP。
 
-## 验证约定
+## 选择与副作用
 
-- 按改动范围选择静态检查、隔离夹具或组包集成测试；组包测试会生成 dist。运行时身份检查使用与源码匹配的二进制。
-- Lua 交互测试依赖 Lupa；`PAM_REQUIRE_LUPA=1` 将其设为必需依赖。动态检查使用隔离临时目录和命令替身。
-- STS2 可选集成输入通过显式变量提供，缺失依赖时注明跳过原因；合成回归独立执行。宿主 Godot 用 `STS2_TEST_GODOT`，ARM64 引擎用 `STS2_TEST_GODOT_ARM64`，RichTextLabel 变体用 `STS2_TEST_GODOT_RICHTEXT_ARM64`。
-- 字体集成使用 `STS2_TEST_SOURCE_PCK`；三字体增量/报告用 `STS2_TEST_FONT_CACHE_DELTA`、`STS2_TEST_FONT_CACHE_REPORT`，六字体用 `STS2_TEST_COMMON_FONT_CACHE_DELTA`、`STS2_TEST_COMMON_FONT_CACHE_REPORT`。输入匹配工具要求的身份。
-- Windows 资源准备使用 `STS2_TEST_WINDOWS_GAME_DIR`，完整集成另需 `STS2_TEST_LINUX_BASELINE_DIR`，默认只运行合成回归。
+- 按变更选择静态检查、隔离夹具或组包测试；组包会产生 dist，完成后清理。涉及原生身份的用例需要匹配当前源码的二进制。
+- Lua 交互依赖 Lupa，`PAM_REQUIRE_LUPA=1` 可要求依赖必须存在。动态检查使用临时目录和命令替身，设备操作仅能由显式指定的集成入口触发。
+- STS2 默认运行合成回归，可选真实输入仅由下列变量提供，缺失时说明跳过原因，不猜测本机缓存；真实输入保持只读。
+
+## STS2 可选输入
+
+| 用途 | 显式变量 |
+|------|----------|
+| 宿主 Godot | `STS2_TEST_GODOT` |
+| ARM64 引擎与 RichTextLabel 变体 | `STS2_TEST_GODOT_ARM64`、`STS2_TEST_GODOT_RICHTEXT_ARM64` |
+| 字体源 PCK | `STS2_TEST_SOURCE_PCK` |
+| 三字体增量与报告 | `STS2_TEST_FONT_CACHE_DELTA`、`STS2_TEST_FONT_CACHE_REPORT` |
+| 六字体增量与报告 | `STS2_TEST_COMMON_FONT_CACHE_DELTA`、`STS2_TEST_COMMON_FONT_CACHE_REPORT` |
+| Windows 准备与完整集成基线 | `STS2_TEST_WINDOWS_GAME_DIR`、`STS2_TEST_LINUX_BASELINE_DIR` |
+
+输入须匹配对应工具要求的身份；低依赖的合成测试不因缺少这些输入而跳过。
 
 ## 业务域清单
 
@@ -65,10 +76,9 @@
 | STS2 官方运行时资源补丁 | `test_sts2_official_runtime_patch.py` | 验证菜单及显式流畅档轻量场景覆盖的修改边界、精确资源闭集和未知或缺失输入拒绝；玩家场景仅可选读取本机缓存，不启动游戏 |
 | STS2 shader 类型扫描 | `test_shader_features.py` | 合成 PCK 验证材质、shader 分类、依赖闭包和私有输出保护 |
 | STS2 VFX 静态扫描 | `test_vfx_catalog.py` | 合成 PCK 检查循环依赖、实例覆盖、粒子材质、shader、确定性与输入保护 |
-| STS2 轻量特效 | `test_sts2_lean_effects.py`、`sts2_lean_effects_fixture.gd` | 合成场景校验精确身份、轻量资源闭集与短动画自动释放，无需玩家游戏或设备 |
+| STS2 轻量特效 | `test_sts2_lean_effects.py`、`sts2_lean_effects_fixture.gd` | 合成场景验证精确身份、轻量资源闭集、闪光清理、治疗计时根生命周期与短动画释放 |
 | Godot 性能浮层 | `test_godot_performance_overlay.py`、`godot_performance_overlay_fixture.gd` | 无头验证浮层生命周期、暂停采样、宿主输入、布局与指标回退 |
-| STS2 轻量特效 | `test_sts2_lean_effects.py`、`sts2_lean_effects_fixture.gd` | 验证轻量场景身份、闪光清理及治疗计时根生命周期 |
-| STS2 低内存 | `test_sts2_lean_memory.py` | 独立 .NET/Cecil 夹具验证显式低内存图集按需加载及清理后重载 |
+| STS2 低内存 | `test_sts2_lean_memory.py` | 隔离 .NET/Cecil 替身验证显式模式、核心图集预取、按需查询与清理后重载 |
 | STS2 低清纹理接入 | `test_sts2_texture_overlay_integration.py`、`test_sts2_texture_merge.py` | 合成资源测试流式合并、Godot 加载、身份绑定及启动拒绝，不访问设备或玩家游戏 |
 | STS2 纹理传输 | `test_sts2_texture_upload.py` | 离线模拟上传和下载续传、损坏及来源变化拒绝和设备路径保护，不连接设备 |
 | STS2 资源清理 | `test_sts2_texture_cleanup.py` | 模拟清理预检、清单、进程引用和目录链接保护，不连接设备 |
@@ -77,7 +87,6 @@
 | STS2 特效 IL 审计 | `test_sts2_vfx_material_audit.py` | 验证静态扫描识别湍流访问及干净程序集 |
 | STS2 启动预载 | `test_sts2_startup_preload.py`、`sts2_startup_preload_fixture.gd` | 隔离验证资源加载、终态、超时及退出清理，不实例化游戏根节点 |
 | STS2 原生渲染 | `test_sts2_render_native.py`、`sts2_render_native_fixture.gd` | Godot 无头合成场景验证渲染策略、精确粒子规则在父节点准备前生效及资源隔离、材质、缓存与房间生命周期 |
-| STS2 低内存 | `test_sts2_lean_memory.py` | 用隔离托管替身验证显式模式、核心图集预取和图集查询按需加载 |
 | STS2 渲染桥 | `test_sts2_render_bridge.py` | .NET 替身验证反射桥、资源所有权和战斗预热边界 |
 | STS2 原生事件与计时 | `test_sts2_native_particles.py` | 可选 .NET 夹具验证粒子策略、帧停顿/管线记录与诊断失败隔离，不执行游戏 |
 | 异常日志 | `test_launcher_logging.py` | 正常退出静默、非零状态与可恢复错误保留、显式诊断、早退及条件内核日志 |

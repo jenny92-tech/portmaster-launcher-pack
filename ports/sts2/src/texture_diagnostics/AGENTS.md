@@ -1,6 +1,6 @@
 # STS2 独立纹理诊断
 
-此目录只供独立小型 PCK 构建器收集；不属于正式兼容覆盖包和主 PCK。用户显式启用后由桥挂载并观察现有节点的纹理和 viewport 元数据。
+独立 PCK 构建器将本目录放入 `res://port_diagnostics/`，兼容层只在显式启用后挂载。runner 分帧观察已存在节点、纹理和缓存，并汇总 viewport/Performance 数据；它既不属于主包覆盖，也不触发游戏资源加载。
 
 ## 约束
 
@@ -12,9 +12,9 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 纹理采样器 | `texture_diagnostic.gd` | 去重统计场景树与已存在缓存中的原生纹理和 viewport，读取渲染设备格式和物理尺寸；缓存查询后立即解除引用 |
-| 资源聚合采样 | `resource_stats.gd` | 读取现成 Performance 帧缓存及可识别的 FMOD 原生性能缓存，不触发资源加载或 FMOD 更新 |
-| 诊断入口 | `texture_diagnostic_runner.gd` | 定期启动有限次数扫描、打印结果并自行退出 |
+| 纹理采样器 | `texture_diagnostic.gd` | 去重纹理/viewport 元数据；缓存查询后解除引用 |
+| 资源聚合采样 | `resource_stats.gd` | 现成 Performance 与 FMOD 缓存聚合，不驱动更新 |
+| 诊断入口 | `texture_diagnostic_runner.gd` | 有限次数扫描、结果输出及自动退出 |
 | 诊断场景 | `texture_diagnostic.tscn` | 独立 PCK 内的 Node 入口 |
-| UI观察器 | `ui_diagnostic.gd`、`ui_diagnostic.tscn` | 仅显式启用且实际user://落在无符号链接隔离根时，限时输出原生绑定控件元数据；另需显式控制开关和0700根目录才读取固定鼠标指令文件 |
-| 指标说明 | `README.md` | 独立包开关、采样边界、聚合指标含义与不可用条件 |
+| UI观察器 | `ui_diagnostic.gd`、`ui_diagnostic.tscn` | 实际 user:// 位于无符号链接隔离根时观察原生控件；控制另需开关与 0700 根 |
+| 指标说明 | `README.md` | 开关、指标口径及不可观测范围 |

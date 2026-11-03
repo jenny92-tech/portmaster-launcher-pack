@@ -1,6 +1,6 @@
 # Batomon 端口
 
-ports/ 下使用专用 Godot SDL2 构建的游戏端口。manifest 指向 src/ 的启动器；专用打包脚本复制 Godot runtime 和说明，设备端读取玩家 PCK 后运行游戏。
+Batomon 通过专用 Godot SDL2 runtime 直接运行玩家 PCK，不经过通用 LÖVE 设置页。共享 dist 调度进入 `src/scripts/`，打包启动器、runtime 和资源放置说明；安装后由 `src/launcher.sh` 检查 PCK 并建立图形和输入环境。
 
 ## 约束
 
@@ -11,7 +11,7 @@ ports/ 下使用专用 Godot SDL2 构建的游戏端口。manifest 指向 src/ �
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 包清单 | `manifest.json` | Godot runtime、入口、目标设备和资源约束 |
-| 使用说明 | `README.md` | 游戏资源准备和部署说明 |
+| 包清单 | `manifest.json` | runtime、设备范围及玩家资源要求 |
+| 使用说明 | `README.md` | 匹配资源的准备与部署步骤 |
 | 授权 | `LICENSE` | 端口授权声明 |
-| 启动与打包 | `src/` | Shell 运行入口和发行组装，见子目录 AGENTS.md |
+| 启动与打包 | `src/` | PCK 检查、游戏启动和专用 runtime 组装 |

@@ -1,4 +1,14 @@
-# CLI source
+# 下载参数、进度与退出状态
 
-Only argument parsing, progress presentation and exit status belong here.
-`main.rs` delegates validation and transfers to the shared GitHub transport.
+`main.rs` 解析 `<GitHub URL> -o <output file>`，由核心传输验证 URL 能力并选择下载路由。下载进度写入 stderr，成功结果写入 stdout，错误转换为非零退出码。
+
+## 约束
+
+- 只接受受支持的 GitHub 文件 URL；仓库页面和 git clone 地址不当作下载。
+- 新增传输行为先进入共享核心，本层保持参数与显示职责；内联测试覆盖参数和能力分类。
+
+## 业务域清单
+
+| 名称 | 文件/子目录 | 职责 |
+|------|------------|------|
+| CLI 与内联测试 | `main.rs` | 参数校验、传输调用、进度输出和 ExitCode 映射 |

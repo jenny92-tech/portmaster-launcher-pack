@@ -1,12 +1,12 @@
-# 通用掌机开发工具
+# 通用掌机控制与探针
 
-独立于具体应用的 Controller/Probe 组件，由 lab 等应用评估器复用。devtools 调用 Python Controller，通过本地/Docker/SSH/ADB 传输运行 Shell Probe；provider 提供原生设备能力，可按能力路由到 I/O 或调试目标并归档结果。
+`devtools` 将命令交给主机 Controller，后者通过本地、Docker、SSH 或 ADB 传输调用目标 Probe。Probe 发现原生 provider 并返回能力与结果，应用侧评估器在此基础上组织业务检查。
 
 ## 约束
 
-- 不在通用层编码 App Manager 或某固件的业务规则。
-- 场景使用参数数组且在首次动作前完整校验，不执行任意拼接的 Shell 片段。
-- 不支持的设备能力明确报告；core、trace、广泛日志采集需显式请求。
+- 通用层维护传输、能力和场景协议，应用及固件业务规则由调用方提供。
+- 场景参数采用数组表示，在首次动作前完成全量校验。
+- 不支持的能力返回明确结果；core、trace 和广泛日志采集属于显式调试操作。
 
 ## 业务域清单
 

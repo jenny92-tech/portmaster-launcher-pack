@@ -1,6 +1,6 @@
 # STS2 资源处理方案
 
-godot_pck 中面向 STS2 的游戏专属编排和覆盖内容。build.sh 恢复原包、修改纹理策略、重导入并组装覆盖包；apply.sh 加入扩展映射和 Sentry 替代；strip_worldenv.py 为无 3D 实验提供独立处理。
+build.sh 将 STS2 原包恢复为工作工程，应用纹理策略后重导入；apply.sh 把 overlay 内的 ARM64 扩展映射和 Sentry 替代脚本加入工程。最终覆盖仍以原包保留无法在宿主重建的资源，strip_worldenv.py 则是独立的无 3D 处理步骤。
 
 ## 约束
 
@@ -12,9 +12,9 @@ godot_pck 中面向 STS2 的游戏专属编排和覆盖内容。build.sh 恢复�
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| apply.sh | `apply.sh` | 将 STS2 ARM64 扩展替代文件应用到恢复工程 |
-| build.sh | `build.sh` | 编排保留原始扩展资源的 STS2 Mali 纹理覆盖构建 |
-| strip_worldenv.py | `strip_worldenv.py` | 为无 3D Godot 构建去除不可用的环境节点 |
+| apply.sh | `apply.sh` | 复制扩展映射与 Sentry 替代资源 |
+| build.sh | `build.sh` | 原包恢复 → 策略调整 → 重导入 → 增量覆盖 |
+| strip_worldenv.py | `strip_worldenv.py` | 从恢复场景移除无 3D 构建不支持的环境节点 |
 | README.md | `README.md` | 游戏专属补丁背景和刷新条件 |
-| overlay | `overlay/` | 按原 res:// 结构保存的静态兼容覆盖 |
-| scripts | `scripts/` | SDL2 设备实验启动器与内存采样工具 |
+| overlay | `overlay/` | 遵循原 res:// 路径的静态打包输入 |
+| scripts | `scripts/` | 独立 SDL 启动及内存观察，不接正式 UI |

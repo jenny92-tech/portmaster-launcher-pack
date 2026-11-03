@@ -1,4 +1,14 @@
-# GitHub automation
+# 持续集成入口
 
-`workflows/` contains manually triggered desktop CLI builds. Artifacts expire
-after two days; workflows do not publish releases or modify repository contents.
+管理桌面下载工具的 GitHub Actions 入口。工作流由维护者手动触发，生成短期下载产物；发布与仓库写入不在本目录的职责内。
+
+## 约束
+
+- 工作流权限保持只读，构建结果通过 Actions artifacts 交付，保留两天。
+- 平台矩阵、验证步骤和产物名称在对应工作流中共同维护。
+
+## 业务域清单
+
+| 名称 | 文件/子目录 | 职责 |
+|------|------------|------|
+| 桌面构建工作流 | `workflows/` | 下载 CLI 的平台矩阵、测试和产物上传 |

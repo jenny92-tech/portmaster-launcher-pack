@@ -1,6 +1,6 @@
 # APP Manager 界面
 
-APP Manager 的表现层，由独立 LOVE-lite runtime 加载，共享 `_kit/love/kit.lua` 控件。`main.lua` 装配 native、model、operations、shell、pages 和 environment；原生任务返回快照/事件，经 model 和 operations 更新页面与确认状态。
+LOVE-lite 加载 `main.lua` 后，页面请求仅经 `app_native.lua` 进入 Rust 服务；返回的快照和任务事件由 model/operations 更新界面。`app_shell.lua` 拥有各级导航和布局，pages/environment 只组织业务内容，因此权限判断、后台任务与页面呈现分别有明确入口。
 
 ## 约束
 
@@ -28,12 +28,12 @@ APP Manager 的表现层，由独立 LOVE-lite runtime 加载，共享 `_kit/lov
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 应用入口 | `main.lua` | 装配模块，加载初始快照并轮询前后台任务 |
-| 原生边界 | `app_native.lua` | 请求 Rust 服务并校验响应和任务事件，传递按键布局偏好与校准命令 |
+| 应用入口 | `main.lua` | 模块装配、初始快照及任务轮询 |
+| 原生边界 | `app_native.lua` | 请求/响应校验、任务事件、输入布局与校准接口 |
 | 按键校准 | `app_input.lua` | 控制器示意、步骤高亮、测试与保存覆盖层；经 app_native 获取状态 |
-| 共享模型 | `app_model.lua` | 保存环境/库存和失败原因，提供日志位置，推导能力、诊断评分并维护缓存 |
-| 操作协调 | `app_operations.lua` | 管理完整路径确认、绑定 revision 的计划、任务生命周期、统一失败详情与退出 |
-| 页面骨架 | `app_shell.lua` | 各级页面共用六功能导航、列表/字段、阅读宽度、字体层级与固定标题操作栏 |
-| 业务页面 | `app_pages.lua` | 六个功能分区及子页；共享关于/退出的品牌、制作者、联系与日志信息；项目详情与完整卸载清单，远程扫码和完整地址 |
-| PortMaster 管理 | `app_environment.lua` | PortMaster 自身状态、安装修复、更新与设备风险确认 |
-| 旧输入映射 | `ui.gptk` | 保留的 gptokeyb 操作语义参考；当前宿主直接读取 SDL，不启动助手 |
+| 共享模型 | `app_model.lua` | 库存/环境状态、失败详情和诊断评分 |
+| 操作协调 | `app_operations.lua` | revision 确认计划、取消、任务结果与退出协调 |
+| 页面骨架 | `app_shell.lua` | 共用导航、字段布局、标题操作栏和阅读宽度 |
+| 业务页面 | `app_pages.lua` | 业务页、关于/退出信息、卸载清单与远程配对 |
+| PortMaster 管理 | `app_environment.lua` | PortMaster 状态、修复和设备风险确认 |
+| 旧输入映射 | `ui.gptk` | 输入语义参考；当前 SDL 宿主不启动 gptokeyb |

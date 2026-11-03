@@ -1,11 +1,11 @@
-# APP Manager 核心库
+# APP Manager 业务核心
 
-Rust 工作区中的业务层，基于 `portkit-core` 并由 `appmanager-service` 与 LOVE-lite 复用。源码将设备解析、资源清单、安装计划、归档事务和 Runtime 修复组合成类型化接口；单元测试与实现同处源码模块。
+把 PortKit 的配置与设备解析结果转为 APP 管理上下文，为嵌入服务提供清单、计划、安装、文件管理和 Runtime 修复。业务事务与其类型化结果均在本 crate 定义。
 
 ## 约束
 
-- APP 特定业务留在此 crate，通用配置与 GitHub 字节传输留在 `portkit-core`。
-- 保持托管路径、能力限制、文件锁及可恢复事务边界，不执行配置文本。
+- 通用设备声明与字节传输由 `portkit-core` 提供，APP 专属事务在本层实现。
+- 写入遵循管理能力、托管路径、文件锁与恢复协议，配置仅作为数据参与决策。
 
 ## 业务域清单
 

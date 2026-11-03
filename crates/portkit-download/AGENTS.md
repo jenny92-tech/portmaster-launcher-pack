@@ -1,10 +1,16 @@
-# Download CLI
+# 桌面下载命令行入口
 
-Thin desktop entry point depending directly on portkit-core. Keep transport policy
-in the core; do not add a second proxy implementation or bump package versions.
+桌面用户通过 `portkit-download` 指定 GitHub 文件 URL 和输出路径。该包直接调用 `portkit-core` 的共享传输，终端只负责参数、进度和结果；CI 提供各桌面平台的短期构建产物。
 
-| File | Responsibility |
-| --- | --- |
-| `Cargo.toml` | Workspace package and direct core dependency |
-| `README.md` | Invocation, limits and CI artifacts |
-| `src/` | CLI and focused tests |
+## 约束
+
+- 路由、代理、超时与回退策略归核心传输，不在 CLI 复制实现。
+- 工具允许替换已有输出，但不验证发布者校验值，使用说明须保留这一能力边界。
+
+## 业务域清单
+
+| 名称 | 文件/子目录 | 职责 |
+|------|------------|------|
+| 构建声明 | `Cargo.toml` | 工作区包与核心传输依赖 |
+| 使用说明 | `README.md` | 调用方式、验证限制与 CI 产物 |
+| 命令行实现 | `src/` | 参数、下载调用、终端状态及内联测试 |

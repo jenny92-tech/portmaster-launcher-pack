@@ -1,6 +1,6 @@
 # Wine 构建与分发
 
-端口构建入口；不读取设备或扫描玩家游戏目录。dist-port 组装小型应用，build-runtime 从固定校验输入重建组件；其他脚本单独封装游戏声明或电脑工具。
+构建器按层输出独立产物：dist-port 组装运行器，build-runtime 从已校验源码构建公共组件，dist-game 只封装游戏声明，准备工具另行发行。dist-zip 将运行器映射到 SD 布局；这些入口均不扫描玩家游戏目录或读取设备。
 
 ## 约束
 
@@ -12,11 +12,11 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 运行器组装 | `dist-port.sh` | 暂存规范入口、共用代码和定义，记录构建身份 |
-| SD 卡布局封装 | `dist-zip.py` | 将暂存运行器封装到 roms/windows/.winecellar，生成 Ports 桥接 |
-| 私有启动环境 | `build-bootstrap.py` | 电脑上构建自带解释器、字体和输入工具的只读映像 |
-| 入门包组合 | `dist-starter.py` | 组合运行器/组件/游戏适配，直接复制到卡且不含游戏资源 |
-| 原生界面预览 | `preview-menu.py` | 用主机离屏 SDL 和内存夹具输出多尺寸 PNG，不启动游戏或连接设备 |
-| 运行组件构建 | `build-runtime.py` | 校验来源、从干净归档构建公共组件及目录，生成带身份清单的标准离线 ZIP |
-| 游戏分发 | `dist-game.py` | 独立 Windows/Ports 入口、bottle 声明和按键，data 中无游戏资源 |
-| 准备工具分发 | `dist-prepare-tools.py` | 固定构建的电脑工具及其来源授权 |
+| 运行器组装 | `dist-port.sh` | 运行器代码/定义暂存及构建身份 |
+| SD 卡布局封装 | `dist-zip.py` | roms/windows/.winecellar 布局与 Ports 桥接 |
+| 私有启动环境 | `build-bootstrap.py` | 构建解释器、字体和输入工具只读映像 |
+| 入门包组合 | `dist-starter.py` | 运行器/组件/适配组合，不含游戏资源 |
+| 原生界面预览 | `preview-menu.py` | 内存夹具上的离屏 SDL 多尺寸 PNG |
+| 运行组件构建 | `build-runtime.py` | 来源校验、干净源码构建及组件离线 ZIP |
+| 游戏分发 | `dist-game.py` | 独立游戏目录、bottle 和 gptk，无游戏 data |
+| 准备工具分发 | `dist-prepare-tools.py` | 电脑准备工具和对应源码/许可 |

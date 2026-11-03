@@ -1,10 +1,10 @@
 # 丝之歌启动界面
 
-丝之歌移植的 LÖVE 设置层与 Unity 6 启动模板。Lua 声明输出 SILK_* 参数；Shell 模板定位既有游戏目录，安装字体 fallback，选择固定的游戏 TOML，以结构化原子合并写入 Unity、GPU、runtime 和 game patch 配置，再调用共享 Unity 启动器。
+此目录是 SILK_* 设置到游戏 TOML 的转换边界。Lua 声明字段，模板定位既有资源和所选 Rust runtime，准备字体后以 PortKit 原子合并 Unity/GPU/runtime/game patch 配置，最后进入共享 Unity 生命周期。设备专项效果与线程策略集中在模板中。
 
 ## 约束
 
-- UI 的显示环境与 Unity 游戏环境隔离；通用运行逻辑交由 `_kit/`。
+- UI 显示环境仅作用于 LÖVE 子进程；游戏参数和退出清理由共享 Unity 启动链交接。
 - 模板必须兼容既有 `/userdata/silksong` 与 `/mnt/UDISK/silksong` 部署路径；游戏目录只需已有资源和选定运行目录中的 Rust loader，不要求保留旧 C loader。
 - 优先使用端口包内的 `love_ui`；未安装独立 UI 包时使用游戏目录内的 UI 与 PortKit，保留原设置位置。
 - 常用页只放渲染和内存档；帧率、装饰物、显示与按键交换放高级页。效果按实测固定处理，不提供低画/原彩或粒子、模糊、光晕开关；新状态默认完整装饰物；保留各设备现有的效果、装饰动画与驱动配置。
@@ -20,5 +20,5 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 选项定义 | `main.lua` | 声明帧率、渲染比例、装饰比例、三档内存和按键配置 |
-| 启动模板 | `launcher.sh.template` | 定位游戏目录、写 TOML 设置、应用实测效果策略并启动 Rudroid |
+| 选项定义 | `main.lua` | 渲染/内存常用页及帧率、装饰、显示和输入高级字段 |
+| 启动模板 | `launcher.sh.template` | 游戏目录选择、原子配置、A523 策略和 Rudroid 启动 |

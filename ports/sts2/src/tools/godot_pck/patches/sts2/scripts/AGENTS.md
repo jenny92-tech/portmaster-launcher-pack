@@ -1,6 +1,6 @@
 # STS2 设备实验脚本
 
-PCK 移植方案的设备端诊断辅助入口，不是当前 LÖVE 正式启动模板。launcher-sdl2.sh 准备 PortMaster/SDL2/交换空间后启动游戏；rss-watch.sh 从 /proc 和内核日志持续输出内存 CSV。
+这里是资源方案的独立设备检查入口：launcher-sdl2.sh 准备 PortMaster、SDL2 和交换空间，再运行游戏；rss-watch.sh 通过 /proc 与内核信息持续记录内存 CSV。它们不经过正式 LÖVE 模板，不能作为正式入口行为的替代证明。
 
 ## 约束
 
@@ -11,5 +11,5 @@ PCK 移植方案的设备端诊断辅助入口，不是当前 LÖVE 正式启动
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| launcher-sdl2.sh | `launcher-sdl2.sh` | 保留用于 STS2 移植实验的设备端 SDL2 启动入口 |
-| rss-watch.sh | `rss-watch.sh` | 记录设备端 STS2 进程存活与 Mali 内存压力 |
+| launcher-sdl2.sh | `launcher-sdl2.sh` | 设备 SDL 会话准备与实验性游戏启动 |
+| rss-watch.sh | `rss-watch.sh` | 进程存活、RSS 和 Mali 内存压力观察 |

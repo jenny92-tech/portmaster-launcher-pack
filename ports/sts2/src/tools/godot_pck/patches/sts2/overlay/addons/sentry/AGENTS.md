@@ -1,6 +1,6 @@
 # Sentry ARM64 占位脚本
 
-静态 addons 覆盖中保留 Godot 场景引用有效性的兼容分支。SentryInit 继承 Node 保持无操作；user_feedback 中表单继承 Control，避免引用未提供的原生 SDK 类型。
+原游戏自加载和反馈场景仍会解析 Sentry 脚本路径，因此覆盖树保留同名文件。SentryInit.gd 仅继承 Node，反馈表单仅继承 Control；两者都不引用 SentrySDK/SentryEvent，避免 ARM64 缺少原生扩展时的脚本类型错误。
 
 ## 约束
 
@@ -11,5 +11,5 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| SentryInit.gd | `SentryInit.gd` | 无操作的 Sentry 自加载占位节点 |
-| user_feedback | `user_feedback/` | 无操作的用户反馈表单控件 |
+| SentryInit.gd | `SentryInit.gd` | 仅保留 Node 基类的自加载脚本 |
+| user_feedback | `user_feedback/` | 仅保留场景可加载的 Control 类型 |
