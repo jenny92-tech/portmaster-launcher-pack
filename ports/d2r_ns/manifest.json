@@ -1,0 +1,25 @@
+{
+  "name": "d2r_ns",
+  "title": "Je-暗黑破坏神II_NS",
+  "engine": "NS native / NVN to Vulkan",
+  "runtime": "D2R Linux ARM64, game build 94012",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "devices": ["MiniLoong Pocket One (RK3566, 4 GB, LoongOS)"],
+  "language": ["zh-CN", "en"],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "d2r_ns",
+  "portable_dir": "d2r_ns",
+  "script": "Je-暗黑破坏神II_NS.sh",
+  "launcher_sh": "love/launcher.sh.template",
+  "launcher_tools": ["font-provision", "runtime-discovery", "artwork"],
+  "portmaster": {
+    "items": ["Je-暗黑破坏神II_NS.sh", "d2r_ns"],
+    "desc": "D2R NS 94012 launcher for the verified MiniLoong classic preset. Game files are user supplied.",
+    "inst": "Keep the SH and d2r_ns folder together in Ports. Install PortMaster and its LÖVE runtime first.",
+    "genres": ["rpg", "action"],
+    "rtr": false,
+    "availability": "paid",
+    "image": {"screenshot": "screenshot.png", "names": ["Je-暗黑破坏神II_NS.png"]}
+  },
+  "notes": "Independent NS build identity; no saves, device identity, runtime cache or game data in the launcher-only package."
+}

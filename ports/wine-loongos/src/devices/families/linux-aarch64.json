@@ -1,0 +1,14 @@
+{
+  "font": "share/NotoSansSC-Regular.ttf",
+  "controller_database": "share/gamecontrollerdb.txt",
+  "input_helper": "bin/gptokeyb2",
+  "input_library": "lib/libinterpose.aarch64.so",
+  "portmaster_directories": [
+    "/opt/system/Tools/PortMaster",
+    "/opt/tools/PortMaster",
+    "{xdg_data_home}/PortMaster",
+    "/roms/ports/PortMaster"
+  ],
+  "machine": "aarch64",
+  "library_directory": "/storage/roms/windows"
+}

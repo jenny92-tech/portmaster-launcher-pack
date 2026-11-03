@@ -1,0 +1,21 @@
+{
+  "machine": "aarch64",
+  "wine_root": "wine-10.0-amd64-wow64",
+  "x86_library_path": "x86-libs/usr/lib/box64-x86_64-linux-gnu",
+  "bind_device_directories": {
+    "sound": "/dev/snd"
+  },
+  "base_components": [
+    "box64",
+    "wine",
+    "x86-libs",
+    "wine-tools"
+  ],
+  "process_environment": {},
+  "bind_files": {
+    "null": "/dev/null",
+    "zero": "/dev/zero",
+    "random": "/dev/random",
+    "urandom": "/dev/urandom"
+  }
+}

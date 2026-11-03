@@ -1,0 +1,13 @@
+{
+  "runner": "default",
+  "deps": ["dxvk"],
+  "env": {"WINEARCH": "win64", "WINEDEBUG": "-all"},
+  "configdir": [],
+  "wine_runner": {
+    "executable": "Game.exe",
+    "graphics_api": "d3d11",
+    "arguments": [],
+    "borderless_fullscreen": true
+  },
+  "attr": {"title": "自己的 Windows 游戏", "availability": "paid"}
+}

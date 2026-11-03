@@ -1,0 +1,38 @@
+{
+  "name": "handheld-low-v0.110.1",
+  "source_pck_sha256": "f526ef85cd5b7cf653defb545a8ba22196c72e6a0e95ad66f78f2f3a168b28c9",
+  "windows_dll_sha256": "7c446efabf80614c429b5088e87101423aa5bb4c04fc3e73393261f6e6d404fd",
+  "windows_deps_sha256": "b4daebc073d305d38992016352e3f5ad0542891436c40d05733ca5dbc9a708b6",
+  "release_info_sha256": "52c1a5470cdb4308199b0f521f70bd055bfd60cc2cbe653f2132c164a140c5fe",
+  "game_dll_sha256": "68ccb3297a9af5355968b77ea810aa79da902be416e83db40327c082bde8c667",
+  "game_deps_sha256": "d0f3f95c56d444b6da0f2495a9cd3fc0a1dba0af7a73172f7a7fca79586bbafe",
+  "linux_godotsharp_sha256": "f25b38747f64bc2fef5b5cd9097851dbc1fefb910dc0110bc61da7b37fa07594",
+  "linux_runtime_deps_sha256": "11c5f0560aeefc4003bb7b7cdd06acae1f5c8e584e74626f5da6f48ebe2ada70",
+  "runtime_baseline_manifest_sha256": "93ae676d7b340476abb82e0126ca74cd4d422852ed826c12d262b8aba5f12f00",
+  "windows_dependency_sha256": {
+    "0Harmony.dll": "ef1898322c9f5c86dc1b0758b272a9c440823b4a41ca9a0b82a3aa6b3d206387",
+    "JetBrains.Annotations.dll": "5f2b1475a7d80033a1ad25ea2710bd4b5fed40c28316cb0439bfb9aada2ef86b",
+    "MonoMod.Backports.dll": "ac3f32bfd44aab83abf71abdff6dde548d57b7c0f8a1fe6d8964e348b4eeafb1",
+    "MonoMod.ILHelpers.dll": "fdd0e3538340fd78b8f521e62b8cac1ebb7683ac1f27f6aaedfc1044b14bf4bb",
+    "Sentry.Godot.dll": "bef522b322662f6dbf280891e23e2001483107f8bb981f1692c264928753112a",
+    "Sentry.dll": "4f1619b048d0b0f604265075bc5311f9f2e4a0ecdc09662009b7ee11d50c216c",
+    "SharpGen.Runtime.COM.dll": "2686187b458aba592e845d8c47f28c730efcca23eae77e3950a5178a9846d9ba",
+    "SharpGen.Runtime.dll": "0e6acd59ab2173a6467626d69cf9f5b5b7651111ffee6e30fb7818de59335b4b",
+    "SmartFormat.ZString.dll": "723e9ffdb9cec9565d9bbbdb27b4d19a9b0ba4ff006e1ab8b94022ae5c426450",
+    "SmartFormat.dll": "6220cde1dafffde5c51a4e23db4bb16e8ec620ef52bac51c0ad5f48c4769f168",
+    "Steamworks.NET.dll": "e1cd0bf2436cefbb8bfcfcc1cea0587e5b9c740769e8340f7b9e9de72785fcf0",
+    "System.IO.Hashing.dll": "fbe8c2fcb4adc01da5c3c8ed0d727903b8fda1e6b84da3c447c9794615f30664",
+    "Vortice.DXGI.dll": "616983bed0d84c6ad499d1963edf12bb5bfe701e60a3ba860d1768516bf56d20",
+    "Vortice.DirectX.dll": "5e1da8c22e0a33cc24078965c80ca4093a2c806aa580076441eb0f27ef38b56f",
+    "Vortice.Mathematics.dll": "bf8aa203d01c565a26811e5b32afba5030c7c6e05298487c6d24608e4fb43fad"
+  },
+  "arm64_dependency_sha256": {
+    "Steamworks.NET.dll": "474a2af1328c2a2b32bedf8376ed46a50958423313856659ac05bee677d8fdd3"
+  },
+  "texture_mode": "windows-bc-to-astc",
+  "input_contract": "Player-provided Windows game assets; pure-IL ARM64 preparation and Linux 9.0.7 runtime are required. A source SHA is an identity, not proof of provenance or API compatibility.",
+  "texture": "Decode BC1/BC3/BC7 to RGBA, halve visual textures and encode ASTC 8x8; protected data remains full-size lossless decoded RGBA; update validated .import path variants and retain logical size.",
+  "spine": "The audited source loader uses logical texture size but the installed binary is not bound to the loader source; inclusion requires explicit opt-in.",
+  "delivery": "Source-bound compatibility resources and converted textures are merged before Godot starts; one immutable selector binds main PCK, managed data, release metadata and patch.",
+  "measurements": "Encoded bytes and static audit coverage do not establish GPU memory or gameplay performance."
+}

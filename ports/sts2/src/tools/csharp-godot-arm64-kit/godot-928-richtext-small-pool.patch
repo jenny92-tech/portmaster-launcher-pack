@@ -1,0 +1,12 @@
+diff --git a/scene/gui/rich_text_label.h b/scene/gui/rich_text_label.h
+--- a/scene/gui/rich_text_label.h
++++ b/scene/gui/rich_text_label.h
+@@ -573,7 +573,7 @@ class RichTextLabel : public Control {
+ 
+ 	void _texture_changed(RID p_item);
+ 
+-	RID_PtrOwner<Item> items;
++	RID_PtrOwner<Item> items{ 4096 };
+ 	List<String> tag_stack;
+ 	HashSet<RID> hr_list;
+ 

@@ -1,0 +1,48 @@
+{
+  "name": "wine-loongos",
+  "title": "Je-Wine",
+  "engine": "Box64 + Wine",
+  "engine_status": "prototype",
+  "engine_scope": "wine-loongos-app-only",
+  "runtime": "Shared component installer: Box64 + Wine + environment-selected graphics",
+  "launcher": "Bundled ARM64 Python + native SDL2/SDL2_ttf; no system Python or PortMaster required",
+  "devices": [
+    "MiniLoong Pocket One (LoongOS 1.4.0.36, RK3566)"
+  ],
+  "language": [
+    "zh-CN"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "wine-loongos",
+  "portable_dir": "wine-loongos",
+  "script": "Je-Wine.sh",
+  "launcher_sh": "src/launcher.sh",
+  "launcher_tools": [],
+  "portmaster": {
+    "items": [
+      "Je-Wine.sh",
+      "wine-loongos",
+      "screenshot.png",
+      "Je-Wine.png"
+    ],
+    "desc": "Windows game runner with separate device families, environment providers and resource-free game adapter packages.",
+    "inst": "Extract the SD-card archives at the card root. Canonical entries are in roms/windows; roms/ports contains bridges. Supply complete Windows game files in roms/windows/<id>/data. Shared runtime is installed under .winecellar.",
+    "rtr": false,
+    "exp": true,
+    "availability": "free",
+    "arch": [
+      "aarch64"
+    ],
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "Je-Wine.png"
+      ]
+    }
+  },
+  "depends_on": [
+    "https://github.com/ptitSeb/box64",
+    "https://github.com/Kron4ek/Wine-Builds"
+  ],
+  "notes": "ROCKNIX Windows SD-card layout with controlled bottle.json loading; this is not a PortMaster autoinstall ZIP. Private ARM64 launcher environment, shared Wine components and resource-free game adapters remain separate under roms/windows. Ports scripts are thin homepage bridges. Only the registered MiniLoong firmware has a machine environment; layout compatibility does not imply ROCKNIX firmware support. Installation and fullscreen handoff are locally checked, not revalidated on a device."
+}

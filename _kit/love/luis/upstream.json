@@ -1,0 +1,16 @@
+{
+  "source": "https://github.com/SiENcE/luis",
+  "source_ref": "main",
+  "resolved_sha": "df9b60106ee8ac29a9cfa41c8d3c0f8fc348e9e4",
+  "accessed_at": "2026-10-26",
+  "sha256": {
+    "LICENSE": "f3d1e1997de029728fe368f5d490e9d46720deafd0b889c16814b3284c9fd121",
+    "widgets/button.lua": "e3034bfa9bc9499e904d05f4520ac3f471eedfc509845c50ac8df58dfd8ce1f4",
+    "widgets/checkBox.lua": "aaa01304d586c36cd6cf9da3e10ab9764c36691fcf585e031390fbf6a0271b37",
+    "widgets/switch.lua": "74baff6192af6980b3fe35115deffe590dfbeb4e595623cb71a0c8b680a75c5e",
+    "3rdparty/utils.lua": "bef4b5fd5ce0099faf29cf6e6be645edca9cad77544ba0b5ca55a5736ad4d589",
+    "3rdparty/vector.lua": "8ebf506af9828588bc15857f7fae19294c976f62b87bc889880a70e3a4d74604",
+    "3rdparty/decorators.lua": "a82c8810a7b60f34d1a426bce2fdc1c22455df6debffef79ccdf41ea1cc3a3a9",
+    "3rdparty/flux.lua": "9352b7f082082a088438d5137d9a22258ad01cf8e48f832c51a661f8ee105666"
+  }
+}

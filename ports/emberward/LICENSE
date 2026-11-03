@@ -1,0 +1,13 @@
+Emberward PortMaster Launcher
+Copyright (c) 2026 jenny92-tech / smallraw
+
+Launcher integration and documentation: CC BY-NC-SA 4.0.
+https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+Attribution: https://github.com/jenny92-tech/portmaster-launcher-pack
+
+The imported Emberward EGL adapter retains its MIT license and separate
+NOTICE.txt. The shared Wayland Vulkan WSI retains its bundled MIT license.
+
+Game files are NOT covered by this launcher license. Emberward game code,
+artwork, fonts and audio retain their original licenses. A PCK is included
+only when its export is explicitly supplied to the local build.

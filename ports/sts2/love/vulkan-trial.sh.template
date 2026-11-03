@@ -1,0 +1,459 @@
+#!/bin/bash
+# INPUT:  原有 STS2、官方 Godot4.5 Mono 镜像、独立性能补丁、私有 WSI 与执行视图工具
+# OUTPUT: 一个独立存档的迷你龙 Vulkan 测试会话及日志
+# POS:    供玩家从固件前端手动启动，不改变正式 GLES 入口
+# PORTMASTER: sts2_vk_test, Je-杀戮尖塔2-VK测试.sh
+set -o pipefail
+PORT_NAME=sts2_vk_test
+LOG_PREFIX="[STS2-VK]"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ORIGINAL="$SCRIPT_DIR/sts2"
+TESTDIR="$SCRIPT_DIR/sts2-vk-test"
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
+#@KIT-END
+portmaster_init "$SCRIPT_DIR" 960 720 || exit 1
+mkdir -p "$TESTDIR/conf/data/vulkan/implicit_layer.d" "$TESTDIR/conf/config" "$TESTDIR/conf/cache" || exit 1
+# The unified settings entry owns a bounded logger. Legacy direct launches keep
+# their existing log file and behavior.
+if [ "${SLL_LAUNCHER_HANDOFF:-0}" != 1 ]; then exec > "$TESTDIR/log.txt" 2>&1; fi
+child_pid=""
+finish_trial() {
+  if [ -n "$child_pid" ] && jobs -pr | grep -qx "$child_pid"; then
+    kill -TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  launcher_platform_finish
+}
+trap finish_trial EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+echo "$LOG_PREFIX PortMaster official Godot4.5 Mono / native Wayland / Vulkan Mobile; private test profile"
+launcher_platform_matches_compatible rockchip,rk3566-rk817-tablet || exit 1
+[ "$(tr -d '\000' < /proc/device-tree/model)" = 'Rockchip RK3566 RK817 MINILOONG LP4X Board' ] || exit 1
+launcher_platform_display || exit 1
+if pidof godot.mono godot43.aarch64 unityloader >/dev/null 2>&1; then
+  echo "$LOG_PREFIX another game is running"
+  exit 1
+fi
+cache_root="/tmp/sts2-vk-test-$(id -u)"
+[ ! -L "$cache_root" ] || exit 1
+mkdir -p -m 700 "$cache_root" || exit 1
+[ -O "$cache_root" ] || exit 1
+RUNTIME_IMAGE="$controlfolder/libs/godot_4.5.mono.squashfs"
+runtime_hash=94710ab1955d41158937088dd026fb83fe15762c37fa264b63a83ec63ea2be14
+engine_hash=bf9e9620201f030e587c6006f0d9d488c91312e43dddebdc96b20f0dbe07935d
+PRIVATE_ENGINE=""
+BUILD_ID=""
+BUILD_DATA=""
+if [ -e "$TESTDIR/active-build" ] || [ -L "$TESTDIR/active-build" ]; then
+  if [ -n "${SLL_TEXTURE_MAIN_PACK:-}" ] || [ -n "${SLL_TEXTURE_OVERLAY:-}" ]; then
+    echo "$LOG_PREFIX explicit texture selection conflicts with active build"; exit 1
+  fi
+  BUILD_ID="$(cat "$TESTDIR/active-build")" || exit 1
+  case "$BUILD_ID" in ''|*[!0-9a-f]*) echo "$LOG_PREFIX invalid build selector"; exit 1 ;; esac
+  [ "${#BUILD_ID}" = 64 ] || exit 1
+  BUILD_DIR="$TESTDIR/builds/$BUILD_ID"
+  BUILD_DATA="$BUILD_DIR/data"
+  PATCHDIR="$BUILD_DIR/patch"
+  MAIN_PACK="$BUILD_DIR/main.pck"
+  python3 - "$BUILD_DIR" "$BUILD_ID" "$ORIGINAL" <<'VERIFY_BUILD' || exit 1
+import hashlib,json,re,stat,struct,sys
+from pathlib import Path
+bundle, identity, original = Path(sys.argv[1]),sys.argv[2],Path(sys.argv[3])
+baseline=original/'data_sts2_linuxbsd_arm64'
+def digest(path):
+    h=hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''): h.update(block)
+    return h.hexdigest()
+def regular(path):
+    if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1: raise ValueError('not a regular file: '+str(path))
+def safe_name(name):
+    return isinstance(name,str) and name not in ('','.','..') and '/' not in name and '\\' not in name
+try:
+    if bundle.is_symlink() or not bundle.is_dir(): raise ValueError('invalid build directory')
+    regular(bundle/'manifest.json'); raw=(bundle/'manifest.json').read_bytes()
+    if hashlib.sha256(raw).hexdigest()!=identity: raise ValueError('build manifest checksum mismatch')
+    manifest=json.loads(raw)
+    fields={'source_pck_sha256','main_sha256','main_bytes','patch_sha256','game_files','release_sha256','entry_sha256','runtime_binding','baseline_files','extension_files'}
+    if set(manifest) not in (fields,fields|{'engine_sha256'}): raise ValueError('unexpected build manifest')
+    if 'engine_sha256' in manifest:
+        engine=bundle/'engine.bin';regular(engine)
+        if manifest['engine_sha256']!='93d0952f7b082e221b15eb2f060b20c0237aabf9fea6ec2639cf31d415ce7e9e' or digest(engine)!=manifest['engine_sha256']:raise ValueError('private engine mismatch')
+    if not all(re.fullmatch('[0-9a-f]{64}',manifest[k]) for k in ('source_pck_sha256','main_sha256','patch_sha256','release_sha256','entry_sha256')): raise ValueError('invalid build hashes')
+    patch=bundle/'patch';data=bundle/'data'
+    if patch.is_symlink() or data.is_symlink() or not patch.is_dir() or not data.is_dir():raise ValueError('invalid bundle directories')
+    regular(patch/'manifest.json');raw_patch=(patch/'manifest.json').read_bytes()
+    if hashlib.sha256(raw_patch).hexdigest()!=manifest['patch_sha256']:raise ValueError('patch identity mismatch')
+    p=json.loads(raw_patch)
+    if set(p)!= {'files','source_files'} or set(p['files'])!={'sts2.dll','sts2.deps.json','sts2_compat.dll','port_compat.pck'} or set(p['source_files'])!={'sts2.dll','sts2.deps.json'}:raise ValueError('invalid patch manifest')
+    if set(x.name for x in patch.iterdir())!=set(p['files'])|{'manifest.json'} or set(x.name for x in data.iterdir())!=set(manifest['game_files']):raise ValueError('unexpected bundle files')
+    for folder,files in ((patch,p['files']),(data,manifest['game_files'])):
+        if not isinstance(files,dict) or not files or any(not safe_name(n) for n in files):raise ValueError('invalid file manifest')
+        for name,expected in files.items():
+            path=folder/name;regular(path)
+            if not isinstance(expected,str) or not re.fullmatch('[0-9a-f]{64}',expected) or digest(path)!=expected:raise ValueError('build file mismatch: '+name)
+    for name,expected in p['source_files'].items():
+        if manifest['game_files'].get(name)!=expected:raise ValueError('patch and game data disagree')
+    release=bundle/'release_info.json';regular(release)
+    if digest(release)!=manifest['release_sha256']:raise ValueError('release info mismatch')
+    regular(bundle/'entry.sh')
+    if digest(bundle/'entry.sh')!=manifest['entry_sha256']:raise ValueError('build entry mismatch')
+    binding=manifest['runtime_binding']
+    if set(binding)!={'sts2.deps.json','GodotSharp.dll'}:raise ValueError('invalid runtime binding')
+    for name,expected in binding.items():
+        path=baseline/name;regular(path)
+        if digest(path)!=expected:raise ValueError('runtime source identity changed: '+name)
+    main=bundle/'main.pck';regular(main)
+    regular(bundle/'main.stat.json');side=json.loads((bundle/'main.stat.json').read_text())
+    s=main.stat()
+    if side!={'build_sha256':identity,'main_sha256':manifest['main_sha256'],'size':s.st_size,'mtime_ns':s.st_mtime_ns} or s.st_size!=manifest['main_bytes']:raise ValueError('main pack identity changed')
+    with main.open('rb') as stream:
+        if struct.unpack('<5I',stream.read(20))!=(0x43504447,3,4,5,1):raise ValueError('unsupported main pack')
+    if not isinstance(manifest['baseline_files'],dict) or not manifest['baseline_files']:raise ValueError('missing runtime baseline')
+    selected={p.name for p in baseline.iterdir() if p.is_file() and p.suffix in ('.dll','.json','.so','.dat') and p.name not in manifest['game_files'] and p.name not in ('sts2.dll','sts2_compat.dll','sts2.deps.json')}
+    if selected != set(manifest['baseline_files']):raise ValueError('runtime baseline inventory changed')
+    for name,expected in manifest['baseline_files'].items():
+        if not safe_name(name):raise ValueError('invalid baseline file')
+        path=baseline/name;regular(path);st=path.stat()
+        if set(expected)!={'sha256','size','mtime_ns'} or {'size':st.st_size,'mtime_ns':st.st_mtime_ns}!={k:expected[k] for k in ('size','mtime_ns')}:raise ValueError('runtime baseline changed: '+name)
+    extensions=manifest['extension_files']
+    required={'addons/spine/linux/libspine_godot.linux.template_release.arm64.so','addons/fmod/libs/linux/libGodotFmod.linux.template_release.arm64.so',*[f'addons/fmod/libs/linux/{name}' for name in ('libfmod.so','libfmod.so.14','libfmod.so.14.6','libfmodstudio.so','libfmodstudio.so.14','libfmodstudio.so.14.6')]}
+    if not isinstance(extensions,dict) or set(extensions)!=required:raise ValueError('invalid native extension inventory')
+    for name,expected in extensions.items():
+        path=original/name;regular(path);st=path.stat()
+        if set(expected)!={'sha256','size','mtime_ns'} or {'size':st.st_size,'mtime_ns':st.st_mtime_ns}!={k:expected[k] for k in ('size','mtime_ns')}:raise ValueError('native extension changed: '+name)
+    print('[STS2-VK] verified atomic game build '+identity[:12])
+except (OSError,ValueError,KeyError,TypeError,struct.error) as exc:
+    raise SystemExit('[STS2-VK] invalid game build: '+str(exc))
+VERIFY_BUILD
+  PRIVATE_ENGINE="$(python3 - "$BUILD_DIR/manifest.json" "$BUILD_DIR/engine.bin" <<'PRIVATE_ENGINE_PATH'
+import json,sys
+m=json.load(open(sys.argv[1]))
+print(sys.argv[2] if 'engine_sha256' in m else '')
+PRIVATE_ENGINE_PATH
+)" || exit 1
+  # Only the unified settings entry requests the original PortMaster runtime.
+  # Legacy direct trial launches keep their installed engine and behavior.
+  if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then PRIVATE_ENGINE=""; fi
+  if [ -n "$PRIVATE_ENGINE" ]; then engine_hash=93d0952f7b082e221b15eb2f060b20c0237aabf9fea6ec2639cf31d415ce7e9e; fi
+else
+patch_id="$(cat "$TESTDIR/active-patch")" || exit 1
+case "$patch_id" in ''|*[!0-9a-f]*) exit 1 ;; esac
+[ "${#patch_id}" = 64 ] || exit 1
+PATCHDIR="$TESTDIR/patches/$patch_id"
+python3 - "$PATCHDIR" "$patch_id" "$ORIGINAL/data_sts2_linuxbsd_arm64" <<'VERIFY_PATCH' || exit 1
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+patch, patch_id, original = sys.argv[1:]
+patch, original = Path(patch), Path(original)
+raw = (patch / "manifest.json").read_bytes()
+if hashlib.sha256(raw).hexdigest() != patch_id:
+    raise SystemExit("[STS2-VK] patch manifest checksum mismatch")
+manifest = json.loads(raw)
+if set(manifest["files"]) != {"sts2.dll", "sts2_compat.dll", "sts2.deps.json", "port_compat.pck"}:
+    raise SystemExit("[STS2-VK] unexpected patch payload")
+if set(manifest["source_files"]) != {"sts2.dll", "sts2.deps.json"}:
+    raise SystemExit("[STS2-VK] unexpected game input manifest")
+for root, entries in ((patch, manifest["files"]), (original, manifest["source_files"])):
+    for name, expected in entries.items():
+        if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected:
+            raise SystemExit("[STS2-VK] game/patch checksum mismatch: " + name)
+print("[STS2-VK] verified game-side performance patch " + patch_id[:12])
+VERIFY_PATCH
+# Select the verified low-texture main PCK before Godot parses its main scene.
+if [ -n "${SLL_TEXTURE_OVERLAY:-}" ]; then
+  echo "$LOG_PREFIX SLL_TEXTURE_OVERLAY is retired; select an installed merged PCK with SLL_TEXTURE_MAIN_PACK or active-texture"
+  exit 1
+fi
+MAIN_PACK="$ORIGINAL/gamedata/pcks/SlayTheSpire2.pck"
+if [ -z "${SLL_TEXTURE_MAIN_PACK:-}" ] && { [ -e "$TESTDIR/active-texture" ] || [ -L "$TESTDIR/active-texture" ]; }; then
+  texture_id="$(cat "$TESTDIR/active-texture")" || { echo "$LOG_PREFIX cannot read texture marker"; exit 1; }
+  case "$texture_id" in ''|*[!0-9a-f]*) echo "$LOG_PREFIX invalid active texture marker"; exit 1 ;; esac
+  [ "${#texture_id}" = 64 ] || { echo "$LOG_PREFIX invalid active texture marker"; exit 1; }
+  SLL_TEXTURE_MAIN_PACK="$TESTDIR/merged/$texture_id.pck"
+fi
+if [ -n "${SLL_TEXTURE_MAIN_PACK:-}" ]; then
+  python3 - "$TESTDIR" "$MAIN_PACK" "$SLL_TEXTURE_MAIN_PACK" <<'VERIFY_TEXTURE' || exit 1
+import json
+from pathlib import Path
+import re
+import stat
+import struct
+import sys
+
+testdir, source, selected = map(Path, sys.argv[1:])
+try:
+    merged = testdir / "merged"
+    if not selected.is_absolute() or selected.parent != merged or not re.fullmatch(r"[0-9a-f]{64}\.pck", selected.name):
+        raise ValueError("main pack path must name an installed merged PCK")
+    if selected.is_symlink():
+        raise ValueError("merged PCK must not be a symlink")
+    with selected.open("rb") as stream:
+        header = stream.read(20)
+    if len(header) != 20 or struct.unpack("<5I", header) != (0x43504447, 3, 4, 5, 1):
+        raise ValueError("unsupported merged PCK header")
+    manifest = json.loads((merged / (selected.stem + ".json")).read_text(encoding="utf-8"))
+    if set(manifest) != {"merged_sha256", "overlay_sha256", "source_sha256", "merged_stat", "source_stat"}:
+        raise ValueError("invalid merged manifest")
+    if manifest["merged_sha256"] != selected.stem or not all(re.fullmatch(r"[0-9a-f]{64}", manifest[key]) for key in ("overlay_sha256", "source_sha256")):
+        raise ValueError("merged manifest identity mismatch")
+    def identity(path):
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("not a regular file: " + str(path))
+        return {"size": info.st_size, "mtime_ns": info.st_mtime_ns}
+    if identity(selected) != manifest["merged_stat"] or identity(source) != manifest["source_stat"]:
+        raise ValueError("merged or original PCK changed since installation")
+except (OSError, ValueError, TypeError, KeyError) as exc:
+    raise SystemExit("[STS2-VK] low texture verification failed: " + str(exc))
+print("[STS2-VK] verified low texture main PCK " + selected.stem[:12])
+VERIFY_TEXTURE
+  MAIN_PACK="$SLL_TEXTURE_MAIN_PACK"
+fi
+fi
+# Never apply a late texture overlay on top of the selected main pack.
+unset SLL_TEXTURE_OVERLAY
+GAME="$cache_root/$engine_hash/${BUILD_ID:-$patch_id}/game"
+mkdir -p "$GAME/data_sts2_linuxbsd_arm64" || exit 1
+[ ! -L "$GAME/godot.mono" ] || { echo "$LOG_PREFIX engine must not be a symlink"; exit 1; }
+if [ ! -e "$GAME/godot.mono" ] && [ -f "$cache_root/$engine_hash/game/godot.mono" ] && [ ! -L "$cache_root/$engine_hash/game/godot.mono" ]; then
+  ln "$cache_root/$engine_hash/game/godot.mono" "$GAME/godot.mono" || exit 1
+fi
+# Mount the official image only in a short-lived private namespace. Keep a
+# verified RAM copy beside the C# assemblies; do not replace the game's fork.
+python3 - "$TESTDIR/launch_exec_view.py" "$RUNTIME_IMAGE" "$runtime_hash" "$GAME" "$engine_hash" "$PRIVATE_ENGINE" <<'PY' || exit 1
+import hashlib
+import os
+from pathlib import Path
+import runpy
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+
+helper, image, image_hash, game, engine_hash, private_engine = sys.argv[1:]
+game = Path(game)
+engine = game / "godot.mono"
+if engine.is_symlink():
+    raise SystemExit("[STS2-VK] engine must not be a symlink")
+def digest(path):
+    result = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            result.update(block)
+    return result.hexdigest()
+if engine.is_file() and digest(engine) == engine_hash:
+    sys.exit(0)
+if private_engine:
+    source=Path(private_engine)
+    source_fd=os.open(source,os.O_RDONLY|os.O_NOFOLLOW)
+    source_stat=os.fstat(source_fd)
+    if not stat.S_ISREG(source_stat.st_mode) or source_stat.st_nlink != 1:
+        os.close(source_fd);raise SystemExit('[STS2-VK] unsafe private engine')
+    fd,incoming=tempfile.mkstemp(prefix='.godot-',dir=str(game))
+    try:
+        with os.fdopen(fd,'wb') as out, os.fdopen(source_fd,'rb') as inp:
+            h=hashlib.sha256()
+            for block in iter(lambda:inp.read(1024*1024),b''):
+                h.update(block);out.write(block)
+            after=os.fstat(inp.fileno());out.flush();os.fsync(out.fileno());os.fchmod(out.fileno(),0o755)
+        if (source_stat.st_dev,source_stat.st_ino,source_stat.st_size,source_stat.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns) or h.hexdigest()!=engine_hash or digest(Path(incoming))!=engine_hash:raise ValueError('private engine copy mismatch')
+        os.replace(incoming,engine)
+    finally:
+        if os.path.exists(incoming):os.unlink(incoming)
+    sys.exit(0)
+if digest(Path(image)) != image_hash:
+    raise SystemExit("[STS2-VK] official PortMaster runtime checksum mismatch")
+runpy.run_path(helper)["_unshare_mounts"]()
+subprocess.run(["mount", "--make-rprivate", "/"], check=True)
+mountpoint = game.parent / "runtime"
+mountpoint.mkdir(exist_ok=True)
+subprocess.run(["mount", "-t", "squashfs", "-o", "loop,ro,nodev,nosuid,exec",
+                image, str(mountpoint)], check=True)
+try:
+    source = mountpoint / "godot45.mono.aarch64"
+    if digest(source) != engine_hash:
+        raise SystemExit("[STS2-VK] official Godot executable checksum mismatch")
+    incoming = engine.with_suffix(".incoming")
+    shutil.copyfile(source, incoming)
+    incoming.chmod(0o755)
+    os.replace(incoming, engine)
+finally:
+    subprocess.run(["umount", str(mountpoint)], check=True)
+PY
+runtime_help="$("$GAME/godot.mono" --help)" || exit 1
+printf '%s\n' "$runtime_help" | grep -E 'wayland.*vulkan' >/dev/null || exit 1
+"$GAME/godot.mono" --version || exit 1
+for name in libsteam_api64.so bootstrap.pck addons gamedata GodotSharp; do
+  [ ! -e "$ORIGINAL/$name" ] || ln -sfn "$ORIGINAL/$name" "$GAME/$name" || exit 1
+done
+for file in "$ORIGINAL/data_sts2_linuxbsd_arm64/"*; do
+  [ -f "$file" ] || continue
+  name="${file##*/}"
+  case "$name" in
+    sts2.dll|sts2_compat.dll|sts2.deps.json) continue ;;
+    *.dll|*.json|*.so|*.dat) ln -sfn "$file" "$GAME/data_sts2_linuxbsd_arm64/$name" || exit 1 ;;
+  esac
+done
+if [ -n "$BUILD_DATA" ]; then
+  for file in "$BUILD_DATA/"*; do
+    [ -f "$file" ] || continue
+    name="${file##*/}"
+    case "$name" in
+      sts2.dll|sts2_compat.dll|sts2.deps.json) continue ;;
+      *.dll|*.json|*.so|*.dat) ln -sfn "$file" "$GAME/data_sts2_linuxbsd_arm64/$name" || exit 1 ;;
+    esac
+  done
+  ln -sfn "$BUILD_DIR/release_info.json" "$GAME/release_info.json" || exit 1
+fi
+for name in sts2.dll sts2_compat.dll sts2.deps.json; do
+  if ! cmp -s "$PATCHDIR/$name" "$GAME/data_sts2_linuxbsd_arm64/$name"; then
+    cp "$PATCHDIR/$name" "$GAME/data_sts2_linuxbsd_arm64/$name.incoming" &&
+      mv "$GAME/data_sts2_linuxbsd_arm64/$name.incoming" "$GAME/data_sts2_linuxbsd_arm64/$name" || exit 1
+  fi
+done
+cp "$PATCHDIR/port_compat.pck" "$GAME/port_compat.pck.incoming" &&
+  mv "$GAME/port_compat.pck.incoming" "$GAME/port_compat.pck" || exit 1
+ln -sfn "$TESTDIR/conf" "$GAME/conf" || exit 1
+ln -sfn "$MAIN_PACK" "$GAME/SlayTheSpire2.pck" || exit 1
+cat > "$GAME/override.cfg" <<'CFG'
+[rendering]
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+CFG
+# The trial runs only after the private XDG root has passed validation. The
+# launcher rewrites the baseline above on every launch; normal launches keep
+# their original SD main-pack path and never inherit a previous trial value.
+configure_memory_trial() {
+  local trial="${SLL_MEMORY_TRIAL:-}"
+  MAIN_PACK_ARG="$MAIN_PACK"
+  [ -n "$trial" ] || return 0
+  [ -n "${SLL_DIAG_XDG_ROOT:-}" ] && [ "${SLL_TEXTURE_DIAG:-0}" = 1 ] || {
+    echo "$LOG_PREFIX memory trial requires isolated data and explicit diagnostics"; return 1;
+  }
+  case "$trial" in worker1|descriptor16|staging16) ;; *)
+    echo "$LOG_PREFIX unknown memory trial"; return 1;; esac
+  python3 - "$GAME/SlayTheSpire2.pck" "$MAIN_PACK" <<'VERIFY_TRIAL_PACK' || return 1
+import os,sys
+from pathlib import Path
+link=Path(sys.argv[1]);main=Path(sys.argv[2])
+if not link.is_symlink() or main.is_symlink() or not main.is_file() or os.readlink(link)!=str(main) or link.resolve(strict=True)!=main.resolve(strict=True):
+ raise ValueError('trial main pack link does not match verified main')
+VERIFY_TRIAL_PACK
+  case "$trial" in
+    worker1) printf '\n[threading]\nworker_pool/max_threads=1\n' >> "$GAME/override.cfg" || return 1;;
+    descriptor16) printf 'rendering_device/vulkan/max_descriptors_per_pool=16\n' >> "$GAME/override.cfg" || return 1;;
+    staging16) printf 'rendering_device/staging_buffer/max_size_mb=16\n' >> "$GAME/override.cfg" || return 1;;
+  esac
+  MAIN_PACK_ARG="$GAME/SlayTheSpire2.pck"
+}
+wsi_hash=ed454d770a5908d94875ab5cf60b6b0d428fe9b31b8e87311ed0c1f928db0cc8
+[ "$(sha256sum "$TESTDIR/libVkLayer_window_system_integration.so" | cut -d ' ' -f 1)" = "$wsi_hash" ] || exit 1
+WSI_DIR="$cache_root/$wsi_hash"
+mkdir -p "$WSI_DIR" || exit 1
+if ! cmp -s "$TESTDIR/libVkLayer_window_system_integration.so" "$WSI_DIR/libVkLayer_window_system_integration.so"; then
+  cp "$TESTDIR/libVkLayer_window_system_integration.so" "$WSI_DIR/libVkLayer_window_system_integration.so" || exit 1
+fi
+sed "s|@PORTKIT_WSI_LIBRARY@|$WSI_DIR/libVkLayer_window_system_integration.so|g" \
+  "$TESTDIR/godot-implicit-template.json" > "$TESTDIR/conf/data/vulkan/implicit_layer.d/sts2-vk-test.json" || exit 1
+launcher_platform_prepare_game godot.mono
+run_trial_game() {
+  ulimit -c 0
+  cd "$GAME" || exit 1
+  export XDG_DATA_HOME="$TESTDIR/conf/data" XDG_CONFIG_HOME="$TESTDIR/conf/config" XDG_CACHE_HOME="$TESTDIR/conf/cache"
+  if [ -n "${SLL_DIAG_XDG_ROOT:-}" ]; then
+    python3 - "$SLL_DIAG_XDG_ROOT" "$TESTDIR/conf/data/SlayTheSpire2/shader_cache" <<'PY' || exit 1
+import os,re,stat,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.parent!=Path('/tmp') or not re.fullmatch(r'sts2-memory-diag-[A-Za-z0-9]+',p.name):raise ValueError('invalid diagnostic data root')
+s=os.lstat(p)
+if not stat.S_ISDIR(s.st_mode) or s.st_uid!=os.geteuid() or s.st_mode&0o077:raise ValueError('unsafe diagnostic data root')
+if any(p.iterdir()):raise ValueError('diagnostic data root must be empty')
+for name in ('data','config','cache'):
+ q=p/name
+ q.mkdir(mode=0o700)
+ s=os.lstat(q)
+ if not stat.S_ISDIR(s.st_mode) or s.st_uid!=os.geteuid() or s.st_mode&0o077:raise ValueError('unsafe diagnostic data directory')
+game=p/'data'/'SlayTheSpire2'
+game.mkdir(mode=0o700)
+s=os.lstat(game)
+if not stat.S_ISDIR(s.st_mode) or s.st_uid!=os.geteuid() or s.st_mode&0o077:raise ValueError('unsafe diagnostic game directory')
+source=Path(sys.argv[2])
+if source.parts[-4:]!=('conf','data','SlayTheSpire2','shader_cache'):raise ValueError('invalid shared shader cache path')
+source=source.parents[3].resolve(strict=True)/'conf/data/SlayTheSpire2/shader_cache'
+fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+try:
+ try:
+  for part in source.parts[1:]:
+   nextfd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+   os.close(fd);fd=nextfd
+ except FileNotFoundError:print('[STS2-VK] diagnostic run uses cold shader cache')
+ else:
+  os.symlink(str(source),game/'shader_cache')
+  print('[STS2-VK] diagnostic run uses existing shader cache')
+finally:os.close(fd)
+PY
+    export XDG_DATA_HOME="$SLL_DIAG_XDG_ROOT/data" XDG_CONFIG_HOME="$SLL_DIAG_XDG_ROOT/config" XDG_CACHE_HOME="$SLL_DIAG_XDG_ROOT/cache"
+    echo "$LOG_PREFIX isolated diagnostic user data enabled"
+  fi
+  configure_memory_trial || exit 1
+  if [ -n "$PRIVATE_ENGINE" ]; then
+    [ -z "${SLL_MEMORY_TRIAL:-}" ] || { echo "$LOG_PREFIX memory override is not available in release mode"; exit 1; }
+    python3 - "$GAME/SlayTheSpire2.pck" "$MAIN_PACK" <<'VERIFY_RELEASE_PACK' || exit 1
+import os,sys
+from pathlib import Path
+link,main=map(Path,sys.argv[1:])
+if not link.is_symlink() or main.is_symlink() or not main.is_file() or os.readlink(link)!=str(main) or link.resolve(strict=True)!=main.resolve(strict=True):raise ValueError('release main link mismatch')
+VERIFY_RELEASE_PACK
+    printf '\n[rendering]\nrendering_device/vulkan/preferred_large_heap_block_size_mb=64\n' >> "$GAME/override.cfg" || exit 1
+    MAIN_PACK_ARG="$GAME/SlayTheSpire2.pck"
+    export SLL_HEAP_TRIM="${SLL_HEAP_TRIM:-1}" SLL_BUNDLED_THEME_FONT="${SLL_BUNDLED_THEME_FONT:-0}" SLL_SYSTEM_FONT_DIAG=0
+  fi
+  export PULSE_SERVER="${PULSE_SERVER:-unix:/tmp/pulse-socket}"
+  export LD_LIBRARY_PATH="$GAME:$GAME/data_sts2_linuxbsd_arm64:/usr/lib:/usr/lib64"
+  export PORTKIT_GODOT_WSI=1 DISABLE_WSI_LAYER=1
+  if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then
+    export SLL_LANGUAGE="${SLL_LANGUAGE:-zh_CN}" SLL_QUALITY="${SLL_QUALITY:-smooth}"
+  else
+    export SLL_LANGUAGE=zh_CN SLL_QUALITY=smooth
+  fi
+  export SLL_GPU_PARTICLES=on SLL_FIRST_CARD_TRACE=1 SLL_MEMORY_MODE=low
+  if [ -n "$PRIVATE_ENGINE" ]; then export SLL_FIRST_CARD_TRACE=0; fi
+  if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then
+    export SLL_FIRST_CARD_TRACE=0
+    printf '\n[rendering]\nrendering_device/fallback_to_opengl3=false\n' >> "$GAME/override.cfg" || exit 1
+    case "${SLL_PERF_OVERLAY:-off}" in on) export PORTKIT_PERF_OVERLAY=1 ;; off) export PORTKIT_PERF_OVERLAY=0 ;; *) exit 1 ;; esac
+  else
+    export PORTKIT_PERF_OVERLAY=1
+  fi
+  export SLL_SHADER_COMPAT=on SLL_COMBAT_WARMUP=safe SLL_WARMUP_FRAMES=2 SLL_CACHE_PROTECT=on
+  set --
+  if [ -n "$BUILD_ID" ]; then
+    export SLL_INPUT_DIAG="${SLL_INPUT_DIAG:-0}" SLL_LOONG_FOCUS_COMPAT="${SLL_LOONG_FOCUS_COMPAT:-1}"
+    export SLL_TEXTURE_DIAG="${SLL_TEXTURE_DIAG:-0}" SLL_ASSET_DIAG="${SLL_ASSET_DIAG:-0}"
+    export SLL_ASSET_DIAG_PATHS="${SLL_ASSET_DIAG_PATHS:-0}" SLL_MALLOC_DIAG="${SLL_MALLOC_DIAG:-0}"
+    set -- --force-steam off
+  fi
+  [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ] || set -- --print-fps "$@"
+  launcher_platform_exec python3 "$TESTDIR/launch_exec_view.py" --root "$ORIGINAL" --root "$GAME" -- \
+    /bin/bash -c 'exec -a unityloader "$@"' sts2-vk "$GAME/godot.mono" \
+    --display-driver wayland --rendering-driver vulkan --rendering-method mobile \
+    --main-pack "$MAIN_PACK_ARG" --fullscreen --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" "$@"
+}
+run_trial_game &
+child_pid=$!
+wait "$child_pid"
+status=$?
+child_pid=""
+echo "$LOG_PREFIX native exit=$status"
+exit "$status"

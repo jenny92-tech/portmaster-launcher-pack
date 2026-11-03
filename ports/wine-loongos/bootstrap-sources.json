@@ -1,0 +1,35 @@
+{
+  "architecture": "aarch64-linux-gnu",
+  "inputs": {
+    "python": {
+      "sha256": "a2364356a17f63de74120a55d5af1f8ae56b8e700c9d43f478ba90e2f543f3a6",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.11.17%2B20261021-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "release": "20261021"
+    },
+    "portmaster": {
+      "sha256": "a1c6df01b40cbefeef9ce1f6d3d48ad7c365e75fa4c10438d865ea39ce93e0cd",
+      "url": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.10.24-1611/PortMaster.zip",
+      "release": "2026.10.24-1611"
+    },
+    "font": {
+      "sha256": "ae82f4e2a55e1316a55bcc1d05e9555ce08d8bda07e893b486896b626fd852ff",
+      "source": "https://github.com/googlefonts/noto-cjk",
+      "license": "SIL-OFL-1.1"
+    },
+    "font-license": {
+      "sha256": "1778d919f28e548adab94a9dc3cf05549124e53d204c2f4c8164617734dc1a3a"
+    },
+    "controller-database": {
+      "sha256": "81b78e8c77d3c382ee504962b102b091e8043c0712446e4699d7c816f8342d21",
+      "source": "https://github.com/PortsMaster/PortMaster-GUI",
+      "license": "SDL_GameControllerDB / PortMaster notices retained"
+    },
+    "input-license": {
+      "sha256": "9273c6b2c55be95f0f0df292d87e8900e5bfdf5b510a6ea09e80306cf45c10f6"
+    }
+  },
+  "files": {
+    "gptokeyb2": "674b6e40e490ae48455339f4f2ded664d4f2141a65c09a2105841faa53700a70",
+    "libinterpose.aarch64.so": "1783abbb3f3825c0bc5e440e800ace3539eab2373d8474eca7000cecd808edda"
+  }
+}

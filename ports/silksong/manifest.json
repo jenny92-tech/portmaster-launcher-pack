@@ -1,0 +1,46 @@
+{
+  "name": "silksong",
+  "title": "Je-空洞骑士_丝之歌[中]",
+  "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
+  "runtime": "Rudroid",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "devices": [
+    "MiniLoong Pocket One",
+    "TrimUI-class 1G handhelds"
+  ],
+  "language": [
+    "en",
+    "zh-CN"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "silksong",
+  "script": "Je-空洞骑士_丝之歌[中].sh",
+  "portable_dir": "silksong",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "json-merge",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
+  "portmaster": {
+    "items": [
+      "Je-空洞骑士_丝之歌[中].sh",
+      "silksong",
+      "screenshot.png",
+      "Je-空洞骑士_丝之歌[中].png"
+    ],
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "Je-空洞骑士_丝之歌[中].png"
+      ]
+    }
+  },
+  "depends_on": [
+    "https://github.com/jenny92-tech/rudroid (unityloader)",
+    "PortMaster runtimes/love_11.5"
+  ],
+  "notes": "Settings launcher for an existing Rudroid Silksong runtime. Uses a measured scene-effects policy without separate effect switches; runtime and game assets are deployed separately."
+}

@@ -1,0 +1,30 @@
+# App Manager never assigns an implicit back action to a face-button convention.
+# Both A/B activate the focused control; Return/Cancel/Exit are explicit UI rows.
+a = enter
+b = enter
+x = esc
+y = esc
+# gptokeyb defaults an omitted Start to Enter and an omitted Back/Select to
+# Escape. Map both to a key UIKit deliberately ignores so they are true no-ops.
+start = f10
+back = f10
+guide = esc
+l1 = pageup
+r1 = pagedown
+
+up = up
+up = repeat
+down = down
+down = repeat
+left = left
+right = right
+
+left_analog_up = up
+left_analog_up = repeat
+left_analog_down = down
+left_analog_down = repeat
+left_analog_left = left
+left_analog_right = right
+
+repeat_delay = 360
+repeat_interval = 90

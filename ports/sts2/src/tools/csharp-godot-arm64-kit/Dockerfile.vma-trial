@@ -1,0 +1,10 @@
+# INPUT:  Ubuntu 20.04 ARM64 image and its signed official package repositories
+# OUTPUT: Native Linux ARM64 Godot Mono build prerequisites
+# POS:    Isolated toolchain for the fixed Godot Vulkan memory trial
+FROM ubuntu@sha256:722ea796ac2d57eeb3627c58a582fc1acc58be51faf815e1bce1682ae5c092f7
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential binutils ca-certificates git pkg-config python3 python3-pip \
+    libgl1-mesa-dev libglu1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+    libasound2-dev libpulse-dev libudev-dev libfontconfig1-dev libdbus-1-dev \
+    libspeechd-dev libxkbcommon-dev libwayland-dev libwayland-bin wayland-protocols \
+    libicu-dev libx11-dev libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev libxss-dev

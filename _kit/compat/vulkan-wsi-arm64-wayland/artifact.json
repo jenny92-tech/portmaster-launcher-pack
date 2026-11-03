@@ -1,0 +1,177 @@
+{
+  "artifact_id": "vulkan-wsi-arm64-wayland",
+  "archived_at": "2026-10-28T15:45:49.829143+00:00",
+  "role": {
+    "purpose": "补充厂商 Vulkan 驱动缺少或不适合当前应用的 Wayland surface/swapchain 窗口呈现支持",
+    "layer": "原生 Linux 用户态 Vulkan WSI 适配层",
+    "connects_from": [
+      "Godot 原生 Vulkan 后端",
+      "Wine/DXVK 的 Vulkan 调用"
+    ],
+    "connects_to": [
+      "系统 Vulkan ICD/GPU 驱动",
+      "Wayland compositor，通过 DMA-BUF 交换图像"
+    ],
+    "not_a": [
+      "完整游戏引擎",
+      "GPU 驱动或 ICD",
+      "OpenGL/glFinish 补丁",
+      "通用跨机型 Vulkan 软件实现"
+    ]
+  },
+  "binary": {
+    "path": "libVkLayer_window_system_integration.so",
+    "bytes": 352096,
+    "sha256": "ed454d770a5908d94875ab5cf60b6b0d428fe9b31b8e87311ed0c1f928db0cc8",
+    "format": "ELF64 little-endian AArch64 ET_DYN"
+  },
+  "requires": {
+    "architecture": "aarch64",
+    "os_abi": "Linux glibc; not musl/Android bionic/macOS/Windows",
+    "direct_needed": [
+      "libwayland-client.so.0",
+      "libstdc++.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libpthread.so.0",
+      "libc.so.6"
+    ],
+    "max_required_symbol_versions": {
+      "GLIBC": "2.30",
+      "GLIBCXX": "3.4.22",
+      "CXXABI": "1.3.9",
+      "GCC": "3.0"
+    },
+    "exact_needed_symbols": {
+      "GLIBC": [
+        "2.17",
+        "2.30"
+      ],
+      "GLIBCXX": [
+        "3.4",
+        "3.4.11",
+        "3.4.14",
+        "3.4.18",
+        "3.4.19",
+        "3.4.22"
+      ],
+      "CXXABI": [
+        "1.3",
+        "1.3.5",
+        "1.3.9"
+      ],
+      "GCC": [
+        "3.0"
+      ]
+    },
+    "glibc_2_30_symbol": "pthread_cond_clockwait",
+    "display": "Wayland; built without X11/headless/direct-display WSI",
+    "memory_heap": "system-uncached DMA-BUF heap; actual kernel device and permissions must be checked",
+    "gpu": "Existing working Vulkan ICD and the Wayland/DMA-BUF/external-memory/synchronization extensions required by this build; version numbers alone do not certify compatibility",
+    "wayland_device_extensions": [
+      "VK_EXT_image_drm_format_modifier",
+      "VK_KHR_image_format_list",
+      "VK_EXT_external_memory_dma_buf",
+      "VK_KHR_external_memory_fd",
+      "VK_KHR_external_fence_fd",
+      "VK_EXT_calibrated_timestamps"
+    ]
+  },
+  "source": {
+    "repository": "https://github.com/GinKage/vulkan-wsi-layer",
+    "commit": "40cfec09d0e2d42c5e1f2642cf4cba11e7008112",
+    "archive_sha256": "43954274b528086371a42bf74accd9e2d8a83a9613fc0833b26f257d882246fc",
+    "license": "MIT; Arm Limited2019, see LICENSE",
+    "build_record": "ports/wine-loongos/src/runtime-patches/BUILD.md",
+    "runtime_record": "ports/wine-loongos/runtime-sources.json",
+    "toolchain_image_sha256": "f539f5cddea8a2fca41644cc981a0bcf6abb3a968ffdf943f568bbc2fed72984",
+    "cmake_options": {
+      "BUILD_WSI_X11": "OFF",
+      "BUILD_WSI_HEADLESS": "OFF",
+      "BUILD_WSI_WAYLAND": "ON",
+      "BUILD_WSI_DISPLAY": "OFF",
+      "SELECT_EXTERNAL_ALLOCATOR": "dma_buf_heaps",
+      "WSIALLOC_MEMORY_HEAP_NAME": "system-uncached"
+    },
+    "patches": [
+      {
+        "path": "patches/wsi-ext-timestamps.patch",
+        "sha256": "c0d385e4c8c8fbeac2faec58a4c1b954836e17a43a1edf18f72887d788deabbc",
+        "purpose": "旧 RK3566 g13 驱动的校准时间戳 EXT/KHR 接口适配"
+      },
+      {
+        "path": "patches/wsi-first-frame.patch",
+        "sha256": "0c945e79bfe577030102a36442873da1e525c2aa551040ff82cd1a2afc029de4",
+        "purpose": "Wine runner 的逐启动首帧通知；未设置 WINE_RUNNER_PRESENT_TOKEN 时不写通知"
+      }
+    ]
+  },
+  "integration": {
+    "loading": "App-private process-local layer; preserve system driver and app save locations",
+    "wine_manifest": "VkLayer_window_system_integration.json",
+    "godot_manifest": "manifests/godot-implicit-template.json",
+    "godot_manifest_difference": "Same ELF; app-only implicit enable flags and minimal interface declaration for older loader; substitute absolute library path at packaging/launch, never rename compiled layer identity",
+    "activation": "Do not place both manifests into one active layer search directory. Choose the adapter for the actual engine and firmware. Do not automatically enable from model/SoC name alone.",
+    "reuse": "Copy the verified binary and appropriate manifest into the selected runtime. No compiler or source rebuild for an unchanged compatible deployment.",
+    "wine_packager_input_example": {
+      "wsi": "<repo>/_kit/compat/vulkan-wsi-arm64-wayland"
+    },
+    "godot_template_device_validation": "Derived from the working Emberward minimal manifest; enable/disable variable and path placeholder names normalized for reuse. This generic naming has not itself been deployed."
+  },
+  "validation": [
+    {
+      "target": "MiniLoong LP4X RK3566/RK817, LoongOS Mali-G52 g13p0",
+      "engine": "PortMaster Godot 4.3, native Wayland, Vulkan Mobile",
+      "scope": "Hardware, runtime and GPU queries, Vulkan startup and payload hash were checked on this configuration. Other firmware and complete gameplay require separate validation."
+    },
+    {
+      "target": "Wine on LoongOS 1.4.0.36",
+      "scope": "Native presentation was checked in this environment. Compatibility varies by game and runtime."
+    }
+  ],
+  "rebuild_when": [
+    "源版本或二进制补丁变化",
+    "目标CPU架构改变，或需要兼容低于现有 glibc/libstdc++ 基线的系统",
+    "需要增加 X11/其他 WSI 后端，或必须更改 DMA-BUF 分配/驱动交互实现",
+    "实际缺少必要接口且无法仅靠加载清单或启动配置解决"
+  ],
+  "no_rebuild_for": [
+    "仅更换 IP、设备名称、游戏内容或普通启动参数",
+    "新机型满足同一 ABI/图形接口要求并经验证",
+    "只调整加载清单或进程环境而不改变 ELF 实现"
+  ],
+  "files": {
+    "LICENSE": {
+      "sha256": "5eb8d2da52230d2d66ce078a89ae0173aac63e2e73bed5f907a34736d114ea30",
+      "bytes": 1086
+    },
+    "README.md": {
+      "bytes": 6327,
+      "sha256": "0eeb3d21315a98fdc796b6cf82c2a43ea761ba039576b7919a278c4b629f04b6"
+    },
+    "VkLayer_window_system_integration.json": {
+      "sha256": "78fa4ab2944f567d9266bcf7e8dc6306b7ce25c99f064718e7f97639ed317f9f",
+      "bytes": 3431
+    },
+    "abi-report.txt": {
+      "sha256": "f9eda354d1d086c67cca0e0c09af85ffa51b7a469220b36b2bb6d1b0826c56c6",
+      "bytes": 6557
+    },
+    "libVkLayer_window_system_integration.so": {
+      "sha256": "ed454d770a5908d94875ab5cf60b6b0d428fe9b31b8e87311ed0c1f928db0cc8",
+      "bytes": 352096
+    },
+    "manifests/godot-implicit-template.json": {
+      "sha256": "2add1e2852f6ff783e79e2ec39af12f14cb49971dce3e947f871b634d13bfd26",
+      "bytes": 1495
+    },
+    "patches/wsi-ext-timestamps.patch": {
+      "sha256": "c0d385e4c8c8fbeac2faec58a4c1b954836e17a43a1edf18f72887d788deabbc",
+      "bytes": 1782
+    },
+    "patches/wsi-first-frame.patch": {
+      "sha256": "0c945e79bfe577030102a36442873da1e525c2aa551040ff82cd1a2afc029de4",
+      "bytes": 2440
+    }
+  }
+}

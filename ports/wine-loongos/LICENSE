@@ -1,0 +1,18 @@
+Wine LoongOS Launcher — License
+
+Copyright (c) 2026 jenny92-tech
+
+Original launcher code, build scripts, documentation and screenshot are licensed
+under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+(CC BY-NC-SA 4.0). Attribution: jenny92-tech (Bili 解腻Jenny).
+https://github.com/jenny92-tech/portmaster-launcher-pack
+https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+Wine, Box64, Python, SDL2, SDL2_ttf, libxkbcommon, PortMaster gptokeyb2 and its
+libinterpose, and fonts retain their respective upstream licenses. They are
+separately prepared and are not relicensed by this launcher license.
+
+IMPORTANT SEPARATE NOTICE — Game files are NOT covered
+
+This license grants no rights to game executables, code, assemblies, graphics,
+audio or other game assets. Players supply their own games and required clients.

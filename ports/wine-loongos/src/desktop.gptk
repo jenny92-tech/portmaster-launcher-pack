@@ -1,0 +1,34 @@
+# Wine keyboard/mouse mode; SDL first normalizes each device's button layout.
+[config]
+mouse_scale = 5000
+mouse_delay = 16
+deadzone = 6000
+
+[controls]
+overlay = clear
+exclusive = true
+a = mouse_left
+b = mouse_right
+x = enter
+y = esc
+start = enter
+back = hold_state shortcuts
+guide = esc
+l1 = tab
+r1 = mouse_slow
+l2 = mouse_wheel_up
+r2 = mouse_wheel_down
+up = up repeat
+down = down repeat
+left = left repeat
+right = right repeat
+left_analog = mouse_movement
+right_analog = mouse_movement
+
+[controls:shortcuts]
+overlay = parent
+start = f4 add_alt
+a = space
+b = backspace
+x = tab add_alt
+y = esc

@@ -1,0 +1,14 @@
+{
+  "title": "我的游戏",
+  "executable": "Game.exe",
+  "arguments": [
+    "-popupwindow",
+    "-screen-fullscreen",
+    "0"
+  ],
+  "environment": {},
+  "input_mode": "desktop",
+  "status": "尚未验证兼容性",
+  "graphics_api": "d3d11",
+  "borderless_fullscreen": true
+}

@@ -1,0 +1,75 @@
+--- a/wsi/wayland/surface.cpp
++++ b/wsi/wayland/surface.cpp
+@@ -34,6 +34,11 @@
+ #include "util/log.hpp"
+ 
+ #include <drm_fourcc.h>
++#include <atomic>
++#include <cstdlib>
++#include <cstring>
++#include <fcntl.h>
++#include <unistd.h>
+ 
+ namespace wsi
+ {
+@@ -401,6 +406,27 @@
+    return util::unique_ptr<swapchain_base>(alloc.make_unique<swapchain>(dev_data, allocator, *this));
+ }
+ 
++/* Project handheld startup notification. Process creation or vkQueuePresent
++ * alone is not a compositor frame callback. */
++static void notify_startup_frame()
++{
++   const char *token = std::getenv("WINE_RUNNER_PRESENT_TOKEN");
++   if (token == nullptr || std::strlen(token) != 32 || std::strspn(token, "0123456789abcdef") != 32)
++      return;
++   static std::atomic_bool notified{false};
++   if (notified.exchange(true))
++      return;
++   const int fd = open("/work/presentation-ready", O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_NONBLOCK, 0600);
++   if (fd < 0)
++      return;
++   char message[40] = "frame ";
++   std::memcpy(message + 6, token, 32);
++   message[38] = '\n';
++   const auto written = write(fd, message, 39);
++   UNUSED(written);
++   close(fd);
++}
++
+ static void frame_done(void *data, wl_callback *cb, uint32_t time)
+ {
+    UNUSED(time);
+@@ -410,6 +436,7 @@
+    assert(present_pending);
+ 
+    *present_pending = false;
++   notify_startup_frame();
+ }
+ 
+ bool surface::set_frame_callback()
+--- a/wsi/wayland/swapchain.cpp
++++ b/wsi/wayland/swapchain.cpp
+@@ -467,8 +467,10 @@
+    /* TODO: work out damage */
+    wl_surface_damage(m_surface, 0, 0, INT32_MAX, INT32_MAX);
+ 
+-   if (m_present_mode == VK_PRESENT_MODE_FIFO_KHR)
+-   {
++   const bool startup_frame = !m_startup_frame_requested && std::getenv("WINE_RUNNER_PRESENT_TOKEN");
++   if (m_present_mode == VK_PRESENT_MODE_FIFO_KHR || startup_frame)
++   {
++      m_startup_frame_requested = true;
+       if (!m_wsi_surface->set_frame_callback())
+       {
+          set_error_state(VK_ERROR_SURFACE_LOST_KHR);
+--- a/wsi/wayland/swapchain.hpp
++++ b/wsi/wayland/swapchain.hpp
+@@ -155,6 +155,7 @@
+    std::variant<VkResult, util::unique_ptr<vulkan_image_handle_creator>> create_image_creator(
+       const VkSwapchainCreateInfoKHR &swapchain_create_info);
+ 
++   bool m_startup_frame_requested{false};
+    struct wl_display *m_display;
+    struct wl_surface *m_surface;
+    /** Raw pointer to the WSI Surface that this swapchain was created from. The Vulkan specification ensures that the

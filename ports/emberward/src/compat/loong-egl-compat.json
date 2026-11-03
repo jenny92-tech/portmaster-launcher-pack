@@ -1,0 +1,34 @@
+{
+  "source": "egl_client_extensions.c",
+  "source_sha256": "921fd0cf0aeb62e914d494f7e014ae662b7d353659d1590f478f83c309261019",
+  "binary_sha256": "4900a4efb288423779efde6f96f26efc4190d3165a06d8640b3b12c4d7cb9084",
+  "bytes": 7616,
+  "build_type": "Release",
+  "target": "aarch64-linux-gnu; stock MiniLoong Mali g13p0; single-window Godot 4.3 GLES",
+  "compiler": "Homebrew clang version 23.1.4",
+  "linker": "LLD 23.1.1 (https://github.com/rust-lang/llvm-project.git 1b9c0d5ff9bbe7634aead059efe6b11a7eeba145) (compatible with GNU linkers)",
+  "compile_args": [
+    "--target=aarch64-linux-gnu",
+    "-std=c11",
+    "-O2",
+    "-DNDEBUG",
+    "-fPIC",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-Wall",
+    "-Wextra",
+    "-Werror"
+  ],
+  "link_args": [
+    "-shared",
+    "-soname",
+    "libEGL.so.1",
+    "-z",
+    "relro",
+    "-z",
+    "now",
+    "-z",
+    "noexecstack",
+    "--strip-all"
+  ]
+}

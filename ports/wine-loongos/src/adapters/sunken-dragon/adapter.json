@@ -1,0 +1,44 @@
+{
+  "id": "sunken-dragon",
+  "title": "龙沉异世录",
+  "executable": "Sunken Dragon.exe",
+  "graphics_api": "d3d11",
+  "architecture": "x86_64",
+  "required_files": [
+    "Sunken Dragon.exe",
+    "UnityPlayer.dll",
+    "GameAssembly.dll",
+    "Sunken Dragon_Data/globalgamemanagers",
+    "Sunken Dragon_Data/il2cpp_data/Metadata/global-metadata.dat"
+  ],
+  "arguments": [
+    "-popupwindow",
+    "-screen-fullscreen",
+    "0"
+  ],
+  "borderless_fullscreen": true,
+  "screen_arguments": {
+    "width": "-screen-width",
+    "height": "-screen-height"
+  },
+  "environment": {
+    "SteamAppId": "3257760",
+    "SteamGameId": "3257760"
+  },
+  "input_mapping": "input.gptk",
+  "input_help": "A 确认，B 返回；方向键/左摇杆移动；L1 设置；Select+Start 退出",
+  "preparation": {
+    "kind": "verified-executable",
+    "source_sha256": "ff188fb4d52a1acaf7b4227366d9216e0b0d406aae9fc44f1a3788f31b471f44",
+    "output_sha256": "39f4e0babf49a93d440ca0f9beebd8f3cd44669767477f8a8ae5c063b6326fbc",
+    "output": ".wine/Sunken Dragon.exe",
+    "tool": "steamless-3.1-x64"
+  },
+  "status": "剧情与首战已实测；全流程待验证",
+  "file_hashes": {
+    "UnityPlayer.dll": "3c58bfe1e921180218094799543bd8f6d633722c0a82bec141db00f2240660f9",
+    "GameAssembly.dll": "f10df728c7557a42fd3197a19009c56046fc23ff8d807175d13674aee9d108f8",
+    "Sunken Dragon_Data/globalgamemanagers": "d0d58ada703617bd63d6c56f140980cd055d54db6a74265450fbfa1465105eae",
+    "Sunken Dragon_Data/il2cpp_data/Metadata/global-metadata.dat": "65d925533b730e8fdd05ec9a99a936650af4c4cd1f5641cd2eea4fc07d16a594"
+  }
+}

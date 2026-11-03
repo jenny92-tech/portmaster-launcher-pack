@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "wine-game-sunken-dragon.zip",
+  "items": ["Je-龙沉异世录.sh", "sunken-dragon"],
+  "runner": "wine-wow64",
+  "deps": ["dxvk"],
+  "env": {"WINEARCH": "win64", "WINEDEBUG": "-all"},
+  "configdir": [],
+  "wine_runner": {"adapter": "sunken-dragon"},
+  "attr": {
+    "title": "Je-龙沉异世录",
+    "inst": "将自己的完整 Windows 游戏文件及已准备的 .wine 子目录复制到 sunken-dragon/data/。",
+    "availability": "paid"
+  }
+}

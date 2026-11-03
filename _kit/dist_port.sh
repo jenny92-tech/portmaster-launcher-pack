@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# INPUT:  端口 manifest.json、love/src/portable 输入、assemble.sh 与共享打包工具
+# OUTPUT: ports/<port>/dist/ 可部署端口内容与统一构建身份
+# POS:    调度端口专用构建或共享组装流程并收集 UI、运行时与发行元数据
+# SPDX-License-Identifier: CC-BY-NC-SA-4.0
+# Copyright (c) 2025-2026 jenny92-tech
+#
+# Build one port into its deployable dist/ directory.
+#
+# Convention:
+#   ports/<port>/src/      editable launcher/runtime inputs
+#   ports/<port>/dist/  files that should be copied to the device
+#
+# Deploy rule:
+#   dist/*.sh               -> device Roms/PORTS/
+#   remaining dist payload  -> device Data/ports/<port>/
+# The package-owned same-stem image is copied to the frontend image directory
+# by the launcher on first run.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PORT="${1:?Usage: _kit/dist_port.sh <port>}"
+PORT_DIR="$ROOT/ports/$PORT"
+SRC="$PORT_DIR/src"
+DIST="$PORT_DIR/dist"
+MANIFEST="$PORT_DIR/manifest.json"
+
+[ -d "$PORT_DIR" ] || { echo "no such port: $PORT" >&2; exit 1; }
+# love 启动器的 port 不再需要 src/(godot 启动器已删); 只要有 love/ 或 src/ 之一即可。
+[ -d "$SRC" ] || [ -d "$PORT_DIR/love" ] || { echo "missing source dir: $SRC (and no love/)" >&2; exit 1; }
+[ -f "$MANIFEST" ] || { echo "missing manifest: $MANIFEST" >&2; exit 1; }
+
+if [ -x "$SRC/scripts/dist-port.sh" ]; then
+  exec "$SRC/scripts/dist-port.sh"
+fi
+
+SCRIPT_NAME="$(python3 - "$MANIFEST" "$PORT" <<'PY'
+import json
+import sys
+
+manifest_path, port = sys.argv[1:3]
+with open(manifest_path, "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+print(manifest.get("script") or manifest.get("dist", {}).get("script") or f"{port}.sh")
+PY
+)"
+
+PORTABLE_DIR="$(python3 - "$MANIFEST" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+value = manifest.get("portable_dir")
+print(value if isinstance(value, str) else "")
+PY
+)"
+
+LAUNCHER_KIT_REQUIRED="$(python3 - "$MANIFEST" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+tools = manifest.get("launcher_tools", [])
+print("1" if isinstance(tools, list) and len(tools) > 0 else "")
+PY
+)"
+
+SHOT="$(python3 - "$MANIFEST" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+print(manifest.get("portmaster", {}).get("image", {}).get("screenshot") or "screenshot.png")
+PY
+)"
+
+rm -rf "$DIST"
+mkdir -p "$DIST"
+APP_DIST_ROOT="$DIST"
+if [ -n "$PORTABLE_DIR" ]; then
+  case "$PORTABLE_DIR" in
+    ""|.|..|/*|*/*) echo "invalid portable_dir: $PORTABLE_DIR" >&2; exit 1 ;;
+  esac
+  APP_DIST_ROOT="$DIST/$PORTABLE_DIR"
+  mkdir -p "$APP_DIST_ROOT"
+fi
+
+# love 启动器优先: 存在 love/launcher.sh.template 时它就是 stage-1(替代 frt/godot)。
+# love_ui = 共享 _kit/love/kit.lua + 本 port 的 main/conf/gptk；系统字体真实路径由启动脚本传入;
+# 这一段是所有 love port 的通用组装步骤。
+LOVE_DIR="$PORT_DIR/love"
+USE_LOVE=""
+if [ -f "$LOVE_DIR/launcher.sh.template" ]; then
+  USE_LOVE=1
+  "$ROOT/_kit/assemble.sh" "$LOVE_DIR/launcher.sh.template" "$DIST/$SCRIPT_NAME"
+elif [ -f "$LOVE_DIR/main.lua" ] && [ -f "$SRC/launcher.sh" ]; then
+  # Ports may keep a private thin bootstrap in src/ while sharing the LÖVE UI payload.
+  USE_LOVE=1
+  "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
+fi
+
+if [ -n "$USE_LOVE" ]; then
+  bash "$ROOT/_kit/stage_love_ui.sh" "$APP_DIST_ROOT/love_ui"
+  # Port-specific Lua modules and optional asset overrides.
+  cp "$LOVE_DIR/"*.lua "$APP_DIST_ROOT/love_ui/"
+  for f in conf.lua ui.gptk launcher_bg.png; do
+    [ -f "$LOVE_DIR/$f" ] && cp "$LOVE_DIR/$f" "$APP_DIST_ROOT/love_ui/"
+  done
+elif [ -f "$SRC/launcher.sh" ]; then
+  "$ROOT/_kit/assemble.sh" "$SRC/launcher.sh" "$DIST/$SCRIPT_NAME"
+fi
+
+# A portable app may own its runtime and input assets next to its
+# UI. Keep this generic so package assembly remains deterministic and does not
+# reach into another repository or an installed PortMaster tree.
+if [ -n "$PORTABLE_DIR" ] && [ -d "$PORT_DIR/portable" ]; then
+  cp -R "$PORT_DIR/portable/." "$APP_DIST_ROOT/"
+fi
+
+# Inline Unity launchers use this optional helper only when the separate
+# audited client bundle is installed; other engines carry no compositor helper.
+if [ -f "$DIST/$SCRIPT_NAME" ] && grep -Fq 'run_unity_game()' "$DIST/$SCRIPT_NAME"; then
+  mkdir -p "$APP_DIST_ROOT/bin"
+  cp "$ROOT/_kit/wayland_session.py" "$APP_DIST_ROOT/bin/wayland-session.py"
+fi
+
+if [ -n "$LAUNCHER_KIT_REQUIRED" ]; then
+  "$ROOT/_kit/stage_portkit_launcher.sh" "$APP_DIST_ROOT"
+fi
+
+if [ "$PORT" = "appmanager" ]; then
+  mkdir -p "$APP_DIST_ROOT/config/platforms"
+  cp "$ROOT/config/config.json" "$APP_DIST_ROOT/config/config.json"
+  cp "$ROOT/config/platforms/"*.json "$APP_DIST_ROOT/config/platforms/"
+  expected_love_lite_revision=$(python3 "$ROOT/_kit/love_lite_revision.py" "$ROOT")
+  packaged_love_lite_revision=$(sed -n '1p' "$PORT_DIR/love-lite-revision.txt" 2>/dev/null || true)
+  if [ -z "$packaged_love_lite_revision" ] || [ "$packaged_love_lite_revision" != "$expected_love_lite_revision" ]; then
+    echo "stale LOVE-lite runtime; run _kit/build_appmanager_love_lite.sh" >&2
+    exit 1
+  fi
+  love_lite_description=$(file "$APP_DIST_ROOT/runtime/love.aarch64")
+  case "$love_lite_description" in
+    *ELF*ARM\ aarch64*) ;;
+    *) echo "invalid LOVE-lite runtime: $love_lite_description" >&2; exit 1 ;;
+  esac
+  grep -aFq "$expected_love_lite_revision" "$APP_DIST_ROOT/runtime/love.aarch64" || {
+    echo "LOVE-lite runtime does not match its source revision" >&2
+    exit 1
+  }
+fi
+
+[ -f "$PORT_DIR/LICENSE" ] && cp "$PORT_DIR/LICENSE" "$APP_DIST_ROOT/"
+[ -f "$PORT_DIR/README.md" ] && cp "$PORT_DIR/README.md" "$APP_DIST_ROOT/"
+if [ -n "$SHOT" ] && [ -f "$PORT_DIR/$SHOT" ]; then
+  ARTWORK_DIST="$DIST"
+  if [ "$PORT" = "appmanager" ]; then
+    ARTWORK_DIST="$APP_DIST_ROOT"
+  fi
+  cp "$PORT_DIR/$SHOT" "$ARTWORK_DIST/screenshot.png"
+  cp "$PORT_DIR/$SHOT" "$ARTWORK_DIST/${SCRIPT_NAME%.sh}.png"
+  python3 - "$MANIFEST" "$PORT_DIR/$SHOT" "$ARTWORK_DIST" <<'PY'
+import json
+import os
+import shutil
+import sys
+
+manifest_path, shot, dist = sys.argv[1:4]
+with open(manifest_path, "r", encoding="utf-8") as fh:
+    manifest = json.load(fh)
+names = manifest.get("portmaster", {}).get("image", {}).get("names", [])
+for name in names:
+    if not isinstance(name, str) or not name:
+        continue
+    out = name if os.path.splitext(name)[1] else f"{name}.png"
+    shutil.copyfile(shot, os.path.join(dist, out))
+PY
+fi
+python3 "$ROOT/_kit/port_json.py" "$MANIFEST" "$DIST" "$PORT"
+
+# 以下都是 src/ 里的可选运行时/输入文件; love-only 的 port 没有 src/, 跳过即可。
+if [ -d "$SRC" ]; then
+  find "$SRC" -maxdepth 1 -type f -name '*.gptk' -exec cp {} "$APP_DIST_ROOT/" \;
+  # A port may bundle its own runtime instead of relying on PortMaster libs/.
+  [ -z "$USE_LOVE" ] && [ -d "$SRC/runtime" ] && cp -R "$SRC/runtime" "$DIST/"
+  [ -f "$SRC/vs114_language.sh" ] && cp "$SRC/vs114_language.sh" "$DIST/"
+  [ -z "$USE_LOVE" ] && [ -d "$SRC/hacksdl" ] && cp -R "$SRC/hacksdl" "$DIST/"
+fi
+
+python3 "$ROOT/_kit/build_info.py" "$MANIFEST" "$DIST"
+
+if compgen -G "$DIST/*.sh" >/dev/null; then
+  bash -n "$DIST"/*.sh
+fi
+
+echo ">>> packaged $PORT -> $DIST"
+find "$DIST" -maxdepth 2 -type f | sort | sed "s#^$DIST/##"

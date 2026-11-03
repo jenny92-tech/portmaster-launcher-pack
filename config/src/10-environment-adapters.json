@@ -1,0 +1,47 @@
+{
+  "environment": {
+    "inherit": "all_except_blocked",
+    "blocked_names": [
+      "LD_PRELOAD",
+      "LD_AUDIT",
+      "GCONV_PATH",
+      "BASH_ENV",
+      "ENV",
+      "SHELLOPTS",
+      "BASHOPTS",
+      "IFS",
+      "PS4"
+    ],
+    "blocked_prefixes": ["BASH_FUNC_"],
+    "value_handling": "literal",
+    "operation_kinds": ["set", "prepend", "append", "unset"],
+    "profiles": {
+      "input": [
+        {"operation": "set", "name": "SDL_GAMECONTROLLERCONFIG_FILE", "value": "{app_root}/share/gamecontrollerdb.txt"}
+      ],
+      "network": [
+        {"operation": "set", "name": "SSL_CERT_FILE", "value": "{app_root}/share/cacert.pem"},
+        {"operation": "set", "name": "CURL_CA_BUNDLE", "value": "{app_root}/share/cacert.pem"}
+      ],
+    "runtime": [
+        {"operation": "set", "name": "LOVE_FONT_PATH", "value": "{app_root}/share/NotoSansSC-Regular.ttf"}
+      ]
+    },
+    "scopes": {
+      "love_ui": {
+      "profiles": ["input", "network", "runtime"],
+        "operations": [
+          {"operation": "set", "name": "LOVE_IDENTITY", "value": "port_app_manager"},
+          {"operation": "set", "name": "LOVE_WINDOW_TITLE", "value": "Port App Manager"}
+        ]
+      }
+    }
+  },
+  "adapters": {
+    "predicate.v1": {"kind": "predicate", "contract_version": 1},
+    "path.v1": {"kind": "path", "contract_version": 1},
+    "frontend.v1": {"kind": "frontend", "contract_version": 1},
+    "library.v1": {"kind": "library", "contract_version": 1},
+    "python.v1": {"kind": "python", "contract_version": 1}
+  }
+}

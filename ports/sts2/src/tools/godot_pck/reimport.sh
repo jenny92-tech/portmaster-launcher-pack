@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# INPUT:  Godot mono 编辑器、已修改的恢复项目
+# OUTPUT: 两轮无头导入生成的 .godot/imported 资源
+# POS:    按修改后的纹理策略清理缓存并重新导入资源
+# Re-import every resource in a recovered godot project using the local godot
+# 4.5 mono editor in headless mode. This regenerates .godot/imported/*.ctex
+# according to the (patched) [rendering] textures/vram_compression/* settings.
+#
+# Usage: reimport.sh <recovered_dir>
+
+set -euo pipefail
+
+PROJECT_DIR="${1:?usage: reimport.sh <recovered_dir>}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${GODOT:-}" ]; then
+  case "$(uname -s)" in
+    Darwin) GODOT="$(command -v godot4 || command -v godot || true)" ;;
+    Linux)  GODOT="$SCRIPT_DIR/bin/godot_mono_linux" ;;
+    *)      echo "Unsupported OS"; exit 1 ;;
+  esac
+fi
+
+if [ -z "$GODOT" ] || [ ! -x "$GODOT" ]; then
+  echo "godot editor missing; set GODOT to an executable editor path"
+  exit 1
+fi
+
+cd "$PROJECT_DIR"
+# Wipe the cached .ctex so godot fully regenerates with new settings.
+rm -rf .godot/imported
+
+echo "==> First-pass import (godot 4 needs two passes to settle uids)"
+"$GODOT" --headless --import 2>&1 | tail -5
+echo "==> Second-pass import"
+"$GODOT" --headless --import 2>&1 | tail -5
+
+echo "==> ctex by format:"
+find .godot/imported -name "*.ctex" 2>/dev/null \
+  | sed -E 's/.*\.([^.]+)\.ctex$/\1/' | sort | uniq -c | sort -rn

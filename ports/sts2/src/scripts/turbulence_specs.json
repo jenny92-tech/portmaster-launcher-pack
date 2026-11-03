@@ -1,0 +1,1075 @@
+{
+  "source_pck_sha256": "f526ef85cd5b7cf653defb545a8ba22196c72e6a0e95ad66f78f2f3a168b28c9",
+  "rule": "ParticleProcessMaterial.turbulence_enabled true -> false; preserve every other byte",
+  "resources": {
+    "res://scenes/vfx/block_spark_vfx.tscn": {
+      "source_sha256": "38406023cbcda1417b8204c3690d83133649b02c06334990150f0d8e004a66c0",
+      "material_ids": [
+        "ParticleProcessMaterial_2vqu0",
+        "ParticleProcessMaterial_bgvyi",
+        "ParticleProcessMaterial_se6pc"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/block_spark_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/common/vfx_common_specks.tscn": {
+      "source_sha256": "3a435eeeb6fb3e293376ceccf97b0c47adb888fa3e00c3e02f941ee6a8cdfdd8",
+      "material_ids": [
+        "ParticleProcessMaterial_536ct"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/block_spark_vfx.tscn",
+        "res://scenes/vfx/common/vfx_common_specks.tscn",
+        "res://scenes/vfx/energy/defect/defect_energy_vfx_front.tscn",
+        "res://scenes/vfx/energy/silent/silent_energy_vfx_front.tscn",
+        "res://scenes/vfx/forms/echo/vfx_echo_form_idle_vfx.tscn",
+        "res://scenes/vfx/hit_spark_vfx.tscn",
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke.tscn",
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile_impact.tscn",
+        "res://scenes/vfx/orbs/glass/vfx_glass_orb_evoke_impact.tscn",
+        "res://scenes/vfx/orbs/glass/vfx_glass_orb_passive_impact.tscn",
+        "res://scenes/vfx/orbs/lightning/vfx_lightning_orb_evoke.tscn",
+        "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_projectile_impact.tscn",
+        "res://scenes/vfx/ui/card/afflictions/bound/vfx_ui_card_affliction_bound.tscn",
+        "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_galvanized.tscn",
+        "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_lightning_corner.tscn",
+        "res://scenes/vfx/ui/card/afflictions/hexed/vfx_ui_card_affliction_hexed.tscn",
+        "res://scenes/vfx/ui/card/afflictions/ringing/vfx_ui_card_affliction_ringing.tscn",
+        "res://scenes/vfx/ui/card/afflictions/smog/vfx_ui_card_affliction_smog.tscn",
+        "res://scenes/vfx/ui/card/vfx_card_remove.tscn",
+        "res://scenes/vfx/ui/card/vfx_card_transform.tscn",
+        "res://scenes/vfx/ui/vfx_buff_applied.tscn",
+        "res://scenes/vfx/ui/vfx_debuff_applied.tscn",
+        "res://scenes/vfx/vfx_attack_blunt.tscn",
+        "res://scenes/vfx/vfx_big_slash_impact.tscn",
+        "res://scenes/vfx/vfx_dagger_spray_flurry.tscn",
+        "res://scenes/vfx/vfx_dagger_spray_impact.tscn",
+        "res://scenes/vfx/vfx_fire_burning.tscn",
+        "res://scenes/vfx/vfx_fire_burst.tscn",
+        "res://scenes/vfx/vfx_gaseous_impact.tscn",
+        "res://scenes/vfx/vfx_grand_finale.tscn",
+        "res://scenes/vfx/vfx_grand_finale_impact.tscn",
+        "res://scenes/vfx/vfx_heavy_blunt.tscn",
+        "res://scenes/vfx/vfx_hyperbeam.tscn",
+        "res://scenes/vfx/vfx_hyperbeam_impact.tscn",
+        "res://scenes/vfx/vfx_large_magic_missile.tscn",
+        "res://scenes/vfx/vfx_minion_dive_bomb.tscn",
+        "res://scenes/vfx/vfx_poison_impact.tscn",
+        "res://scenes/vfx/vfx_scratch_impact.tscn",
+        "res://scenes/vfx/vfx_shiv_throw.tscn",
+        "res://scenes/vfx/vfx_small_magic_missile.tscn",
+        "res://scenes/vfx/vfx_spore_impact.tscn",
+        "res://scenes/vfx/vfx_starry_impact.tscn",
+        "res://scenes/vfx/vfx_sweeping_beam.tscn"
+      ]
+    },
+    "res://scenes/vfx/energy/defect/defect_energy_vfx_front.tscn": {
+      "source_sha256": "bbf0bb968aee95c6919dc876809f3881b36101181832d3a6fd6395707bdb362e",
+      "material_ids": [
+        "ParticleProcessMaterial_4ms1i"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/energy/defect/defect_energy_vfx_front.tscn"
+      ]
+    },
+    "res://scenes/vfx/energy/ironclad/ironclad_energy_vfx_front.tscn": {
+      "source_sha256": "fd4906ba289bd3f91ef90f9fef314dacd7e5558fab4f362c7ed1a85b72dd789a",
+      "material_ids": [
+        "ParticleProcessMaterial_kta1j"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/energy/ironclad/ironclad_energy_vfx_front.tscn"
+      ]
+    },
+    "res://scenes/vfx/energy/necrobinder/necrobinder_energy_vfx_front.tscn": {
+      "source_sha256": "298c03aa7e25ae6467af8754ac394e77400b8ffcda3f9ab583d5ee06d351edaa",
+      "material_ids": [
+        "ParticleProcessMaterial_e8oys"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/energy/necrobinder/necrobinder_energy_vfx_front.tscn"
+      ]
+    },
+    "res://scenes/vfx/energy/silent/silent_energy_vfx_front.tscn": {
+      "source_sha256": "3a8a7e274cda425e8eccd5f23d7a3a20e628f42df3e2246b5296452043e39065",
+      "material_ids": [
+        "ParticleProcessMaterial_jui8l"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/energy/silent/silent_energy_vfx_front.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/abyssal_baths_vfx.tscn": {
+      "source_sha256": "e40ff283dbfc1b89e71055f12508c3a95912681fa43ccffe09ba8f0e67a385f3",
+      "material_ids": [
+        "ParticleProcessMaterial_ttrqw"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/abyssal_baths_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/bugslayer_vfx.tscn": {
+      "source_sha256": "1f1ef6b2ff0500439628d9ae26c1b1551d7fb38edde4035fe57b89fdcd12b1d9",
+      "material_ids": [
+        "ParticleProcessMaterial_4kftu",
+        "ParticleProcessMaterial_c4xus",
+        "ParticleProcessMaterial_tof53"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/bugslayer_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/byrdonis_nest_vfx.tscn": {
+      "source_sha256": "bc3045442cb1c51eaefbde5f9834657641900b3b170fa688b5ec3474b37ea676",
+      "material_ids": [
+        "ParticleProcessMaterial_0byn2",
+        "ParticleProcessMaterial_8334i",
+        "ParticleProcessMaterial_ionxt",
+        "ParticleProcessMaterial_ttpbm"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/byrdonis_nest_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/colorful_philosophers_vfx.tscn": {
+      "source_sha256": "9c05700633c564505d0aa620ae618005f699aa2d611a2ac5a9144329b32a188a",
+      "material_ids": [
+        "ParticleProcessMaterial_38wyv",
+        "ParticleProcessMaterial_gbh04",
+        "ParticleProcessMaterial_tdleo",
+        "ParticleProcessMaterial_w0u6f"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/colorful_philosophers_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/colossal_flower_vfx.tscn": {
+      "source_sha256": "3ba6748c6405aa8d169ee1c292721b63a0355493bdedcf217ee2a9d8f2c632d4",
+      "material_ids": [
+        "ParticleProcessMaterial_57djm",
+        "ParticleProcessMaterial_mt6c2",
+        "ParticleProcessMaterial_ywpr5"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/colossal_flower_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/crystal_sphere_vfx.tscn": {
+      "source_sha256": "9588486ec7a08b2ab3650484a34275c43e90039c86db48f79c7e609d32fc4f5f",
+      "material_ids": [
+        "ParticleProcessMaterial_ewvfq",
+        "ParticleProcessMaterial_tnvd3",
+        "ParticleProcessMaterial_w2kp4"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/crystal_sphere_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/dense_vegetation_vfx.tscn": {
+      "source_sha256": "4116b0cac9a11214fc4d0315cf14bc7416e0a8f2c5139b6ffe73f8b2c0a05724",
+      "material_ids": [
+        "ParticleProcessMaterial_a2igo",
+        "ParticleProcessMaterial_a35f4",
+        "ParticleProcessMaterial_mcr1g"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/dense_vegetation_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/doll_room_vfx.tscn": {
+      "source_sha256": "8995a599c8020f660797db92cbb6c317ac306ae50d2066dfd9d89fe4d04835f3",
+      "material_ids": [
+        "ParticleProcessMaterial_b6a8s",
+        "ParticleProcessMaterial_en1ku",
+        "ParticleProcessMaterial_p531n",
+        "ParticleProcessMaterial_tafja"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/doll_room_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/doors_of_light_and_dark_vfx.tscn": {
+      "source_sha256": "c6ca8fe1abdce941678a2760eca04be8f2b870f76946773f3ea59b7e3c0dd03f",
+      "material_ids": [
+        "ParticleProcessMaterial_7f65b"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/doors_of_light_and_dark_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/drowning_beacon_vfx.tscn": {
+      "source_sha256": "78ee9775d31a548051848b86861a79c914abe699fb45b076eb532e577eda2711",
+      "material_ids": [
+        "ParticleProcessMaterial_04jcv",
+        "ParticleProcessMaterial_5tsto",
+        "ParticleProcessMaterial_l4h8j",
+        "ParticleProcessMaterial_ymocq"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/drowning_beacon_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/endless_conveyor_vfx.tscn": {
+      "source_sha256": "40e5505596b82aba26c7ca18ead642256e1b58e2a99e498ae905f57d71917496",
+      "material_ids": [
+        "ParticleProcessMaterial_bdmu2"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/endless_conveyor_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/grave_of_the_forgotten_vfx.tscn": {
+      "source_sha256": "4f5775c47b29c344e7360c956ff785afd4bc235add5a020ca1265c8bab966196",
+      "material_ids": [
+        "ParticleProcessMaterial_3wdlr",
+        "ParticleProcessMaterial_ad2o5",
+        "ParticleProcessMaterial_d6ik6",
+        "ParticleProcessMaterial_j6sgt"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/grave_of_the_forgotten_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/hungry_for_mushrooms_vfx.tscn": {
+      "source_sha256": "6f83d9c952e5d72391870155a176a47370e1a0ba7cf6762d27e7682e1f01f2ca",
+      "material_ids": [
+        "ParticleProcessMaterial_el03l",
+        "ParticleProcessMaterial_fa6rf",
+        "ParticleProcessMaterial_lso6d",
+        "ParticleProcessMaterial_txpqd"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/hungry_for_mushrooms_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/infested_automaton_vfx.tscn": {
+      "source_sha256": "4c4def83cc5b1362c674539940eea5ebdb407b6359ac434114a5de934818d4e8",
+      "material_ids": [
+        "ParticleProcessMaterial_1hpt3",
+        "ParticleProcessMaterial_2u6r0"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/infested_automaton_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/lost_wisp_vfx.tscn": {
+      "source_sha256": "abd3a8686308e590e57c649c880297c8321815a65709cf59d562fc3cdc555d62",
+      "material_ids": [
+        "ParticleProcessMaterial_2rt0b",
+        "ParticleProcessMaterial_gqbcl",
+        "ParticleProcessMaterial_sndya",
+        "ParticleProcessMaterial_uq0gm"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/lost_wisp_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/morphic_grove_vfx.tscn": {
+      "source_sha256": "94d4ce86831bc6c8fd2fe2aae6cd05819f74a1e8d0630935e5f7bf002898e4ac",
+      "material_ids": [
+        "ParticleProcessMaterial_766ik",
+        "ParticleProcessMaterial_k2v6l"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/morphic_grove_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/potion_courier_vfx.tscn": {
+      "source_sha256": "0f685bc07c956e993a8db7cb1ace597e70bb431b5dfbcad64802f955bd6d318b",
+      "material_ids": [
+        "ParticleProcessMaterial_08350",
+        "ParticleProcessMaterial_588cy",
+        "ParticleProcessMaterial_j5ky0",
+        "ParticleProcessMaterial_r17xa",
+        "ParticleProcessMaterial_um5wb"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/potion_courier_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/punch_off_vfx.tscn": {
+      "source_sha256": "e340e2dd458d50eb5102dbf80f2fe6ba2b4a4c0ad2cd59ba85d4d573c85e2372",
+      "material_ids": [
+        "ParticleProcessMaterial_3ciu2"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/punch_off_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/ranwid_the_elder_vfx.tscn": {
+      "source_sha256": "0920d16c24525ceb93de15dcad164d012faa75dd502f427980a4d4b1533c7536",
+      "material_ids": [
+        "ParticleProcessMaterial_453y0",
+        "ParticleProcessMaterial_6mb2p",
+        "ParticleProcessMaterial_ksh6v",
+        "ParticleProcessMaterial_yumhk"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/ranwid_the_elder_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/relic_trader_vfx.tscn": {
+      "source_sha256": "0efb496b056ffca2c40e16bb26a00cfebc3c63208695381df9b3a1b7759490be",
+      "material_ids": [
+        "ParticleProcessMaterial_iox46"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/relic_trader_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/self_help_book_vfx.tscn": {
+      "source_sha256": "a4184db9cadad5e0bdeed372a4e1ce11e22de650a9fdb6aa3e587aa89f94aa1b",
+      "material_ids": [
+        "ParticleProcessMaterial_uj540"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/self_help_book_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/spiraling_whirlpool_vfx.tscn": {
+      "source_sha256": "66b4402a11011110c0d0b0444aa468b468e8565f79513b0537ba15913644ab39",
+      "material_ids": [
+        "ParticleProcessMaterial_bih8a"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/spiraling_whirlpool_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/sunken_treasury_vfx.tscn": {
+      "source_sha256": "c41b0655f0bce39330142d2c975cf9c197a9cebe3f30eb5cd45ac37de82eedac",
+      "material_ids": [
+        "ParticleProcessMaterial_8elxj",
+        "ParticleProcessMaterial_n8y1x"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/sunken_treasury_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/symbiote_vfx.tscn": {
+      "source_sha256": "593bde12a888d4dd4b336140f22f85d1a65eb8123a2f02c2d18ef4c60aaca46d",
+      "material_ids": [
+        "ParticleProcessMaterial_o4nss",
+        "ParticleProcessMaterial_onjdn",
+        "ParticleProcessMaterial_un1ey"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/symbiote_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/tablet_of_truth_vfx.tscn": {
+      "source_sha256": "35e325c7fca872b4638556c42d49bcb684f2f415b25709b7f924d8a8a5157206",
+      "material_ids": [
+        "ParticleProcessMaterial_i17k1"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/tablet_of_truth_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/tea_master_vfx.tscn": {
+      "source_sha256": "508b331500402424bb5eb2d7e64946dbe36456799bb555fb64a0c2c377577a90",
+      "material_ids": [
+        "ParticleProcessMaterial_6627k",
+        "ParticleProcessMaterial_apek2",
+        "ParticleProcessMaterial_b03vx",
+        "ParticleProcessMaterial_bap33",
+        "ParticleProcessMaterial_na2lp"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/tea_master_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/the_future_of_potions_vfx.tscn": {
+      "source_sha256": "aa64f488c62cadd6dd2e828a503a77f4cf13a6ae0472c4d8595039da9876bbee",
+      "material_ids": [
+        "ParticleProcessMaterial_6cu1y",
+        "ParticleProcessMaterial_q66sk",
+        "ParticleProcessMaterial_tbcnd"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/the_future_of_potions_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/the_legends_were_true_vfx.tscn": {
+      "source_sha256": "4de4161a0869fc3c9858964b4d3f5bbb5e6b74e8c1db46de442e9a1c84314d10",
+      "material_ids": [
+        "ParticleProcessMaterial_3u3gy",
+        "ParticleProcessMaterial_qlxf8",
+        "ParticleProcessMaterial_xr2go"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/the_legends_were_true_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/this_or_that_vfx.tscn": {
+      "source_sha256": "d9e05b40daf973703dd639ee0f992fe37173350b85dd4425ee0f278bcf25b982",
+      "material_ids": [
+        "ParticleProcessMaterial_bs20h",
+        "ParticleProcessMaterial_ht0st",
+        "ParticleProcessMaterial_pflpv",
+        "ParticleProcessMaterial_yyho2"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/this_or_that_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/trial_merchant_vfx.tscn": {
+      "source_sha256": "7f0d718b9e7c4aa9dfe3a959ded4d7ca7bc1a9241ef1a338033c9f11211bcecb",
+      "material_ids": [
+        "ParticleProcessMaterial_3q7ye",
+        "ParticleProcessMaterial_krowg",
+        "ParticleProcessMaterial_tn5bb"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/trial_merchant_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/trial_noble_vfx.tscn": {
+      "source_sha256": "0d643988c5ab3cda8782d05648e416684556a09240948745482a3a6a9f82a6a8",
+      "material_ids": [
+        "ParticleProcessMaterial_8hoci",
+        "ParticleProcessMaterial_gihfj",
+        "ParticleProcessMaterial_wrso2"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/trial_noble_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/trial_nondescript_vfx.tscn": {
+      "source_sha256": "222ff6c37ac138c3df28c3cfef70aa73c6a27583eb17ec65df737e7ed24feeed",
+      "material_ids": [
+        "ParticleProcessMaterial_42l8a",
+        "ParticleProcessMaterial_lb10u",
+        "ParticleProcessMaterial_np5iu"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/trial_nondescript_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/trial_vfx.tscn": {
+      "source_sha256": "508998442b0b27a2cad07980d04f79c96e8d4c2c9b163d41e526c34367ba6f6f",
+      "material_ids": [
+        "ParticleProcessMaterial_2hhat",
+        "ParticleProcessMaterial_5itrq"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/trial_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/unrest_site_vfx.tscn": {
+      "source_sha256": "7ead3e613b7140d115bdab6cce92de7c4581f082b0b8aa7f9bd3128d3ee581df",
+      "material_ids": [
+        "ParticleProcessMaterial_1h5py",
+        "ParticleProcessMaterial_1xnse",
+        "ParticleProcessMaterial_3sg83"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/unrest_site_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/war_historian_repy_vfx.tscn": {
+      "source_sha256": "31d13c06424a8a5d510397232310c44f28423f3d15cb8f98844a326d87a10f81",
+      "material_ids": [
+        "ParticleProcessMaterial_g6afs",
+        "ParticleProcessMaterial_u6glk"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/war_historian_repy_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/waterlogged_scriptorium_vfx.tscn": {
+      "source_sha256": "5ef2036eb68ed231f74f49bfb3c0046be08a5db924a6c36a14e76ba53504b804",
+      "material_ids": [
+        "ParticleProcessMaterial_hd412"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/waterlogged_scriptorium_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/events/whispering_hollow_vfx.tscn": {
+      "source_sha256": "71a51750e2baa072e86952e540739126c18b3b2b9b00672da3bc530001d4a25d",
+      "material_ids": [
+        "ParticleProcessMaterial_2gmr2",
+        "ParticleProcessMaterial_moe0e"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/events/whispering_hollow_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/fire_impact/vfx_fire_embers_straight.tscn": {
+      "source_sha256": "2ce5b4d50944392a0d0311216705caa3d6259e90ab63ff4b7d70b80ffcf00839",
+      "material_ids": [
+        "ParticleProcessMaterial_kta1j"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/energy/ironclad/ironclad_energy_vfx_front.tscn",
+        "res://scenes/vfx/energy/necrobinder/necrobinder_energy_vfx_front.tscn",
+        "res://scenes/vfx/fire_impact/vfx_fire_embers_straight.tscn",
+        "res://scenes/vfx/forms/demon/vfx_demon_form_idle_vfx.tscn",
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke.tscn",
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile.tscn",
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile_impact.tscn",
+        "res://scenes/vfx/ui/card/vfx_card_exhaust.tscn",
+        "res://scenes/vfx/ui/card/vfx_card_exhaust_quick.tscn",
+        "res://scenes/vfx/ui/card/vfx_card_remove.tscn"
+      ]
+    },
+    "res://scenes/vfx/fires/vfx_ground_fire.tscn": {
+      "source_sha256": "22d02dbbbf674cac74b0afbdcdd6d6fd6964d34ba452251face157a23a524b16",
+      "material_ids": [
+        "ParticleProcessMaterial_qlpnp"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/fires/vfx_ground_fire.tscn"
+      ]
+    },
+    "res://scenes/vfx/forms/demon/vfx_demon_form_idle_vfx.tscn": {
+      "source_sha256": "3ba7d6b17970e150183df294fbf4dd238f68b3c3f18a260579315ca6f3c25d7f",
+      "material_ids": [
+        "ParticleProcessMaterial_47q8e",
+        "ParticleProcessMaterial_srpue"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/forms/demon/vfx_demon_form_idle_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/forms/echo/vfx_echo_form_idle_vfx.tscn": {
+      "source_sha256": "5a9628d0e5e68b0dd096a7594fc92aff0145d8eb73d870b57082c5b0acd84847",
+      "material_ids": [
+        "ParticleProcessMaterial_epjuj"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/forms/echo/vfx_echo_form_idle_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/hit_spark_vfx.tscn": {
+      "source_sha256": "27925af9d28d8df1d36cbf2f0e341951cc5737fcdf7bd4d31a0910d25ed3aacd",
+      "material_ids": [
+        "ParticleProcessMaterial_1pf1r",
+        "ParticleProcessMaterial_2vqu0",
+        "ParticleProcessMaterial_stade"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/hit_spark_vfx.tscn"
+      ]
+    },
+    "res://scenes/vfx/monsters/kaiser_crab_boss_explosion.tscn": {
+      "source_sha256": "c023391b26ae9aa286d6ee1ceb06cdeef655f1c9a3b02180ee0b1ff36d63a20d",
+      "material_ids": [
+        "ParticleProcessMaterial_2tkqk"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/monsters/kaiser_crab_boss_explosion.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke.tscn": {
+      "source_sha256": "28f36b72803dde06832a03a0e0983064fc2b5dedda754904f1e4e89900a748cb",
+      "material_ids": [
+        "ParticleProcessMaterial_6eas5",
+        "ParticleProcessMaterial_7cngj"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile_impact.tscn": {
+      "source_sha256": "9f85daaae03a40045e704d5300dbdcbbf1bbf40b8058c2d0d4bd0014159d3360",
+      "material_ids": [
+        "ParticleProcessMaterial_hh6ri",
+        "ParticleProcessMaterial_re1g0"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/frost/vfx_frost_orb_evoke.tscn": {
+      "source_sha256": "75030120efddb5ffacaca6ce70a0777d17abfd693772df5f42d34745fbac202a",
+      "material_ids": [
+        "ParticleProcessMaterial_4goo5",
+        "ParticleProcessMaterial_pg6y6"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/frost/vfx_frost_orb_evoke.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/frost/vfx_frost_orb_evoke_shield.tscn": {
+      "source_sha256": "6c61bf2b3526fecdb5aee3bd2c1a1d7446bb65aba5d64181e62b5847d3b27d26",
+      "material_ids": [
+        "ParticleProcessMaterial_g3664"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/frost/vfx_frost_orb_evoke_shield.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/frost/vfx_frost_orb_passive_shield.tscn": {
+      "source_sha256": "a717c24e1bd1563829c96b8169f98f2fc1df37872e6b06ba5ea9285382563aff",
+      "material_ids": [
+        "ParticleProcessMaterial_g3664"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/frost/vfx_frost_orb_passive_shield.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/glass/vfx_glass_orb_evoke_impact.tscn": {
+      "source_sha256": "b033e76bb67b605b779d4ad1f36770eee44f76b3d9656c2503be50037e74117d",
+      "material_ids": [
+        "ParticleProcessMaterial_rwk4f"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/glass/vfx_glass_orb_evoke_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/glass/vfx_glass_orb_passive_impact.tscn": {
+      "source_sha256": "8a1a2f7d0684e273207b4edbfeb14ed9d20e2b093b15bae08c27332526534d74",
+      "material_ids": [
+        "ParticleProcessMaterial_rwk4f"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/glass/vfx_glass_orb_passive_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/lightning/vfx_lightning_orb_evoke.tscn": {
+      "source_sha256": "5a72921a803f2b2d7ea7c25c38b545fa6a54629f55fd452a07eafee7520ce2d9",
+      "material_ids": [
+        "ParticleProcessMaterial_obnod"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/lightning/vfx_lightning_orb_evoke.tscn"
+      ]
+    },
+    "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_projectile_impact.tscn": {
+      "source_sha256": "ed8ba1f609d9d956e07834d68b03df8f44a2c916784a4f2a8690128c604db61b",
+      "material_ids": [
+        "ParticleProcessMaterial_6lp4l"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_projectile_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/sovereign_blade.tscn": {
+      "source_sha256": "d036ec834d82d9a446871bc16e86c6ddb29516db74f36ea2627dfde0e2b80c75",
+      "material_ids": [
+        "ParticleProcessMaterial_rc0to"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/sovereign_blade.tscn"
+      ]
+    },
+    "res://scenes/vfx/templates/vfx_template_particles.tscn": {
+      "source_sha256": "10b5fc13fb2fc17e0096cf7479917ac0c2bdc90583c59f5ab811a4de7e231586",
+      "material_ids": [
+        "ParticleProcessMaterial_fkl1g",
+        "ParticleProcessMaterial_tnblb"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/templates/vfx_template_particles.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/afflictions/bound/vfx_ui_card_affliction_bound.tscn": {
+      "source_sha256": "56df4a08d2cd7b6bc266ab5d3cf6e96797ce67982ceb742dfe3fa5d21df4158a",
+      "material_ids": [
+        "ParticleProcessMaterial_3netq"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/afflictions/bound/vfx_ui_card_affliction_bound.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_galvanized.tscn": {
+      "source_sha256": "7db96f98decab4782383dbd0f35f45e97538fd969143697be29e2ebffa9d7240",
+      "material_ids": [
+        "ParticleProcessMaterial_q1lvn"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_galvanized.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_lightning_corner.tscn": {
+      "source_sha256": "4947a05298a58a0417b75c4aab538c43974c76414cabe4b2a1972cd776f78f79",
+      "material_ids": [
+        "ParticleProcessMaterial_ekdtc"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_galvanized.tscn",
+        "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_lightning_corner.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/afflictions/hexed/vfx_ui_card_affliction_hexed.tscn": {
+      "source_sha256": "45f7540924bafbfd257e19ade4b0cc8b04e6e9948c799857a7e7afcfe988b658",
+      "material_ids": [
+        "ParticleProcessMaterial_kta1j"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/afflictions/hexed/vfx_ui_card_affliction_hexed.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/afflictions/ringing/vfx_ui_card_affliction_ringing.tscn": {
+      "source_sha256": "47a7a92981dcebb384c7d97a80f106764d6007e2cd68cae03879d27496f02b94",
+      "material_ids": [
+        "ParticleProcessMaterial_iejey"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/afflictions/ringing/vfx_ui_card_affliction_ringing.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/afflictions/smog/vfx_ui_card_affliction_smog.tscn": {
+      "source_sha256": "8f9e8bd88b8a79f7fb11faab4aecb1c0e359925e3c096f97bc088b8ad23a9ca6",
+      "material_ids": [
+        "ParticleProcessMaterial_rbnxx"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/afflictions/smog/vfx_ui_card_affliction_smog.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/vfx_card_remove.tscn": {
+      "source_sha256": "7ef66f9c42b9d5fb7941ece2a4ca1c5376614058f8007597dc75e3eaac0d395e",
+      "material_ids": [
+        "ParticleProcessMaterial_a6nis",
+        "ParticleProcessMaterial_ejx8e",
+        "ParticleProcessMaterial_qr0p0"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/vfx_card_remove.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/card/vfx_card_transform.tscn": {
+      "source_sha256": "b677da85b398d9becf9fee29031c78b03121a65c9b935043b0ff92ae8cd41167",
+      "material_ids": [
+        "ParticleProcessMaterial_2i77k",
+        "ParticleProcessMaterial_2l8lo"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/card/vfx_card_transform.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/vfx_buff_applied.tscn": {
+      "source_sha256": "2f6f7b31d4cfa3fb8ee3c7753d40fc215b09d5b8908e72b62979d48041b98f90",
+      "material_ids": [
+        "ParticleProcessMaterial_ivp5k"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/vfx_buff_applied.tscn"
+      ]
+    },
+    "res://scenes/vfx/ui/vfx_debuff_applied.tscn": {
+      "source_sha256": "49a39474c5ff182985bef8d313c5af6ca394b79d9aae770aecf078e5a00cd78c",
+      "material_ids": [
+        "ParticleProcessMaterial_2eh7x"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/ui/vfx_debuff_applied.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_attack_blunt.tscn": {
+      "source_sha256": "865465c647b54b70824e109199f94a50bb79398d10c66a54fa8a84566f8ec87c",
+      "material_ids": [
+        "ParticleProcessMaterial_qdfs7"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_attack_blunt.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_big_slash_impact.tscn": {
+      "source_sha256": "8585c0668cf10086fc80eab80459a6872019d680d9ab8f80cedba85230014acb",
+      "material_ids": [
+        "ParticleProcessMaterial_8vl02",
+        "ParticleProcessMaterial_m1oxd"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_big_slash_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_dagger_spray_flurry.tscn": {
+      "source_sha256": "6a4b5599b3f7b739304175b149ce747df15157f08a5629a8bb33b74d3c2695c6",
+      "material_ids": [
+        "ParticleProcessMaterial_1pwvi"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_dagger_spray_flurry.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_dagger_spray_impact.tscn": {
+      "source_sha256": "0b59bfa3405d63c97042774dc3949ea487b21d9c450bdddcc31c7ff516fa601a",
+      "material_ids": [
+        "ParticleProcessMaterial_vo6g6"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_dagger_spray_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_dramatic_entrance_fullscreen.tscn": {
+      "source_sha256": "ab2e9d6a35b3f79e8096380454dc7d9a048d72617094fe60816ea12cf11604a6",
+      "material_ids": [
+        "ParticleProcessMaterial_hee80"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_dramatic_entrance_fullscreen.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_dramatic_stab.tscn": {
+      "source_sha256": "2c8c69de524408b79f8c96a4d879b73662e7118c64899a73d779cd8edba8c663",
+      "material_ids": [
+        "ParticleProcessMaterial_a77aa"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_dramatic_stab.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_fire_burning.tscn": {
+      "source_sha256": "bcccfe700f11374fb9eaf3d12ebd76f6f92a18f789bfd18ee10fea2cd7e28d6e",
+      "material_ids": [
+        "ParticleProcessMaterial_evy5u",
+        "ParticleProcessMaterial_kanw8"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_fire_burning.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_fire_burst.tscn": {
+      "source_sha256": "abc9001afe9ea80c74eb76cb3dd6546b809dfd3d0a79bf38503dfc63319db8fc",
+      "material_ids": [
+        "ParticleProcessMaterial_2lldl",
+        "ParticleProcessMaterial_xh42l"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_fire_burst.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_fire_smoke_puff.tscn": {
+      "source_sha256": "8a3762d07fc62c566ea7d519c5b5a55fa6b8e9a5032b6526daa6674950bc6f3d",
+      "material_ids": [
+        "ParticleProcessMaterial_wp2ot"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_fire_smoke_puff.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_gaseous_impact.tscn": {
+      "source_sha256": "a2fa743f92b2616f8081a5a197129b38e4a894c33d492b0a2254790452849051",
+      "material_ids": [
+        "ParticleProcessMaterial_0yqks",
+        "ParticleProcessMaterial_5nv8a"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_gaseous_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up_2d_front.tscn": {
+      "source_sha256": "2178e629c13c5adb8fa76c6bfc268e40e4a054f5023cdfe7160f8984ea5ccab5",
+      "material_ids": [
+        "ParticleProcessMaterial_v4twp"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up.tscn",
+        "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up_2d_front.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_giant_horizontal_slash.tscn": {
+      "source_sha256": "2ed10abfc92f8762e3ea44eae12edb667efa6fabe92670f30b64b0b65e8acb02",
+      "material_ids": [
+        "ParticleProcessMaterial_2mcfy"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_giant_horizontal_slash.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_grand_finale.tscn": {
+      "source_sha256": "9641ee5f8dc54ccef99316329087ac08720cc9445d4bc8996e899729a0311403",
+      "material_ids": [
+        "ParticleProcessMaterial_e0khs"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_grand_finale.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_grand_finale_impact.tscn": {
+      "source_sha256": "a97d0dc9b4f5bb14b84455d1de6d909d60e16603c006791312b8d48a802ba0b4",
+      "material_ids": [
+        "ParticleProcessMaterial_pkmpr"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_grand_finale_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_heal_osty.tscn": {
+      "source_sha256": "109e90f8765a4ad062ab6cf8f4ec21faea99b86c5cc4707927da7d3feb16aed6",
+      "material_ids": [
+        "ParticleProcessMaterial_cn5ul",
+        "ParticleProcessMaterial_o787e"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_heal_osty.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_heavy_blunt.tscn": {
+      "source_sha256": "8fdaa444b398b88064945d491d0764206ff4f891e163bf09d2d7299d6bb150fa",
+      "material_ids": [
+        "ParticleProcessMaterial_0dvld",
+        "ParticleProcessMaterial_32k7s"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_heavy_blunt.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_hyperbeam.tscn": {
+      "source_sha256": "4e4c1b4a2142192e116aad10787a7c263bcdb2c6d40f87a474788b6342abc5d2",
+      "material_ids": [
+        "ParticleProcessMaterial_2ac57",
+        "ParticleProcessMaterial_373df",
+        "ParticleProcessMaterial_6sfr5",
+        "ParticleProcessMaterial_kg4hr",
+        "ParticleProcessMaterial_syai8"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_hyperbeam.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_hyperbeam_impact.tscn": {
+      "source_sha256": "2fe8339cc373558d77a6bc6303ec07330a504f7ce0cfa4a31dd3b292a89fd860",
+      "material_ids": [
+        "ParticleProcessMaterial_tgt2i"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_hyperbeam_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_large_magic_missile.tscn": {
+      "source_sha256": "806a1e2f08dec2ae0f0843544d7fbde0dba7a5cae7effc56ef8cc4bdf15bd1e2",
+      "material_ids": [
+        "ParticleProcessMaterial_6to7m",
+        "ParticleProcessMaterial_ch3u3"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_large_magic_missile.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_minion_dive_bomb.tscn": {
+      "source_sha256": "5c4ee7745ffe908bbfc8b9fbde372e7360fe8a815fd3a8b5fac6fed1209177ea",
+      "material_ids": [
+        "ParticleProcessMaterial_41406",
+        "ParticleProcessMaterial_jlvfm",
+        "ParticleProcessMaterial_rcmjv",
+        "ParticleProcessMaterial_xebgd"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_minion_dive_bomb.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_molten_fist.tscn": {
+      "source_sha256": "7070b036ecc78561a967f8610dda65c84a70d733dde52626a5cdef4e80bfcd78",
+      "material_ids": [
+        "ParticleProcessMaterial_fkl1g",
+        "ParticleProcessMaterial_tnblb"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_molten_fist.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_poison_impact.tscn": {
+      "source_sha256": "c03a2f2255dfd695b1072aa34c0db61ec491544968597c51c436c586040b0078",
+      "material_ids": [
+        "ParticleProcessMaterial_m6hld"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_poison_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_power_up/vfx_power_up_2d_front.tscn": {
+      "source_sha256": "9cc1edcfc7827020e3ca6790df5f2d736d3dfcac6093dd3028f78f5d0d4bcd0b",
+      "material_ids": [
+        "ParticleProcessMaterial_h4i4y",
+        "ParticleProcessMaterial_mw7ih"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_power_up/vfx_power_up.tscn",
+        "res://scenes/vfx/vfx_power_up/vfx_power_up_2d_front.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_sandy_impact.tscn": {
+      "source_sha256": "931da464e4d4bacd37ac8cf2368427118d2ed3025e6ab3bd822714b019c4f08f",
+      "material_ids": [
+        "ParticleProcessMaterial_m7lmj"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_sandy_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_scratch_impact.tscn": {
+      "source_sha256": "c96506c02f86be33475551dec21f61836392ab1a14d64f4dbd0dc960b278c34d",
+      "material_ids": [
+        "ParticleProcessMaterial_ybutx"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_scratch_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_shiv_throw.tscn": {
+      "source_sha256": "0ee9f59b470cb5ec77953277864b18e287fe73be6265eed443046b3273deb852",
+      "material_ids": [
+        "ParticleProcessMaterial_5geno",
+        "ParticleProcessMaterial_gxvfc"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_shiv_throw.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_small_magic_missile.tscn": {
+      "source_sha256": "b48cf830aa6405770503434748e776743b831c2e2cf1292fcc6ecc4f3ed844c5",
+      "material_ids": [
+        "ParticleProcessMaterial_51tuk",
+        "ParticleProcessMaterial_ll8cw"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_small_magic_missile.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_smoke_puff.tscn": {
+      "source_sha256": "5bf44ec02f396f2206e84318360b2e6826a14eacf547993c619cb32bae8332d1",
+      "material_ids": [
+        "ParticleProcessMaterial_wp2ot"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_smoke_puff.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_spore_impact.tscn": {
+      "source_sha256": "d9df47e892566f4133bcc21a714e19e704f670eb97f89e7aa7bc8e83afb9b304",
+      "material_ids": [
+        "ParticleProcessMaterial_jese1"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_spore_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_starry_impact.tscn": {
+      "source_sha256": "f9b59ce9203e57e404c14b2447f5cf517a66653f5fd834be3fc4bca22397cb66",
+      "material_ids": [
+        "ParticleProcessMaterial_5usk3"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_starry_impact.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_sweeping_beam.tscn": {
+      "source_sha256": "eca61095540aabd43aeb5b153a3d6469c3b305b0be9b68f89102bb6efd34a0a6",
+      "material_ids": [
+        "ParticleProcessMaterial_bch4b",
+        "ParticleProcessMaterial_rtb21",
+        "ParticleProcessMaterial_txww1",
+        "ParticleProcessMaterial_vnn21"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_sweeping_beam.tscn"
+      ]
+    },
+    "res://scenes/vfx/vfx_thrash.tscn": {
+      "source_sha256": "184d08bf199ddc5e349a9458717f7ef04dadd93af4d0aa51698299a322d903fb",
+      "material_ids": [
+        "ParticleProcessMaterial_2bi10",
+        "ParticleProcessMaterial_t7qkv"
+      ],
+      "referenced_by": [
+        "res://scenes/vfx/vfx_thrash.tscn"
+      ]
+    }
+  }
+}

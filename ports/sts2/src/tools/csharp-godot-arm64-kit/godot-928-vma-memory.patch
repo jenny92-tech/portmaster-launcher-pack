@@ -1,0 +1,66 @@
+--- a/drivers/vulkan/rendering_device_driver_vulkan.h
++++ b/drivers/vulkan/rendering_device_driver_vulkan.h
+@@ -44,6 +44,8 @@
+ #include "thirdparty/vulkan/vk_mem_alloc.h"
+ 
+ #include "drivers/vulkan/godot_vulkan.h"
++
++#include <atomic>
+ 
+ // Design principles:
+ // - Vulkan structs are zero-initialized and fields not requiring a non-zero value are omitted (except in cases where expresivity reasons apply).
+@@ -170,6 +172,8 @@
+ 	/****************/
+ 
+ 	VmaAllocator allocator = nullptr;
++	bool vma_statistics_log = false;
++	std::atomic<uint64_t> vma_statistics_last_log_ms{ 0 };
+ 	HashMap<uint32_t, VmaPool> small_allocs_pools;
+ 
+ 	VmaPool _find_or_create_small_allocs_pool(uint32_t p_mem_type_index);
+--- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
++++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
+@@ -1248,6 +1248,17 @@
+ 	allocator_info.physicalDevice = physical_device;
+ 	allocator_info.device = vk_device;
+ 	allocator_info.instance = context_driver->instance_get();
++	const Variant block_size_setting = GLOBAL_DEF_RST("rendering/rendering_device/vulkan/preferred_large_heap_block_size_mb", 0);
++	const int64_t block_size_mb = block_size_setting.get_type() == Variant::INT ? int64_t(block_size_setting) : -1;
++	if (block_size_mb == 0 || block_size_mb == 32 || block_size_mb == 64) {
++		allocator_info.preferredLargeHeapBlockSize = VkDeviceSize(block_size_mb) * 1024 * 1024;
++	} else {
++		WARN_PRINT("Invalid preferred_large_heap_block_size_mb; using VMA's default (0). Accepted values: 0, 32, 64.");
++	}
++	vma_statistics_log = GLOBAL_DEF_RST("rendering/rendering_device/vulkan/log_memory_statistics", false);
++	if (vma_statistics_log) {
++		print_line(vformat("VMA_CONFIG preferred_large_heap_block_size_mb=%d allocator_preferred_bytes=%d auto_default=%s stats_enabled=true", allocator_info.preferredLargeHeapBlockSize / (1024 * 1024), allocator_info.preferredLargeHeapBlockSize, allocator_info.preferredLargeHeapBlockSize == 0 ? "true" : "false"));
++	}
+ 	const bool use_1_3_features = physical_device_properties.apiVersion >= VK_API_VERSION_1_3;
+ 	if (use_1_3_features) {
+ 		allocator_info.flags |= VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT;
+@@ -5787,6 +5798,25 @@
+ uint64_t RenderingDeviceDriverVulkan::get_total_memory_used() {
+ 	VmaTotalStatistics stats = {};
+ 	vmaCalculateStatistics(allocator, &stats);
++	if (vma_statistics_log) {
++		const uint64_t now_ms = OS::get_singleton()->get_ticks_msec();
++		uint64_t last_ms = vma_statistics_last_log_ms.load(std::memory_order_relaxed);
++		if (now_ms >= last_ms && now_ms - last_ms >= 10000 &&
++				vma_statistics_last_log_ms.compare_exchange_strong(last_ms, now_ms, std::memory_order_relaxed)) {
++			const VkPhysicalDeviceMemoryProperties *properties = nullptr;
++			vmaGetMemoryProperties(allocator, &properties);
++			const VmaStatistics &total = stats.total.statistics;
++			print_line(vformat("VMA_STATS time_ms=%d total block_bytes=%d allocation_bytes=%d blocks=%d allocations=%d", now_ms, total.blockBytes, total.allocationBytes, total.blockCount, total.allocationCount));
++			for (uint32_t i = 0; i < properties->memoryHeapCount; i++) {
++				const VmaStatistics &s = stats.memoryHeap[i].statistics;
++				print_line(vformat("VMA_STATS heap=%d size=%d flags=%d block_bytes=%d allocation_bytes=%d blocks=%d allocations=%d", i, properties->memoryHeaps[i].size, properties->memoryHeaps[i].flags, s.blockBytes, s.allocationBytes, s.blockCount, s.allocationCount));
++			}
++			for (uint32_t i = 0; i < properties->memoryTypeCount; i++) {
++				const VmaStatistics &s = stats.memoryType[i].statistics;
++				print_line(vformat("VMA_STATS type=%d heap=%d flags=%d block_bytes=%d allocation_bytes=%d blocks=%d allocations=%d", i, properties->memoryTypes[i].heapIndex, properties->memoryTypes[i].propertyFlags, s.blockBytes, s.allocationBytes, s.blockCount, s.allocationCount));
++			}
++		}
++	}
+ 	return stats.total.statistics.allocationBytes;
+ }
+ 

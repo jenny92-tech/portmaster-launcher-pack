@@ -1,0 +1,254 @@
+// INPUT:  命令行参数、portkit_launcher 功能模块与构建来源标识
+// OUTPUT: portkit-launcher CLI 命令分派、结果输出和退出码
+// POS:    游戏包内原生辅助程序入口，连接 Shell 启动器与 Rust 文件操作
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use portkit_launcher::font::{ProvisionRequest, provision};
+use portkit_launcher::unity::{ConfigureRequest, configure};
+
+const SOURCE_REVISION: &str = match option_env!("PORTKIT_LAUNCHER_SOURCE_REVISION") {
+    Some(value) => value,
+    None => "development",
+};
+
+fn main() -> ExitCode {
+    match run(std::env::args().skip(1).collect()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("portkit-launcher: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(arguments: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    match arguments.as_slice() {
+        [command] if matches!(command.as_str(), "version" | "--version" | "-V") => {
+            println!(
+                "portkit-launcher {} {SOURCE_REVISION}",
+                env!("CARGO_PKG_VERSION")
+            );
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "artwork" && command == "probe" => {
+            let options = Options::parse(rest)?;
+            let script_dir = required(&options, "script-dir")?;
+            match portkit_launcher::artwork::probe_image_dir(
+                script_dir.as_ref(),
+                &portkit_launcher::artwork::ProbeMarkers::default(),
+            ) {
+                Some(dir) => println!("{}", dir.display()),
+                None => println!(),
+            }
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "artwork" && command == "sync" => {
+            let options = Options::parse(rest)?;
+            let script_dir = required(&options, "script-dir")?;
+            let launcher = required(&options, "launcher")?;
+            let source_dir = required(&options, "source-dir")?;
+            let outcome = portkit_launcher::artwork::sync_launcher_artwork(
+                script_dir.as_ref(),
+                launcher.as_ref(),
+                source_dir.as_ref(),
+                &portkit_launcher::artwork::ProbeMarkers::default(),
+            )?;
+            match outcome {
+                portkit_launcher::artwork::SyncOutcome::Copied(path) => {
+                    println!("copied	{}", path.display());
+                }
+                portkit_launcher::artwork::SyncOutcome::Existing(path) => {
+                    println!("existing	{}", path.display());
+                }
+                portkit_launcher::artwork::SyncOutcome::Skipped(reason) => {
+                    println!("skipped	{reason}");
+                }
+            }
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "font" && command == "provision" => {
+            let options = Options::parse(rest)?;
+            let outcome = provision(&ProvisionRequest {
+                candidates: options.many("candidate").map(PathBuf::from).collect(),
+                tar_xz_sources: options.many("tar-xz").map(PathBuf::from).collect(),
+                zip_sources: options.many("zip").map(PathBuf::from).collect(),
+                outputs: options.many("output").map(PathBuf::from).collect(),
+                member: options
+                    .one("member")
+                    .unwrap_or("NotoSansSC-Regular.ttf")
+                    .to_owned(),
+            })?;
+            println!("{}", outcome.path.display());
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "json" && command == "merge" => {
+            let options = Options::parse(rest)?;
+            options.only_once(&["file", "patch"])?;
+            let path = required(&options, "file")?;
+            let patch = serde_json::from_str(required(&options, "patch")?)?;
+            portkit_launcher::json::merge_file(path.as_ref(), &patch)?;
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "toml" && command == "merge" => {
+            let options = Options::parse(rest)?;
+            options.only_once(&["file", "patch"])?;
+            let patch = serde_json::from_str(required(&options, "patch")?)?;
+            portkit_launcher::toml::merge_file(required(&options, "file")?.as_ref(), &patch)?;
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "unity" && command == "configure" => {
+            let options = Options::parse(rest)?;
+            options.only_once(&[
+                "file",
+                "section",
+                "width",
+                "height",
+                "render-percent",
+                "memory-mode",
+                "graphics-api",
+                "render-filter",
+                "print-dimensions",
+                "a",
+                "b",
+                "x",
+                "y",
+            ])?;
+            let button_values = ["a", "b", "x", "y"].map(|name| options.one(name));
+            let buttons = if button_values.iter().all(Option::is_none) {
+                None
+            } else if button_values.iter().all(Option::is_some) {
+                let values = button_values.map(|value| value.unwrap().to_owned());
+                Some(values)
+            } else {
+                return Err("--a, --b, --x and --y must be supplied together".into());
+            };
+            let width = optional_u32(&options, "width")?;
+            let height = optional_u32(&options, "height")?;
+            let render_scale_percent = optional_u32(&options, "render-percent")?;
+            // The library owns the device/gpu/runtime/input table contract.
+            // A missing or misspelled section must never write at root.
+            let section = options.one("section").map(str::to_owned);
+            let print_dimensions = match options.one("print-dimensions") {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("--print-dimensions must be true or false".into()),
+            };
+            let dimensions = configure(&ConfigureRequest {
+                path: required(&options, "file")?.into(),
+                section,
+                width,
+                height,
+                buttons,
+                render_scale_percent,
+                memory_mode: options.one("memory-mode").map(str::to_owned),
+                graphics_api: options.one("graphics-api").map(str::to_owned),
+                render_filter: options.one("render-filter").map(str::to_owned),
+            })?;
+            if print_dimensions {
+                println!(
+                    "{} {} {} {}",
+                    dimensions.output_width,
+                    dimensions.output_height,
+                    dimensions.render_width,
+                    dimensions.render_height
+                );
+            }
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "runtime" && command == "latest-love" => {
+            let options = Options::parse(rest)?;
+            let path =
+                portkit_launcher::runtime::latest_love(required(&options, "root")?.as_ref())?;
+            println!("{}", path.display());
+            Ok(())
+        }
+        [group, command, rest @ ..] if group == "file" && command == "sync-newer" => {
+            let options = Options::parse(rest)?;
+            let copied =
+                portkit_launcher::sync::sync_newer(&portkit_launcher::sync::SyncRequest {
+                    source: required(&options, "source")?.into(),
+                    destination: required(&options, "destination")?.into(),
+                    extensions: options.many("extension").cloned().collect(),
+                })?;
+            println!("{copied}");
+            Ok(())
+        }
+        _ => Err(usage().into()),
+    }
+}
+
+#[derive(Default)]
+struct Options {
+    values: BTreeMap<String, Vec<String>>,
+}
+
+impl Options {
+    fn only_once(&self, allowed: &[&str]) -> Result<(), String> {
+        for (name, values) in &self.values {
+            if !allowed.contains(&name.as_str()) {
+                return Err(format!("unknown option --{name}"));
+            }
+            if values.len() != 1 {
+                return Err(format!("option --{name} may be supplied only once"));
+            }
+        }
+        Ok(())
+    }
+
+    fn parse(arguments: &[String]) -> Result<Self, String> {
+        let mut options = Self::default();
+        let mut index = 0;
+        while index < arguments.len() {
+            let name = arguments[index].strip_prefix("--").ok_or_else(usage)?;
+            let value = arguments
+                .get(index + 1)
+                .ok_or_else(|| format!("option --{name} requires a value"))?;
+            if value.starts_with("--") {
+                return Err(format!("option --{name} requires a value"));
+            }
+            options
+                .values
+                .entry(name.to_owned())
+                .or_default()
+                .push(value.clone());
+            index += 2;
+        }
+        Ok(options)
+    }
+
+    fn one(&self, name: &str) -> Option<&str> {
+        self.values
+            .get(name)
+            .and_then(|values| values.last())
+            .map(String::as_str)
+    }
+
+    fn many(&self, name: &str) -> impl Iterator<Item = &String> {
+        self.values.get(name).into_iter().flatten()
+    }
+}
+
+fn required<'a>(options: &'a Options, name: &str) -> Result<&'a str, String> {
+    options
+        .one(name)
+        .ok_or_else(|| format!("option --{name} is required"))
+}
+
+fn optional_u32(options: &Options, name: &str) -> Result<Option<u32>, String> {
+    options
+        .one(name)
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|_| format!("--{name} must be an unsigned integer"))
+        })
+        .transpose()
+}
+
+fn usage() -> String {
+    "usage: portkit-launcher artwork sync --script-dir DIR --launcher FILE --source-dir DIR
+       portkit-launcher artwork probe --script-dir DIR
+       portkit-launcher font provision [--candidate FILE] [--tar-xz FILE] [--zip FILE] --output FILE [--output FALLBACK] [--member FILE]\n       portkit-launcher json merge --file FILE --patch JSON\n       portkit-launcher toml merge --file FILE --patch JSON\n       portkit-launcher unity configure --file FILE [--section device|input.remap] [--width N --height N] [--render-percent 100|75|50] [--memory-mode low_memory|balanced|performance] [--graphics-api gles|gles30|gles32|vulkan] [--render-filter config|sharp|linear] [--print-dimensions true|false] [--a NAME --b NAME --x NAME --y NAME]\n       portkit-launcher runtime latest-love --root DIR\n       portkit-launcher file sync-newer --source DIR --destination DIR --extension EXT [--extension EXT]".into()
+}

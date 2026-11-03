@@ -1,0 +1,53 @@
+-- INPUT:  launcher 共享框架、gamedata 核心文件或玩家 APK
+-- OUTPUT: 泰拉瑞亚设置/资源检查页面及 TER_* 启动参数
+-- POS:    泰拉瑞亚语言、画面、内存和按键选项及游戏资源就绪检查定义
+local launcher = require("launcher")
+
+launcher.define {
+    id = "terraria",
+    title = {en = "Terraria Launcher", zh = "泰拉瑞亚 启动器"},
+    credits = {
+        {"credit_dev", "Re-Logic / 505 Games"},
+        {"credit_porter", "Bili 解腻Jenny"},
+    },
+    fields = {
+        launcher.output_resolution {env = {"TER_WIDTH", "TER_HEIGHT"}},
+        launcher.render_scale {env = "TER_RENDER_PERCENT", default = "75"},
+        launcher.memory_mode {env = "TER_MEMORY_MODE"},
+        launcher.graphics_api {env = "TER_GRAPHICS_API"},
+        launcher.select {
+            key = "language", label = {en = "Game Language:", zh = "游戏语言:"}, default = "7", env = "TER_LANGUAGE",
+            options = {
+                {"1", {en = "English", zh = "英文"}}, {"7", {en = "Chinese (Simplified)", zh = "简体中文"}},
+                {"12", {en = "Chinese (Traditional)", zh = "繁体中文"}},
+            },
+        },
+        launcher.toggle {key = "swap_ab", label = {en = "Swap A/B:", zh = "交换 A/B:"}, env = "TER_SWAP_AB"},
+        launcher.toggle {key = "swap_xy", label = {en = "Swap X/Y:", zh = "交换 X/Y:"}, env = "TER_SWAP_XY"},
+    },
+    pages = {
+        {title = "title", rows = {"render_scale", "memory_mode", "language", launcher.button("advanced", "page:2")}},
+        {title = "advanced_title", fields = {"resolution", "swap_ab", "swap_xy"}, actions = {"start", "back"}},
+    },
+    legacy = {
+        path = "../conf/godot/app_userdata/泰拉瑞亚启动器/launch_config.env",
+        state_path = "../conf/godot/app_userdata/泰拉瑞亚启动器/terraria_launcher_state.json",
+    },
+    launch_count_env = "TER_LAUNCH_COUNT",
+    prelaunch = {
+        -- Core files UnityLoader needs at runtime (see config.toml
+        -- game_files="./gamedata/"). All must exist for the launcher to exit.
+        core_files = {
+            "gamedata/lib/arm64-v8a/libil2cpp.so",
+            "gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat",
+            "gamedata/assets/bin/Data/data.unity3d",
+        },
+        -- Player-supplied source package. If core files are missing but this
+        -- matches, we still exit (the shell-side patcher extracts it).
+        source_glob = "gamedata/*.apk",
+        missing_msg = {
+            en = "Game data not found. Put your Terraria APK in gamedata/ — see README.",
+            zh = "未找到游戏资源。请购买泰拉瑞亚，将安卓 APK 放到 gamedata/ 目录后重启。",
+        },
+    },
+}

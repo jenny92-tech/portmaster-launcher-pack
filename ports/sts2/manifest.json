@@ -1,0 +1,42 @@
+{
+  "name": "sts2",
+  "title": "Je-杀戮尖塔2[中]",
+  "engine": "C# Godot 4.5 (mono)",
+  "runtime": "Matched SDL2 Godot/OpenGL or PortMaster Godot/Vulkan + private adapters + Harmony patcher",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "devices": [
+    "TrimUI A523 (validated Buildroot 2022.05 profile)",
+    "MiniLoong LP4X RK3566 (LoongOS 1.4.0.36 profile)"
+  ],
+  "language": [
+    "en",
+    "zh-CN"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "sts2",
+  "script": "Je-杀戮尖塔2[中].sh",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "json-merge",
+    "runtime-discovery",
+    "sync-newer",
+    "artwork"
+  ],
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "Je-杀戮尖塔2[中].png"
+      ]
+    }
+  },
+  "depends_on": [
+    "Matched Godot SDL2 ARM64 Mono runtime (TrimUI OpenGL route)",
+    "PortMaster runtimes/godot_4.5.mono.aarch64.squashfs",
+    "https://github.com/pardeike/Harmony",
+    "PortMaster runtimes/love_11.5",
+    "PortMaster runtimes/weston_pkg_0.2 (TrimUI private Wayland route)"
+  ],
+  "notes": "The existing Launchpack selects Auto, SDL2/OpenGL or Vulkan for a matched device profile and keeps the same saves. TrimUI checks the existing SDL Godot and PortMaster Vulkan paths independently; MiniLoong's current profile keeps Vulkan only. A shared custom dual-backend engine is authorized source work, not yet deployed. Other devices require separate validation. Historical standalone installations are not modified."
+}

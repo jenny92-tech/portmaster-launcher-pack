@@ -1,0 +1,25 @@
+{
+  "id": "terraria",
+  "name": "Terraria",
+  "title": "Je-泰拉瑞亚[中]",
+  "port_dir": "terraria",
+  "script": "Je-泰拉瑞亚[中].sh",
+  "engine": "Unity 2021.3 IL2CPP / Rudroid UnityLoader",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "json-merge",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
+  "portmaster": {
+    "image": {
+      "screenshot": "screenshot.png"
+    }
+  },
+  "depends_on": [
+    "PortMaster runtimes/love_11.5"
+  ]
+}

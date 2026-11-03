@@ -1,0 +1,13 @@
+{
+  "id": "steamless-3.1-x64",
+  "source": "https://github.com/atom0s/Steamless/tree/cd770bf9749d3e4f438d23ac643917ad1a804257",
+  "source_revision": "cd770bf9749d3e4f438d23ac643917ad1a804257",
+  "license": "CC-BY-NC-ND-4.0",
+  "runner": "desktop-docker-mono-interpreter",
+  "files": {
+    "Plugins/Steamless.Unpacker.Variant30.x64.dll": "f447be6f711d70c54c751508e5fc34e811985ee043f426041eefd8d1b73fc522",
+    "Plugins/Steamless.Unpacker.Variant31.x64.dll": "b583bea94435a056089c64fa4086036614c45c7e1cbcbfe809eebdea648343b9",
+    "Steamless.API.dll": "248090d973a968eabb0894eca1f2de88a01259f80a721b250434ebe8f69c4e46",
+    "Steamless.CLI.exe": "2d7cfe62fdf8fd4a97709f40649d6a57fc1478e6fc585cd08bc2e961c212e0de"
+  }
+}

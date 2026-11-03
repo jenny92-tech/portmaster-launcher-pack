@@ -1,0 +1,22 @@
+{
+  "runtime_mount": "/tmp/wine-loongos",
+  "wayland_display": "wayland-0",
+  "xdg_runtime_dir": "/run",
+  "lifecycle": {
+    "library": "/usr/lib/libloong_sdk.so",
+    "open": "EventOpend",
+    "close": "EventClosing",
+    "category": "GAME"
+  },
+  "environment": "loongos-rk3566",
+  "extends": "families/linux-aarch64.json",
+  "portmaster_directories": [
+    "/opt/system/Tools/PortMaster",
+    "/opt/tools/PortMaster",
+    "{xdg_data_home}/PortMaster",
+    "/roms/ports/PortMaster",
+    "/mnt/sdcard/roms/ports/PortMaster",
+    "/sdcard/roms/ports/PortMaster"
+  ],
+  "library_directory": "/mnt/sdcard/roms/windows"
+}

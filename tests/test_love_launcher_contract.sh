@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# INPUT:  _kit 组装/打包工具、共享 Lua 资源、游戏模板与发行目录
+# OUTPUT: 模板展开、共享资源、参数及各端口包接口断言结果
+# POS:    共享 LÖVE 启动器从声明到发行包的集成契约测试
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# Direct assemble.sh usage must resolve ports/<port>/love/ back to the port root.
+out="$("$ROOT/_kit/assemble.sh" "$ROOT/ports/hk/love/launcher.sh.template" "$tmp/hk.sh")"
+grep -Fq 'assembled hk' <<<"$out"
+bash -n "$tmp/hk.sh"
+! grep -qE '#@KIT|source "\$KIT/' "$tmp/hk.sh"
+
+# Shared runtime assets live once in _kit; individual ports only declare their schema
+# and launcher shell. dist_port.sh copies the common assets into every deployable pack.
+for file in kit.lua launcher.lua conf.lua ui.gptk; do
+  [ -f "$ROOT/_kit/love/$file" ] || {
+    echo "_kit/love: missing shared $file" >&2
+    exit 1
+  }
+done
+[ -x "$ROOT/ports/hk/dist/bin/portkit-launcher" ]
+! grep -Eq 'unzip|xz -dc|tar xf|grep -oE' "$ROOT/ports/hk/dist/Je-空洞骑士[中].sh"
+! grep -Fq 'python3 -' "$ROOT/ports/hk/dist/Je-空洞骑士[中].sh"
+grep -Fq 'portkit_launcher json merge' "$ROOT/ports/hk/dist/Je-空洞骑士[中].sh"
+grep -Fq 'portkit_launcher unity configure' "$ROOT/ports/hk/dist/Je-空洞骑士[中].sh"
+! grep -Eq '^[[:space:]]*awk -v .*a=' "$ROOT/ports/hk/dist/Je-空洞骑士[中].sh"
+
+# Every migrated launcher declares its legacy Godot env so existing choices survive
+# the first LÖVE launch.
+for port in heishenhua hk sts2 terraria vampiresurvivors114; do
+  main="$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'launcher.define' "$main"
+  grep -Fq 'legacy' "$main"
+  grep -Fq 'state_path' "$main"
+  for file in main.lua launcher.sh.template; do
+    [ -f "$ROOT/ports/$port/love/$file" ] || {
+      echo "$port: missing love/$file" >&2
+      exit 1
+    }
+  done
+  [ ! -f "$ROOT/ports/$port/love/conf.lua" ] || {
+    echo "$port: conf.lua must come from _kit/love" >&2
+    exit 1
+  }
+  [ ! -f "$ROOT/ports/$port/love/ui.gptk" ] || {
+    echo "$port: ui.gptk must come from _kit/love" >&2
+    exit 1
+  }
+done
+
+# Every Unity settings launcher separates physical output from internal render
+# scale and applies the shared Game preset/100%/75%/50% protocol.
+for port in heishenhua hk silksong sunkendragon terraria vampiresurvivors114; do
+  grep -Fq 'launcher.output_resolution' "$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'launcher.render_scale' "$ROOT/ports/$port/love/main.lua"
+  grep -Fq 'configure_unity_display "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template"
+  grep 'configure_unity_display "$PORT_TOML"' "$ROOT/ports/$port/love/launcher.sh.template" | grep -Fq '|| exit 1'
+done
+
+# Pixel Wukong keeps pixel edges sharp while its existing quality picker
+# continues to own the texture dimension cap.
+grep -Fq '\"textureDownsampleFilter\":\"nearest\"' "$ROOT/ports/heishenhua/love/launcher.sh.template"
+! grep -Fq "'/^\\[ui_layout\\]/,\u0024d'" "$ROOT/ports/heishenhua/love/launcher.sh.template"
+grep -Fq '[ -d "$LAUNCHERDIR/love_ui" ] || LAUNCHERDIR="$GAMEDIR"' "$ROOT/ports/silksong/love/launcher.sh.template"
+
+# Build one representative port and assert the common files are materialized in dist.
+bash "$ROOT/_kit/dist_port.sh" hk >/dev/null
+for file in kit.lua launcher.lua conf.lua ui.gptk ui_components.lua ui_theme.lua luis/widgets/button.lua luis/widgets/checkBox.lua luis/widgets/switch.lua luis/LICENSE luis/LICENSE-flux.txt; do
+  [ -f "$ROOT/ports/hk/dist/love_ui/$file" ] || {
+    echo "hk dist: missing shared $file" >&2
+    exit 1
+  }
+done
+
+python3 - "$ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+expected_tools = {
+    "heishenhua": ["font-provision", "runtime-discovery", "unity-config", "artwork"],
+    "hk": ["font-provision", "json-merge", "runtime-discovery", "unity-config", "artwork"],
+    "sts2": ["font-provision", "json-merge", "runtime-discovery", "sync-newer", "artwork"],
+    "terraria": ["font-provision", "json-merge", "runtime-discovery", "unity-config", "artwork"],
+    "vampiresurvivors114": ["font-provision", "runtime-discovery", "unity-config", "artwork"],
+}
+for port in expected_tools:
+    manifest = json.loads((root / "ports" / port / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["launcher"].startswith("LÖVE 11.5"), port
+    assert manifest["gptk"] == "love/ui.gptk", port
+    assert manifest["launcher_tools"] == expected_tools[port], port
+    assert "godot_launcher" not in manifest, port
+PY
+
+# STS2's managed patcher consumes these through process environment variables.
+grep -Fq 'export SLL_LANGUAGE SLL_QUALITY' "$ROOT/ports/sts2/love/launcher.sh.template"
+grep -Fq 'PortPaths.Get("SLL_QUALITY")' "$ROOT/ports/sts2/src/STS2LinuxLauncher/QualityProfile.cs"
+grep -Fq 'love_ui/main.lua' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
+grep -Fq 'love_ui/kit.lua' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"
+grep -Fq 'bash "$KIT_ROOT/stage_love_ui.sh" "$DIST/love_ui"' "$ROOT/ports/sts2/src/scripts/dist-port.sh"
+UI_ONLY=1 bash "$ROOT/_kit/dist_port.sh" sts2 >/dev/null
+STS2_SCRIPT="$(python3 - "$ROOT/ports/sts2/manifest.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["script"])
+PY
+)"
+for file in "$STS2_SCRIPT" love_ui/kit.lua love_ui/launcher.lua love_ui/main.lua love_ui/ui.gptk love_ui/ui_components.lua love_ui/luis/widgets/button.lua love_ui/luis/LICENSE; do
+  [ -f "$ROOT/ports/sts2/dist/$file" ] || {
+    echo "sts2 UI-only dist: missing $file" >&2
+    exit 1
+  }
+done
+[ -x "$ROOT/ports/sts2/dist/bin/portkit-launcher" ]
+grep -Fq 'portkit_launcher json merge' "$ROOT/ports/sts2/dist/$STS2_SCRIPT"
+! grep -Fq 'tail -c 8' "$ROOT/ports/sts2/dist/$STS2_SCRIPT"
+! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/deploy-to-device.sh"
+! grep -Fq 'bootstrap.pck' "$ROOT/ports/sts2/src/scripts/assemble-launcher-pack.sh"

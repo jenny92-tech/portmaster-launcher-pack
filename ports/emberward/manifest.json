@@ -1,0 +1,24 @@
+{
+  "name": "emberward",
+  "title": "Je-余烬灯塔",
+  "engine": "Godot 4.3 / GDScript",
+  "runtime": "PortMaster Godot 4.3 and WestonPack",
+  "devices": ["MiniLoong Pocket One", "TrimUI Smart Pro/Brick"],
+  "language": ["zh-CN", "en"],
+  "license": "CC-BY-NC-SA-4.0; compatibility adapters retain MIT",
+  "port_dir": "emberward",
+  "portable_dir": "emberward",
+  "script": "Je-余烬灯塔.sh",
+  "launcher_sh": "src/launcher.sh",
+  "portmaster": {
+    "items": ["Je-余烬灯塔.sh", "emberward"],
+    "porter": ["jenny92-tech"],
+    "desc": "Original controller-first pixel-art roguelike deckbuilder. The launcher uses an explicitly supplied Emberward PCK export.",
+    "inst": "Keep the SH and emberward folder together in Ports. Supply emberward/emberward.pck and install the listed PortMaster runtimes. Saves remain in emberward/conf.",
+    "genres": ["strategy", "rpg"],
+    "runtime": ["godot_4.3.squashfs", "weston_pkg_0.2.squashfs"],
+    "rtr": false,
+    "availability": "free"
+  },
+  "notes": "Launcher-only by default; EMBERWARD_PCK explicitly selects a game export for a complete local package. No saves, preview tools, mounted runtimes or device logs are collected."
+}

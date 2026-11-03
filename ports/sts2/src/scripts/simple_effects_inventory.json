@@ -1,0 +1,3150 @@
+{
+  "source_pck_sha256": "f526ef85cd5b7cf653defb545a8ba22196c72e6a0e95ad66f78f2f3a168b28c9",
+  "scope": "All scenes/vfx .tscn entries in the identified source PCK; additional combat/UI inventory remains private.",
+  "notes": [
+    "This is an exhaustive static inventory, not a dynamic usage or safety audit.",
+    "Category labels are pathname guesses and can overlap; empty means no inferred label.",
+    "Candidate status requires comparison with the actual build manifest and source hash; it is not evidence that a scene was converted.",
+    "Other entries are unreviewed static candidates or protected information, not a claim that no independent overlay contains them.",
+    "This file contains identifiers and audit metadata only, not original scene contents."
+  ],
+  "scene_count": 312,
+  "static_class_counts": {
+    "typed_cs_callback_contract_audit": 122,
+    "other_scriptless_or_inherited_audit": 83,
+    "protected_information_or_ui_audit": 26,
+    "scriptless_visual_candidate_factory_and_child_audit": 43,
+    "generic_particle_system_requires_lifetime_audit": 34,
+    "known_four_existing": 4
+  },
+  "scenes": [
+    {
+      "path": "res://scenes/vfx/additive_overlay_vfx.tscn",
+      "source_sha256": "176ce247fd04ecfb28a71cb65a4d17ed4303985fa54871dadfe1d366161bad66",
+      "root_script": "res://src/Core/Nodes/Vfx/NAdditiveOverlayVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/bg_ground_spike_vfx.tscn",
+      "source_sha256": "3b642963e749218ec310ebb0b52e7e771bc1354240d82698f5218beed5e990e1",
+      "root_script": "res://src/Core/Nodes/Vfx/NBgGroundSpikeVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/big_slash/vfx_big_slash_impact_core.tscn",
+      "source_sha256": "be7e4bd2089600cc747eec9a024101349e225b588cfa5bb75180454e71da50b7",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/big_slash/vfx_big_slash_impact_side_smoke.tscn",
+      "source_sha256": "85e38bf010e445355b57ad4bc1f1993b6975761f2458c8987a9919e8dfdc3c2a",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/block_spark_vfx.tscn",
+      "source_sha256": "38406023cbcda1417b8204c3690d83133649b02c06334990150f0d8e004a66c0",
+      "root_script": "res://src/Core/Nodes/Vfx/NBlockSparkVfx.cs",
+      "categories_guessed": [
+        "hit",
+        "block"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/bounce_spark_vfx.tscn",
+      "source_sha256": "59eb8e382954d1b09aa5552969cbac465e34dcc522d6e489a72e5ab5fc668a26",
+      "root_script": "res://src/Core/Nodes/Vfx/NBounceSparkVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/card_sparkles_vfx.tscn",
+      "source_sha256": "953c646eef31cacd4162d07a7353e101a1979b255fd73d2e7c622acd3c8fc4de",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "cardUI"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/card_trail_defect.tscn",
+      "source_sha256": "6c84d64ca8d8fb48430fb8d0040003eaf045d61f7050fd7710e05fff47d75fe9",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardTrailVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/card_trail_ironclad.tscn",
+      "source_sha256": "8a8fedeec3295c921695b5ad7e3bd345279bde15da7374c64f4832cec09fbe27",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardTrailVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/card_trail_necrobinder.tscn",
+      "source_sha256": "dae3c76e072f3160f2eed28acb99138e2acd1a3ff9b59161cb46d4b133b391cb",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardTrailVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/card_trail_regent.tscn",
+      "source_sha256": "4ba683fd7e35a7c55007d81f88529a518ae5a354e94373af55d5a2be06ea7a81",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardTrailVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/card_trail_silent.tscn",
+      "source_sha256": "ee56bad7a299af922db4767961c547506400879e675d2daadfa2afbed8728d3c",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardTrailVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/cards/bolas_vfx.tscn",
+      "source_sha256": "eeba6b8ab83f11d537515ed3f7eb8cd29246132fb6c0ed3353357eee15cc2d5b",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NBolasVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/cards/nightmare_hands_vfx.tscn",
+      "source_sha256": "4a114a54c9fb2c10182e8aff241c49574036f907bd555b081ff94835f661d367",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NNightmareHandsVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/cards/vfx_hellraiser/hellraiser_sword_vfx.tscn",
+      "source_sha256": "ee97c0e10d545695147040e662ee8631e019679b8a13a4c48b6fd1990ee11e3e",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NHellraiserSwordVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/cards/vfx_hellraiser/hellraiser_vfx.tscn",
+      "source_sha256": "1dbe14d3e15cafdf39f2a7812d55a07e770638569269ddad916fa426a1185e83",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NHellraiserVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_blunt_impact_core.tscn",
+      "source_sha256": "1fb25ba80c271059b8e7c6addf359ed8c45f05619fb72bc3f9ac4c3e3d581f02",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_clean_flare_1.tscn",
+      "source_sha256": "e0adc998b73322a8d7a1c3e7ec6399ca5d1de5c0318e890ea847ae56fcf5e267",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_clouds.tscn",
+      "source_sha256": "1ed89e63950fb052487172625a4a79cd14b85f1f9636d62590463851f1d14547",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_glow.tscn",
+      "source_sha256": "355db0a0fb3a22441ac4413cb1770c6d590bd6305003b2acc5dd40e5ab0a8b2a",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_hit_flare.tscn",
+      "source_sha256": "7e7ce30dc9dbeccede709bd44b0da59a16ae896b66d1280e7fba8834e537928b",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_outward_streaks.tscn",
+      "source_sha256": "7cbaa8bc5f7e16bb5c8786adc39a07150a03660ce96e3ad84b590f0d6b36a403",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_ray.tscn",
+      "source_sha256": "7634749da8c0ebb7a45c3ebf3d6964513d81b20fcac488cd251bb072229d4241",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_ring_polar_a.tscn",
+      "source_sha256": "81fe829c05d7887a8177b17d7bc856106a4859acd746dd91f9be723a061c570c",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_ring_polar_b.tscn",
+      "source_sha256": "e6e6440c67f20a8cbd3e2d652e1ef408a9e170cba8f1c32f1fbd9d179b1f72ab",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_round_smoke.tscn",
+      "source_sha256": "9dfcb97360748ca65cb23a49adcd09fd87e7a0de9a976e15b6b6a04527152deb",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_round_smoke_flipbook.tscn",
+      "source_sha256": "3c48c86a19ee6af8a30a95b4c3045cdf49fc6c9cfe2e1e08b004121e8b9c0e2d",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_common_specks.tscn",
+      "source_sha256": "3a435eeeb6fb3e293376ceccf97b0c47adb888fa3e00c3e02f941ee6a8cdfdd8",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_horizontal_smoke.tscn",
+      "source_sha256": "928246feb3c48c00c9303b94002cc3d3f3ebdc708ce0e214dc2fda3ac53ebeba",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_poof.tscn",
+      "source_sha256": "09ed385cb24ca9a361cd543052629b61ec9dcf5844edee1df71ee9b3221374bc",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_screen_chromatic_aberration.tscn",
+      "source_sha256": "8771747e148647bf4659519a9690700507f1e96a3345c0dcdf8ddda3fe921244",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/common/vfx_smoke_flipbook.tscn",
+      "source_sha256": "c003ef8683c014464e8c0ffc1a3efb12f415c107ae65066c44905c658e981b6a",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/dagger/vfx_dagger_impact_core.tscn",
+      "source_sha256": "77675a790adf6f00a54f63ea44f8b669d83e13f494f0d161daa642e3f04bcdf3",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/dagger/vfx_dagger_spray_dagger.tscn",
+      "source_sha256": "e9718c8c4c365a64cdd56ca0a71ccd7c6d9db4cde16539d8bc990f8bb9847d9e",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/desaturate_transition_vfx.tscn",
+      "source_sha256": "d4b10a079174c18b19b46c484488cfd55edbad4247ae57bc25be9a79183f0da7",
+      "root_script": "res://src/Core/Nodes/Vfx/NDesaturateTransitionVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/distortions/vfx_outward_screen_distortion.tscn",
+      "source_sha256": "42e59841ebbf78be04b24ace00b2fcb402569c98ae6a09468d392486d50d228d",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/doom_overlay_vfx.tscn",
+      "source_sha256": "7279a4691765dfb9a090fdbe44b4ab99f74f226e87e0437ad5a0ef94b93d429c",
+      "root_script": "res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/defect/defect_energy_vfx_back.tscn",
+      "source_sha256": "6d9f6d633f8b50320c3f7833788a7a3c57207bf68573d4d05f27143ac2c13ed0",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/defect/defect_energy_vfx_front.tscn",
+      "source_sha256": "bbf0bb968aee95c6919dc876809f3881b36101181832d3a6fd6395707bdb362e",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/ironclad/ironclad_energy_vfx_back.tscn",
+      "source_sha256": "3897719f2f071cff012ada71fbe892b35e3f647afb97d7fafdf33cf6db51ed12",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/ironclad/ironclad_energy_vfx_front.tscn",
+      "source_sha256": "fd4906ba289bd3f91ef90f9fef314dacd7e5558fab4f362c7ed1a85b72dd789a",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/necrobinder/necrobinder_energy_vfx_back.tscn",
+      "source_sha256": "956d080d75fdbd611acf983e869aabdd56fa5d10b3eeff581f0db41441cd15aa",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/necrobinder/necrobinder_energy_vfx_front.tscn",
+      "source_sha256": "298c03aa7e25ae6467af8754ac394e77400b8ffcda3f9ab583d5ee06d351edaa",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/regent/regent_energy_vfx_back.tscn",
+      "source_sha256": "5d4d60f1147aec762d6d2671cda7656a79f01b9b00fd68816200cd851b8ac4e8",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/regent/regent_energy_vfx_front.tscn",
+      "source_sha256": "35ef8b0e4c7ae113db158c07bec4f707e3136c1f9b7d058e2dba01f37450c0ba",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/silent/silent_energy_vfx_back.tscn",
+      "source_sha256": "741eca533c4d2f9bc2c10b707dc6d36801d93c4b025abb69da9776f6e1434fca",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/energy/silent/silent_energy_vfx_front.tscn",
+      "source_sha256": "3a8a7e274cda425e8eccd5f23d7a3a20e628f42df3e2246b5296452043e39065",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NParticlesContainer.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/epoch_highlight_vfx.tscn",
+      "source_sha256": "1c52e117df8c3b9dd6b27a0ba4cc1d8a4892a30356c7c0808e90c1b20417a97b",
+      "root_script": "res://src/Core/Nodes/Vfx/NEpochHighlightVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/epoch_slot_particle_vfx.tscn",
+      "source_sha256": "d5212d22ddbc32e9d62806b50cbd5ca5be931529080ada2fbbd2d41b249458ae",
+      "root_script": "res://src/Core/Nodes/Vfx/NEpochSlotParticle.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/abyssal_baths_vfx.tscn",
+      "source_sha256": "e40ff283dbfc1b89e71055f12508c3a95912681fa43ccffe09ba8f0e67a385f3",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/bugslayer_vfx.tscn",
+      "source_sha256": "1f1ef6b2ff0500439628d9ae26c1b1551d7fb38edde4035fe57b89fdcd12b1d9",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/byrdonis_nest_vfx.tscn",
+      "source_sha256": "bc3045442cb1c51eaefbde5f9834657641900b3b170fa688b5ec3474b37ea676",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/colorful_philosophers_vfx.tscn",
+      "source_sha256": "9c05700633c564505d0aa620ae618005f699aa2d611a2ac5a9144329b32a188a",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/colossal_flower_vfx.tscn",
+      "source_sha256": "3ba6748c6405aa8d169ee1c292721b63a0355493bdedcf217ee2a9d8f2c632d4",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/crystal_sphere_vfx.tscn",
+      "source_sha256": "9588486ec7a08b2ab3650484a34275c43e90039c86db48f79c7e609d32fc4f5f",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/dense_vegetation_slice_vfx.tscn",
+      "source_sha256": "87e2b7dd106f0c2e66e7837e8c394f4174afda2ede2db9b4d1de898624381e7d",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/events/dense_vegetation_vfx.tscn",
+      "source_sha256": "4116b0cac9a11214fc4d0315cf14bc7416e0a8f2c5139b6ffe73f8b2c0a05724",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/doll_room_vfx.tscn",
+      "source_sha256": "8995a599c8020f660797db92cbb6c317ac306ae50d2066dfd9d89fe4d04835f3",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/doors_of_light_and_dark_vfx.tscn",
+      "source_sha256": "c6ca8fe1abdce941678a2760eca04be8f2b870f76946773f3ea59b7e3c0dd03f",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/drowning_beacon_vfx.tscn",
+      "source_sha256": "78ee9775d31a548051848b86861a79c914abe699fb45b076eb532e577eda2711",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/endless_conveyor_vfx.tscn",
+      "source_sha256": "40e5505596b82aba26c7ca18ead642256e1b58e2a99e498ae905f57d71917496",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/grave_of_the_forgotten_vfx.tscn",
+      "source_sha256": "4f5775c47b29c344e7360c956ff785afd4bc235add5a020ca1265c8bab966196",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/hungry_for_mushrooms_vfx.tscn",
+      "source_sha256": "6f83d9c952e5d72391870155a176a47370e1a0ba7cf6762d27e7682e1f01f2ca",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/infested_automaton_vfx.tscn",
+      "source_sha256": "4c4def83cc5b1362c674539940eea5ebdb407b6359ac434114a5de934818d4e8",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/lost_wisp_vfx.tscn",
+      "source_sha256": "abd3a8686308e590e57c649c880297c8321815a65709cf59d562fc3cdc555d62",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/morphic_grove_vfx.tscn",
+      "source_sha256": "94d4ce86831bc6c8fd2fe2aae6cd05819f74a1e8d0630935e5f7bf002898e4ac",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/potion_courier_vfx.tscn",
+      "source_sha256": "0f685bc07c956e993a8db7cb1ace597e70bb431b5dfbcad64802f955bd6d318b",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/punch_off_vfx.tscn",
+      "source_sha256": "e340e2dd458d50eb5102dbf80f2fe6ba2b4a4c0ad2cd59ba85d4d573c85e2372",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/ranwid_the_elder_vfx.tscn",
+      "source_sha256": "0920d16c24525ceb93de15dcad164d012faa75dd502f427980a4d4b1533c7536",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/relic_trader_vfx.tscn",
+      "source_sha256": "0efb496b056ffca2c40e16bb26a00cfebc3c63208695381df9b3a1b7759490be",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/self_help_book_vfx.tscn",
+      "source_sha256": "a4184db9cadad5e0bdeed372a4e1ce11e22de650a9fdb6aa3e587aa89f94aa1b",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/spiraling_whirlpool_vfx.tscn",
+      "source_sha256": "66b4402a11011110c0d0b0444aa468b468e8565f79513b0537ba15913644ab39",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/sunken_treasury_vfx.tscn",
+      "source_sha256": "c41b0655f0bce39330142d2c975cf9c197a9cebe3f30eb5cd45ac37de82eedac",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/symbiote_vfx.tscn",
+      "source_sha256": "593bde12a888d4dd4b336140f22f85d1a65eb8123a2f02c2d18ef4c60aaca46d",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/tablet_of_truth_vfx.tscn",
+      "source_sha256": "35e325c7fca872b4638556c42d49bcb684f2f415b25709b7f924d8a8a5157206",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/tea_master_vfx.tscn",
+      "source_sha256": "508b331500402424bb5eb2d7e64946dbe36456799bb555fb64a0c2c377577a90",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/the_future_of_potions_vfx.tscn",
+      "source_sha256": "aa64f488c62cadd6dd2e828a503a77f4cf13a6ae0472c4d8595039da9876bbee",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/the_legends_were_true_vfx.tscn",
+      "source_sha256": "4de4161a0869fc3c9858964b4d3f5bbb5e6b74e8c1db46de442e9a1c84314d10",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/this_or_that_vfx.tscn",
+      "source_sha256": "d9e05b40daf973703dd639ee0f992fe37173350b85dd4425ee0f278bcf25b982",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/trial_merchant_vfx.tscn",
+      "source_sha256": "7f0d718b9e7c4aa9dfe3a959ded4d7ca7bc1a9241ef1a338033c9f11211bcecb",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/trial_noble_vfx.tscn",
+      "source_sha256": "0d643988c5ab3cda8782d05648e416684556a09240948745482a3a6a9f82a6a8",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/trial_nondescript_vfx.tscn",
+      "source_sha256": "222ff6c37ac138c3df28c3cfef70aa73c6a27583eb17ec65df737e7ed24feeed",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/trial_vfx.tscn",
+      "source_sha256": "508998442b0b27a2cad07980d04f79c96e8d4c2c9b163d41e526c34367ba6f6f",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/unrest_site_vfx.tscn",
+      "source_sha256": "7ead3e613b7140d115bdab6cce92de7c4581f082b0b8aa7f9bd3128d3ee581df",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/war_historian_repy_vfx.tscn",
+      "source_sha256": "31d13c06424a8a5d510397232310c44f28423f3d15cb8f98844a326d87a10f81",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/waterlogged_scriptorium_vfx.tscn",
+      "source_sha256": "5ef2036eb68ed231f74f49bfb3c0046be08a5db924a6c36a14e76ba53504b804",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/events/whispering_hollow_vfx.tscn",
+      "source_sha256": "71a51750e2baa072e86952e540739126c18b3b2b9b00672da3bc530001d4a25d",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fan_of_knives_vfx.tscn",
+      "source_sha256": "5b0edb20b5d2d9eec5e8438d8186456cbd06a4c93b774c9ea482ee5f9f555e43",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NFanOfKnivesVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fg_ground_spike_vfx.tscn",
+      "source_sha256": "d64af122b5a76caf6fdb6c4d033a299bb6e4cedf870a6006d7cc3d34c9712fa0",
+      "root_script": "res://src/Core/Nodes/Vfx/NFgGroundSpikeVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_burst_center_flipbook.tscn",
+      "source_sha256": "1a7405a0cd6704c535a1bf0ed0dc66374ed2bb1b7bd6aa44ac16fd3624c42d52",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_burst_left_flipbook.tscn",
+      "source_sha256": "8a8275705f5b84104b9bc50f8593d8901231ccf486f803c265b7525567ccc43b",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_burst_right_flipbook.tscn",
+      "source_sha256": "33b92cc15a90adc84458b80460e5e71b0c96aba6122b5c3e108e580b6e685154",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_embers_straight.tscn",
+      "source_sha256": "2ce5b4d50944392a0d0311216705caa3d6259e90ab63ff4b7d70b80ffcf00839",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_flipbook.tscn",
+      "source_sha256": "782b1c152769873dc79571fd88aeb9219380a6e25addb7f5c12d97f2daa1759a",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_flipbook_1.tscn",
+      "source_sha256": "0bc6e2c27c43af44ec215338d355d948f8fd0added5a6330c21b0ee9f89317ae",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_flipbook_2.tscn",
+      "source_sha256": "9acefbe985141a9d158c5087dbefb9334c22b750dbd2c2986fefd91295b080d4",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fire_impact/vfx_fire_flipbook_3.tscn",
+      "source_sha256": "e8049f10447467e359ee1b69277099fe36c667bcba1ec8ec01fb4bd0025af9fd",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fires/vfx_additive_step_fire.tscn",
+      "source_sha256": "78a1f39f7ed4b4b73bedcd70f92171fa58bed093d226b3d7749223b996ad5f3d",
+      "root_script": null,
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fires/vfx_ground_fire.tscn",
+      "source_sha256": "22d02dbbbf674cac74b0afbdcdd6d6fd6964d34ba452251face157a23a524b16",
+      "root_script": "res://src/Core/Nodes/Vfx/NGroundFireVfx.cs",
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/fires/vfx_stepped_fire.tscn",
+      "source_sha256": "925f5452c115bcc25dd3b05c473d7051b13406a30e6cc5aedd3bbd3d6a9fc39c",
+      "root_script": null,
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/forms/demon/vfx_demon_form_idle_vfx.tscn",
+      "source_sha256": "3ba7d6b17970e150183df294fbf4dd238f68b3c3f18a260579315ca6f3c25d7f",
+      "root_script": "res://src/Core/Nodes/Vfx/Forms/NDemonFormVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/forms/echo/vfx_echo_form_idle_vfx.tscn",
+      "source_sha256": "5a9628d0e5e68b0dd096a7594fc92aff0145d8eb73d870b57082c5b0acd84847",
+      "root_script": "res://src/Core/Nodes/Vfx/Forms/NEchoFormVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/forms/reaper/vfx_reaper_form_idle_vfx.tscn",
+      "source_sha256": "6d192bc6de3cdeabbfbd8e0770448f19866af99da00cd41037e3447385af3731",
+      "root_script": "res://src/Core/Nodes/Vfx/Forms/NReaperFormVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/forms/serpent/vfx_serpent_form_idle_vfx.tscn",
+      "source_sha256": "874c8b6061209fcf167a1cde3aab8ad794e44a36d2249a75226da9e2a41ff0a3",
+      "root_script": "res://src/Core/Nodes/Vfx/Forms/NSerpentFormVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/forms/void/vfx_void_form_idle_vfx.tscn",
+      "source_sha256": "ce409be94859d77da96bd02259ef065aa75892236f922698864cd540e16aeedc",
+      "root_script": "res://src/Core/Nodes/Vfx/Forms/NVoidFormVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/forms/void/vfx_void_form_spike_pivot.tscn",
+      "source_sha256": "902a8a83d25598d15cd5123783626e28c8ac2db36810c684552de78c56a63fa2",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/goopy_impact/vfx_goopy_impact_bits.tscn",
+      "source_sha256": "2047c41504e06b1da457ec796eeeab50d8337f2b490ce3b67087b863d95a0fcd",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/grand_finale/vfx_grand_finale_petals.tscn",
+      "source_sha256": "b7cd5596c6d0a8390a0ac010e089f6b6d54bd75efd49caf028dc3ed274781404",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/heavy_blunt/components/vfx_heavy_blunt_anticipation_core.tscn",
+      "source_sha256": "347b537da268c2c666a45a4930507f003faa615f81be6f4359680a87f72b6972",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/heavy_blunt/components/vfx_heavy_blunt_hit_core.tscn",
+      "source_sha256": "1b213dd4e545c0c1c01c3d05aa124723bbe3f32b05285680f3c1d982992506cd",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/heavy_blunt/components/vfx_heavy_blunt_hit_core_glow.tscn",
+      "source_sha256": "d20ecaf2faee505b854afbcaffa18f29611b3d13fee90ade592132a153a49757",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/heavy_blunt/components/vfx_heavy_blunt_hit_floor_smoke.tscn",
+      "source_sha256": "e78e29a9cb04dc2c3b1bc028cbd597835c59e190a43cfbf2c94db9442e82159d",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/heavy_blunt/components/vfx_heavy_blunt_hit_spikes.tscn",
+      "source_sha256": "42b0350ff56bbb4e22d7f3755bff04552c5ed64c5f118762b122ab4bce1da947",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/hellraiser_attack_vfx.tscn",
+      "source_sha256": "fa7c0db9e1842ae6f42fe9d68c3ecaace467d540ff8e65ff762b68ea867af614",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NHellraiserAttackVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/hit_spark_vfx.tscn",
+      "source_sha256": "27925af9d28d8df1d36cbf2f0e341951cc5737fcdf7bd4d31a0910d25ed3aacd",
+      "root_script": "res://src/Core/Nodes/Vfx/NHitSparkVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "known_four_existing",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Existing targeted scene; verify actual build manifest and source identity."
+    },
+    {
+      "path": "res://scenes/vfx/laser_vfx.tscn",
+      "source_sha256": "9d082389a48a2739c312da9a6c1928792aba06da2d5ec0c45c61d3d274c414ba",
+      "root_script": "res://src/Core/Nodes/Vfx/NLaserVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/lightning/vfx_lightning_flipbook_1.tscn",
+      "source_sha256": "31bff9368a41a1113759933baaee851d326f33c2c02eb9d175e9dfca91c86d99",
+      "root_script": null,
+      "categories_guessed": [
+        "lightning"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/lightning/vfx_lightning_flipbook_2.tscn",
+      "source_sha256": "923ad018dc40b0ec8fe4d96f19a2360267e698905a51e14d45a673314b4ab841",
+      "root_script": null,
+      "categories_guessed": [
+        "lightning"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/lightning/vfx_lightning_row_flipbook_1.tscn",
+      "source_sha256": "37a1e226a9f1d118e19de15b4b0aea549b85b3618948c94445a8efead2c233c9",
+      "root_script": null,
+      "categories_guessed": [
+        "lightning"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/liquid/vfx_liquid_droplets.tscn",
+      "source_sha256": "a23d9681d4d4c6e77f7e3683a32c710782b616b2411cf3832f7641475045d345",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/liquid/vfx_liquid_splash.tscn",
+      "source_sha256": "3191475a9165f520c743a761d201846f52678667521d8085263bd612bdeb5658",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/map_circle_vfx.tscn",
+      "source_sha256": "038f2cf76c25ff77bd7896a7ab85a3cdc1b58b0cd9e57d738feff1da287ea70c",
+      "root_script": "res://src/Core/Nodes/Vfx/NMapCircleVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/map_node_select_vfx.tscn",
+      "source_sha256": "516da9c2177a3116cce45f32e2714dc9611b0bc1f556d3a2441a7bdbb3eef221",
+      "root_script": "res://src/Core/Nodes/Vfx/NMapNodeSelectVfx.cs",
+      "categories_guessed": [],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/map_ping_vfx.tscn",
+      "source_sha256": "c93c8fe10192d1a594cfa05242e3c146f04684385b370d9df87bbfbbfe8335b8",
+      "root_script": "res://src/Core/Nodes/Vfx/NMapPingVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/missile/vfx_missile_core.tscn",
+      "source_sha256": "1bfc77a3157ea9aa4aca2362b4c4e2ec18724720cdcc90f75fe02c32c06cc670",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/missile/vfx_missile_impact_core.tscn",
+      "source_sha256": "9e9b852e231a83ad86b19e209b27baf0411a729de4d543360dcc220921d43b45",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/missile/vfx_missile_impact_smoke.tscn",
+      "source_sha256": "46a524cf2975da3a11ad588835fb6881833b75033a89afca70b4d4a51fd6d6c0",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/missile/vfx_missile_impact_streak_side.tscn",
+      "source_sha256": "834bf4717d489d4863a5ec2aeb502b6528fbbb9b0cdd2464ad19272ad355005f",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/missile/vfx_missile_sky_flare.tscn",
+      "source_sha256": "628ff6eedbc0d7e3209dff7413284436f45e20e91b901454ab1c898c29f1bd07",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/missile/vfx_missile_sky_ray.tscn",
+      "source_sha256": "280b622301b2377bd88cce187910e39d1e088adaa388266e7684dee6f5428f33",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/flyconid_spores_vfx.tscn",
+      "source_sha256": "ba6814fc3868c7a7fa7e9dbe5551039d83fea76bfc5e0debdb874c4f69630e00",
+      "root_script": null,
+      "categories_guessed": [
+        "poison"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/kaiser_crab_boss_explosion.tscn",
+      "source_sha256": "c023391b26ae9aa286d6ee1ceb06cdeef655f1c9a3b02180ee0b1ff36d63a20d",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [
+        "death"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/kin_priest_beam_vfx.tscn",
+      "source_sha256": "702889481a772a91b15520c2d3b38358fcc69b0ce8821e8833b04390928b7a0d",
+      "root_script": "res://src/Core/Nodes/Vfx/NKinPriestBeamVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/kin_priest_grenade_vfx.tscn",
+      "source_sha256": "734c7c21282873931a0953dce0d95b67afe7fbf4578d454de2960031fdc12a54",
+      "root_script": "res://src/Core/Nodes/Vfx/NKinPriestGrenadeVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/test_subject_burn_vfx.tscn",
+      "source_sha256": "84866998dfe6d5a0390a898baf35934d988727cb5b6ca700cd0186136f0266c5",
+      "root_script": "res://src/Core/Nodes/Vfx/NTestSubjectBurnVfx.cs",
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/vine_shambler_vines/vine_shambler_vines_back_vfx.tscn",
+      "source_sha256": "6beda8e04585c60f7414536a08940c590c6a7945b3586c1862c89a95439d6f18",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/monsters/vine_shambler_vines/vine_shambler_vines_vfx.tscn",
+      "source_sha256": "ccfe3e4a33d1fefe3f2e1f43c657aaa065ccba8d9ce8b70984069f81d0ac099b",
+      "root_script": "res://src/Core/Nodes/Vfx/NVineShamblerVinesVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orange_glow_big.tscn",
+      "source_sha256": "3673fe36cbb5e4fffcfc8b148a11c4a604a5d527e3b5eee7356acaa3b2bc6828",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke.tscn",
+      "source_sha256": "28f36b72803dde06832a03a0e0983064fc2b5dedda754904f1e4e89900a748cb",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile.tscn",
+      "source_sha256": "26806032b972e1c953e9f97cdcbd073d8acead943e1834f4a889baae71f71621",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxProjectile.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile_handler.tscn",
+      "source_sha256": "ee01ecc546e24e075a6d674877c3892bbcf1c85c3968732886bf609ae05aa72e",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxProjectileHandler.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/dark/vfx_dark_orb_evoke_projectile_impact.tscn",
+      "source_sha256": "9f85daaae03a40045e704d5300dbdcbbf1bbf40b8058c2d0d4bd0014159d3360",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/frost/vfx_frost_orb_evoke.tscn",
+      "source_sha256": "75030120efddb5ffacaca6ce70a0777d17abfd693772df5f42d34745fbac202a",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/frost/vfx_frost_orb_evoke_shield.tscn",
+      "source_sha256": "6c61bf2b3526fecdb5aee3bd2c1a1d7446bb65aba5d64181e62b5847d3b27d26",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "block"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/frost/vfx_frost_orb_passive_shield.tscn",
+      "source_sha256": "a717c24e1bd1563829c96b8169f98f2fc1df37872e6b06ba5ea9285382563aff",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "block"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/frost/vfx_frost_orb_snow.tscn",
+      "source_sha256": "f4247890be63827dc86bc4b9e2172f333672488d31bad3ed7d90feacf74c1b64",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/glass/vfx_glass_orb_evoke.tscn",
+      "source_sha256": "dd9fa59737fbe7fe610672b5633130112e221e056905e20a70ba113245bf8870",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/glass/vfx_glass_orb_evoke_impact.tscn",
+      "source_sha256": "b033e76bb67b605b779d4ad1f36770eee44f76b3d9656c2503be50037e74117d",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/glass/vfx_glass_orb_passive_impact.tscn",
+      "source_sha256": "8a1a2f7d0684e273207b4edbfeb14ed9d20e2b093b15bae08c27332526534d74",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/lightning/vfx_lightning_orb_evoke.tscn",
+      "source_sha256": "5a72921a803f2b2d7ea7c25c38b545fa6a54629f55fd452a07eafee7520ce2d9",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "lightning"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_evoke.tscn",
+      "source_sha256": "e687e65c6432f82ab2d535ae9a6ec362b2903161ed0f742e27e4abf2d83d5236",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_goopy_particles.tscn",
+      "source_sha256": "a9a9a596df4c9f7995c34a6eafc65165998bd55bd6d0a92d1557a3b10cda69b6",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_projectile.tscn",
+      "source_sha256": "4e5f80c312ee2c0662c5d5d70b2adeeb4a938a659c6d9eef5b43afcd858b6311",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxProjectile.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_projectile_handler.tscn",
+      "source_sha256": "c290a0dc12f8a4203ed1cc50309db331e77ebe5c372ce6faf3309d72cbfa1dc6",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxProjectileHandler.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/orbs/plasma/vfx_plasma_orb_projectile_impact.tscn",
+      "source_sha256": "ed8ba1f609d9d956e07834d68b03df8f44a2c916784a4f2a8690128c604db61b",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/poison/vfx_poison_skull.tscn",
+      "source_sha256": "2d305e0323ddbd93208b7a49f26c9cd7feeebf170c54dacbfb05982e0cafb8aa",
+      "root_script": null,
+      "categories_guessed": [
+        "poison"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/power_applied_vfx.tscn",
+      "source_sha256": "047491b40ac2cb924fb2e313047a8fe8856bf0851b4452a93d549e1adced115b",
+      "root_script": "res://src/Core/Nodes/Vfx/NPowerAppliedVfx.cs",
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/power_flash_vfx.tscn",
+      "source_sha256": "4ea63c1aa776f380e3c54d5b24743ce4ba60dc77a5700cef22841f48119e8717",
+      "root_script": "res://src/Core/Nodes/Vfx/NPowerFlashVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/power_removed_vfx.tscn",
+      "source_sha256": "8364ee6abfd7c5aabb7ae57e34193a0883e48a18984631a6409a15c92be7cfa6",
+      "root_script": "res://src/Core/Nodes/Vfx/NPowerRemovedVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/rare_glow_vfx.tscn",
+      "source_sha256": "a07baf8724e5e745218fcb0b72c79d544abc68ac8f89d5f58aae7ac2483ea3ca",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NCardRareGlow.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/relic_flash_vfx.tscn",
+      "source_sha256": "e8e1ea82344c91fc0a28b60a662acc48c5525fc653014d351263fd18dd3763d8",
+      "root_script": "res://src/Core/Nodes/Vfx/NRelicFlashVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/relic_inventory_flash_vfx.tscn",
+      "source_sha256": "03cc6257e5f4da975ccc7fd7c54210501fada0b8912f94f564c46c366c725f0f",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/relic_rare_glow_vfx.tscn",
+      "source_sha256": "42379f02b5ec0445b4a4d41886d2820f9604c2c201d44ef324731f207bb1556a",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/rest_site_screen_wipe.tscn",
+      "source_sha256": "efb5abec488cd880317709f90f1ad34aa4393b95de4db68e2bdd6776b516dbf8",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/rest_smoke_vfx.tscn",
+      "source_sha256": "ddbf2d03b101986f04a04ebeae499b4f305b02dfd1289834c3b8bb68d23a5b95",
+      "root_script": "res://src/Core/Nodes/Vfx/NRestSmokeVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ribbon_flipbook/vfx_ribbon_flipbook_1.tscn",
+      "source_sha256": "52f8ca650a58aef527085514b27e1552694f204c580b9a6fcf4b29509fdc260b",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ribbon_flipbook/vfx_ribbon_flipbook_2.tscn",
+      "source_sha256": "2d7df8abbfac7b05a64d30d4e1e142c83fc040fe94fbea4665596f0d8edaba9d",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scratch/vfx_scratch_flipbook.tscn",
+      "source_sha256": "8c472ee5e47334e5698553bb36023b4f80345d8644628f35874f25a19c8039f7",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scream/vfx_scream_distortion_polar.tscn",
+      "source_sha256": "16fd9ca1ccc7aa3ae6a91156f755031e49b25a53ab136287e482f89cd60ed73a",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scream/vfx_scream_ring_polar.tscn",
+      "source_sha256": "5ca5d7834dbac88e2a37a76553b44ad82a2122c7621f7e1d3b895eed3ffc4869",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scream/vfx_scream_squiggly_distortion_polar.tscn",
+      "source_sha256": "85a0d924d102af7a2a747d5f037445637b1b3b750147f2d0ce81ad8fb06fe4c4",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scream/vfx_scream_squiggly_ring_polar.tscn",
+      "source_sha256": "fe3bbbd9f4bae1cb5e7b88705e2a954b08642540647d1ea1d4aadfde3a6b60fd",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scream/vfx_scream_squiggly_streaks.tscn",
+      "source_sha256": "ae43c3b3cc4eabedea506cbd7bbb59d03bd5d48689b069a6c4b5fd1741bbab3b",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/scream/vfx_scream_streaks.tscn",
+      "source_sha256": "24767609d7d8f6ce3f04c4be74f597bec4739eeb1d4476c29351c6d44d0c151f",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/slash/vfx_slash_core.tscn",
+      "source_sha256": "66d3dc355dc5855ffa46bcec8412ae225a80ea965ca1ebcea8456d8824054d69",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/slash/vfx_slash_quick.tscn",
+      "source_sha256": "654858eefef9228215ca074b449b6235a2ed2f5bc445092a6089478b1e45e11b",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/sleeping/vfx_sleeping_z.tscn",
+      "source_sha256": "4270ed53286484d11489c2908b1ce3d557d0a70dd25d82b9b759fc05e56b46eb",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/sovereign_blade.tscn",
+      "source_sha256": "d036ec834d82d9a446871bc16e86c6ddb29516db74f36ea2627dfde0e2b80c75",
+      "root_script": "res://src/Core/Nodes/Vfx/NSovereignBladeVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/spike_splash_vfx.tscn",
+      "source_sha256": "4c4374a35fde94af8ff0a8ad40c088299c9d760113b08bcca2277394f9ec77c8",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NSpikeSplashVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/stab_vfx.tscn",
+      "source_sha256": "3f453064194a9b5d72ff94258787019d6e959e92190f84f0d2e31ccd7735b30b",
+      "root_script": "res://src/Core/Nodes/Vfx/NStabVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/stabby_line_particles.tscn",
+      "source_sha256": "09c3bb361fb8ead2dce19c13fc9f16f7a929e55b14edf91bc68a1046d455fa49",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/star_gain_vfx.tscn",
+      "source_sha256": "8dcb28150cf6774531f684fd075ea2fa3eaf1b585d3391479930ee54d250c459",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/starry_impact/vfx_starry_impact_constellation_small.tscn",
+      "source_sha256": "cf362bc2b0d08a3bdba5f3c99d737621905148e2d9664710e7e20599bc7349e9",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/starry_impact/vfx_starry_impact_core.tscn",
+      "source_sha256": "34f2ea5258d99b733a892323bad33dfc28a1d6a789fa5bab514a6ac970699492",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/starry_impact/vfx_starry_impact_small_stars.tscn",
+      "source_sha256": "6ce6df77125b173f0480936d2899eba728ed9d5012798e9076217624639975f3",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/starry_impact/vfx_starry_impact_smoke_flipbook.tscn",
+      "source_sha256": "97bdd0381942d51bf588bcec202ce5e670d50b24dd97401c274b801bcd73a4ec",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/stunned_vfx.tscn",
+      "source_sha256": "00938bc15a5663420a043ebf243f8153b54c90c05124b2724a9774060eeb7bd1",
+      "root_script": "res://src/Core/Nodes/Vfx/NStunnedVfx.cs",
+      "categories_guessed": [
+        "debuff"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/templates/vfx_template_particles.tscn",
+      "source_sha256": "10b5fc13fb2fc17e0096cf7479917ac0c2bdc90583c59f5ab811a4de7e231586",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/templates/vfx_template_spine.tscn",
+      "source_sha256": "31ee0f8c7692c6408638eab04927d198485af358aba822dd1572221d7534cd02",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/templates/vfx_template_sprite_animation.tscn",
+      "source_sha256": "2cda6c90fa477b391146985fa5eef9351570cd4b8ac0d0aa1e55526facb5e088",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NSpriteAnimator.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/the_insatiable_vfx_test.tscn",
+      "source_sha256": "5d0a87a4633a4a378fbbf7fb6766e4c653b9131abe712449ba9de0504e44715a",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/thin_slice_vfx.tscn",
+      "source_sha256": "4e13ad662c01606a67f26cac05317e5642a2508f670e4fd2269f270da600dea2",
+      "root_script": "res://src/Core/Nodes/Vfx/NThinSliceVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/trail_test.tscn",
+      "source_sha256": "9f79be0eab8cecdf178d7d5661a1999e3dd6a8b8244ce0d9a429383124a9bc6d",
+      "root_script": "res://src/Core/Debug/NTrailTest.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/bound/vfx_ui_card_affliction_bound.tscn",
+      "source_sha256": "56df4a08d2cd7b6bc266ab5d3cf6e96797ce67982ceb742dfe3fa5d21df4158a",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/entangled/vfx_ui_card_affliction_entangled.tscn",
+      "source_sha256": "2d71c512c09fbb4447ae3c4d3de53bb396887d3f3e42d4ae21f4722ac62c4d4d",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/entangled/vfx_ui_card_entangled_leaf.tscn",
+      "source_sha256": "7c11f7a0fb0912c31119534198fc0705cb85dd66a8147405f016719a6bef7598",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_galvanized.tscn",
+      "source_sha256": "7db96f98decab4782383dbd0f35f45e97538fd969143697be29e2ebffa9d7240",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_lightning_corner.tscn",
+      "source_sha256": "4947a05298a58a0417b75c4aab538c43974c76414cabe4b2a1972cd776f78f79",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "lightning",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/hexed/vfx_ui_card_affliction_hexed.tscn",
+      "source_sha256": "45f7540924bafbfd257e19ade4b0cc8b04e6e9948c799857a7e7afcfe988b658",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/ringing/vfx_ui_card_affliction_ringing.tscn",
+      "source_sha256": "47a7a92981dcebb384c7d97a80f106764d6007e2cd68cae03879d27496f02b94",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/smog/vfx_ui_card_affliction_smog.tscn",
+      "source_sha256": "8f9e8bd88b8a79f7fb11faab4aecb1c0e359925e3c096f97bc088b8ad23a9ca6",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/afflictions/tainted/vfx_ui_card_affliction_tainted.tscn",
+      "source_sha256": "22d7648bc82630105e9c6aee8d5932dc261451e5ebaefac0e0e2706de74ac128",
+      "root_script": null,
+      "categories_guessed": [
+        "debuff",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/vfx_card_exhaust.tscn",
+      "source_sha256": "ced6770f57a48f401428dffb874c164e01d4220d1ec70ddf92470a1538f2603b",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NCardExhaustVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/vfx_card_exhaust_quick.tscn",
+      "source_sha256": "44ef198effedc545dc88ebe3f102b06b31fa30bf76e0d324f2d61f74371a4ff5",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NCardExhaustQuickVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/vfx_card_remove.tscn",
+      "source_sha256": "7ef66f9c42b9d5fb7941ece2a4ca1c5376614058f8007597dc75e3eaac0d395e",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NCardRemoveVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/card/vfx_card_transform.tscn",
+      "source_sha256": "b677da85b398d9becf9fee29031c78b03121a65c9b935043b0ff92ae8cd41167",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NCardTransformShineVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/vfx_buff_applied.tscn",
+      "source_sha256": "2f6f7b31d4cfa3fb8ee3c7753d40fc215b09d5b8908e72b62979d48041b98f90",
+      "root_script": "res://src/Core/Nodes/Vfx/Ui/NPowerAppliedBuffVfx.cs",
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "known_four_existing",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Existing targeted scene; verify actual build manifest and source identity."
+    },
+    {
+      "path": "res://scenes/vfx/ui/vfx_debuff_applied.tscn",
+      "source_sha256": "49a39474c5ff182985bef8d313c5af6ca394b79d9aae770aecf078e5a00cd78c",
+      "root_script": "res://src/Core/Nodes/Vfx/Ui/NPowerAppliedDebuffVfx.cs",
+      "categories_guessed": [
+        "buff",
+        "debuff"
+      ],
+      "static_class": "known_four_existing",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Existing targeted scene; verify actual build manifest and source identity."
+    },
+    {
+      "path": "res://scenes/vfx/ui/vfx_failed_join.tscn",
+      "source_sha256": "6a433f27752a110a5b373ea69d95090be5a019fac5830e7e989108222772a8c5",
+      "root_script": "res://src/Core/Nodes/Vfx/Ui/NFailedJoinVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/vfx_gaseous_screen.tscn",
+      "source_sha256": "158ac61ad5516def292228d48a2edfd7357e60e47f58bbaf4096433bfcf8b8db",
+      "root_script": "res://src/Core/Nodes/Vfx/Ui/NGaseousScreenVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/vfx_low_hp_border.tscn",
+      "source_sha256": "741b62d163dac062ffae1f346b50cce81d4c37045082862b61ea2ecd5da96206",
+      "root_script": "res://src/Core/Nodes/Vfx/Ui/NLowHpBorderVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui/vfx_ui_epoch_unlock_chain_shards.tscn",
+      "source_sha256": "45971d2242229cf5d3c368918b739e40d0fa29347c19056110d92d639d487c42",
+      "root_script": null,
+      "categories_guessed": [],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/ui_flash_vfx.tscn",
+      "source_sha256": "9b63492f34966ab88ceea38f5400e27f8b317f774790a4c93e455c5f957010ba",
+      "root_script": "res://src/Core/Nodes/Vfx/NUiFlashVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/uncommon_glow_vfx.tscn",
+      "source_sha256": "81c4be73c111bc576ed7a96ce8a8710abcc9ef504e1d12c49fa22df0421fec59",
+      "root_script": "res://src/Core/Nodes/Vfx/Cards/NCardUncommonGlow.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_adrenaline.tscn",
+      "source_sha256": "7fc81b4b123e5e88f796a63af5275a812b33ee449ceff4252ef4b3e075b60772",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_attack_blunt.tscn",
+      "source_sha256": "865465c647b54b70824e109199f94a50bb79398d10c66a54fa8a84566f8ec87c",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_attack_lightning.tscn",
+      "source_sha256": "32d0dd6a2747f3606497451f6d1bbb99e258e8e410db7ed2cacfa03fa290465b",
+      "root_script": null,
+      "categories_guessed": [
+        "hit",
+        "lightning"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_attack_slash.tscn",
+      "source_sha256": "b1649985226698e0da28038eae184cae1e1cefd77de5a31670422e3793699590",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NSpriteAnimator.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_big_slash.tscn",
+      "source_sha256": "49125e0ca5185232043da2d419427d135ca8543061302164ed6e9a5ad7cd525d",
+      "root_script": "res://src/Core/Nodes/Vfx/NBigSlashVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_big_slash_impact.tscn",
+      "source_sha256": "8585c0668cf10086fc80eab80459a6872019d680d9ab8f80cedba85230014acb",
+      "root_script": "res://src/Core/Nodes/Vfx/NBigSlashImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_bite.tscn",
+      "source_sha256": "4238fcbcda5fc3322f1df0336e03195a37c045fb244bd54d5607e38f1d065f7c",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_block.tscn",
+      "source_sha256": "cb753f4d4ce3e53b0e9c13585edc0a0ce20686e3511131a1b5d077df8d02dedd",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NSpriteAnimator.cs",
+      "categories_guessed": [
+        "block"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_block_broken.tscn",
+      "source_sha256": "eccf3530ad965de2a1625f56cb945b718cb040b66784f83edc41480dae517a05",
+      "root_script": "res://src/Core/Nodes/Vfx/NBlockBrokenVfx.cs",
+      "categories_guessed": [
+        "block"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_blocked_text.tscn",
+      "source_sha256": "8387ed0a5c2d9f676fbb3f5da6ae2702a9459ee65c03e410bd4e736d8d9610a5",
+      "root_script": "res://src/Core/Nodes/Vfx/NDamageBlockedVfx.cs",
+      "categories_guessed": [
+        "block",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_blood_wall.tscn",
+      "source_sha256": "b063e08316526322a18b399d3edcd1d07acad0a2acd5165e70fb77830684fcf8",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_bloody_impact.tscn",
+      "source_sha256": "632fd1cd0887f713b77032f066d72d08ed641b6743be7247d23dbe9aa5c284da",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_enchant.tscn",
+      "source_sha256": "289c356be8c3c96f3a77349bddd4f50b6bd4a96a6c612f2fa528b54c99668c31",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardEnchantVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_fly.tscn",
+      "source_sha256": "40ee60282757cce899e48acd9b720461f955ae7004faa409a518a9e819ac9e1f",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardFlyVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_power_fly.tscn",
+      "source_sha256": "e57e660ee0f7f42d56d5fd3b2966e2f8990289dc82f05c8ae2f48ab8ee754380",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardFlyPowerVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_shuffle_fly.tscn",
+      "source_sha256": "feb1235329c1fc2a9c31a15873178146012047420b4a3313598617def1378564",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardFlyShuffleVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_smith.tscn",
+      "source_sha256": "65e258ac87e40fce0e41bc1ee804bbe54656ceb9cc54346a2e72b15eeb7cf600",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardSmithVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_transform.tscn",
+      "source_sha256": "a7c8a089ca2ad6b5adf8c399dac7282030a63738584a671801664dc25b4a4228",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardTransformVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_card_upgrade.tscn",
+      "source_sha256": "86af52238bee864d8cd70bb46493529650bf707ff4ec3c438544888ff43f1cc8",
+      "root_script": "res://src/Core/Nodes/Vfx/NCardUpgradeVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_chain.tscn",
+      "source_sha256": "3361067698864cad236800cff99230da6cda841104f3a09ada4d9734025dd911",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_coin_explosion_jumbo.tscn",
+      "source_sha256": "2ec49c174775f8f12f71061c8450f2795081236f26e042ea4a42843ac7d45872",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "death"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_coin_explosion_regular.tscn",
+      "source_sha256": "e67bb3c9db69acda1b7e5f0c87cac0992c66cc93e4bc35c7b88dd92e04c4115b",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "death"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_coin_explosion_small.tscn",
+      "source_sha256": "252c3cdbf7b32fb4a6d8af8117daba22253c4fbc3578a89549deace5bb604e63",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "death"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_constant_fire.tscn",
+      "source_sha256": "2ce3c73113f0ca08dceefc3fb81b90c574ce576032203eeb46dcb1ba45cf21c3",
+      "root_script": null,
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_cross_heal.tscn",
+      "source_sha256": "dd2b0e3116bea3f6706790326a02c0c49094bd4935e4470da94378ebaeba5940",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "heal"
+      ],
+      "static_class": "known_four_existing",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Existing targeted scene; verify actual build manifest and source identity."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_cross_heal_fullscreen.tscn",
+      "source_sha256": "3227287176e754e4fe78864c531155c38bfe0fe7a4506b1bda311369fe158d3b",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "heal"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_dagger_spray.tscn",
+      "source_sha256": "e2ff643e5301190dcbd113a1f448082d2365dab4cb7e9414f597ea0ba1d0db3d",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_dagger_spray_flurry.tscn",
+      "source_sha256": "6a4b5599b3f7b739304175b149ce747df15157f08a5629a8bb33b74d3c2695c6",
+      "root_script": "res://src/Core/Nodes/Vfx/NDaggerSprayFlurryVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_dagger_spray_impact.tscn",
+      "source_sha256": "0b59bfa3405d63c97042774dc3949ea487b21d9c450bdddcc31c7ff516fa601a",
+      "root_script": "res://src/Core/Nodes/Vfx/NDaggerSprayImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_dagger_throw.tscn",
+      "source_sha256": "4ec03bebd12faa0e6df144df53a312425102b0b568e72e64013b05aebea32299",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_damage_num.tscn",
+      "source_sha256": "2ffd00e6de12d2b2962786a095639c2823315206d8b6315f7446aba469a9e465",
+      "root_script": "res://src/Core/Nodes/Vfx/NDamageNumVfx.cs",
+      "categories_guessed": [
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_decimillipede_rocks.tscn",
+      "source_sha256": "02bf6892535799c4a50aa4ee719f8fa34eb0ad911ed6391bf32d01d0c679984c",
+      "root_script": "res://src/Core/Nodes/Vfx/NDecimillipedeRocksVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_doom.tscn",
+      "source_sha256": "59611820b3abf2416a519a7775a2be1773ae2d3d50031cd0f1f9f88bf992b013",
+      "root_script": "res://src/Core/Nodes/Vfx/NDoomVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_dramatic_entrance_fullscreen.tscn",
+      "source_sha256": "ab2e9d6a35b3f79e8096380454dc7d9a048d72617094fe60816ea12cf11604a6",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_dramatic_stab.tscn",
+      "source_sha256": "2c8c69de524408b79f8c96a4d879b73662e7118c64899a73d779cd8edba8c663",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_fire_burning.tscn",
+      "source_sha256": "bcccfe700f11374fb9eaf3d12ebd76f6f92a18f789bfd18ee10fea2cd7e28d6e",
+      "root_script": "res://src/Core/Nodes/Vfx/NFireBurningVfx.cs",
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_fire_burst.tscn",
+      "source_sha256": "abc9001afe9ea80c74eb76cb3dd6546b809dfd3d0a79bf38503dfc63319db8fc",
+      "root_script": "res://src/Core/Nodes/Vfx/NFireBurstVfx.cs",
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_fire_smoke_puff.tscn",
+      "source_sha256": "8a3762d07fc62c566ea7d519c5b5a55fa6b8e9a5032b6526daa6674950bc6f3d",
+      "root_script": "res://src/Core/Nodes/Vfx/NFireSmokePuffVfx.cs",
+      "categories_guessed": [
+        "burn"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_flying_slash.tscn",
+      "source_sha256": "a569ffcb806a6a54a75239ea38a264a5dcc240cfc441acb04e82a5d2daa91678",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_fullscreen_text.tscn",
+      "source_sha256": "d083306ee9700e9c50543d42255f76b80795a9fd7d12a3c879a3ddf7aa75796c",
+      "root_script": "res://src/Core/Nodes/Vfx/NFullscreenTextVfx.cs",
+      "categories_guessed": [],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_gain_epoch.tscn",
+      "source_sha256": "e6a4208d8b7f4ff8600ad45f089a698da1470d1c45a82eb82efa6e290f885ace",
+      "root_script": "res://src/Core/Nodes/Vfx/NGainEpochVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_gaseous_impact.tscn",
+      "source_sha256": "a2fa743f92b2616f8081a5a197129b38e4a894c33d492b0a2254790452849051",
+      "root_script": "res://src/Core/Nodes/Vfx/NGaseousImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_gaze.tscn",
+      "source_sha256": "4e3b3002b5ee8e8c835005543c364b15490a8de70fb8fceeabfc4da7cc83ae8e",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up.tscn",
+      "source_sha256": "acea49b2d8fdf428fe644df8db1f522806df27a3e0ee70538ed586f5b1fbc725",
+      "root_script": "res://src/Core/Nodes/Vfx/NPowerUpVfx.cs",
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up_2d_front.tscn",
+      "source_sha256": "2178e629c13c5adb8fa76c6bfc268e40e4a054f5023cdfe7160f8984ea5ccab5",
+      "root_script": null,
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up_3d_back.tscn",
+      "source_sha256": "9d58a34523fc88c1e3d6bd7bf1ad443b6ea849b67f0219e4cded921d7f2fc6c7",
+      "root_script": null,
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up_viewport_bg.tscn",
+      "source_sha256": "c99d918948d0a4af2cb554047f1b94a7bd4369db2c270070121e5edfb78628c7",
+      "root_script": null,
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_giant_horizontal_slash.tscn",
+      "source_sha256": "2ed10abfc92f8762e3ea44eae12edb667efa6fabe92670f30b64b0b65e8acb02",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_goopy_impact.tscn",
+      "source_sha256": "e672f8e9499899003b98a8e38d7b58019ad725dc4dca141412094a98ae761aea",
+      "root_script": "res://src/Core/Nodes/Vfx/NGoopyImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_grand_finale.tscn",
+      "source_sha256": "9641ee5f8dc54ccef99316329087ac08720cc9445d4bc8996e899729a0311403",
+      "root_script": "res://src/Core/Nodes/Vfx/NGrandFinaleVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_grand_finale_impact.tscn",
+      "source_sha256": "a97d0dc9b4f5bb14b84455d1de6d909d60e16603c006791312b8d48a802ba0b4",
+      "root_script": "res://src/Core/Nodes/Vfx/NGrandFinaleImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_heal_num.tscn",
+      "source_sha256": "49cce69049e37469f853bbd527a3ec1359612952b9bbabaf9b88baffa5374e00",
+      "root_script": "res://src/Core/Nodes/Vfx/NHealNumVfx.cs",
+      "categories_guessed": [
+        "heal",
+        "cardUI"
+      ],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_heal_osty.tscn",
+      "source_sha256": "109e90f8765a4ad062ab6cf8f4ec21faea99b86c5cc4707927da7d3feb16aed6",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "heal"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_heavy_blunt.tscn",
+      "source_sha256": "8fdaa444b398b88064945d491d0764206ff4f891e163bf09d2d7299d6bb150fa",
+      "root_script": "res://src/Core/Nodes/Vfx/NHeavyBluntVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_hyperbeam.tscn",
+      "source_sha256": "4e4c1b4a2142192e116aad10787a7c263bcdb2c6d40f87a474788b6342abc5d2",
+      "root_script": "res://src/Core/Nodes/Vfx/NHyperbeamVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_hyperbeam_impact.tscn",
+      "source_sha256": "2fe8339cc373558d77a6bc6303ec07330a504f7ce0cfa4a31dd3b292a89fd860",
+      "root_script": "res://src/Core/Nodes/Vfx/NHyperbeamImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_item_throw.tscn",
+      "source_sha256": "99c6a760747d6d09fc4902eee1d9195ad503e9aed95ff7c72d99e171a3add38b",
+      "root_script": "res://src/Core/Nodes/Vfx/NItemThrowVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_kin_poof.tscn",
+      "source_sha256": "38f2024102eee4729d209f7688f3b028a489fe1aa38cc20a320de1ce910937c7",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_large_magic_missile.tscn",
+      "source_sha256": "806a1e2f08dec2ae0f0843544d7fbde0dba7a5cae7effc56ef8cc4bdf15bd1e2",
+      "root_script": "res://src/Core/Nodes/Vfx/NLargeMagicMissileVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_line_burst.tscn",
+      "source_sha256": "1064d4ae87cc741d0b2edb2cb7587a85478b371d79abae7838e55f12c4dfbf4e",
+      "root_script": "res://src/Core/Nodes/Vfx/NLineBurstVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_line_heal.tscn",
+      "source_sha256": "1bc84816166217cdea0666e73858e6608aeec987f3cd04e94b0b1746cd4493f0",
+      "root_script": null,
+      "categories_guessed": [
+        "heal"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_liquid_overlay.tscn",
+      "source_sha256": "a60fa44490025ceca28a6c3914b02578f1406feb3d8a943cf65788feee8c6764",
+      "root_script": "res://src/Core/Nodes/Vfx/NLiquidOverlayVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_minion_dive_bomb.tscn",
+      "source_sha256": "5c4ee7745ffe908bbfc8b9fbde372e7360fe8a815fd3a8b5fac6fed1209177ea",
+      "root_script": "res://src/Core/Nodes/Vfx/NMinionDiveBombVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_molten_fist.tscn",
+      "source_sha256": "7070b036ecc78561a967f8610dda65c84a70d733dde52626a5cdef4e80bfcd78",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_monster_death.tscn",
+      "source_sha256": "bad6cbfaa53f948608e80450a1aac71af05ab5e6067e41ac485f9e459deeaa3d",
+      "root_script": "res://src/Core/Nodes/Vfx/NMonsterDeathVfx.cs",
+      "categories_guessed": [
+        "death"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_poison_impact.tscn",
+      "source_sha256": "c03a2f2255dfd695b1072aa34c0db61ec491544968597c51c436c586040b0078",
+      "root_script": "res://src/Core/Nodes/Vfx/NPoisonImpactVfx.cs",
+      "categories_guessed": [
+        "hit",
+        "poison"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_potion_flash.tscn",
+      "source_sha256": "996a98dadfe15b9a39c3b162d65163d486bd19289d3fd407f01ff98a77aed039",
+      "root_script": "res://src/Core/Nodes/Vfx/NPotionFlashVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_power_up/vfx_power_up.tscn",
+      "source_sha256": "5c9ec9329fdd64ef9c8e9b79314840500bffa946013b53db4277e1b892d1f452",
+      "root_script": "res://src/Core/Nodes/Vfx/NPowerUpVfx.cs",
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_power_up/vfx_power_up_2d_front.tscn",
+      "source_sha256": "9cc1edcfc7827020e3ca6790df5f2d736d3dfcac6093dd3028f78f5d0d4bcd0b",
+      "root_script": null,
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_power_up/vfx_power_up_3d_back.tscn",
+      "source_sha256": "ac5d028267a66b0391aedc7d81e7ac0240d0dc146b141917a9125382e77446aa",
+      "root_script": null,
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_power_up/vfx_power_up_viewport_bg.tscn",
+      "source_sha256": "4c842d3ac3b8417e4b99cd10addef8d5f66f14f1c79377980cbfb0c499d6fa84",
+      "root_script": null,
+      "categories_guessed": [
+        "buff"
+      ],
+      "static_class": "scriptless_visual_candidate_factory_and_child_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Scriptless static visual candidate; factory, callers and child contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_rock_shatter.tscn",
+      "source_sha256": "a96f2d175f0dea4ad754190625c0035e9750db1d8fb5f767c63ab24f499b94b6",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_rolling_boulder.tscn",
+      "source_sha256": "e25ecab725e6ee73ee3e36f42e1f0823d198e96d24b6fd78affb6bb172a18cc5",
+      "root_script": "res://src/Core/Nodes/Vfx/NRollingBoulderVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_sandy_impact.tscn",
+      "source_sha256": "931da464e4d4bacd37ac8cf2368427118d2ed3025e6ab3bd822714b019c4f08f",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_scratch.tscn",
+      "source_sha256": "033a980bf7b2dec2085c946ed89934e1af29cbb5124921284d39b7cb2dab40d9",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_scratch_impact.tscn",
+      "source_sha256": "c96506c02f86be33475551dec21f61836392ab1a14d64f4dbd0dc960b278c34d",
+      "root_script": "res://src/Core/Nodes/Vfx/NScratchVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_scream.tscn",
+      "source_sha256": "737a6593a8822032559a16716fcad88c855b767600f0e11a5774efd24a89525c",
+      "root_script": "res://src/Core/Nodes/Vfx/NScreamVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_shiv_throw.tscn",
+      "source_sha256": "0ee9f59b470cb5ec77953277864b18e287fe73be6265eed443046b3273deb852",
+      "root_script": "res://src/Core/Nodes/Vfx/NShivThrowVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_sleeping.tscn",
+      "source_sha256": "8d9f4ecfcd5eda5dbbedb97e663a7bae7ec01054de4759fe7bc789d157fc17f1",
+      "root_script": "res://src/Core/Nodes/Vfx/NSleepingVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_slime_impact.tscn",
+      "source_sha256": "1dc1a2aa5624b09d18e1cfc04932bbc41bc1cb60d160cf03c8577305e21ef142",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_small_magic_missile.tscn",
+      "source_sha256": "b48cf830aa6405770503434748e776743b831c2e2cf1292fcc6ecc4f3ed844c5",
+      "root_script": "res://src/Core/Nodes/Vfx/NSmallMagicMissileVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_smoke_puff.tscn",
+      "source_sha256": "5bf44ec02f396f2206e84318360b2e6826a14eacf547993c619cb32bae8332d1",
+      "root_script": "res://src/Core/Nodes/Vfx/NSmokePuffVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_speech_bubble.tscn",
+      "source_sha256": "d7934f23dd5e14f460e4e983ad56d001f8b6b78d72f7d487cedfca2fb4de5691",
+      "root_script": "res://src/Core/Nodes/Vfx/NSpeechBubbleVfx.cs",
+      "categories_guessed": [],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_splash.tscn",
+      "source_sha256": "85234f88b7f5f2c0b03efd34106e8a4d44206c496a83fc1ec5f4cdf6e442d1b0",
+      "root_script": "res://src/Core/Nodes/Vfx/NSplashVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_spooky_scream.tscn",
+      "source_sha256": "6f72e1d6bc6f8aea89d57844c1abf9a685d97ada34be21938ed79a923220f1c5",
+      "root_script": "res://src/Core/Nodes/Vfx/NSpookyScreamVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_spore_impact.tscn",
+      "source_sha256": "d9df47e892566f4133bcc21a714e19e704f670eb97f89e7aa7bc8e83afb9b304",
+      "root_script": "res://src/Core/Nodes/Vfx/NSporeImpactVfx.cs",
+      "categories_guessed": [
+        "hit",
+        "poison"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_starry_impact.tscn",
+      "source_sha256": "f9b59ce9203e57e404c14b2447f5cf517a66653f5fd834be3fc4bca22397cb66",
+      "root_script": "res://src/Core/Nodes/Vfx/NStarryImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_sweeping_beam.tscn",
+      "source_sha256": "eca61095540aabd43aeb5b153a3d6469c3b305b0be9b68f89102bb6efd34a0a6",
+      "root_script": "res://src/Core/Nodes/Vfx/NSweepingBeamVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_sweeping_beam_impact.tscn",
+      "source_sha256": "3c1af60e6c010364ca1431687719b48e6b0b77fd13c366f457a8b47f4e3b6a27",
+      "root_script": "res://src/Core/Nodes/Vfx/NSweepingBeamImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_thought_bubble.tscn",
+      "source_sha256": "7874b579d585b8d02625089b59f0740e256e37a28839572106f0db072360292d",
+      "root_script": "res://src/Core/Nodes/Vfx/NThoughtBubbleVfx.cs",
+      "categories_guessed": [],
+      "static_class": "protected_information_or_ui_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "May carry gameplay or UI information; preserve pending semantic and caller audit."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_thrash.tscn",
+      "source_sha256": "184d08bf199ddc5e349a9458717f7ef04dadd93af4d0aa51698299a322d903fb",
+      "root_script": "res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs",
+      "categories_guessed": [],
+      "static_class": "generic_particle_system_requires_lifetime_audit",
+      "build_status": "candidate_verify_build_manifest",
+      "review_reason": "Generic particle root; verify actual build manifest and source identity, and audit lifetime and callers."
+    },
+    {
+      "path": "res://scenes/vfx/vfx_wormy_impact.tscn",
+      "source_sha256": "9fa7398add8e5df17d992f434b35d00c5d436bfc3ef0dc3e8c67f2637c7e1069",
+      "root_script": "res://src/Core/Nodes/Vfx/NWormyImpactVfx.cs",
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/whole_screen/horizontal_lines_vfx.tscn",
+      "source_sha256": "05267937ec5445ae5a8b72c28256671c0fcf014a941d8af25e62fedc3d132d7b",
+      "root_script": "res://src/Core/Nodes/Vfx/NHorizontalLinesVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/whole_screen/mirror_vfx.tscn",
+      "source_sha256": "1950cca2f2fa716ba91a5d9327ef2bc3839711c816c466d5fb56c5953ed7e3e1",
+      "root_script": "res://src/Core/Nodes/Vfx/NMirrorVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/whole_screen/vfx_rain.tscn",
+      "source_sha256": "0fcba26afa68038831e237b677b28e2cf7f8d07610c334829573ce2426e65ca1",
+      "root_script": "res://src/Core/Nodes/Vfx/NRainVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/whole_screen/vfx_smoky_vignette.tscn",
+      "source_sha256": "be5aef8983f918ce930d13e0795697dea1d6399c18f15a234a8b0a03ac700014",
+      "root_script": "res://src/Core/Nodes/Vfx/NSmokyVignetteVfx.cs",
+      "categories_guessed": [],
+      "static_class": "typed_cs_callback_contract_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Custom typed root; callback, child and lifetime contracts require audit."
+    },
+    {
+      "path": "res://scenes/vfx/wormy_impact/vfx_wormy_impact_air_flipbook.tscn",
+      "source_sha256": "2bea82626205fbd0c644ff746e1e8afa5fb5137cd55301e3d7191695f3a4ac92",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    },
+    {
+      "path": "res://scenes/vfx/wormy_impact/vfx_wormy_impact_ground_flipbook.tscn",
+      "source_sha256": "e17a1923597c36a7511f4575ceca3b0ae6cc5b0eb02cc13def1820d2e3c4bdab",
+      "root_script": null,
+      "categories_guessed": [
+        "hit"
+      ],
+      "static_class": "other_scriptless_or_inherited_audit",
+      "build_status": "not_targeted_in_static_inventory",
+      "review_reason": "Non-targeted root or inherited scene; particle roots, child dependencies and callers require audit."
+    }
+  ]
+}

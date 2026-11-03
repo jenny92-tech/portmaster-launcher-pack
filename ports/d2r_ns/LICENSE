@@ -1,0 +1,17 @@
+D2R NS PortMaster Launcher
+Copyright (c) 2026 jenny92-tech (Bili 解腻Jenny)
+
+Original launcher code and documentation are licensed under CC BY-NC-SA 4.0:
+https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+Attribution: https://github.com/jenny92-tech/portmaster-launcher-pack
+Retain attribution, noncommercial use and the same license for adaptations.
+Third-party components retain their own licenses.
+
+Game files are NOT covered by this launcher license. Diablo II: Resurrected
+game code, data, artwork and audio retain their respective owners' rights.
+The launcher-only build contains no game data. A private complete package
+uses only the explicit prepared game input supplied by its user.
+
+D2R Linux runtime and native rewriting tools retain their MIT license;
+private Wayland/Vulkan components retain the notices supplied with them.
+The build includes those separate notices without relicensing them.

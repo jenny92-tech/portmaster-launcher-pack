@@ -1,0 +1,46 @@
+{
+  "handheld_startup": true,
+  "graphics": {
+    "d3d11": {
+      "provider": "dxvk-sarek",
+      "components": [
+        "vulkan-wsi",
+        "dxvk-sarek"
+      ],
+      "dlls": [
+        "d3d11.dll",
+        "dxgi.dll"
+      ],
+      "status": "verified-opening"
+    },
+    "vulkan": {
+      "provider": "wine",
+      "components": [
+        "vulkan-wsi"
+      ],
+      "dlls": [],
+      "status": "native-presentation-verified-only"
+    }
+  },
+  "unsupported_graphics": {
+    "d3d9": "尚未在此环境验证 D3D9",
+    "d3d10": "尚未在此环境验证 D3D10",
+    "d3d12": "尚无此机型已适配的 D3D12 实现"
+  },
+  "bind_files": {
+    "mali": "/dev/mali0",
+    "drm": "/dev/dri/card0",
+    "render": "/dev/dri/renderD128"
+  },
+  "extends": "bases/linux-aarch64.json",
+  "additional_components": [
+    "xkbregistry"
+  ],
+  "process_environment": {
+    "VK_LAYER_PATH": "/runtime/graphics/wsi",
+    "VK_INSTANCE_LAYERS": "VK_LAYER_window_system_integration"
+  },
+  "bind_device_directories": {
+    "dma_heap": "/dev/dma_heap"
+  }
+}

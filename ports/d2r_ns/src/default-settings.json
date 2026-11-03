@@ -1,0 +1,21 @@
+{
+  "Texture Quality": 4,
+  "Shadow Quality": 2,
+  "Ambient Occlusion Quality": 1,
+  "Anti Aliasing": 0,
+  "Vfx Lighting Quality": 0,
+  "Atmospherics Quality": 0,
+  "Transparency Quality": 0,
+  "Vfx Quality": 0,
+  "Character Detail": 4,
+  "Environment Detail": 4,
+  "Texture Anisotropy": 2,
+  "Light Quality": 2,
+  "Blended Shadows": 1,
+  "Perspective": 1,
+  "Legacy Graphics Mode": 2,
+  "Game Resolution": 1,
+  "Low Vision Mode": 1,
+  "Language": 8,
+  "VoiceLanguage": 8
+}

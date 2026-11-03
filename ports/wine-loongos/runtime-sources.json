@@ -1,0 +1,110 @@
+{
+  "profile": "loongos-rk3566-arm64",
+  "supply": "sha256-component-catalog",
+  "automatic_download": true,
+  "components": [
+    {
+      "name": "box64",
+      "version": "0.4.4",
+      "commit": "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a",
+      "kind": "source-built-aarch64",
+      "url": "https://api.github.com/repos/ptitSeb/box64/tarball/2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a",
+      "sha256": "166b53fc1090303d228f32c0804a60c03fbb2d7bad178b5d6362be5db1622d39",
+      "baseline_binary_sha256": "6db3a6a91af607bbc1d3d588c0bf0496f415103cd9de537a7bc8a2d31cf93d01"
+    },
+    {
+      "name": "wine",
+      "version": "10.0-amd64-wow64",
+      "url": "https://github.com/Kron4ek/Wine-Builds/releases/download/10.0/wine-10.0-amd64-wow64.tar.xz",
+      "sha256": "aeebbbf239e548f0136f1cd72a2e109dd9a572a8f703da3c09fa40d74d5c255f",
+      "published_digest_verified": true,
+      "handheld_driver": {
+        "source_ref": "wine-10.0",
+        "commit": "b073859675060c9211fcbccfd90e4e87520dc2c2",
+        "source_url": "https://codeload.github.com/wine-mirror/wine/tar.gz/b073859675060c9211fcbccfd90e4e87520dc2c2",
+        "source_sha256": "71e4fef333852496d938a735ccbf45f090e23beb964172dd1defefa965b9956d",
+        "path": "lib/wine/x86_64-unix/winewayland.so",
+        "sha256": "40efdd9af0390f410380d08726b3186d044c497d82a8a3671246f797e0c0a694",
+        "source_files": {
+          "runtime-patches/wine-handheld-startup.patch": "a29bfb33645ad93723731101ce7f52aa674f78a28d1f95d9062144d5f348dd47",
+          "runtime-patches/wine_startup_card.h": "f1ccffefad77685065c928f75267d6cb60e903a850c483cff496168563947c11"
+        }
+      }
+    },
+    {
+      "name": "box64-x86-libs",
+      "version": "0.4.4",
+      "url": "https://github.com/ptitSeb/box64/releases/download/v0.4.4/box64-bundle-x86-libs-v0.4.4.tar.gz",
+      "sha256": "1d4a8787a8a92267c1be673ec194c69e3bb33d14c800575d94131084142fcff0",
+      "published_digest_verified": true
+    },
+    {
+      "name": "gptokeyb2",
+      "version": "2.00.03",
+      "kind": "bundled-private-bootstrap-pair",
+      "upstream": "https://github.com/PortsMaster/gptokeyb2",
+      "baseline_binary_sha256": "674b6e40e490ae48455339f4f2ded664d4f2141a65c09a2105841faa53700a70",
+      "paired_library": "libinterpose.aarch64.so",
+      "paired_library_sha256": "1783abbb3f3825c0bc5e440e800ace3539eab2373d8474eca7000cecd808edda",
+      "binary_release": "https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.10.24-1611/PortMaster.zip"
+    },
+    {
+      "name": "libxkbregistry0",
+      "version": "1.5.0-1",
+      "architecture": "arm64",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxkbcommon/libxkbregistry0_1.5.0-1_arm64.deb",
+      "sha256": "f46a6a6bff1df3b0f187698dfff35e32318b5df917876616649a511eca13f6b0",
+      "checksum_index": "https://deb.debian.org/debian/dists/bookworm/main/binary-arm64/Packages.xz"
+    },
+    {
+      "name": "vulkan-wsi-layer",
+      "commit": "40cfec09d0e2d42c5e1f2642cf4cba11e7008112",
+      "kind": "source-built-aarch64-private-patch",
+      "url": "https://github.com/GinKage/vulkan-wsi-layer/tree/40cfec09d0e2d42c5e1f2642cf4cba11e7008112",
+      "optional_for": "wayland-vulkan",
+      "runtime_path": "runtime/graphics/wsi",
+      "patch": "Require EXT calibrated timestamps and fall back KHR dispatch to EXT; Wayland + system-uncached DMA heaps only",
+      "baseline_binary_sha256": "ed454d770a5908d94875ab5cf60b6b0d428fe9b31b8e87311ed0c1f928db0cc8",
+      "patch_file": "wsi-ext-timestamps.patch",
+      "patch_sha256": "c0d385e4c8c8fbeac2faec58a4c1b954836e17a43a1edf18f72887d788deabbc",
+      "startup_patch": "src/runtime-patches/wsi-first-frame.patch",
+      "startup_patch_sha256": "0c945e79bfe577030102a36442873da1e525c2aa551040ff82cd1a2afc029de4"
+    },
+    {
+      "name": "dxvk-sarek",
+      "version": "1.14.1",
+      "commit": "0c0e8f6f62c7cb37dbf5d38413517efa00c08fef",
+      "url": "https://github.com/pythonlover02/dxvk-sarek/releases/tag/v1.14.1",
+      "sha256": "07a6d5d889e9810ce856511e853cd72d2f547ec12c0dc5d7049b32e4bfa05c25",
+      "optional_for": [
+        "d3d9",
+        "d3d10",
+        "d3d11"
+      ],
+      "runtime_path": "runtime/graphics/sarek",
+      "binaries": {
+        "d3d11.dll": "c48e2173e603a105252fd12ded29307740c6d2cf32b0b4767f78c8c0b3482595",
+        "dxgi.dll": "3113131b7468825ee7ebab6d81cd070a4f0fd52569c2af80c486b03698e64638"
+      }
+    },
+    {
+      "name": "wine-close",
+      "kind": "project-source-built-win64",
+      "source": "src/wine_close.c",
+      "source_sha256": "038bdec6bfdf4d94d522dd676732424de627598c170bd46f5856129dea2847ea",
+      "baseline_binary_sha256": "382349459be187d202bcaf0922824546e44855ae677828ca258028d4602384fa",
+      "runtime_path": "runtime/graphics/wine-close.exe"
+    },
+    {
+      "name": "wine-borderless",
+      "kind": "project-source-built-win64",
+      "source": "src/wine_borderless.c",
+      "source_sha256": "20814dd963c99d8967c86a64ef17a90bcd7d2fc9f21ce8df910cd9301422c7e8",
+      "baseline_binary_sha256": "fd1613f3d72f1d81b7578806cced30509def565f8dd8aa1f9ee39d7d66a3bee9",
+      "optional_for": "borderless",
+      "runtime_path": "runtime/graphics/wine-borderless.exe"
+    }
+  ],
+  "published_runtime_urls": false,
+  "catalog": "src/components/catalog.json"
+}

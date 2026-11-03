@@ -1,0 +1,5 @@
+FROM bogo-builder:dev
+RUN printf '%s\n' 'deb [check-valid-until=no] https://archive.debian.org/debian bullseye main' 'deb [check-valid-until=no] https://archive.debian.org/debian-security bullseye-security main' > /etc/apt/sources.list \
+    && rm -rf /var/lib/apt/lists/* && apt-get update \
+    && apt-get install -y --no-install-recommends flex bison libwayland-dev libxkbcommon-dev libxkbregistry-dev libegl-dev libvulkan-dev binutils-mingw-w64-x86-64 squashfs-tools \
+    && rm -rf /var/lib/apt/lists/*

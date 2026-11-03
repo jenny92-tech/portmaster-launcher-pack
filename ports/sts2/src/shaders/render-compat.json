@@ -1,0 +1,49 @@
+{
+  "source": {
+    "repo": "ModinMobileSTS/sts2-android-compat",
+    "revision": "450082d894167267408e75e014018f684253948d",
+    "shader_update": "2026-10-08"
+  },
+  "shader_paths": {
+    "res://shaders/dark_blur.gdshader": "res://shaders/mobile_compat/dark_blur_compat.gdshader",
+    "res://shaders/radial_blur.gdshader": "res://shaders/mobile_compat/radial_blur_compat.gdshader",
+    "res://shaders/doom_overlay.gdshader": "res://shaders/mobile_compat/doom_overlay_compat.gdshader",
+    "res://shaders/vfx/distortion/vfx_screen_distortion_outward_shader.gdshader": "res://shaders/mobile_compat/screen_distortion_compat.gdshader",
+    "res://shaders/vfx/scream/vfx_scream_distortion_polar_shader.gdshader": "res://shaders/mobile_compat/scream_distortion_compat.gdshader",
+    "res://shaders/vfx/vfx_water_reflection_post.gdshader": "res://shaders/mobile_compat/water_reflection_post_compat.gdshader",
+    "res://shaders/vfx/the_insatiable_sand_fall_2.gdshader": "res://shaders/mobile_compat/sand_fall_post_compat.gdshader",
+    "res://shaders/overlay_blend.gdshader": "res://shaders/mobile_compat/overlay_blend_compat.gdshader",
+    "res://shaders/blur/Blur.gdshader": "res://shaders/mobile_compat/card_portrait_blur_compat.gdshader",
+    "res://shaders/vfx/vfx_water_reflection.gdshader": "res://shaders/mobile_compat/water_reflection_compat.gdshader",
+    "res://shaders/vfx/common/vfx_flipbook_shader.gdshader": "res://shaders/mobile_compat/flipbook_compat.gdshader",
+    "res://shaders/vfx/common/vfx_row_flipbook_shader.gdshader": "res://shaders/mobile_compat/row_flipbook_compat.gdshader",
+    "res://shaders/vfx/common/vfx_screen_chromatic_aberration_shader.gdshader": "res://shaders/mobile_compat/screen_chromatic_aberration_compat.gdshader",
+    "res://shaders/hsv.gdshader": "res://shaders/mobile_compat/hsv_compat.gdshader",
+    "res://shaders/scry_reveal.gdshader": "res://shaders/mobile_compat/scry_reveal_compat.gdshader",
+    "res://scenes/rest_site/rest_site_light_shader.gdshader": "res://shaders/mobile_compat/rest_site_light_compat.gdshader",
+    "res://scenes/backgrounds/vantom_boss/oil.gdshader": "res://shaders/mobile_compat/oil_compat.gdshader"
+  },
+  "material_paths": {
+    "res://scenes/cards/card_portrait_blur_material.tres": "res://shaders/mobile_compat/card_portrait_blur_compat.gdshader",
+    "res://scenes/cards/card_canvas_group_blur_material.tres": "res://shaders/mobile_compat/card_canvas_group_blur_compat.gdshader"
+  },
+  "embedded_codes": {
+    "10365f5ad4c7cf285634a92558b35b4c13f1c2aa188502cef3859a4493dc7198": "res://shaders/mobile_compat/stepped_fire_flat_compat.gdshader",
+    "020ed35c9ac3f2b3c5312d36c4fbe98d5d456023270a94c6fd44e2c40aaef721": "res://shaders/mobile_compat/stepped_fire_add_compat.gdshader",
+    "6fae0954ba6d4ae43947d8ad19be2a2f8a04252e9969b6d5faa0cc0bc16ed537": "res://shaders/mobile_compat/stepped_fire_dark_compat.gdshader",
+    "50f860bed946a5b3403cfde1bf3f1ec57fa34f7be95b5da48f5a355d423af55e": "res://shaders/mobile_compat/blood_wall_compat.gdshader",
+    "26fed431691f6b33f2dc53ee181a83d043e9fed697dc168ab172767606636b2e": "res://shaders/mobile_compat/molten_fist_compat.gdshader",
+    "077573061b6ca57f86aa02cc19f0bcd7bd141017dd6a0fa9a46da212c22a8bce": "res://shaders/mobile_compat/aeonglass_ray_compat.gdshader",
+    "fc34286df4b9e0354b49bfc886890613c1402ab376df43e9e889773475f04fab": "res://shaders/mobile_compat/slash_compat.gdshader",
+    "d9dc65a610bdc75a0a7cf45a4a06cafc75630555048448da2e8030332eecbc90": "res://shaders/mobile_compat/fire_shader_1_compat.gdshader",
+    "74722e307dca888796f2ee1f6a4bdd7816f8d44564c842d4e71572347d9d18db": "res://shaders/mobile_compat/2d_sphere_compat.gdshader"
+  },
+  "excluded_shader_paths": [
+    "res://shaders/blur/canvas_group_mask_blur.gdshader"
+  ],
+  "builtin_prefixes": [
+    "res://scenes/",
+    "res://images/",
+    "res://shaders/"
+  ]
+}

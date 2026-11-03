@@ -1,0 +1,27 @@
+[package]
+name = "love-lite"
+version = "1.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Production Lua UI runtime scoped to Port App Manager"
+
+[features]
+default = []
+sdl-backend = ["dep:sdl2"]
+
+[dependencies]
+anyhow = "1.0"
+appmanager-core = { path = "../appmanager-core" }
+appmanager-service = { path = "../appmanager-service" }
+love-api = { path = "vendor/love-api" }
+mlua = { version = "0.10", features = ["lua51", "vendored", "send", "serialize"] }
+sdl2 = { version = "0.38", features = ["use-pkgconfig"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "love-lite"
+path = "src/main.rs"
+required-features = ["sdl-backend"]

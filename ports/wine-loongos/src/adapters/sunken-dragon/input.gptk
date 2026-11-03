@@ -1,0 +1,33 @@
+# Sunken Dragon: game controls plus the shared Select+Start exit chord.
+[config]
+deadzone = 6000
+mouse_scale = 5000
+mouse_delay = 16
+
+[controls]
+overlay = clear
+exclusive = true
+a = enter
+b = esc
+x = space
+y = tab
+start = enter
+back = hold_state shortcuts
+guide = esc
+up = up repeat
+down = down repeat
+left = left repeat
+right = right repeat
+left_analog_up = up repeat
+left_analog_down = down repeat
+left_analog_left = left repeat
+left_analog_right = right repeat
+right_analog = mouse_movement
+l1 = f1
+r1 = mouse_slow
+l2 = mouse_left
+r2 = mouse_right
+
+[controls:shortcuts]
+overlay = parent
+start = f4 add_alt

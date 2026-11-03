@@ -1,0 +1,20 @@
+{
+  "id": "loongos-rk3566",
+  "label": "LoongOS 1.4.0.36 · Mali-G52",
+  "required_host_files": [
+    "/usr/lib/libSDL2-2.0.so.0",
+    "/usr/lib/libSDL2_ttf-2.0.so.0",
+    "/usr/share/vulkan/icd.d/rk_vk.json"
+  ],
+  "process_environment": {
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/rk_vk.json",
+    "PULSE_SERVER": "unix:/tmp/pulse-socket",
+    "XDG_RUNTIME_DIR": "/run",
+    "WAYLAND_DISPLAY": "wayland-0"
+  },
+  "extends": "families/mali-g52-vendor-wayland.json",
+  "bind_files": {
+    "pulse": "/tmp/pulse-socket",
+    "wayland": "/run/wayland-0"
+  }
+}

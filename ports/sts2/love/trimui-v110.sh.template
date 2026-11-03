@@ -1,0 +1,47 @@
+#!/bin/bash
+# INPUT: TrimUI PortMaster and the independent, source-bound 0.110.1 payload
+# OUTPUT: one user-started SDL2/GLES game process and a local startup log
+# POS: independent handheld entry; never alters the earlier STS2 installation
+# PORTMASTER: sts2_v110, Je-杀戮尖塔2-新版.sh
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
+source "$KIT/launcher_compat.sh"
+#@KIT-END
+
+PORT_NAME=sts2_v110
+LOG_PREFIX="[STS2-v110]"
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" 1280 720 || exit 1
+GAMEDIR="/mnt/SDCARD/Data/ports/sts2-v110"
+[ -d "$GAMEDIR" ] && [ ! -L "$GAMEDIR" ] || { echo "$LOG_PREFIX missing game data"; exit 1; }
+cd "$GAMEDIR" || exit 1
+exec > "$GAMEDIR/launch.log" 2>&1
+ulimit -c 0
+
+if launcher_compat_wayland_socket; then
+  echo "$LOG_PREFIX this independent KMS entry requires an inactive compositor"
+  exit 1
+fi
+export SDL_VIDEODRIVER=kmsdrm
+export LD_LIBRARY_PATH="$GAMEDIR/gamedata/libs:$GAMEDIR/data_sts2_linuxbsd_arm64:/usr/lib:/usr/lib64:/usr/trimui/lib:/mnt/SDCARD/System/lib"
+launcher_compat_plan godot-sdl2 gles "$GAMEDIR" "$GAMEDIR/gamedata/libs" || { launcher_platform_finish; exit 1; }
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+export SLL_LANGUAGE=zh_CN SLL_QUALITY=smooth SLL_MEMORY_MODE=low SLL_GPU_PARTICLES=on
+export SLL_SHADER_COMPAT=on SLL_COMBAT_WARMUP=safe SLL_WARMUP_FRAMES=2 SLL_CACHE_PROTECT=on
+export SLL_HEAP_TRIM=1 SLL_LOONG_FOCUS_COMPAT=1 SLL_FIRST_CARD_TRACE=0
+export SLL_TEXTURE_DIAG=0 SLL_ASSET_DIAG=0 SLL_MALLOC_DIAG=0 SLL_INPUT_DIAG=0 SLL_UI_DIAG=0 SLL_UI_CONTROL=0
+export PORTKIT_PERF_OVERLAY=1
+export XDG_CONFIG_HOME="$GAMEDIR/conf" XDG_DATA_HOME="$GAMEDIR/conf"
+launcher_platform_prepare_game godot.mono
+(
+  launcher_compat_describe
+  launcher_compat_exec ./godot.mono --display-driver sdl2 --rendering-driver opengl3 \
+    --rendering-method gl_compatibility --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" \
+    --main-pack "$GAMEDIR/SlayTheSpire2.pck" --force-steam off
+)
+status=$?
+echo "$LOG_PREFIX exit=$status"
+launcher_platform_finish
+exit "$status"

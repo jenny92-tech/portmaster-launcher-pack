@@ -1,0 +1,51 @@
+{
+  "name": "jenny92-appmanager",
+  "app_id": "com.jenny92.portappmanager",
+  "title": "APP Manager",
+  "engine": "APP Manager LOVE-lite 1.x (Rust + Lua 5.1)",
+  "engine_status": "production",
+  "engine_scope": "appmanager-only",
+  "runtime": "Bundled production APP Manager runtime (aarch64)",
+  "launcher": "Self-contained APP Manager LOVE-lite (Jenny UI kit + classic gptokeyb)",
+  "devices": ["TrimUI Smart Pro/Brick", "MiniLoong Pocket One", "ROCKNIX", "JELOS", "UnofficialOS"],
+  "language": ["en", "zh-CN"],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "jenny92-appmanager",
+  "script": "APP Manager.sh",
+  "portable_dir": "jenny92-appmanager",
+  "launcher_sh": "src/launcher.sh",
+  "gptk": "love/ui.gptk",
+  "trimui_app": {
+    "folder": "jenny92-appmanager",
+    "archive": "APP Manager",
+    "package": "com.jenny92.portappmanager",
+    "label": "APP Manager",
+    "label_zh": "APP Manager",
+    "description": "维护 PortMaster、Runtime 和已安装的 Port 游戏",
+    "icon": "trimui-app/icon.png",
+    "include": ["APP Manager.sh", "jenny92-appmanager"],
+    "env": {
+      "PAM_SOURCE_DIR": "{app_dir}",
+      "PAM_SCRIPTS_DIR_OVERRIDE": "/mnt/SDCARD/Roms/PORTS",
+      "PAM_NATIVE_LAUNCHER_OVERRIDE": "/mnt/SDCARD/Roms/PORTS/APP Manager.sh"
+    }
+  },
+  "portmaster": {
+    "min_glibc": "2.29",
+    "items": ["APP Manager.sh", "jenny92-appmanager"],
+    "attr": {
+      "image": {
+        "screenshot": "jenny92-appmanager/screenshot.png",
+        "names": ["APP Manager.png"],
+        "covers": [],
+        "thumbnail": null,
+        "video": null
+      }
+    },
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": ["APP Manager.png"]
+    }
+  },
+  "depends_on": []
+}

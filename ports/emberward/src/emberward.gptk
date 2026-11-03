@@ -1,0 +1,26 @@
+back = k
+start = j
+a = u
+b = i
+x = o
+y = h
+up = up
+down = down
+left = left
+right = right
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right
+l1 = p
+l2 = q
+r1 = r
+r2 = v
+l3 = c
+r3 = f
+
+# The right stick scrolls ally status without taking directional navigation.
+right_analog_up = pageup
+right_analog_up = repeat
+right_analog_down = pagedown
+right_analog_down = repeat

@@ -1,0 +1,41 @@
+# Build outputs
+build/
+dist/
+output/
+target/
+*.pck.bak
+.cache/
+*.os
+.sconsign.dblite
+godot-cpp/
+ports/*/src/godotsteam-stub/bin/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+.claude/
+.alva/
+__pycache__/
+*.pyc
+
+# Local artifacts that shouldn't ship
+.env
+.env.local
+.env.*
+!.env.example
+!.env.template
+*.pcap
+*.pcapng
+*.core
+core.[0-9]*
+*.dmp
+
+/pocs
+/external
+/.tmp/
+/.pam-lab/
+/.scratch/
+
+# Bundled runtimes are fetched, not committed (ports/*/src/scripts/fetch_runtime.sh)
+ports/*/src/runtime/*.squashfs

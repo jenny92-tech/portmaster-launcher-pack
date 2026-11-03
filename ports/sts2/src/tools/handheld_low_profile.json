@@ -1,0 +1,13 @@
+{
+  "name": "handheld-low",
+  "source_pck_sha256": "d220c699aa60eeb22e22aebf9e34a3f7f350b58427c979ad2ccd75c25750b528",
+  "game_dll_sha256": "0c612d63090b2404435c1f026b8d79f2b484aeaf978d293a968a8cfac5be3885",
+  "game_deps_sha256": "11c5f0560aeefc4003bb7b7cdd06acae1f5c8e584e74626f5da6f48ebe2ada70",
+  "input_contract": "Player-provided ARM64/Mali-ready STS2 Godot 4.5.1 PCK and matching unmodified ARM64 game DLL/deps; this tool does not convert a Windows distribution to ARM64.",
+  "texture": "Halve physical image dimensions, retaining logical size, flags and texture format; preserve font, normal, LUT, HDR/data and other protected semantic assets.",
+  "spine": "Spine fork source jenny92-tech/spine-runtimes 4.2 revision 7c1c1682bf703ac3204dc8bba4bc178109fc31c8 (CI run 26935186871) uses Texture.get_width/get_height for UV; the installed binary has not independently been bound to that CI hash. Spine candidates are included only for this source PCK identity, with logical dimensions retained.",
+  "memory": "Explicit low mode keeps essential atlases and loads other supported atlases on demand.",
+  "effects": "Apply audited simple scenes and scan all text resources for ParticleProcessMaterial turbulence and recognized canvas shader feature patterns. Preserve node and shader interfaces; visual pixels can change. Report unhandled VisualShader, binary and dynamic resources. Preload only approved light scenes without instantiating their typed roots.",
+  "delivery": "The verified main PCK remains on SD, separate from the small compatibility PCK and /tmp execution view. Install checks full hashes; startup checks identity, size and modification time.",
+  "measurements": "Encoded file savings are not RSS, GPU allocation, or measured gameplay performance."
+}

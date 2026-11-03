@@ -1,0 +1,327 @@
+// INPUT:  std 文件系统、Unix flock / Windows 独占句柄、md5/sha2 与 zip
+// OUTPUT: ExclusiveFileLock、DigestAlgorithm、摘要/ZIP 检查及原子读写接口
+// POS:    原生共享层的文件完整性、互斥和持久化基础设施
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+use sha2::{Digest as _, Sha256};
+
+use crate::{Error, Result};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DigestAlgorithm {
+    Md5,
+    Sha256,
+}
+
+/// A process-scoped advisory lock. The kernel releases it on exit or crash;
+/// the persistent lock file itself never carries stale ownership state.
+#[derive(Debug)]
+pub struct ExclusiveFileLock {
+    file: File,
+}
+
+impl ExclusiveFileLock {
+    #[cfg(windows)]
+    pub fn try_acquire(path: &Path) -> std::io::Result<Self> {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        // Deny sharing while this handle lives; Windows releases it on exit.
+        // Open reparse points themselves, then reject them (including junctions).
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .custom_flags(0x00200000)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.file_attributes() & 0x400 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "lock must be a regular file",
+            ));
+        }
+        Ok(Self { file })
+    }
+
+    #[cfg(unix)]
+    pub fn try_acquire(path: &Path) -> std::io::Result<Self> {
+        reject_lock_symlink(path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)?;
+        let file_metadata = file.metadata()?;
+        let path_metadata = fs::symlink_metadata(path)?;
+        if !file_metadata.is_file()
+            || path_metadata.file_type().is_symlink()
+            || file_metadata.dev() != path_metadata.dev()
+            || file_metadata.ino() != path_metadata.ino()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("lock path changed while opening: {}", path.display()),
+            ));
+        }
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self { file })
+    }
+}
+
+#[cfg(unix)]
+fn reject_lock_symlink(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("lock path is a symlink: {}", path.display()),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+impl DigestAlgorithm {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "md5" => Ok(Self::Md5),
+            "sha256" => Ok(Self::Sha256),
+            _ => Err(Error::InvalidConfig(
+                "digest algorithm must be md5 or sha256".to_owned(),
+            )),
+        }
+    }
+}
+
+pub fn digest_file(path: &Path, algorithm: DigestAlgorithm) -> Result<String> {
+    let mut file = File::open(path)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    match algorithm {
+        DigestAlgorithm::Md5 => {
+            let mut digest = md5::Context::new();
+            loop {
+                let read = file.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                digest.consume(&buffer[..read]);
+            }
+            Ok(format!("{:x}", digest.compute()))
+        }
+        DigestAlgorithm::Sha256 => {
+            let mut digest = Sha256::new();
+            loop {
+                let read = file.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                digest.update(&buffer[..read]);
+            }
+            Ok(format!("{:x}", digest.finalize()))
+        }
+    }
+}
+
+pub fn zip_readable(path: &Path) -> Result<bool> {
+    let file = File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|error| Error::InvalidConfig(format!("invalid ZIP archive: {error}")))?;
+    if archive.is_empty() {
+        return Ok(false);
+    }
+    for index in 0..archive.len() {
+        archive
+            .by_index_raw(index)
+            .map_err(|error| Error::InvalidConfig(format!("invalid ZIP entry: {error}")))?;
+    }
+    Ok(true)
+}
+
+/// Durably replaces one ordinary file without exposing a partially-written
+/// destination. Callers retain responsibility for validating that `path` is
+/// inside their managed root before invoking this filesystem primitive.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("output path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = unique_sibling(path, "atomic-write");
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        // Some removable-media filesystems reject directory fsync even after
+        // the rename has committed. Do not turn a complete replacement into
+        // a reported failure; the file itself was synced before the rename.
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// Copies one regular file and atomically promotes the complete copy.
+pub fn atomic_copy(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| std::io::Error::other("destination path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = unique_sibling(destination, "atomic-copy");
+    let result = (|| {
+        fs::copy(source, &temporary)?;
+        File::open(&temporary)?.sync_all()?;
+        fs::rename(&temporary, destination)?;
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn unique_sibling(path: &Path, label: &str) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut name = path
+        .file_name()
+        .map_or_else(|| "output".into(), |value| value.to_os_string());
+    name.push(format!(".{label}.{}.{}.tmp", std::process::id(), sequence));
+    path.with_file_name(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn streams_standard_file_digests() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), b"abc").unwrap();
+        assert_eq!(
+            digest_file(temp.path(), DigestAlgorithm::Md5).unwrap(),
+            "900150983cd24fb0d6963f7d28e17f72"
+        );
+        assert_eq!(
+            digest_file(temp.path(), DigestAlgorithm::Sha256).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_file_lock_is_released_with_its_owner() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let first = ExclusiveFileLock::try_acquire(temp.path()).unwrap();
+        assert_eq!(
+            ExclusiveFileLock::try_acquire(temp.path())
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        drop(first);
+        drop(ExclusiveFileLock::try_acquire(temp.path()).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_file_lock_rejects_symlink_paths() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target.lock");
+        let link = temp.path().join("linked.lock");
+        std::fs::write(&target, "").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            ExclusiveFileLock::try_acquire(&link).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn zip_probe_requires_a_nonempty_readable_directory() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let mut archive = zip::ZipWriter::new(temp.reopen().unwrap());
+            archive
+                .start_file("file.txt", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            archive.write_all(b"body").unwrap();
+            archive.finish().unwrap();
+        }
+        assert!(zip_readable(temp.path()).unwrap());
+        std::fs::write(temp.path(), b"not a zip").unwrap();
+        assert!(zip_readable(temp.path()).is_err());
+    }
+
+    #[test]
+    fn atomic_write_replaces_the_complete_file_and_cleans_temporary_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("state/value.txt");
+        atomic_write(&output, b"first").unwrap();
+        atomic_write(&output, b"second").unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"second");
+        assert_eq!(
+            std::fs::read_dir(output.parent().unwrap())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn atomic_copy_replaces_the_complete_file_and_preserves_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.bin");
+        let output = temp.path().join("state/output.bin");
+        std::fs::write(&source, b"replacement").unwrap();
+        std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+        std::fs::write(&output, b"old").unwrap();
+
+        atomic_copy(&source, &output).unwrap();
+
+        assert_eq!(std::fs::read(&source).unwrap(), b"replacement");
+        assert_eq!(std::fs::read(&output).unwrap(), b"replacement");
+        assert_eq!(
+            std::fs::read_dir(output.parent().unwrap())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .count(),
+            1
+        );
+    }
+}

@@ -1,0 +1,101 @@
+{
+  "project": "Microsoft Fluent System Icons",
+  "repository": "https://github.com/microsoft/fluentui-system-icons",
+  "revision": "60d561a815310bd52914fa0bccee14836428e23b",
+  "license": "MIT",
+  "style": "filled",
+  "source_size": 24,
+  "raster": {
+    "min_size": 8,
+    "max_size": 48,
+    "padding": 1,
+    "supersampling": 4,
+    "color": "#ffffff"
+  },
+  "icons": [
+    {
+      "name": "menu",
+      "file": "svg/menu.svg",
+      "upstream_path": "assets/Navigation/SVG/ic_fluent_navigation_24_filled.svg",
+      "sha256": "083b6f7cec4ce330773ca36082df4cee50b364c040b44d9d834b4b365d24eeb0"
+    },
+    {
+      "name": "app",
+      "file": "svg/app.svg",
+      "upstream_path": "assets/Apps/SVG/ic_fluent_apps_24_filled.svg",
+      "sha256": "2f129b85454551f6e62525b34a19f113956a71ed4d278a897a1df51ca222ce9c"
+    },
+    {
+      "name": "games",
+      "file": "svg/games.svg",
+      "upstream_path": "assets/Games/SVG/ic_fluent_games_24_filled.svg",
+      "sha256": "954f9da7348e506853002a24d59c7318e9003c97eb89a3e3f0e4747ec0f8df84"
+    },
+    {
+      "name": "install",
+      "file": "svg/install.svg",
+      "upstream_path": "assets/Arrow Download/SVG/ic_fluent_arrow_download_24_filled.svg",
+      "sha256": "5f6d03bf77eee0d67eccb2fb5f0cb48e4137c9c6fd27508d738cf9926e6089da"
+    },
+    {
+      "name": "cleanup",
+      "file": "svg/cleanup.svg",
+      "upstream_path": "assets/Delete/SVG/ic_fluent_delete_24_filled.svg",
+      "sha256": "c33611159992bdae8929f02fc48ed8e50daaf9d0be04ca44da443f28bb049f13"
+    },
+    {
+      "name": "repair",
+      "file": "svg/repair.svg",
+      "upstream_path": "assets/Wrench/SVG/ic_fluent_wrench_24_filled.svg",
+      "sha256": "8a7308b8d5b4594746a3a2c2c087a7383e75509668be52bd93bbf557a7a475e0"
+    },
+    {
+      "name": "package",
+      "file": "svg/package.svg",
+      "upstream_path": "assets/Box/SVG/ic_fluent_box_24_filled.svg",
+      "sha256": "e54a1f3a5dd520e692e842980326f9ebb79c7634fa049cce2b77cf371997f8dc"
+    },
+    {
+      "name": "remote",
+      "file": "svg/remote.svg",
+      "upstream_path": "assets/Desktop/SVG/ic_fluent_desktop_24_filled.svg",
+      "sha256": "dd6a852fc0536f66a0084d63b0fbf8e06564deeb6d86d9680fe64386ca57529d"
+    },
+    {
+      "name": "settings",
+      "file": "svg/settings.svg",
+      "upstream_path": "assets/Options/SVG/ic_fluent_options_24_filled.svg",
+      "sha256": "c7faaa8cbd8711386c772e7724dc0785ffa65de3984e14d0f689054e01a15bc9"
+    },
+    {
+      "name": "diagnostics",
+      "file": "svg/diagnostics.svg",
+      "upstream_path": "assets/Pulse/SVG/ic_fluent_pulse_24_filled.svg",
+      "sha256": "e9c61be10c88a54976b3011121c6fa20d9cbc0ab0adb18ab5b28398bac25e038"
+    },
+    {
+      "name": "help",
+      "file": "svg/help.svg",
+      "upstream_path": "assets/Question Circle/SVG/ic_fluent_question_circle_24_filled.svg",
+      "sha256": "52bef0b414268f1c266e53e8bc6755c2e8f72cb14722263d87f18770a73f8098"
+    },
+    {
+      "name": "quit",
+      "file": "svg/quit.svg",
+      "upstream_path": "assets/Sign Out/SVG/ic_fluent_sign_out_24_filled.svg",
+      "sha256": "fc93f8f9fa59716f4a1bf9ea307b6332eb2ea1808f736cfc20061574ac29703c"
+    },
+    {
+      "name": "refresh",
+      "file": "svg/refresh.svg",
+      "upstream_path": "assets/Arrow Sync/SVG/ic_fluent_arrow_sync_24_filled.svg",
+      "sha256": "5d8d4b30486f5a7156d8ea4e8bc2e6ea8e9503229e93a61b426f3e2a3d33056d"
+    },
+    {
+      "name": "language",
+      "file": "svg/language.svg",
+      "upstream_path": "assets/Translate/SVG/ic_fluent_translate_24_filled.svg",
+      "sha256": "1f737432232f9932eef1d06ec14e7912c25aa425bc47be34d01186aa2f602ac7"
+    }
+  ]
+}

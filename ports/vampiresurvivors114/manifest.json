@@ -1,0 +1,45 @@
+{
+  "name": "vampiresurvivors114",
+  "title": "Je-吸血鬼幸存者_114",
+  "engine": "Unity 6 (IL2CPP, PAD assetpacks)",
+  "runtime": "Rudroid",
+  "launcher": "LÖVE 11.5 (PortMaster runtime + gptokeyb)",
+  "devices": [
+    "TrimUI Smart Pro/Brick",
+    "MiniLoong Pocket One"
+  ],
+  "language": [
+    "en",
+    "zh-CN"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "port_dir": "vampiresurvivors114",
+  "script": "Je-吸血鬼幸存者_114.sh",
+  "portable_dir": "vampiresurvivors114",
+  "gptk": "love/ui.gptk",
+  "launcher_tools": [
+    "font-provision",
+    "runtime-discovery",
+    "unity-config",
+    "artwork"
+  ],
+  "portmaster": {
+    "items": [
+      "Je-吸血鬼幸存者_114.sh",
+      "vampiresurvivors114",
+      "screenshot.png",
+      "Je-吸血鬼幸存者_114.png"
+    ],
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "Je-吸血鬼幸存者_114.png"
+      ]
+    }
+  },
+  "depends_on": [
+    "https://github.com/jenny92-tech/rudroid (unityloader)",
+    "PortMaster runtimes/love_11.5"
+  ],
+  "notes": "Direct Unity launch with Rudroid's native Android gamepad input and exit handling."
+}

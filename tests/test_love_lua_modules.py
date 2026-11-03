@@ -1,0 +1,1481 @@
+#!/usr/bin/env python3
+# INPUT:  _kit/love、各游戏 Lua 启动声明、lupa 和模拟 LÖVE 接口
+# OUTPUT: 控件行为、启动参数、状态持久化与错误处理的断言结果
+# POS:    共享 Lua UI 与声明式游戏启动器的无设备回归测试
+"""Executable shared-Lua contract tests (uses lupa when available)."""
+from pathlib import Path
+import json
+import os
+import tempfile
+import sys
+
+try:
+    from lupa import LuaRuntime
+except ImportError:
+    if os.environ.get("PAM_REQUIRE_LUPA") == "1":
+        raise SystemExit("love Lua module tests: lupa is required")
+    print("love Lua module tests: SKIP (lupa unavailable)")
+    raise SystemExit(0)
+
+root = Path(__file__).resolve().parents[1]
+
+mock = r'''
+local getenv=os.getenv
+os.getenv=function(k)
+    if k=="PORTKIT_GRAPHICS_FEATURES" then return "sdl2,gles,gles-scale,gles-sharp,gles-shader,gles-texture" end
+    return getenv(k)
+end
+love = {graphics={}, filesystem={}, event={}}
+local font = {
+    getHeight=function() return 20 end,
+    getWidth=function(_,text) return #text*10 end,
+    getWrap=function(_,text,limit)
+        local count=math.max(1,math.floor(limit/10)); local lines={}
+        for i=1,#text,count do lines[#lines+1]=text:sub(i,i+count-1) end
+        return math.min(#text*10,limit),lines
+    end,
+}
+love.graphics.getDimensions=function() return 960,720 end
+love.graphics.setBackgroundColor=function() end
+love.graphics.newFont=function() return font end
+love.graphics.newImage=function() return {getDimensions=function() return 1280,720 end} end
+love.graphics.setFont=function() end
+love.graphics.setColor=function() end
+love.graphics.rectangle=function() end
+love.graphics.circle=function() end
+love.graphics.polygon=function() end
+love.graphics.line=function() end
+love.graphics.setLineWidth=function() end
+love.graphics.printf=function() end
+love.graphics.print=function() end
+love.graphics.draw=function() end
+love.graphics.push=function() end
+love.graphics.pop=function() end
+love.graphics.translate=function() end
+love.graphics.setScissor=function() end
+love.filesystem.getInfo=function() return nil end
+love.filesystem.getSource=function() return SOURCE end
+love.event.quit=function(code) LAST_QUIT=code end
+'''
+
+expected_env = {
+    "heishenhua": ("HSH_WIDTH='auto'", "HSH_RENDER_PERCENT='75'", "HSH_GRAPHICS_API='gles'", "HSH_MEMORY_MODE='balanced'", "HSH_TEXMAX='480'", "HSH_DMG='1.0'", "HSH_LAUNCH_COUNT='1'"),
+    "hk": ("HKL_WIDTH='auto'", "HKL_RENDER_PERCENT='75'", "HKL_GRAPHICS_API='gles'", "HKL_MEMORY_MODE='balanced'", "HKL_TEXMAX='384'", "HKL_SWAP_AB='off'", "HKL_LAUNCH_COUNT='1'"),
+    "sts2": ("SLL_PCK_VARIANT='8x8'", "SLL_LANGUAGE='zh_CN'", "SLL_GRAPHICS_API='vulkan'", "SLL_PERF_OVERLAY='off'", "SLL_DIAGNOSTICS='off'", "SLL_SWAP_AB='off'", "SLL_LAUNCH_COUNT='1'"),
+    "terraria": ("TER_WIDTH='auto'", "TER_RENDER_PERCENT='75'", "TER_GRAPHICS_API='gles'", "TER_MEMORY_MODE='balanced'", "TER_LANGUAGE='7'", "TER_SWAP_AB='off'", "TER_LAUNCH_COUNT='1'"),
+    "vampiresurvivors114": ("VS_WIDTH='auto'", "VS_HEIGHT='auto'", "VS_RENDER_PERCENT='75'", "VS_GRAPHICS_API='gles'", "VS_MEMORY_MODE='balanced'", "VS_SWAP_AB='off'", "VS_LAUNCH_COUNT='1'"),
+    "silksong": ("SILK_WIDTH='auto'", "SILK_RENDER_PERCENT='75'", "SILK_GRAPHICS_API='gles'", "SILK_MEMORY_MODE='balanced'", "SILK_FPS='config'", "SILK_DECORATIVE_PERCENT='100'", "SILK_LAUNCH_COUNT='1'"),
+    "sunkendragon": ("SDR_WIDTH='auto'", "SDR_RENDER_PERCENT='config'", "SDR_SWAP_AB='off'", "SDR_LAUNCH_COUNT='1'"),
+}
+
+def prepare_launcher_core_files(port, destination):
+    files = {
+        "terraria": (
+            "gamedata/lib/arm64-v8a/libil2cpp.so",
+            "gamedata/assets/bin/Data/Managed/Metadata/global-metadata.dat",
+            "gamedata/assets/bin/Data/data.unity3d",
+        ),
+        "sunkendragon": (
+            "gamefiles/lib/arm64-v8a/libil2cpp.so",
+            "gamefiles/lib/arm64-v8a/libunity.so",
+            "gamefiles/lib/arm64-v8a/libmain.so",
+            "gamefiles/assets/bin/Data/Managed/Metadata/global-metadata.dat",
+            "gamefiles/assets/bin/Data/globalgamemanagers",
+            "gamefiles/.gamedata_ready",
+        ),
+    }
+    for relative in files.get(port, ()):
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
+
+
+for port in expected_env:
+    with tempfile.TemporaryDirectory() as temp:
+        source = Path(temp) / "love"
+        source.mkdir()
+        prepare_launcher_core_files(port, Path(temp))
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals().SOURCE = str(source)
+        lua.execute(mock)
+        if port == "sts2":
+            lua.execute('''local previous=os.getenv; os.getenv=function(k)
+                if k=="SLL_VULKAN_AVAILABLE" then return "1" end
+                if k=="SLL_GLES_AVAILABLE" then return "0" end
+                return previous(k)
+            end''')
+        lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+        lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+        lua.execute("love.load(); love.draw()")
+        required = expected_env[port]
+        # Fresh launcher pages focus Start Game by default.
+        lua.execute("love.keypressed('return')")
+        assert lua.globals().LAST_QUIT == 42, port
+        text = (source / "launch_config.env").read_text(encoding="utf-8")
+        for line in required:
+            assert line in text, (port, line, text)
+        if port == "silksong":
+            assert "SILK_QUALITY=" not in text, text
+
+# Every Unity port must retain shared choices across a UI restart and serialize
+# its own environment prefix, including Silksong's multi-page settings.
+for port, prefix in {
+    "heishenhua": "HSH", "hk": "HKL", "silksong": "SILK",
+    "sunkendragon": "SDR", "terraria": "TER", "vampiresurvivors114": "VS",
+}.items():
+    for percent in ("config", "100", "75", "50"):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "love"
+            source.mkdir()
+            prepare_launcher_core_files(port, Path(temp))
+            (source / "state.txt").write_text(
+                f"ui_lang=zh\nresolution=1280x720\nrender_scale={percent}\nswap_ab=on\nswap_xy=on\n"
+                + ("quality=original\n" if port == "silksong" else ""),
+                encoding="utf-8",
+            )
+            for _ in range(2):
+                lua = LuaRuntime(unpack_returned_tuples=True)
+                lua.globals().SOURCE = str(source)
+                lua.execute(mock)
+                lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+                lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+                lua.execute("love.load(); love.draw(); love.keypressed('return')")
+                assert lua.globals().LAST_QUIT == 42, (port, percent)
+                text = (source / "launch_config.env").read_text(encoding="utf-8")
+                if port == "silksong":
+                    assert "SILK_QUALITY=" not in text, text
+                for key, value in {
+                    "WIDTH": "1280", "HEIGHT": "720", "RENDER_PERCENT": percent,
+                    "SWAP_AB": "on", "SWAP_XY": "on",
+                }.items():
+                    assert f"{prefix}_{key}='{value}'" in text, (port, percent, key, text)
+
+# Common settings stay on page one; one-time display/button choices live on
+# the advanced page. Exercise navigation as well as the declared row layout.
+for port in ("heishenhua", "hk", "silksong", "sunkendragon", "terraria", "vampiresurvivors114"):
+    with tempfile.TemporaryDirectory() as source:
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals().SOURCE = source
+        lua.globals().EXPECT_MEMORY = port != "sunkendragon"
+        lua.globals().EXPECT_BACKEND = port in ("silksong", "vampiresurvivors114")
+        lua.globals().SILK_FIXED_EFFECTS = port == "silksong"
+        lua.execute(mock)
+        lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+        lua.execute('''
+            local k=require("kit")
+            CAPTURED_PAGES={}
+            local add=k.add_page
+            k.add_page=function(title,rows,...)
+                CAPTURED_PAGES[#CAPTURED_PAGES+1]=rows
+                return add(title,rows,...)
+            end
+        ''')
+        lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+        lua.execute('''
+            love.load()
+            local k=require("kit")
+            local keys={}
+            local advanced
+            for i,row in ipairs(CAPTURED_PAGES[1]) do
+                if row.key then keys[row.key]=true end
+                if row.action=="page:2" then advanced=i end
+            end
+            assert(keys.render_scale and (not EXPECT_MEMORY or keys.memory_mode))
+            assert(not keys.resolution and not keys.swap_ab and not keys.swap_xy)
+            assert(advanced)
+            keys={}
+            for _,row in ipairs(CAPTURED_PAGES[2]) do if row.key then keys[row.key]=true end end
+            assert(keys.resolution and keys.swap_ab and keys.swap_xy)
+            assert((keys.graphics_api==true)==EXPECT_BACKEND)
+            assert(not keys.render_filter and not keys.assetbundle_unload)
+            assert(not keys.ambient_particles and not keys.bloom and not keys.camera_blur_plane)
+            assert(not keys.light_blur and not keys.uber_postprocess)
+            assert(not SILK_FIXED_EFFECTS or not keys.quality)
+            for _=1,20 do
+                local focus=k.debug_focus().focus_i
+                if focus==advanced then break end
+                k.input(focus>advanced and "up" or "down")
+            end
+            assert(k.debug_focus().focus_i==advanced)
+            k.input("confirm")
+            assert(k.debug_page().index==2)
+            k.input("cancel")
+            assert(k.debug_page().index==1)
+        ''')
+
+# All three Rudroid memory modes survive restart; invalid saved values fall
+# back to balanced. The experimental C port does not advertise this contract.
+for port, prefix in {"heishenhua":"HSH", "hk":"HKL", "silksong":"SILK", "terraria":"TER", "vampiresurvivors114":"VS"}.items():
+    for mode in ("low_memory", "balanced", "performance", "invalid"):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "love"
+            source.mkdir()
+            prepare_launcher_core_files(port, Path(temp))
+            (source / "state.txt").write_text(f"ui_lang=en\nmemory_mode={mode}\n", encoding="utf-8")
+            expected = "balanced" if mode == "invalid" else mode
+            for _ in range(2):
+                lua = LuaRuntime(unpack_returned_tuples=True)
+                lua.globals().SOURCE = str(source)
+                lua.execute(mock)
+                lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+                lua.execute(f"dofile({str(root / 'ports' / port / 'love/main.lua')!r})")
+                lua.execute("love.load(); love.keypressed('return')")
+                assert lua.globals().LAST_QUIT == 42, (port, mode)
+                assert f"{prefix}_MEMORY_MODE='{expected}'" in (source / "launch_config.env").read_text(encoding="utf-8")
+
+# Saved unavailable APIs are normalized before display/save. The visible API
+# must equal the launch API; removed technical choices cannot affect output.
+full_features="sdl2,gles,gles-scale,gles-sharp,gles-shader,gles-texture,vulkan,vulkan-scale,vulkan-linear"
+# Native probe success does not opt a fresh launcher into Vulkan.
+# Manual Vulkan/GLES choices persist independently of the GLES default.
+for port,prefix in {"silksong":"SILK","vampiresurvivors114":"VS"}.items():
+    for installed,platform,saved,expected in (
+        (True,True,None,"gles"),
+        (False,True,None,"gles"),
+        (True,False,None,"gles"),
+        (True,True,"gles","gles"),
+        (True,True,"vulkan","vulkan"),
+        (True,True,"invalid","gles"),
+        (False,True,"vulkan","gles"),
+    ):
+        with tempfile.TemporaryDirectory() as source:
+            if saved:
+                (Path(source)/"state.txt").write_text(f"ui_lang=zh\ngraphics_api={saved}\n")
+            # A fresh Lua runtime must retain the saved manual backend.
+            for _ in range(2):
+                lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source
+                lua.globals().FEATURES=full_features
+                lua.globals().INSTALLED="1" if installed else "0"
+                lua.globals().PLATFORM="1" if platform else "0"
+                lua.execute(mock)
+                lua.execute('''local getenv=os.getenv;os.getenv=function(k)
+                    if k=="PORTKIT_GRAPHICS_FEATURES" then return FEATURES end
+                    if k=="PORTKIT_VULKAN_AVAILABLE" then return INSTALLED end
+                    if k=="PORTKIT_VULKAN_PLATFORM_SUPPORTED" then return PLATFORM end
+                    return getenv(k)
+                end''')
+                lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+                lua.execute(f"dofile({str(root/'ports'/port/'love/main.lua')!r})")
+                lua.execute("love.load()")
+                lua.execute(f"assert(require('kit').get_state().graphics_api=={expected!r})")
+                lua.execute("love.keypressed('return')")
+                assert lua.globals().LAST_QUIT==42,(port,installed,platform,saved)
+                assert f"{prefix}_GRAPHICS_API='{expected}'" in (Path(source)/'launch_config.env').read_text()
+
+for port,prefix in {"silksong":"SILK","vampiresurvivors114":"VS"}.items():
+    for features,installed,platform,render,api,effective_render in (
+        (full_features,True,True,"100","vulkan","100"),
+        (full_features,True,True,"75","vulkan","75"),
+        (full_features,True,True,"50","vulkan","50"),
+        (full_features,True,True,"config","vulkan","config"),
+        ("sdl2,gles,gles-scale,vulkan,vulkan-linear",True,True,"75","vulkan","100"),
+        (full_features,False,True,"75","gles","75"),
+        (full_features,True,False,"75","gles","75"),
+        ("sdl2,gles,gles-scale",True,True,"75","gles","75"),
+        ("sdl2,gles",True,True,"50","gles","100"),
+        ("sdl2",True,True,"50",None,None),
+    ):
+        with tempfile.TemporaryDirectory() as source:
+            (Path(source)/"state.txt").write_text(f"ui_lang=zh\ngraphics_api=vulkan\nrender_scale={render}\nrender_filter=sharp\n")
+            env=Path(source)/"launch_config.env";env.write_text("previous='keep'\n")
+            lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source
+            lua.globals().FEATURES=features;lua.globals().INSTALLED="1" if installed else "0"
+            lua.globals().PLATFORM="1" if platform else "0"
+            lua.execute(mock)
+            lua.execute('''local getenv=os.getenv;os.getenv=function(k)
+                if k=="PORTKIT_GRAPHICS_FEATURES" then return FEATURES end
+                if k=="PORTKIT_VULKAN_AVAILABLE" then return INSTALLED end
+                if k=="PORTKIT_VULKAN_PLATFORM_SUPPORTED" then return PLATFORM end
+                return getenv(k)
+            end''')
+            lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+            lua.execute(f"dofile({str(root/'ports'/port/'love/main.lua')!r})")
+            lua.execute("love.load(); love.keypressed('return')")
+            if api:
+                assert lua.globals().LAST_QUIT==42,(port,render,features)
+                output=env.read_text()
+                assert f"{prefix}_GRAPHICS_API='{api}'" in output,output
+                assert f"{prefix}_RENDER_PERCENT='{effective_render}'" in output,output
+                lua.execute(f"assert(require('kit').get_state().graphics_api=={api!r})")
+                assert f'graphics_api={api}' in (Path(source)/'state.txt').read_text()
+                assert 'render_filter=' not in (Path(source)/'state.txt').read_text()
+                assert f'{prefix}_RENDER_FILTER=' not in output
+            else:
+                assert lua.globals().LAST_QUIT is None,(port,render)
+                assert env.read_text()=="previous='keep'\n"
+
+# The picker changes the launched API directly. Unsupported controls are grey,
+# display Disabled and are skipped by focus; preferences return with support.
+with tempfile.TemporaryDirectory() as source:
+    lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source;lua.execute(mock)
+    lua.globals().FEATURES=full_features
+    lua.execute('''local getenv=os.getenv;os.getenv=function(k)
+        if k=="PORTKIT_GRAPHICS_FEATURES" then return FEATURES end
+        if k=="PORTKIT_VULKAN_AVAILABLE" or k=="PORTKIT_VULKAN_PLATFORM_SUPPORTED" then return "1" end
+        return getenv(k)
+    end''')
+    lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+    lua.execute('''local k=require('kit');local select=k.select;ROWS={}
+        k.select=function(...) local row=select(...);ROWS[row.id]=row;return row end
+        local l=require('launcher')
+        PORT=l.define{title={zh='测试',en='Test'},fields={
+            l.render_scale{env='RENDER'},l.graphics_api{env='API',vulkan=true},
+            l.select{key='texmax',env='TEX',values={'256','512'},default='256',
+                requires_feature='texture_limits',unavailable_value='0'},
+            l.memory_mode{env='MEMORY'}},pages={{rows={'graphics_api','render_scale','texmax','memory_mode'}}}}
+        love.load();local s=k.get_state();s.render_scale='75';PORT.refresh_graphics(k)
+        assert(not ROWS.texmax.disabled and s.graphics_api=='gles')
+        assert(#ROWS.graphics_api.values==2)
+        for _=1,20 do if k.debug_focus().zone=='rows' and k.debug_focus().focus_i==1 then break end;love.keypressed('up') end
+        love.keypressed('right')
+        assert(s.graphics_api=='vulkan' and ROWS.texmax.disabled)
+        assert(ROWS.texmax.display_value.zh=='禁用' and ROWS.texmax.display_value.en=='Disabled')
+        assert(not ROWS.memory_mode.disabled and not ROWS.render_scale.disabled)
+        local out={value=''};function out:write(t) self.value=self.value..t;return true end
+        assert(PORT.write_env(out,s,k));assert(out.value:find("TEX='0'",1,true) and out.value:find("API='vulkan'",1,true))
+        love.keypressed('down');love.keypressed('down')
+        assert(k.debug_focus().focus_i==4) -- disabled texture row is skipped
+        love.keypressed('up');love.keypressed('up');love.keypressed('left')
+        assert(s.graphics_api=='gles' and not ROWS.texmax.disabled and s.texmax=='256')
+        assert(ROWS.texmax.display_value==nil)
+        assert(require('graphics').detect(true,'vulkan').resolve({}).api=='vulkan')
+        assert(require('graphics').detect(false,'vulkan').resolve({}).api=='gles')
+    ''')
+
+# An unavailable backend cannot be selected; the stored value is also corrected
+# before display. Explicit unavailable input fails validation without substitution.
+with tempfile.TemporaryDirectory() as source:
+    (Path(source)/'state.txt').write_text('ui_lang=zh\ngraphics_api=vulkan\n')
+    lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source;lua.execute(mock)
+    lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+    lua.execute('''local k=require('kit');local l=require('launcher')
+        l.define{title='Test',fields={l.graphics_api{env='API',vulkan=true}}}
+        love.load();assert(k.get_state().graphics_api=='gles')
+        for _=1,20 do if k.debug_focus().zone=='rows' and k.debug_focus().focus_i==1 then break end;love.keypressed('up') end
+        for _=1,4 do love.keypressed('right');assert(k.get_state().graphics_api=='gles') end
+        assert(not require('graphics').detect(true).validate({graphics_api='vulkan'}))
+    ''')
+    assert 'graphics_api=gles' in (Path(source)/'state.txt').read_text()
+
+# Persisted picker values are untrusted input: invalid values must fall back to
+# defaults and generated shell environments must quote every value.
+with tempfile.TemporaryDirectory() as source:
+    marker = Path(source) / "would-run"
+    (Path(source) / "state.txt").write_text(
+        f"ui_lang=invalid\nlaunch_count=0\nquality=$(touch {marker})\n", encoding="utf-8"
+    )
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        require("launcher").define({title={en="Test",zh="测试"},static_env={{"TEXT","it's safe"}},fields={
+            require("launcher").select({key="quality",default="safe",
+                options={{value="safe",label="Safe"},{value="fast",label="Fast"}},env="QUALITY"})
+        }})
+        love.load()
+        local state=require("kit").get_state()
+        assert(state.ui_lang=="zh" and state.quality=="safe")
+        love.keypressed("return")
+    ''')
+    text = (Path(source) / "launch_config.env").read_text(encoding="utf-8")
+    assert "QUALITY='safe'" in text and "TEXT='it'\"'\"'s safe'" in text, text
+    assert "$(touch" not in text and not marker.exists(), text
+
+# A failed atomic environment write keeps the launcher open and reports an
+# ordinary retry/stay dialog instead of returning EXIT_START with stale config.
+lua = LuaRuntime(unpack_returned_tuples=True)
+lua.globals().SOURCE = "/definitely/missing/port/source"
+lua.execute(mock)
+lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+lua.execute(r'''
+    local k=require("kit")
+    k.run({state={ui_lang="en",launch_count=0},
+        build_pages=function() k.add_page("Test",{k.button("Start","start")}) end,
+        write_env=function(out) out:write("VALUE=ok\n") end})
+    love.load(); love.keypressed("return")
+    assert(LAST_QUIT==nil and k.debug_dialog().open and k.debug_dialog().focus=="cancel")
+''')
+
+# A writer exception leaves the previous complete environment in place and
+# removes the temporary file.
+with tempfile.TemporaryDirectory() as source:
+    old_env = Path(source) / "launch_config.env"
+    old_env.write_text("OLD='complete'\n", encoding="utf-8")
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en",launch_count=0},
+            build_pages=function() k.add_page("Test",{k.button("Start","start")}) end,
+            write_env=function() error("simulated write failure") end})
+        love.load(); love.keypressed("return")
+        assert(LAST_QUIT==nil and k.debug_dialog().open)
+    ''')
+    assert old_env.read_text(encoding="utf-8") == "OLD='complete'\n"
+    assert not Path(str(old_env) + ".tmp").exists()
+
+# Lua's file:write may return nil while file:close still succeeds. A field
+# write failure or an explicit false result must never publish a partial env.
+for failure in ("field_write", "callback_false"):
+    with tempfile.TemporaryDirectory() as source:
+        old_env = Path(source) / "launch_config.env"
+        old_env.write_text("OLD='complete'\n", encoding="utf-8")
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals().SOURCE = source
+        lua.globals().FAILURE = failure
+        lua.execute(mock)
+        lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+        lua.execute('''
+            local open=io.open
+            io.open=function(path,mode)
+                local f,err=open(path,mode)
+                if f and FAILURE=="field_write" and path==SOURCE.."/launch_config.env.tmp" then
+                    return {write=function(_,text)
+                        if text:find("QUALITY=",1,true) then return nil,"simulated full disk" end
+                        return f:write(text)
+                    end,close=function() return f:close() end}
+                end
+                return f,err
+            end
+            local launcher=require("launcher")
+            launcher.define({title={en="Test",zh="测试"},fields={
+                launcher.select({key="quality",default="safe",options={{"safe","Safe"}},env="QUALITY"})
+            },write_env=function() if FAILURE=="callback_false" then return false,"save failed" end end})
+            love.load(); love.keypressed("return")
+            assert(LAST_QUIT==nil and require("kit").debug_dialog().open)
+        ''')
+        assert old_env.read_text(encoding="utf-8") == "OLD='complete'\n"
+        assert not Path(str(old_env) + ".tmp").exists()
+
+# Focus scopes: display-only pages, disabled controls, header return, and
+# rebuilding away the focused scope must never leave a phantom selection.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function() k.add_page("Focus",{}) end})
+        love.load()
+        local fv=require("focus_view")
+        local function leaf(id,x,y,enabled)
+            return {id=id,focusable=enabled~=false,rect={x=x,y=y,w=40,h=30}}
+        end
+        local a,b,c=leaf("a",0,0),leaf("diagonal",60,40),leaf("same-column",0,100)
+        local group={id="group",children={a,b,c,leaf("display",0,35,false)}}
+        local tree={id="root",axis="x",children={
+            {id="outer",axis="y",children={group}},leaf("tools",200,0)}}
+        assert(fv.move(tree,"a",0,1)==c,"vertical projection beats a closer diagonal")
+        assert(fv.move(tree,"same-column",0,-1)==a)
+        assert(fv.move(tree,"a",1,0).id=="tools","exhausted inner scopes bubble through ancestors")
+        assert(fv.move(tree,"same-column",0,1)==nil,"boundary does not wrap")
+        local note=k.textview("Status","Ready",{expandable=false})
+        assert(not note.focusable and not k.info("Info","Value").focusable)
+        assert(k.textview("Details","Long text").focusable)
+        local side=k.button("Tool",function() end,{id="tool"})
+        k.set_page(1,"Focus",{note},{sidebar={side}})
+        assert(k.debug_focus().zone=="sidebar")
+        k.input("up"); assert(k.debug_focus().zone=="bar")
+        k.input("down"); assert(k.debug_focus().zone=="sidebar")
+        k.set_page(1,"Focus",{note},{preserve_focus=true,sidebar={}})
+        assert(k.debug_focus().zone=="bar")
+        k.input("down"); assert(k.debug_focus().zone=="bar")
+        local blocked=k.button("Disabled",function() error("disabled action") end,{disabled=true})
+        k.set_page(1,"Focus",{note,blocked,k.button("Go",function() end)}, {sidebar={side}})
+        assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==3)
+        k.input("right"); assert(k.debug_focus().zone=="sidebar")
+        k.input("up"); k.input("down"); assert(k.debug_focus().zone=="sidebar")
+        k.input("left"); assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==3)
+        local rows={}
+        for i=1,40 do rows[i]=k.button("Row "..i,function() end,{id="row:"..i}) end
+        k.set_page(1,"Scrolled",rows,{row_layout={mode="flow",min_width=420,max_columns=1},sidebar={side}})
+        for i=1,20 do k.input("down") end
+        k.input("right")
+        local layout=k.debug_layout()
+        assert(layout.scroll_y>0)
+        local sg=k.debug_sidebar_geometry()
+        local best,score
+        for i,g in ipairs(layout.geometry) do
+            local distance=math.abs(g.y+g.h/2-(sg.y1+sg.h1/2))
+            if not score or distance<score then best,score=i,distance end
+        end
+        k.input("left")
+        assert(k.debug_focus().focus_i==21,"returning to a container restores its stable focus")
+    ''')
+
+# Scroll containers reveal focus in the same frame, including paired tools and
+# pinned actions; textviews keep complete content and pan only on overflow.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function() k.add_page("Scroll",{}) end})
+        love.load()
+        for _,size in ipairs({{640,480},{720,720},{960,720},{480,640},{320,240}}) do
+            love.graphics.getDimensions=function() return size[1],size[2] end
+            local side={}
+            for i=1,14 do side[i]=k.button("Tool "..i,function() end,
+                {id="tool:"..i,half=i==2 or i==3,group=i==14 and "bottom" or nil}) end
+            k.set_page(1,"Scroll",{},{sidebar=side,sidebar_footer={lines={"Version","Contact"}}})
+            local function visible(index)
+                local painted=false
+                love.graphics.printf=function(text) if text=="Tool "..index then painted=true end end
+                love.draw()
+                local f=k.debug_focus(); local g=k.debug_sidebar_geometry()
+                assert(f.zone=="sidebar" and f.sidebar_i==index,"unexpected navigation target "..f.sidebar_i.." expected "..index)
+                assert(painted,"focused button must actually be painted this frame")
+                assert(g.total==12,"half tools share one layout row")
+                if index~=14 then
+                    assert(g["y"..index]>=g.viewport_top-0.01,"focus above viewport")
+                    assert(g["y"..index]+g["h"..index]<=g.viewport_bottom+0.01,"focus below viewport")
+                end
+            end
+            visible(1)
+            k.input("down"); visible(2)
+            k.input("right"); visible(3)
+            for i=4,14 do k.input("down"); visible(i) end
+            k.input("down"); visible(14)
+            for i=13,4,-1 do k.input("up"); visible(i) end
+            k.input("up"); visible(2)
+            k.input("up"); visible(1)
+        end
+        love.graphics.getDimensions=function() return 640,480 end
+        local font=love.graphics.newFont()
+        font.getWrap=function(_,text,width)
+            local lines={}
+            for line in (text.."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end
+            return width,lines
+        end
+        local value="first line\nsecond line\nthird line\nlast line"
+        k.set_page(1,"Text",{k.textview("Label",value,{max_lines=2,expandable=false})},
+            {row_layout={mode="flow",max_columns=1}})
+        local drawn_y,drawn_clip,clip
+        love.graphics.setScissor=function(x,y,w,h) clip={x,y,w,h} end
+        love.graphics.printf=function(text,x,y)
+            assert(not text:find("…",1,true),"textview must not add ellipsis")
+            if text==value then drawn_y=y; drawn_clip=clip end
+        end
+        love.draw()
+        assert(drawn_y and drawn_clip[4]>0)
+        local initial=drawn_y
+        assert(k.wake_interval() and k.wake_interval()<=1/30)
+        k.update(1); love.draw(); assert(drawn_y==initial,"pause before scrolling")
+        k.update(2); love.draw(); assert(drawn_y<initial,"slowly reveal remaining lines")
+        assert(drawn_clip[2]>drawn_y,"moving text remains clipped to its own box")
+        k.set_page(1,"Text",{k.textview("Label","short",{max_lines=2,expandable=false})},
+            {row_layout={mode="flow",max_columns=1}})
+        love.draw(); assert(k.wake_interval()==nil,"fitting text must not keep redrawing")
+        value=string.rep("long-path-",80)
+        k.set_page(1,"Text",{k.textview("Label",value,{max_lines=1,preserve_lines=true,expandable=false})},
+            {row_layout={mode="flow",max_columns=1}})
+        local drawn_x
+        love.graphics.print=function(text,x) if text==value then drawn_x=x end end
+        love.draw(); assert(drawn_x)
+        initial=drawn_x
+        k.update(3); love.draw(); assert(drawn_x<initial,"overlong explicit line scrolls horizontally")
+        k.dialog({title="Pause",message="Pause",on_confirm=function() end})
+        k.update(3); love.draw(); assert(drawn_x<initial)
+        assert(k.wake_interval()==nil,"modal dialog pauses background text animation")
+    ''')
+
+# The shared component API stays small but explicit: Select is the named form
+# of the existing picker, Checkbox accepts an options table, and physical keys
+# are translated to semantic actions before widgets see them.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local changed=nil
+        local select_row=k.select("Quality",{"safe","fast"},{safe="Safe",fast="Fast"},"quality",{id="quality"})
+        local check_row=k.checkbox("Enabled",{id="enabled",detail="Optional feature",checked=false,
+            on_change=function(value) changed=value end})
+        local text_row=k.textview("Path","/roms",{label_px=16,value_px=18})
+        local section_row=k.section("Paths",{font_px=22})
+        assert(select_row.kind=="picker" and select_row.id=="quality")
+        assert(check_row.kind=="checkbox" and check_row.id=="enabled" and check_row.detail=="Optional feature")
+        assert(text_row.label_px==16 and text_row.value_px==18 and section_row.font_px==22)
+        k.run({state={ui_lang="en",quality="safe"},input_map={z="confirm",x="cancel"},
+            build_pages=function()
+                k.add_page("Home",{select_row,check_row,k.button("Dialog",function()
+                    k.dialog({title="Confirm",on_cancel=function() changed="cancelled" end})
+                end,{id="dialog"})})
+                k.add_page("Other",{k.button("Other",function() end,{id="other"})})
+            end})
+        love.load()
+        love.keypressed("down"); love.keypressed("z")
+        assert(check_row.checked and changed==true)
+        love.keypressed("down"); love.keypressed("z")
+        local before=k.debug_focus()
+        assert(k.debug_dialog().open and k.debug_dialog().scope_depth==1)
+        -- A programmatic page change cannot steal the modal's return target.
+        k.set_page(1,"Home",{k.button("Inserted",function() end,{id="inserted"}),
+            select_row,check_row,k.button("Dialog",function() end,{id="dialog"})},{preserve_focus=true})
+        k.goto_page(2); k.close_dialog()
+        local after=k.debug_focus()
+        assert(k.debug_page().index==1 and after.zone==before.zone and after.focus_i==before.focus_i+1)
+        k.dialog({title="Confirm",on_cancel=function() changed="cancelled" end})
+        love.keypressed("x")
+        assert(changed=="cancelled" and not k.debug_dialog().open)
+        k.set_busy(true,"Repairing",{stage="Downloading · godot_4.5",detail="part.001 · proxy",
+            progress=0.42,footer_left="8.4 MB / 20.0 MB",footer_right="1.2 MB/s"})
+        local busy=k.debug_busy()
+        assert(busy.busy and busy.progress==0.42 and busy.stage=="Downloading · godot_4.5")
+        love.draw()
+        k.set_busy(true,"Checking",{indeterminate=true,stage="Checking files",detail="Please wait"})
+        love.update(0.2)
+        assert(k.debug_busy().indeterminate)
+        assert(love.isAnimating())
+        love.draw(); k.set_busy(false)
+        assert(not love.isAnimating())
+        assert(not k.debug_busy().busy)
+        k.toast({en="Saved",zh="已保存"},{kind="success",duration=0.3})
+        assert(love.isAnimating())
+        assert(love.needsRedraw() and love.takeDirty())
+        local toast=k.debug_toast()
+        assert(toast.open and toast.message=="Saved" and toast.kind=="success")
+        local focus_before=k.debug_focus().focus_i
+        k.input("up")
+        assert(k.debug_focus().focus_i~=focus_before and k.debug_toast().open)
+        assert(love.takeDirty())
+        love.update(0.2); assert(k.debug_toast().open)
+        assert(love.isAnimating())
+        love.draw(); love.update(0.11)
+        assert(not k.debug_toast().open)
+        assert(love.takeDirty())
+        k.input("up")
+        assert(k.debug_focus().focus_i==2)
+        -- Idle UI blocks on input; busy/task paths publish a short wake interval.
+        assert(love.wakeInterval()==nil)
+        k.set_busy(true,"Working",{progress=0.2})
+        assert(love.wakeInterval()==0.1)
+        k.set_busy(false)
+
+        -- User navigation keeps a real history stack. Back/cancel restores the
+        -- previous page and its focused control instead of always jumping Home.
+        k.push_page(2)
+        assert(k.debug_page().index==2 and k.debug_navigation().depth==1)
+        k.input("cancel")
+        assert(k.debug_page().index==1 and k.debug_navigation().depth==0)
+    ''')
+
+# App pages without sidebar controls use the full single-pane layout. This is
+# distinct from an empty but still reserved right-hand operation column.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local outline_rects,vertical_lines=0,0
+        love.graphics.rectangle=function(mode,...)
+            if mode=="line" then outline_rects=outline_rects+1 end
+        end
+        love.graphics.line=function(x1,y1,x2,y2)
+            if x1==x2 then vertical_lines=vertical_lines+1 end
+        end
+        local k=require("kit")
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            k.add_page("Notice",{
+                k.textview("Status","PortMaster is not installed.",{
+                    focusable=false,expandable=false,surface=false}),
+            },{sidebar={},row_layout={mode="flow",max_columns=1,min_width=420}})
+        end})
+        love.load()
+        local page=k.debug_page()
+        local layout=k.debug_layout()
+        assert(page.sidebar_count==0)
+        assert(not layout.has_sidebar and layout.columns==1)
+        assert(layout.x==(960-layout.w)/2)
+        love.draw()
+        assert(outline_rects==1,"plain TextView must not draw a button-like panel")
+        assert(vertical_lines==0,"single-pane app must not draw a sidebar divider")
+    ''')
+
+# Checkbox visuals are drawn as a real control, not font-dependent square/check
+# glyphs. The selected state adds a vector checkmark to the custom box.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local printed={}
+        local line_calls=0
+        love.graphics.print=function(value) printed[#printed+1]=tostring(value) end
+        love.graphics.line=function() line_calls=line_calls+1 end
+        local k=require("kit")
+        local row=k.checkbox("Port",{detail="Required by several games with long names that must wrap onto more than one line",detail_max_lines=3,height=96,checked=false})
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            k.add_page("Manager",{row},{row_layout={mode="flow",max_columns=1,min_width=300}})
+        end})
+        love.load(); love.draw()
+        local layout=k.debug_layout()
+        assert(layout.geometry[1].h>layout.rh)
+        for _,value in ipairs(printed) do
+            assert(not value:find("□",1,true) and not value:find("✓",1,true))
+        end
+        local unchecked_lines=line_calls
+        printed={}; line_calls=0
+        k.input("confirm"); love.draw()
+        assert(row.checked and line_calls>unchecked_lines)
+        for _,value in ipairs(printed) do
+            assert(not value:find("□",1,true) and not value:find("✓",1,true))
+        end
+    ''')
+
+# Select renders its value once as crisp centred text inside a custom control,
+# with vector chevrons instead of fuzzy font characters around the value.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local printed={}
+        local line_calls,rectangle_calls=0,0
+        love.graphics.printf=function(value) printed[#printed+1]=tostring(value) end
+        love.graphics.line=function() line_calls=line_calls+1 end
+        love.graphics.rectangle=function() rectangle_calls=rectangle_calls+1 end
+        local k=require("kit")
+        local row=k.select("Quality",{"safe","fast"},{safe="Safe",fast="Fast"},"quality")
+        k.run({state={ui_lang="en",quality="safe"},build_pages=function()
+            k.add_page("Launcher",{row})
+        end})
+        love.load(); love.draw()
+        local value_count=0
+        for _,value in ipairs(printed) do
+            if value=="Safe" then value_count=value_count+1 end
+            assert(value~="< Safe >")
+        end
+        assert(value_count==1 and line_calls>=2 and rectangle_calls>=4)
+    ''')
+
+# APP body and title typography render once on integer physical pixels.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local draws={}
+        local current_font=nil
+        love.graphics.newFont=function(size)
+            local f={size=tonumber(size) or 20}
+            f.getHeight=function(self) return self.size end
+            f.getWidth=function(self,text) return #text*self.size*0.5 end
+            f.getWrap=function(self,text,limit) return limit,{text} end
+            return f
+        end
+        love.graphics.setFont=function(font) current_font=font end
+        local function record(value,x,y)
+            value=tostring(value)
+            draws[value]=draws[value] or {}
+            draws[value][#draws[value]+1]={x=x,y=y,size=current_font.size}
+        end
+        love.graphics.print=record
+        love.graphics.printf=function(value,x,y) record(value,x,y) end
+        local k=require("kit")
+        k.run({state={ui_lang="en",feature="on"},theme={kind="app"},build_pages=function()
+            k.add_page("Manager",{
+                k.section("Installed"),
+                k.list_item("frt_3.6"),k.list_item("godot_4.5"),
+                k.switch("Feature","feature"),
+                k.checkbox("Port",{checked=false}),
+            },{row_layout={mode="grid",columns=2}})
+        end})
+        love.load(); love.draw()
+        assert(#(draws.Manager or {})==1)
+        assert(draws.Manager[1].size==32)
+        assert(draws.Installed[1].size==18)
+        assert(draws["frt_3.6"][1].size==21)
+        assert(draws.Feature[1].size==26 and draws.Port[1].size==24)
+        for _,value in ipairs({"Installed","frt_3.6","godot_4.5","Feature","Port"}) do
+            local items=draws[value] or {}
+            assert(#items==1,value)
+            assert(items[1].x==math.floor(items[1].x) and items[1].y==math.floor(items[1].y),value)
+        end
+    ''')
+
+# The launcher passes the validated PortMaster font's real path. Kit reads it
+# once as FileData and shares that same object across every requested size,
+# instead of requiring a copied font.ttf inside each launcher directory.
+with tempfile.TemporaryDirectory() as source:
+    local_copy = Path(source) / "font.ttf"
+    local_copy.write_bytes(b"old-per-launcher-copy")
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local system_font="/PortMaster/resources/NotoSansSC-Regular.ttf"
+        local original_getenv,original_open=os.getenv,io.open
+        local reads,new_fonts=0,0
+        local shared_data=nil
+        os.getenv=function(key)
+            if key=="LOVE_FONT_PATH" then return system_font end
+            return original_getenv(key)
+        end
+        io.open=function(path,mode)
+            if path==system_font then
+                return {read=function() reads=reads+1; return "validated-font-data" end,
+                    close=function() end}
+            end
+            return original_open(path,mode)
+        end
+        love.filesystem.newFileData=function(contents,name)
+            assert(contents=="validated-font-data" and name:match("%.ttf$"))
+            shared_data={kind="font-data"}; return shared_data
+        end
+        local font={getHeight=function() return 20 end,getWidth=function(_,text) return #text*10 end,
+            getWrap=function(_,text,limit) return limit,{text} end}
+        love.graphics.newFont=function(source,size)
+            assert(source==shared_data and type(size)=="number")
+            new_fonts=new_fonts+1; return font
+        end
+        love.filesystem.getInfo=function(path)
+            assert(path~="font.ttf","system font must not require a local copy")
+            return nil
+        end
+        local k=require("kit")
+        k.run({state={ui_lang="en"},build_pages=function()
+            k.add_page("Font",{k.button("One",function() end),k.info("Two","Value")})
+        end})
+        love.load(); love.draw()
+        assert(reads==1 and new_fonts>1)
+    ''')
+    assert not local_copy.exists()
+
+# Measured Grid/Flow geometry is cached independently of focus and scroll.
+# Expanding a TextView invalidates the measurement and produces a new height.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local row=k.textview("Long",string.rep("long value ",80),{id="long"})
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            k.add_page("Cache",{row},{row_layout={mode="grid",columns=2}})
+        end})
+        love.load()
+        local before=k.debug_layout_cache()
+        local compact=k.debug_layout()
+        local measured=k.debug_layout_cache()
+        k.debug_layout()
+        local reused=k.debug_layout_cache()
+        assert(measured.misses==before.misses+1 and reused.hits==measured.hits+1)
+        k.input("confirm")
+        local expanded=k.debug_layout()
+        local invalidated=k.debug_layout_cache()
+        assert(invalidated.misses==reused.misses+1)
+        assert(expanded.geometry[1].h>compact.geometry[1].h)
+        k.invalidate_layout()
+        k.debug_layout()
+        assert(k.debug_layout_cache().misses==invalidated.misses+1)
+    ''')
+
+# Sidebar context is resolved from the focused row's stable key, never its
+# current array position. Inserting a row while preserving focus keeps the
+# matching explanation.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local details={a={title="A",body="About A"},b={title="B",body="About B"}}
+        local page
+        k.run({state={ui_lang="en"},theme={kind="app"},build_pages=function()
+            page=k.add_page("Keyed",{k.textview("A","1",{id="a"}),k.textview("B","2",{id="b"})},
+                {sidebar_details=details})
+        end})
+        love.load(); k.input("down")
+        assert(k.debug_sidebar_detail().key=="b")
+        k.set_page(page,"Keyed",{k.textview("Inserted","0",{id="new"}),
+            k.textview("A","1",{id="a"}),k.textview("B","2",{id="b"})},
+            {preserve_focus=true,sidebar_details=details})
+        local detail=k.debug_sidebar_detail()
+        assert(k.debug_focus().focus_i==3 and detail.key=="b" and detail.body=="About B")
+    ''')
+
+# Switch is a state-bound boolean control: Left/Right set an exact value and
+# Confirm toggles it. Declarative launcher.toggle fields render through it.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local changes={}
+        local switch_row=k.switch("Feature","feature",{id="feature",off_value="disabled",on_value="enabled",
+            on_change=function(on,value) changes[#changes+1]={on,value} end})
+        assert(switch_row.kind=="switch" and switch_row.id=="feature")
+        k.run({state={ui_lang="en",feature="disabled"},build_pages=function()
+            k.add_page("Switch",{switch_row})
+        end})
+        love.load(); love.draw()
+        k.input("right")
+        assert(k.get_state().feature=="enabled" and changes[1][1]==true and changes[1][2]=="enabled")
+        k.input("left")
+        assert(k.get_state().feature=="disabled" and changes[2][1]==false and changes[2][2]=="disabled")
+        k.input("confirm")
+        assert(k.get_state().feature=="enabled" and changes[3][1]==true)
+        switch_row.disabled=true
+        k.input("left")
+        assert(k.get_state().feature=="enabled" and #changes==3)
+    ''')
+
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        local original=k.switch
+        local switch_calls=0
+        k.switch=function(...) switch_calls=switch_calls+1; return original(...) end
+        require("launcher").define({title="Toggle",fields={
+            require("launcher").toggle({key="enabled",label="Enabled",default="on",env="ENABLED"})
+        }})
+        love.load()
+        assert(switch_calls==1 and k.get_state().enabled=="on")
+    ''')
+
+# Switch needs no redundant On/Off copy: its label, track and knob share one
+# centre line, while position and colour communicate the boolean state.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local current_font=nil
+        local label_y,label_h,track_cy,knob_cy
+        local status_seen=false
+        love.graphics.newFont=function(size)
+            local f={size=tonumber(size) or 20}
+            f.getHeight=function(self) return self.size end
+            f.getWidth=function(self,text) return #text*self.size*0.5 end
+            f.getWrap=function(self,text,limit) return limit,{text} end
+            return f
+        end
+        love.graphics.setFont=function(font) current_font=font end
+        love.graphics.print=function(value,x,y)
+            if value=="Feature" then label_y,label_h=y,current_font.size end
+        end
+        love.graphics.printf=function(value,x,y)
+            if value=="On" or value=="Off" then status_seen=true end
+        end
+        love.graphics.rectangle=function(mode,x,y,w,h)
+            if mode=="fill" and w/h>2 and w/h<2.5 then track_cy=y+h/2 end
+        end
+        love.graphics.circle=function(mode,x,y,radius)
+            if mode=="fill" then knob_cy=y end
+        end
+        local k=require("kit")
+        k.run({state={ui_lang="en",feature="on"},theme={kind="app"},build_pages=function()
+            k.add_page("Switch",{k.switch("Feature","feature")})
+        end})
+        love.load(); love.draw()
+        assert(label_y and track_cy and knob_cy)
+        assert(not status_seen)
+        assert(math.abs((label_y+label_h/2)-track_cy)<=0.75)
+        assert(math.abs(knob_cy-track_cy)<0.01)
+    ''')
+
+# APP Manager caches are fine-grained and lazy. Repeated page consumers reuse
+# the same Rust inventory snapshot.
+lua = LuaRuntime(unpack_returned_tuples=True)
+lua.execute(f"package.path={str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path")
+lua.execute(r'''
+    local snapshots=0
+    local inventory={schema=1,entries={},ports={{script="Game.sh",path="/scripts/Game.sh",
+        dir="",data_path="",images={}}},data_refcount={},orphan_dirs={},
+        orphan_images={},dead_scripts={},trash={},runtimes={need={godot_4_5={"Game.sh"}},
+        facts={{name="godot_4_5",health="healthy",bytes=42}}}}
+    local native={snapshot=function()
+        snapshots=snapshots+1
+        return {env={scripts_dir="/scripts",gamedirs_dir="/data",images_dir="/images",libs_dir="/libs",
+            gamedir=""},inventory=inventory,runtime_metadata={}}
+    end}
+    local model=require("app_model").new({get_state=function() return {ui_lang="en"} end},native)
+    assert(model.load_env())
+    assert(model.ensure_report()==model.ensure_report() and snapshots==1)
+    assert(model.required_runtimes()[1].health=="healthy")
+    assert(model.installed_runtimes()[1]=="godot_4_5")
+''')
+
+# APP Manager must use the same renderer against a real dynamic scan result.
+with tempfile.TemporaryDirectory() as source:
+    base = Path(source)
+    scripts = base / "scripts"
+    data = base / "data"
+    app = data / "jenny92-appmanager"
+    for directory in (scripts, data / "GameData", app / "conf", app / "trash", base / "libs", base / "images"):
+        directory.mkdir(parents=True, exist_ok=True)
+    (base / "libs" / "frt_3.6.squashfs").write_bytes(b"hsqs")
+    (base / "libs" / "godot_4.5.squashfs").write_bytes(b"hsqs")
+    (scripts / "Game.sh").write_text(
+        'GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\nruntime=godot_4.6.3\n',
+        encoding="utf-8",
+    )
+    (scripts / "Installed.sh").write_text(
+        'GAMEDIR="/' + str(data).lstrip('/') + '/GameData"\nruntime=godot_4.5\n',
+        encoding="utf-8",
+    )
+    (scripts / "Game.png").write_bytes(b"sibling image")
+    (base / "images" / "Installed.png").write_bytes(b"frontend image")
+    (base / "images" / "Orphan.png").write_bytes(b"orphan image")
+    env_path = app / "conf/env.json"
+    env_path.write_text(json.dumps({
+        "controlfolder": str(base / "PortMaster"), "scripts_dir": str(scripts),
+        "gamedirs_dir": str(data), "images_dir": str(base / "images"),
+        "libs_dir": str(base / "libs"), "gamedir": str(app), "directory": str(data).lstrip('/'),
+        "home": str(base), "cfw": "test", "free_bytes": 1024,
+        "display_width": "960", "display_height": "720", "device_arch": "aarch64",
+        "device": "test",
+        "portmaster_health": "healthy", "portmaster_version": "2026.07",
+        "portmaster_latest": "2026.08", "update_status": "ok",
+        "portmaster_target": str(base / "PortMaster"), "target_confirmed": "1",
+        "device_class": "tested", "portmaster_release_channel": "official",
+        "capability_inventory_ports": True, "capability_inventory_apps": False,
+        "capability_manage_ports": True, "capability_manage_apps": False,
+        "capability_install_ports": True, "capability_install_apps": False,
+        "capability_trash": True, "capability_leftovers": True,
+        "capability_repair_runtimes": True, "capability_cleanup_appledouble": True,
+        "capability_manage_portmaster": True, "capability_install_portmaster": True,
+        "capability_update_portmaster": True,
+        "ignore_dirs": ["PortMaster", "images", "jenny92-appmanager"],
+        "ignore_scripts": ["PortMaster.sh", "APP Manager.sh", ".port.sh"], "self_port": "jenny92-appmanager"
+    }), encoding="utf-8")
+    previous = os.environ.get("PAM_ENV")
+    os.environ["PAM_ENV"] = str(env_path)
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = str(app / "love_ui")
+    lua.execute(mock)
+    lua.execute(
+        f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'.."
+        f"{str(root / 'ports/appmanager/love' / '?.lua')!r}..';'..package.path"
+    )
+    inventory = {
+        "schema": 1,
+        "entries": [
+            {"root": "scripts", "name": "Game.sh", "path": str(scripts / "Game.sh")},
+            {"root": "scripts", "name": "Installed.sh", "path": str(scripts / "Installed.sh")},
+            {"root": "game-dirs", "name": "GameData", "path": str(data / "GameData")},
+        ],
+        "ports": [
+            {"script": "Game.sh", "path": str(scripts / "Game.sh"), "dir": "GameData",
+                "data_path": str(data / "GameData"), "images": [
+                {"name": "Game.png", "path": str(scripts / "Game.png")}], "runtimes": ["godot_4.6.3"]},
+            {"script": "Installed.sh", "path": str(scripts / "Installed.sh"), "dir": "GameData",
+                "data_path": str(data / "GameData"), "images": [
+                {"name": "Installed.png", "path": str(base / "images" / "Installed.png")}], "runtimes": ["godot_4.5"]},
+        ],
+        "data_refcount": {str(data / "GameData"): 2}, "orphan_dirs": [],
+        "orphan_images": [{"name": "Orphan.png", "path": str(base / "images" / "Orphan.png")}],
+        "dead_scripts": [], "trash": [],
+        "runtimes": {"need": {"godot_4.6.3": ["Game.sh"], "godot_4.5": ["Installed.sh"]},
+            "facts": [
+                {"name": "frt_3.6", "health": "healthy", "bytes": 4},
+                {"name": "godot_4.6.3", "health": "missing", "bytes": 0},
+                {"name": "godot_4.5", "health": "healthy", "bytes": 20},
+            ]},
+    }
+    lua.globals().APP_SNAPSHOT = lua.table_from({
+        "env": json.loads(env_path.read_text(encoding="utf-8")), "inventory": inventory,
+        "sizes": {},
+        "runtime_metadata": {
+            "godot_4.5": {"arch": "aarch64", "bytes": 20,
+                "md5": "03569a31f137dcf994ed737352cb746a",
+                "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.5.squashfs"},
+            "godot_4.6.3": {"arch": "aarch64", "bytes": 20,
+                "md5": "00000000000000000000000000000000",
+                "url": "https://github.com/PortsMaster/PortMaster-New/releases/download/test/godot_4.6.3.squashfs"},
+        },
+    }, recursive=True)
+    lua.execute(r'''
+        appmanager={
+            request=function(method,payload)
+                if method=="snapshot" then return {ok=true,value=APP_SNAPSHOT} end
+                if method=="start" then
+                    if payload.kind=="config-refresh-if-newer" then
+                        return {ok=false,error={code="offline",message="offline fixture"}}
+                    end
+                    TASK_ID=(TASK_ID or 0)+1
+                    if payload.kind=="initial-snapshot" then
+                        POLL_EVENT={task_id=TASK_ID,kind="initial-snapshot",status="complete",
+                            data={snapshot=APP_SNAPSHOT}}
+                    end
+                    return {ok=true,value=TASK_ID}
+                end
+                if method=="poll" then
+                    local event=POLL_EVENT
+                    if event then POLL_EVENT=nil; return {ok=true,value=event} end
+                    return {ok=true}
+                end
+                if method=="cancel" then return {ok=true,value=true} end
+                return {ok=false,error={code="unsupported_method",message="unsupported method"}}
+            end,
+        }
+    ''')
+    lua.execute(f"dofile({str(root / 'ports/appmanager/love/main.lua')!r})")
+    lua.execute(
+        "love.load(); love.update(0.2); local L=require('kit').debug_layout(); "
+        "assert(L.app and L.navigation and L.side_x < L.x and L.w > L.side_w * 2 and L.rh >= 60)"
+    )
+    lua.execute(r'''
+        local k=require("kit")
+        local page=k.debug_page()
+        assert(page.title=="已安装" and page.root)
+        assert(#page.sidebar_footer_lines==0 and page.sidebar_count==7)
+        function focus_app_row(id)
+            local target
+            for i,key in ipairs(k.debug_page().row_ids) do if key==id then target=i; break end end
+            assert(target,"missing row "..id)
+            for _=1,80 do
+                local f=k.debug_focus()
+                if f.zone=="bar" then k.input("down")
+                elseif f.zone=="sidebar" then k.input(k.debug_layout().navigation and "right" or "left")
+                elseif f.focus_i==target then return
+                else
+                    local g=k.debug_layout().geometry
+                    local a,b=g[f.focus_i],g[target]
+                    if b.content_y<a.content_y then k.input("up")
+                    elseif b.content_y>a.content_y then k.input("down")
+                    else k.input(b.x<a.x and "left" or "right") end
+                end
+            end
+            error("cannot focus "..id)
+        end
+        function open_app_section(id)
+            k.goto_page(1); k.input("left")
+            for _=1,6 do
+                if k.debug_page().sidebar_ids[k.debug_focus().sidebar_i]==id then break end
+                k.input("down")
+            end
+            assert(k.debug_page().sidebar_ids[k.debug_focus().sidebar_i]==id)
+            k.input("confirm")
+        end
+    ''')
+    # Dialogs trap focus, default to the safe cancel action, and close before
+    # calling either callback. Escape/B always follows the cancel path.
+    lua.execute(r'''
+        local k=require("kit")
+        k.close_guide()
+        DIALOG_CONFIRM,DIALOG_CANCEL=0,0
+        k.dialog({title={en="Confirm",zh="确认"},message="Review this action",
+            items={"One","Two","A very long selected item name that must stay on one line","Four","Five"},
+            confirm="Delete",cancel="Cancel",danger=true,
+            on_confirm=function() DIALOG_CONFIRM=DIALOG_CONFIRM+1 end,
+            on_cancel=function() DIALOG_CANCEL=DIALOG_CANCEL+1 end})
+        local D=k.debug_dialog()
+        assert(D.open and D.focus=="cancel" and D.item_count==5 and D.danger)
+        love.draw(); love.keypressed("right"); love.keypressed("return")
+        assert(DIALOG_CONFIRM==1 and DIALOG_CANCEL==0 and not k.debug_dialog().open)
+        k.dialog({title="Confirm",on_cancel=function() DIALOG_CANCEL=DIALOG_CANCEL+1 end})
+        love.keypressed("escape")
+        assert(DIALOG_CANCEL==1 and not k.debug_dialog().open)
+        OPTION_CONFIRMED=nil
+        k.dialog({title="Uninstall",checkbox={label="Delete permanently",danger=true},
+            on_confirm=function(_,checked) OPTION_CONFIRMED=checked end})
+        love.keypressed("up"); love.keypressed("return")
+        assert(k.debug_dialog().focus=="checkbox" and k.debug_dialog().checkbox_checked and k.debug_dialog().danger)
+        love.keypressed("down"); love.keypressed("right"); love.keypressed("return")
+        assert(OPTION_CONFIRMED==true and not k.debug_dialog().open)
+    ''')
+    # Uninstall groups exact paths by game and defaults to Cancel.
+    # Select All/None retain stable sidebar focus after a page rebuild.
+    lua.execute(r'''
+        local k=require("kit")
+        focus_app_row("library:manage"); love.keypressed("return")
+        assert(k.debug_page().index==8)
+        k.close_guide()
+        love.keypressed("return")
+        focus_app_row("uninstall"); love.keypressed("return")
+        local direct=k.debug_dialog()
+        assert(direct.open and direct.danger and direct.focus=="cancel" and direct.group_count==1)
+        assert(direct.title=="卸载所选项目" and direct.checkbox_label=="")
+        assert(direct.item_count==2 and direct.groups[1].items[1]:match("/Game.sh$"))
+        love.keypressed("down"); love.draw()
+        assert(k.debug_dialog().groups[1].items[2]:match("/Game.png$"))
+        assert(k.debug_dialog().focus=="cancel")
+        assert(direct.message:find("无法还原",1,true))
+        -- Reopening resets the list scroll and keeps the safe default.
+        love.keypressed("escape"); love.keypressed("return")
+        direct=k.debug_dialog()
+        assert(direct.open and direct.danger and direct.focus=="cancel" and direct.scroll_y==0)
+        love.keypressed("escape")
+        -- No empty Trash entry sits between Uninstall and Select All/None.
+        focus_app_row("select-all")
+        local before=k.debug_focus()
+        assert(before.zone=="rows")
+        love.keypressed("return")
+        local selected=k.debug_focus()
+        assert(selected.zone==before.zone and selected.focus_i==before.focus_i)
+        love.keypressed("right"); love.keypressed("return")
+        local cleared=k.debug_focus()
+        assert(cleared.zone=="rows" and cleared.focus_i==before.focus_i+1)
+        love.keypressed("left"); love.keypressed("left")
+        assert(k.debug_focus().zone=="sidebar")
+    ''')
+    # Diagnostics keeps the score and grouped checks ahead of complete paths,
+    # device/environment data and the compact installed-runtime list.
+    lua.execute(r'''
+        local k=require("kit")
+        love.keypressed("escape")
+        assert(k.debug_page().index==1)
+        open_app_section("nav:system")
+        focus_app_row("system:details"); love.keypressed("return")
+        local page=k.debug_page()
+        assert(page.index==4 and page.title=="环境诊断" and page.row_ids[1]=="diagnostic:score")
+        local ids={}; for i,id in ipairs(page.row_ids) do ids[id]=i end
+        local script,data,core=ids['path:scripts'],ids['path:data'],ids['path:portmaster']
+        local last=page.row_count
+        assert(page.section_labels[page.section_count]=="已安装 Runtime（2）")
+        assert(page.row_kinds[last-1]=="list_item" and page.row_kinds[last]=="list_item")
+        assert(page.row_value_px[1]==32 and page.row_label_px[script]==18 and page.row_value_px[script]==20)
+        assert(page.row_font_px[last-1]==19)
+        assert(k.debug_focus().zone=="rows" and k.debug_focus().focus_i==1)
+        focus_app_row("path:scripts")
+        assert(k.debug_focus().focus_i==script)
+        assert(k.debug_page().row_descriptions[script]:find("启动脚本",1,true))
+        love.keypressed("return")
+        assert(k.debug_page().row_expanded[script])
+        local layout=k.debug_layout()
+        assert(layout.row_layout_mode=="flow" and layout.columns==1)
+        assert(layout.geometry[script].x == layout.geometry[data].x)
+        assert(layout.geometry[script].content_y+layout.geometry[script].h <= layout.geometry[data].content_y)
+        assert(layout.geometry[script].w == layout.geometry[data].w)
+        assert(layout.geometry[last-1].h < layout.rh and layout.geometry[last].h < layout.rh)
+        love.keypressed("down")
+        assert(k.debug_focus().focus_i==data)
+        assert(k.debug_page().row_descriptions[data]:find("游戏文件",1,true))
+        love.keypressed("down")
+        assert(k.debug_focus().focus_i==core)
+        love.draw(); love.keypressed("escape")
+    ''')
+    # Missing Runtimes have their own selectable repair page. Current official
+    # metadata is a refreshable state cache rather than a packaged inventory.
+    lua.execute(r'''
+        local k=require("kit")
+        open_app_section("nav:system")
+        focus_app_row("system:runtimes"); love.keypressed("return")
+        local page=k.debug_page()
+        assert(page.index==5 and page.title=="修复游戏 Runtime" and page.row_count==7)
+        assert(page.section_count==2 and page.section_labels[1]=="需要修复（1）")
+        assert(page.section_labels[2]=="已安装（1）")
+        assert(page.row_kinds[4]=="section" and page.row_kinds[5]=="checkbox")
+        assert(page.row_kinds[6]=="section" and page.row_kinds[7]=="checkbox")
+        local layout=k.debug_layout()
+        assert(layout.row_layout_mode=="flow" and layout.columns==1)
+        assert(layout.geometry[5].h>layout.rh and k.debug_focus().focus_i==5)
+        -- The missing item starts selected, so Repair immediately confirms one.
+        focus_app_row("runtime-repair"); love.keypressed("return")
+        local dialog=k.debug_dialog()
+        assert(dialog.open and not dialog.danger and dialog.item_count==1,
+            "missing Runtime should be the only default repair")
+        -- An installed item is opt-in; selecting it adds a second forced repair.
+        love.keypressed("escape")
+        focus_app_row("repair:godot_4.5")
+        love.keypressed("return")
+        focus_app_row("runtime-repair"); love.keypressed("return")
+        dialog=k.debug_dialog()
+        assert(dialog.open and dialog.item_count==2,"installed Runtime should be an opt-in repair")
+        love.keypressed("escape"); k.goto_page(1)
+    ''')
+    # Flow layout derives its column count from the available width, while all
+    # cards in one visual row share the tallest wrapped TextView height.
+    lua.execute(r'''
+        local k=require("kit")
+        local flow=k.add_page("Flow",{
+            k.textview("Long","This value is deliberately long enough to wrap across several lines inside a card."),
+            k.textview("Short","OK"),
+            k.textview("Third","Another card"),
+        },{row_layout={mode="flow",min_width=250}})
+        k.goto_page(flow)
+        local L=k.debug_layout()
+        assert(L.row_layout_mode=="flow" and L.columns==2,
+            string.format("mode=%s columns=%s",L.row_layout_mode,L.columns))
+        assert(L.geometry[1].y==L.geometry[2].y and L.geometry[1].h==L.geometry[2].h)
+        assert(L.geometry[1].h>L.rh)
+        love.keypressed("right"); assert(k.debug_focus().focus_i==2)
+        love.keypressed("down"); assert(k.debug_focus().focus_i==3)
+        love.keypressed("right"); assert(k.debug_focus().focus_i==3)
+        k.goto_page(1)
+    ''')
+    # Moving right from the lowest grid row chooses the spatially closest
+    # bottom sidebar action rather than jumping to its first action.
+    lua.execute(r'''
+        local k=require("kit"); local rows={}
+        for i=1,12 do rows[i]=k.textview("Row "..i,"Value") end
+        local cross=k.add_page("Cross",rows,{row_layout={mode="grid",columns=2},sidebar={
+            k.button("Top",function() end),k.button("Bottom",function() end,{group="bottom"})}})
+        k.goto_page(cross); love.keypressed("right")
+        for _=1,5 do love.keypressed("down") end
+        assert(k.debug_focus().focus_i==12)
+        love.keypressed("right")
+        assert(k.debug_focus().zone=="sidebar" and k.debug_focus().sidebar_i==2)
+        k.goto_page(1)
+    ''')
+    # Sidebar navigation follows visual rows: Down skips the right half of the
+    # current row, while Right still crosses between paired half buttons.
+    lua.execute(r'''
+        local k=require("kit")
+        local sidebar_page=k.add_page("Sidebar",{k.button("Row",function() end)},{sidebar={
+            k.button("Full",function() end),k.button("Left",function() end,{half=true}),
+            k.button("Right",function() end,{half=true}),k.button("Next",function() end)}})
+        k.goto_page(sidebar_page); love.keypressed("right"); love.keypressed("down")
+        assert(k.debug_focus().sidebar_i==2)
+        love.keypressed("down"); assert(k.debug_focus().sidebar_i==4)
+        love.keypressed("up"); assert(k.debug_focus().sidebar_i==2)
+        love.keypressed("right"); assert(k.debug_focus().sidebar_i==3)
+        k.goto_page(1)
+    ''')
+    # A status-only page has no focusable row. Pressing Down must move to its
+    # sidebar (or the header when no sidebar exists) without clearing focus_i;
+    # a later Right press used to crash in nearest_sidebar_for_row.
+    lua.execute(r'''
+        local k=require("kit")
+        local status=k.add_page("Status",{
+            k.textview("State","Ready",{focusable=false})
+        },{row_layout={mode="flow",max_columns=1},sidebar={
+            k.button("Continue",function() end,{id="continue"})}})
+        k.goto_page(status)
+        love.keypressed("down")
+        local focus=k.debug_focus()
+        assert(focus.zone=="sidebar" and focus.sidebar_i==1 and focus.focus_i~=nil)
+        love.keypressed("left"); love.keypressed("right")
+        assert(k.debug_focus().zone=="sidebar")
+        k.goto_page(1)
+    ''')
+    # L1/R1 emit PageUp/PageDown. A page jump advances by the number of
+    # currently visible focusable rows and works for both lists and grids.
+    lua.execute(r'''
+        local k=require("kit"); local rows={}
+        for i=1,30 do rows[i]=k.button("Row "..i,function() end) end
+        local long_list=k.add_page("Long list",rows)
+        k.goto_page(long_list); love.draw()
+        local visible=k.debug_layout().last-k.debug_layout().first+1
+        assert(visible>1 and k.debug_focus().focus_i==1)
+        love.keypressed("pagedown")
+        assert(k.debug_focus().focus_i==1+visible)
+        love.draw(); love.keypressed("pageup")
+        assert(k.debug_focus().focus_i==1)
+
+        local grid=k.add_page("Grid",rows,{row_layout={mode="grid",columns=2}})
+        k.goto_page(grid); love.draw()
+        local first=k.debug_focus().focus_i
+        love.keypressed("pagedown")
+        assert(k.debug_focus().focus_i>first+1)
+        love.draw(); love.keypressed("pageup")
+        assert(k.debug_focus().focus_i==first)
+        k.goto_page(1)
+    ''')
+    # preserve_focus follows a stable row id across insertions rather than
+    # retaining an index that now names another action.
+    lua.execute(r'''
+        local k=require("kit")
+        local function b(name) return k.button(name,function() LAST_ACTION=name end,{id=name}) end
+        local stable=k.add_page("Stable",{b("A"),b("B"),b("C")})
+        k.goto_page(stable); love.keypressed("down")
+        k.set_page(stable,"Stable",{b("X"),b("A"),b("B"),b("C")},{preserve_focus=true})
+        love.keypressed("return"); assert(LAST_ACTION=="B" and k.debug_focus().focus_i==3)
+        love.keypressed("down")
+        k.set_page(stable,"Stable",{b("A"),b("B")},{preserve_focus=true})
+        love.keypressed("return"); assert(LAST_ACTION=="B" and k.debug_focus().focus_i==2)
+        k.goto_page(1)
+    ''')
+    # TextViews default to a compact two-line value, expose an ellipsis, and
+    # expand on A without ever becoming taller than the viewport.
+    lua.execute(r'''
+        local k=require("kit"); local long=string.rep("very long value ",400)
+        local text_page=k.add_page("Text",{k.textview("Long",long)},{row_layout={mode="grid",columns=2}})
+        k.goto_page(text_page); local compact=k.debug_layout()
+        assert(compact.geometry[1].h<compact.band/2)
+        love.keypressed("return"); local expanded=k.debug_layout()
+        assert(expanded.geometry[1].h>compact.geometry[1].h and expanded.geometry[1].h<=expanded.band)
+        love.keypressed("return"); assert(k.debug_layout().geometry[1].h==compact.geometry[1].h)
+        k.goto_page(1)
+    ''')
+    # A library item opens details; launching is an explicit item action.
+    lua.execute(r'''
+        local k=require("kit")
+        love.draw(); love.keypressed("return")
+        assert(k.debug_page().index==14 and not k.debug_dialog().open)
+        focus_app_row("item:launch"); love.keypressed("return")
+        local launch=k.debug_dialog()
+        assert(launch.open and launch.focus=="confirm" and not launch.danger)
+        love.keypressed("escape"); love.draw()
+        assert(not k.debug_dialog().open and k.debug_page().index==14)
+        love.keypressed("escape"); assert(k.debug_page().index==1)
+    ''')
+    # Back follows content -> navigation -> exit dialog, whose A confirms
+    # and B returns. The visible Exit entry never runs merely from focus.
+    lua.execute(r'''
+        local k=require("kit")
+        LAST_QUIT=nil
+        love.keypressed("escape")
+        assert(k.debug_focus().zone=="sidebar" and not k.debug_dialog().open)
+        love.keypressed("escape")
+        local exit_dialog=k.debug_dialog()
+        assert(exit_dialog.open and exit_dialog.focus=="confirm" and not exit_dialog.danger)
+        love.keypressed("escape")
+        assert(LAST_QUIT==nil and not k.debug_dialog().open and k.debug_focus().zone=="sidebar")
+        for _=1,6 do love.keypressed("down") end
+        assert(k.debug_page().sidebar_ids[k.debug_focus().sidebar_i]=="nav:quit" and not k.debug_dialog().open)
+        love.keypressed("return"); assert(k.debug_dialog().open)
+        love.keypressed("escape"); assert(LAST_QUIT==nil)
+        love.keypressed("return"); love.keypressed("return")
+        assert(LAST_QUIT==k.EXIT_QUIT and not k.debug_dialog().open)
+    ''')
+    if previous is None:
+        os.environ.pop("PAM_ENV", None)
+    else:
+        os.environ["PAM_ENV"] = previous
+
+# The controller-only password keyboard never exposes the entered value through
+# diagnostics, supports every semantic navigation action, and clears itself on
+# both completion and cancellation.
+with tempfile.TemporaryDirectory() as source:
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().SOURCE = source
+    lua.execute(mock)
+    lua.execute(f"package.path={str(root / '_kit/love' / '?.lua')!r}..';'..package.path")
+    lua.execute(r'''
+        local k=require("kit")
+        k.run({state={ui_lang="en"},build_pages=function()
+            k.add_page("Home",{k.button("Open",function() end)})
+        end})
+        love.load()
+        local submitted=nil
+        assert(k.password_dialog({on_confirm=function(value) submitted=value end}))
+        assert(k.debug_password_dialog().open and k.debug_password_dialog().length==0)
+        k.input("confirm"); k.input("right"); k.input("confirm")
+        assert(k.debug_password_dialog().length==2)
+        k.input("page_down"); assert(k.debug_password_dialog().mode==2)
+        k.input("down"); k.input("down"); k.input("down"); k.input("down")
+        k.input("right"); k.input("right"); k.input("right"); k.input("confirm")
+        assert(submitted=="12" and not k.debug_password_dialog().open)
+        local cancelled=false
+        assert(k.password_dialog({on_confirm=function() error("must not submit") end,
+            on_cancel=function() cancelled=true end}))
+        k.input("confirm"); k.input("cancel")
+        assert(cancelled and not k.debug_password_dialog().open)
+    ''')
+
+print("love Lua module tests: PASS")

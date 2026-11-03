@@ -1,0 +1,33 @@
+{
+  "name": "pvz_portable_jenny",
+  "title": "Je-植物大战僵尸年度版[中]",
+  "engine": "PvZ Portable / SDL2",
+  "runtime": "Maintained native aarch64 PvZ Portable engine",
+  "license": "CC-BY-NC-SA-4.0 launcher integration; LGPL-3.0-or-later engine",
+  "port_dir": "pvz_portable_jenny",
+  "portable_dir": "pvz_portable_jenny",
+  "script": "Je-植物大战僵尸年度版[中].sh",
+  "launcher_sh": "src/launcher.sh",
+  "portmaster": {
+    "zip_name": "pvz_portable.zip",
+    "items": [
+      "Je-植物大战僵尸年度版[中].sh",
+      "pvz_portable_jenny"
+    ],
+    "porter": [
+      "gama97",
+      "jenny92-tech"
+    ],
+    "desc": "Maintained Plants vs. Zombies GOTY portable engine. Original game resources and all player saves are excluded.",
+    "inst": "Supply main.pak and properties/ from your own GOTY copy in pvz_portable_jenny/.",
+    "genres": [
+      "strategy",
+      "puzzle"
+    ],
+    "rtr": false,
+    "availability": "paid",
+    "arch": [
+      "aarch64"
+    ]
+  }
+}

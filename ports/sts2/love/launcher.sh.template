@@ -1,0 +1,202 @@
+#!/bin/bash
+# INPUT:  PortMaster control、共享 _kit、LÖVE 选项、玩家 gamedata
+# OUTPUT: 经设备能力校验的 GLES 或 Vulkan 游戏启动
+# POS:    STS2 LÖVE 设置与游戏启动阶段的设备入口模板
+# SPDX-License-Identifier: CC-BY-NC-SA-4.0
+# Copyright (c) 2025-2026 jenny92-tech
+#
+# PORTMASTER: sts2, Je-杀戮尖塔2[中].sh
+# Stage-1: shared love settings UI (run_love_launcher_ui, logic in
+# _kit/portmaster_common.sh) writes launch_config.env; its display env stays
+# confined to the subshell and never leaks into stage-2.
+# Stage-2: patch the save, then run the game's godot.mono.
+# Constraints still apply (see docs): the stage-2 game must not use
+# gptokeyb/EVDEV grab, must not pass --verbose, and DEFSHADER must not contain
+# rect. The love launcher's gptokeyb is transient and is killed when love exits.
+
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
+source "$KIT/launcher_compat.sh"
+source "$KIT/launcher_artwork.sh"
+#@KIT-END
+SLL_TRIMUI_ACTIVE=0
+[ "${SLL_UNIFIED_V110:-1}" = 1 ] || { echo '[STS2] unsupported launch mode' >&2; exit 1; }
+early_model="$(tr -d '\000' < /proc/device-tree/model 2>/dev/null)"
+case "$early_model" in sun55iw3|'Rockchip RK3566 RK817 MINILOONG LP4X Board') ;; *) echo '[STS2] unsupported device' >&2; exit 1 ;; esac
+if [ "$early_model" = sun55iw3 ]; then
+  # Acquire the display before PortMaster's control helper can touch it.
+  # The inner process must consume the guardian's one-use pipe token first.
+  early_base=/mnt/SDCARD/Data/ports/sts2-v110
+  if [ -z "${SLL_TRIMUI_LEASE_FD:-}" ] && [ "${SLL_STARTUP_LOGGED:-0}" != 1 ]; then
+    early_logger="$early_base/bin/sts2_bounded_log.py"
+    [ ! -L "$early_logger" ] && [ -f "$early_logger" ] || exit 1
+    [ "$(sha256sum "$early_logger" | cut -d ' ' -f 1)" = 94e75a3c4fe6adb73787cb2371937b4d22405712f11ec9dbb7de8f48168d561a ] || exit 1
+    export SLL_STARTUP_LOGGED=1
+    exec python3 "$early_logger" off "$early_base/launcher-startup.log" -- /bin/bash "$0"
+  fi
+  early_probe="$early_base/bin/sts2_official_profile_v6.py"
+  [ ! -L "$early_probe" ] && [ -f "$early_probe" ] || exit 1
+  [ "$(sha256sum "$early_probe" | cut -d ' ' -f 1)" = b9c3ca34a01ba08d8c52eaa85c39eb66e1a15d89068989dddeccecfe5794602a ] || exit 1
+  # The leased probe must be a direct child of namespace PID 1; command
+  # substitution would insert a shell process and invalidate the token.
+  early_caps_file="$(mktemp /tmp/sts2-caps.XXXXXXXX)" || exit 1
+  if ! python3 "$early_probe" 91 > "$early_caps_file"; then rm -f -- "$early_caps_file"; exit 1; fi
+  early_caps="$(<"$early_caps_file")"
+  rm -f -- "$early_caps_file" || exit 1
+  case "$early_caps" in
+    'CAPS gles=1 vulkan=1') SLL_GLES_AVAILABLE=1; SLL_VULKAN_AVAILABLE=1 ;;
+    'CAPS gles=1 vulkan=0') SLL_GLES_AVAILABLE=1; SLL_VULKAN_AVAILABLE=0 ;;
+    'CAPS gles=0 vulkan=1') SLL_GLES_AVAILABLE=0; SLL_VULKAN_AVAILABLE=1 ;;
+    *) echo '[STS2] invalid graphics capability result' >&2; exit 1 ;;
+  esac
+  if [ -z "${SLL_TRIMUI_LEASE_FD:-}" ]; then
+    early_lease="$early_base/bin/sts2_trimui_lease_v3.py"
+    [ ! -L "$early_lease" ] && [ -f "$early_lease" ] || exit 1
+    [ "$(sha256sum "$early_lease" | cut -d ' ' -f 1)" = 6e970890fb0285380fc7ddd3d4d0900ce8a401cbd1b4bb3a54d211dda6464f67 ] || exit 1
+    exec python3 "$early_lease"
+  fi
+  unset SLL_TRIMUI_LEASE_FD SLL_TRIMUI_LEASE_TOKEN
+  SLL_TRIMUI_ACTIVE=1
+  # Avoid sourcing PortMasterDialog's shared /dev/shm cleanup and home-file
+  # writes. No dialog pipe is needed by this self-contained LÖVE launcher.
+  SLL_PM_PRIVATE="$(mktemp -d /tmp/sts2-pm.XXXXXXXX)" || exit 1
+  export PM_PIPE="$SLL_PM_PRIVATE/unused"
+fi
+portmaster_init "$(cd "$(dirname "$0")" && pwd)" 1280 720 || {
+  [ "$SLL_TRIMUI_ACTIVE" != 1 ] || rmdir -- "$SLL_PM_PRIVATE" 2>/dev/null || true
+  exit 1
+}
+if [ "$SLL_TRIMUI_ACTIVE" = 1 ]; then
+  # The standard TrimUI pm_finish performs global pkill and restarts a system
+  # service. Our PID-scoped UI cleanup and lease guardian own this lifecycle.
+  pm_finish() { :; }
+  trap 'rmdir -- "$SLL_PM_PRIVATE" 2>/dev/null || true' EXIT
+fi
+
+# Current source supports only the verified PortMaster Godot Vulkan profile.
+if [ "${SLL_UNIFIED_V110:-1}" = 1 ]; then
+  PORT_NAME=sts2_v110
+  LOG_PREFIX="[STS2]"
+  model="$(tr -d '\000' < /proc/device-tree/model 2>/dev/null)"
+  case "$model" in
+    sun55iw3)
+      GAMEDIR=/mnt/SDCARD/Data/ports/sts2-v110
+      PROFILE=/mnt/UDISK/sts2-vulkan-game-profile-20261030/data
+      PROFILE_KIND=91
+      ;;
+    'Rockchip RK3566 RK817 MINILOONG LP4X Board')
+      GAMEDIR=/roms/ports/sts2-vk-test
+      PROFILE="$GAMEDIR/conf/data"
+      PROFILE_KIND=90
+      ;;
+    *) echo "$LOG_PREFIX unsupported device"; exit 1 ;;
+  esac
+  [ -d "$GAMEDIR" ] && [ ! -L "$GAMEDIR" ] && [ -d "$PROFILE/SlayTheSpire2" ] || exit 1
+  if [ "$PROFILE_KIND" = 90 ]; then
+    PROFILE_CHECK="$GAMEDIR/bin/sts2_official_profile_v2.py"
+    [ ! -L "$PROFILE_CHECK" ] && [ -f "$PROFILE_CHECK" ] || exit 1
+    [ "$(sha256sum "$PROFILE_CHECK" | cut -d ' ' -f 1)" = 6afcaacb918d7bf76feb7ce9a8f4ef15f198147fa663df62f39738eb881c9512 ] || exit 1
+    python3 "$PROFILE_CHECK" 90 || { echo "$LOG_PREFIX verified Vulkan profile unavailable" >&2; exit 1; }
+  elif [ "$SLL_TRIMUI_ACTIVE" != 1 ]; then
+    echo "$LOG_PREFIX verified display handoff unavailable" >&2; exit 1
+  fi
+  if [ "$PROFILE_KIND" = 91 ]; then
+    export SLL_VULKAN_AVAILABLE SLL_GLES_AVAILABLE SLL_GRAPHICS_PREFERRED=gles
+  else
+    export SLL_VULKAN_AVAILABLE=1 SLL_GLES_AVAILABLE=0 SLL_GRAPHICS_PREFERRED=vulkan
+  fi
+  if [ "$PROFILE_KIND" = 91 ] && [ "$SLL_VULKAN_AVAILABLE" = 1 ]; then export SLL_WESTON_COMPOSITION_AVAILABLE=1; else export SLL_WESTON_COMPOSITION_AVAILABLE=0; fi
+  #@KIT-BEGIN
+  KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+  source "$KIT/portmaster_common.sh"
+  #@KIT-END
+  export PORTKIT_LAUNCHER_BIN_OVERRIDE="$GAMEDIR/bin/portkit-launcher"
+  if [ "$model" != sun55iw3 ]; then
+    # MiniLoong's ports volume is noexec; copy only the verified small UI
+    # helper to an owned executable temporary directory for this session.
+    ui_cache="$(mktemp -d /tmp/sts2-launcher-ui.XXXXXXXX)" || exit 1
+    trap 'rm -rf -- "$ui_cache"' EXIT
+    cp "$PORTKIT_LAUNCHER_BIN_OVERRIDE" "$ui_cache/portkit-launcher" || exit 1
+    [ "$(sha256sum "$ui_cache/portkit-launcher" | cut -d ' ' -f 1)" = 55f22464cff54b57c5b7c3ccf1c3bcae12f9df638a3b2783879efef5822de85a ] || exit 1
+    chmod 700 "$ui_cache/portkit-launcher" || exit 1
+    export PORTKIT_LAUNCHER_BIN_OVERRIDE="$ui_cache/portkit-launcher"
+    mkdir "$ui_cache/love" || exit 1
+    cp "$controlfolder/runtimes/love_11.5/love.aarch64" "$ui_cache/love/love.aarch64" || exit 1
+    cp -R "$controlfolder/runtimes/love_11.5/libs.aarch64" "$ui_cache/love/libs.aarch64" || exit 1
+    cp "$controlfolder/gptokeyb" "$ui_cache/gptokeyb" || exit 1
+    chmod 700 "$ui_cache/love/love.aarch64" "$ui_cache/gptokeyb" || exit 1
+    export LAUNCHER_UI_RUNTIME_DIR="$ui_cache"
+    export GPTOKEYB="$ui_cache/gptokeyb ${ESUDOKILL:-}"
+  fi
+  [ -x "$PORTKIT_LAUNCHER_BIN_OVERRIDE" ] || { echo "$LOG_PREFIX missing UI helper"; exit 1; }
+  _love_provide_font "$GAMEDIR/love_ui-v110" || { echo "$LOG_PREFIX Chinese UI font unavailable"; exit 1; }
+  [ -n "${LOVE_FONT_PATH:-}" ] && [ -r "$LOVE_FONT_PATH" ] || { echo "$LOG_PREFIX Chinese UI font unavailable"; exit 1; }
+  # Existing UI state wins; these defaults are consulted only on first use.
+  export SLL_INITIAL_QUALITY=smooth SLL_INITIAL_LANGUAGE=zh_CN
+  if [ ! -e "$GAMEDIR/love_ui-v110/state.txt" ]; then
+    for settings in "$PROFILE"/SlayTheSpire2/*/*/settings.save; do
+      [ -f "$settings" ] && [ ! -L "$settings" ] || continue
+      initial_language="$(python3 - "$settings" <<'PYLANG'
+import json,sys
+try:
+    with open(sys.argv[1],encoding='utf-8') as f: value=json.load(f).get('language')
+    print({'eng':'en_US','zhs':'zh_CN'}.get(value,'zh_CN'))
+except (OSError,ValueError,AttributeError): print('zh_CN')
+PYLANG
+)"
+      export SLL_INITIAL_LANGUAGE="$initial_language"
+      break
+    done
+  fi
+  run_love_launcher_ui "$GAMEDIR/love_ui-v110"
+  [ "${launcher_exit:-1}" = 42 ] && [ -s "$LAUNCH_ENV" ] || { launcher_platform_finish; exit 1; }
+  source "$LAUNCH_ENV"
+  case "${SLL_GRAPHICS_API:-}:$SLL_VULKAN_AVAILABLE:$SLL_GLES_AVAILABLE" in
+    vulkan:1:*) ;;
+    gles:*:1) ;;
+    *) echo "$LOG_PREFIX renderer unavailable"; launcher_platform_finish; exit 1 ;;
+  esac
+  case "${SLL_PERF_OVERLAY:-off}" in on|off) ;; *) exit 1 ;; esac
+  case "${SLL_DIAGNOSTICS:-off}" in on|off) ;; *) exit 1 ;; esac
+  if [ -z "${SLL_WESTON_COMPOSITION+x}" ]; then
+    if [ "$PROFILE_KIND" = 91 ] && [ "$SLL_GRAPHICS_API" = vulkan ]; then SLL_WESTON_COMPOSITION=on; else SLL_WESTON_COMPOSITION=off; fi
+  fi
+  case "$SLL_WESTON_COMPOSITION:$SLL_WESTON_COMPOSITION_AVAILABLE" in off:*|on:1) ;; *) exit 1 ;; esac
+  case "${SLL_LANGUAGE:-}" in zh_CN) game_language=zhs ;; en_US) game_language=eng ;; *) exit 1 ;; esac
+  case "${SLL_QUALITY:-}" in smooth|balanced|quality) ;; *) exit 1 ;; esac
+  # Only merge the selected language into existing game settings. Save files
+  # and all other settings remain under the existing shared game profile.
+  for settings in "$PROFILE"/SlayTheSpire2/*/*/settings.save; do
+    [ -f "$settings" ] && [ ! -L "$settings" ] || continue
+    portkit_launcher json merge --file "$settings" --patch "{\"language\":\"$game_language\"}" || {
+      echo "$LOG_PREFIX failed to update language"; launcher_platform_finish; exit 1;
+    }
+  done
+  export SLL_GRAPHICS_API SLL_PERF_OVERLAY SLL_DIAGNOSTICS SLL_LANGUAGE SLL_QUALITY SLL_SWAP_AB SLL_SWAP_XY
+  if [ "$PROFILE_KIND" = 91 ]; then export SLL_WESTON_COMPOSITION; else unset SLL_WESTON_COMPOSITION; fi
+  export SLL_UI_CONTROL=0 SLL_UI_DIAG=0 SLL_TEXTURE_DIAG=0 SLL_ASSET_DIAG=0 SLL_INPUT_DIAG=0 SLL_MALLOC_DIAG=0
+  export SLL_HEAP_TRIM=1 SLL_BUNDLED_THEME_FONT=0 SLL_SYSTEM_FONT_DIAG=0
+  unset SLL_DIAG_XDG_ROOT SLL_MEMORY_TRIAL SLL_TEXTURE_MAIN_PACK SLL_TEXTURE_OVERLAY
+  if [ "$PROFILE_KIND" = 90 ]; then audio_setup >/dev/null 2>&1; fi
+  launcher_platform_prepare_game godot.mono
+  if [ "$model" = sun55iw3 ]; then
+    game_backend="$GAMEDIR/bin/sts2_trimui_backend_v6.py"
+    [ ! -L "$game_backend" ] && [ -f "$game_backend" ] || exit 1
+    [ "$(sha256sum "$game_backend" | cut -d ' ' -f 1)" = 771104742cc0a813bbc9589ce02c1ba976ed2673fbf317a304a2adda8a301e65 ] || exit 1
+    python3 "$GAMEDIR/bin/sts2_bounded_log.py" "$SLL_DIAGNOSTICS" "$GAMEDIR/launcher-bounded.log" -- \
+      python3 "$game_backend" "$SLL_GRAPHICS_API"
+  else
+    export SLL_LAUNCHER_HANDOFF=1
+    python3 "$GAMEDIR/bin/sts2_bounded_log.py" "$SLL_DIAGNOSTICS" "$GAMEDIR/launcher-bounded.log" -- \
+      /bin/bash /roms/ports/.sts2-v110-vulkan-handoff.sh
+  fi
+  result=$?
+  launcher_platform_finish
+  exit "$result"
+fi
+
+
+echo "[STS2] unsupported launch mode" >&2
+exit 1

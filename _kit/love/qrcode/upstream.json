@@ -1,0 +1,9 @@
+{
+  "source": "https://github.com/speedata/luaqrcode",
+  "resolved_sha": "5a9c34bc04d5113048df8528af72ef31d25b7300",
+  "path": "qrencode.lua",
+  "sha256": "c5afe1f5026208e59e5bae9b1ec617725aaba37c5a1aeaf5ac8c4d4b68d96d85",
+  "changes": [
+    "Repository source header only"
+  ]
+}

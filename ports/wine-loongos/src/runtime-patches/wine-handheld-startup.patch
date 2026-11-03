@@ -1,0 +1,49 @@
+--- a/dlls/winewayland.drv/wayland_surface.c
++++ b/dlls/winewayland.drv/wayland_surface.c
+@@ -31,6 +31,7 @@
+ #include "waylanddrv.h"
+ #include "wine/debug.h"
+ #include "wine/server.h"
++#include "wine_startup_card.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
+ 
+@@ -252,6 +253,10 @@
+     if (process_name)
+         xdg_toplevel_set_app_id(surface->xdg_toplevel, process_name);
+ 
++    /* Request native fullscreen before the first configure or mapped buffer. */
++    if (wine_runner_fullscreen(surface->hwnd))
++        xdg_toplevel_set_fullscreen(surface->xdg_toplevel, NULL);
++
+     wl_surface_commit(surface->wl_surface);
+     wl_display_flush(process_wayland.wl_display);
+ 
+@@ -382,6 +387,10 @@
+     TRACE("surface=%p shm_buffer=%p (%dx%d)\n",
+           surface, shm_buffer, shm_buffer->width, shm_buffer->height);
+ 
++    /* GPU game contents use a separate client surface. Keep temporary parent
++     * buffers visually continuous with the fullscreen launcher underneath. */
++    wine_runner_paint_card(surface->hwnd, shm_buffer->map_data,
++                            shm_buffer->width, shm_buffer->height);
+     shm_buffer->busy = TRUE;
+     wayland_shm_buffer_ref(shm_buffer);
+ 
+--- a/dlls/winewayland.drv/window.c
++++ b/dlls/winewayland.drv/window.c
+@@ -173,6 +173,14 @@
+         window_state |= WAYLAND_SURFACE_CONFIG_STATE_MAXIMIZED;
+     }
+ 
++    /* A handheld session owns the display; keep the requested native state
++     * fullscreen even if the engine briefly changes its Win32 window style. */
++    if (getenv("WINE_RUNNER_FULLSCREEN") &&
++        !strcmp(getenv("WINE_RUNNER_FULLSCREEN"), "1") &&
++        !(style & (WS_CHILD | WS_MINIMIZE)) &&
++        !NtUserGetWindowRelative(data->hwnd, GW_OWNER))
++        window_state = WAYLAND_SURFACE_CONFIG_STATE_FULLSCREEN;
++
+     conf->state = window_state;
+     conf->scale = NtUserGetSystemDpiForProcess(0) / 96.0;
+     conf->visible = (style & WS_VISIBLE) == WS_VISIBLE;

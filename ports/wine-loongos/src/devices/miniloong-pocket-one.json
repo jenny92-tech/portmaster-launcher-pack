@@ -1,0 +1,20 @@
+{
+  "id": "miniloong-pocket-one",
+  "label": "迷你龙 · LoongOS",
+  "display_size": [
+    960,
+    720
+  ],
+  "controller_device": "/dev/input/by-path/platform-loong1_joypad-event-joystick",
+  "detect": {
+    "machine": "aarch64",
+    "os_id": "loong",
+    "os_version": "1.4.0.36",
+    "compatible": "rockchip,rk3566",
+    "required_files": [
+      "/usr/lib/libloong_sdk.so",
+      "/dev/input/by-path/platform-loong1_joypad-event-joystick"
+    ]
+  },
+  "extends": "families/loongos-rk3566.json"
+}

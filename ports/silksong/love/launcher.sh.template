@@ -1,0 +1,173 @@
+#!/bin/bash
+# INPUT:  _kit 启动/Unity 公共库、PortMaster control.txt、SILK_* 配置、unityloader
+# OUTPUT:  丝之歌 TOML 设置、字体 fallback、显示/按键配置与游戏进程
+# POS:    丝之歌 LÖVE 设置页和 Rudroid Unity 6 启动模板
+# PORTMASTER: silksong, Je-空洞骑士_丝之歌[中].sh
+#
+# Stage-1: shared love settings UI writes launch_config.env.
+# Stage-2: apply measured effects plus frame/render/input/memory policy,
+#          then run the standard plugin-based unityloader.
+
+PORT_NAME="silksong"; LOG_PREFIX="[SILK-LOVE]"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ── PortMaster preamble (controlfolder discovery + control.txt).
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_bootstrap.sh"
+source "$KIT/launcher_platform.sh"
+source "$KIT/launcher_compat.sh"
+source "$KIT/launcher_artwork.sh"
+#@KIT-END
+portmaster_init "$SCRIPT_DIR" || exit 1
+LAUNCHERDIR="/$directory/ports/$PORT_NAME"
+[ -d "$LAUNCHERDIR" ] || LAUNCHERDIR="$SCRIPT_DIR/$PORT_NAME"
+
+resolve_silksong_gamedir() {
+  local candidate
+  for candidate in \
+    "/$directory/ports/$PORT_NAME" \
+    "/userdata/silksong" \
+    "/mnt/UDISK/silksong" \
+    "/mnt/sdcard/roms/ports/$PORT_NAME" \
+    "/mnt/SDCARD/Roms/PORTS/$PORT_NAME" \
+    "/sdcard/roms/ports/$PORT_NAME"; do
+    [ -n "$candidate" ] || continue
+    if [ -x "$candidate/unityloader" ] ||
+       { [ -d "$candidate/gamedata" ] && [ -x "/userdata/$PORT_NAME-runtime/unityloader" ]; }; then
+      printf '%s\n' "$candidate"; return 0
+    fi
+  done
+  return 1
+}
+
+GAMEDIR="$(resolve_silksong_gamedir)" || {
+  echo "$LOG_PREFIX runtime missing: expected unityloader under /$directory/ports/$PORT_NAME, /userdata/silksong or /mnt/UDISK/silksong"
+  pm_finish
+  exit 1
+}
+# Existing internal-storage installs keep the UI beside the runtime. Prefer
+# the portable launcher payload when present, otherwise retain that layout.
+[ -d "$LAUNCHERDIR/love_ui" ] || LAUNCHERDIR="$GAMEDIR"
+portmaster_sync_launcher_artwork "$SCRIPT_DIR" "$0" "$LAUNCHERDIR"
+CONFDIR="$GAMEDIR/conf"
+cd "$GAMEDIR" || exit 1
+launcher_platform_start_log "$GAMEDIR/log_silk.txt" || exit 1
+#@BUILD-LOG
+echo "$LOG_PREFIX CFW=$CFW_NAME ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} GAMEDIR=$GAMEDIR"
+mkdir -p "$CONFDIR" "$GAMEDIR/cache" "$GAMEDIR/cache/UnityShaderCache"
+[ -x "$LAUNCHERDIR/bin/portkit-launcher" ] &&
+  export PORTKIT_LAUNCHER_BIN_OVERRIDE="$LAUNCHERDIR/bin/portkit-launcher"
+
+# ── shared helpers (assemble.sh inlines these into the device build) ─────
+#@KIT-BEGIN
+KIT="$(cd "$(dirname "$0")/../../../_kit" && pwd)"
+source "$KIT/portmaster_common.sh"
+source "$KIT/launcher_unity_common.sh"
+#@KIT-END
+
+resolve_unity_runtime || exit 1
+# Keep scaled Vulkan buffers behind the compositor on the A523 portrait panel.
+unset RUDROID_WAYLAND_FORCE_RENDERER
+if [ "${CFW_NAME:-}" = TrimUI ] && launcher_platform_matches_compatible allwinner,a523; then
+  export RUDROID_WAYLAND_FORCE_RENDERER=1
+fi
+prepare_unity_graphics_options 1
+
+install_unity_font_fallback() {
+  local font_dir="$GAMEDIR/gamedata/fonts"
+  local font_source="$controlfolder/resources/NotoSansSC-Regular.ttf"
+  local font_config="$GAMEDIR/silksong-fonts.xml"
+  [ -s "$font_source" ] || return 0
+  mkdir -p "$font_dir" || return 0
+  if [ ! -s "$font_dir/NotoSansSC-Regular.ttf" ]; then
+    cp "$font_source" "$font_dir/NotoSansSC-Regular.ttf" || return 0
+  fi
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/Roboto-Regular.ttf"
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/Roboto-Bold.ttf"
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/DroidSans.ttf"
+  ln -sf NotoSansSC-Regular.ttf "$font_dir/DroidSansFallback.ttf"
+  if [ -s "$font_config" ]; then
+    cp "$font_config" "$font_dir/fonts.xml"
+    cp "$font_config" "$font_dir/system_fonts.xml"
+    cp "$font_config" "$font_dir/fallback_fonts.xml"
+  fi
+}
+
+select_silksong_toml() {
+  PORT_TOML="$GAMEDIR/config.low.toml"
+  [ -f "$PORT_TOML" ] || PORT_TOML="$GAMEDIR/config.toml"
+  [ -f "$PORT_TOML" ] || {
+    echo "$LOG_PREFIX no config TOML in $GAMEDIR"
+    exit 1
+  }
+}
+
+apply_silksong_effects() {
+  local toml="$1" decorative="${SILK_DECORATIVE_PERCENT:-100}"
+  local a523_profile=false separate_mixer=false
+  if [ "${CFW_NAME:-}" = TrimUI ] && launcher_platform_matches_compatible allwinner,a523; then
+    a523_profile=true
+    [ "${UNITY_GRAPHICS_API:-}" != vulkan ] || separate_mixer=true
+  fi
+  case "$decorative" in 50|75|100) ;; *) decorative=100 ;; esac
+  # Keep explicit per-title audio choices; memory_mode supplies defaults only.
+  # Clearing an obsolete C-only file-mapper switch does not change Rudroid's
+  # validated file-backed/anonymous-fallback mapping behavior.
+  portkit_launcher toml merge --file "$toml" --patch "{
+    \"game_patches\":{\"silksong_unity6\":{
+      \"disable_touch_camera\":true,\"disable_touch_controls\":true,\"disable_watermark_canvas\":true,
+      \"decorative_sprite_percent\":$decorative,
+      \"unload_assetbundles_after_title\":false,\"unload_unused_assets_after_prune\":false
+    }},\"unity\":{\"fast_exit\":true},\"loader\":{\"file_backed_elf\":null},
+    \"gpu\":{\"separateRenderThread\":$a523_profile,\"renderThreadName\":\"UnityGfxDeviceW\"},
+    \"sdk_fmod\":{\"separate_mixer_thread\":$separate_mixer}
+  }" || return 1
+  if [ "$a523_profile" = true ]; then
+    # Only reduce the measured high softening level on this A523 build.
+    # Retain the device's effect, animation, driver and other preference policies.
+    mkdir -p "$CONFDIR/shared_prefs" || return 1
+    portkit_launcher json merge \
+      --file "$CONFDIR/shared_prefs/com.game.silksong.v2.playerprefs.json" \
+      --patch '{"ints":{"ShaderQuality":0,"VidShaderQuality":0}}' || return 1
+  fi
+}
+
+apply_silksong_fps() {
+  local toml="$1" fps="${SILK_FPS:-config}" patch
+  case "$fps" in
+    config) patch='{"unity":{"frame_sync_interval_us":null}}' ;;
+    90|60|45|30|25) patch="{\"unity\":{\"target_fps\":$fps,\"render_sleep_us\":0,\"frame_sync_interval_us\":null}}" ;;
+    *) echo "$LOG_PREFIX invalid frame cap: $fps"; return 1 ;;
+  esac
+  portkit_launcher toml merge --file "$toml" --patch "$patch"
+}
+
+# ═══════════════ STAGE 1: love settings UI → writes launch_config.env ════
+run_love_launcher_ui "$LAUNCHERDIR/love_ui"
+
+# ═══════════════ STAGE 2: patch config TOML from launcher choices ════════
+SILK_ENV="$LAUNCH_ENV"
+[ ! -f "$SILK_ENV" ] || source "$SILK_ENV"
+resolve_unity_graphics_api "${SILK_GRAPHICS_API:-gles}" gles32 1 || exit 1
+if [ -f "$SILK_ENV" ]; then
+  echo "$LOG_PREFIX env: fps=${SILK_FPS:-config} output=${SILK_WIDTH:-auto}x${SILK_HEIGHT:-auto} render_percent=${SILK_RENDER_PERCENT:-config} decorative=${SILK_DECORATIVE_PERCENT:-100} swap_ab=${SILK_SWAP_AB:-off} swap_xy=${SILK_SWAP_XY:-off}"
+
+  if [ "${SILK_SWAP_AB:-off}" = "on" ]; then A_V=BUTTON_B; B_V=BUTTON_A; else A_V=BUTTON_A; B_V=BUTTON_B; fi
+  if [ "${SILK_SWAP_XY:-off}" = "on" ]; then X_V=BUTTON_Y; Y_V=BUTTON_X; else X_V=BUTTON_X; Y_V=BUTTON_Y; fi
+else
+  echo "$LOG_PREFIX no launch_config.env — keeping configured frame/render policy"
+  A_V=BUTTON_A; B_V=BUTTON_B; X_V=BUTTON_X; Y_V=BUTTON_Y
+fi
+
+select_silksong_toml
+echo "$LOG_PREFIX config=$PORT_TOML"
+configure_unity_display "$PORT_TOML" "${SILK_WIDTH:-auto}" "${SILK_HEIGHT:-auto}" "${SILK_RENDER_PERCENT:-config}" "${SILK_MEMORY_MODE:-}" "$UNITY_GRAPHICS_API" || exit 1
+apply_button_remap "$PORT_TOML" "$A_V" "$B_V" "$X_V" "$Y_V" || exit 1
+apply_silksong_fps "$PORT_TOML" || exit 1
+apply_silksong_effects "$PORT_TOML" || exit 1
+install_unity_font_fallback
+export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+
+# Unity Loader resolves Android base assets and PAD asset packs internally.
+run_unity_game "$PORT_TOML"

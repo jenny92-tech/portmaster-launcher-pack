@@ -1,0 +1,13 @@
+D2R NS 2G PortMaster Launcher
+Copyright (c) 2026 jenny92-tech
+
+Pack integration and documentation: CC BY-NC-SA 4.0.
+https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+Attribution: https://github.com/jenny92-tech/portmaster-launcher-pack
+
+The runner imported from D2R Linux retains its MIT license; see licenses/
+in this package. External runtime components retain their supplied notices.
+
+Game files are NOT covered by this launcher license. Diablo II: Resurrected
+code, data, artwork and audio retain their respective owners' rights.
+This launcher package contains no game files, saves or device identity.

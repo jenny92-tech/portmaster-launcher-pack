@@ -1,0 +1,126 @@
+diff --git a/modules/text_server_adv/text_server_adv.cpp b/modules/text_server_adv/text_server_adv.cpp
+index 567bd73d3f..e1c94a6a54 100644
+--- a/modules/text_server_adv/text_server_adv.cpp
++++ b/modules/text_server_adv/text_server_adv.cpp
+@@ -50,6 +50,7 @@ using namespace godot;
+ #include "core/config/project_settings.h"
+ #include "core/error/error_macros.h"
+ #include "core/object/worker_thread_pool.h"
++#include "core/string/print_string.h"
+ #include "core/string/translation_server.h"
+ #include "scene/resources/image_texture.h"
+ 
+@@ -5652,16 +5653,55 @@ RID TextServerAdvanced::_find_sys_font_for_text(const RID &p_fdef, const String
+ 				}
+ 			}
+ 
++#ifdef GODOT_MODULE
++			bool diag_miss = false;
++			uint64_t diag_entries = 0;
++			uint64_t diag_bytes = 0;
++#endif
+ 			if (!system_font_data.has(E)) {
+ 				system_font_data[E] = FileAccess::get_file_as_bytes(E);
++#ifdef GODOT_MODULE
++				// Freeze the opt-in at the first miss, so totals cover this cache.
++				static const bool diag_enabled = OS::get_singleton()->get_environment("SLL_SYSTEM_FONT_DIAG") == "1";
++				if (diag_enabled) {
++					MutexLock diag_lock(system_font_diag_mutex);
++					diag_miss = true;
++					diag_entries = ++system_font_diag_entries;
++					system_font_diag_bytes += system_font_data[E].size();
++					diag_bytes = system_font_diag_bytes;
++				}
++#endif
+ 			}
+ 
+ 			const PackedByteArray &font_data = system_font_data[E];
++#ifdef GODOT_MODULE
++			auto diag_log = [&](const String &p_family) {
++				if (!diag_miss) {
++					return;
++				}
++				auto token = [](const String &p_value, int p_limit) {
++					String out;
++					for (int i = 0; i < p_value.length() && out.length() < p_limit; i++) {
++						char32_t ch = p_value[i];
++						if (ch < 32 || ch == 127 || ch == '/' || ch == '\\' || ch == '"') {
++							ch = '_';
++						}
++						out += ch;
++					}
++					return out;
++				};
++				String first_cp = p_text.is_empty() ? "none" : "U+" + String::num_uint64((uint64_t)p_text[0], 16, true).pad_zeros(4);
++				print_line(vformat("[SYSTEM-FONT-DIAG] basename=\"%s\" family=\"%s\" requested_family=\"%s\" logical_bytes=%d cache_entries=%d cache_bytes=%d first_codepoint=%s locale=\"%s\"", token(E.get_file(), 160), token(p_family, 160), token(font_name, 160), font_data.size(), diag_entries, diag_bytes, first_cp, token(locale, 48)));
++			};
++#endif
+ 
+ 			SystemFontCacheRec sysf;
+ 			sysf.rid = _create_font();
+ 			_font_set_data_ptr(sysf.rid, font_data.ptr(), font_data.size());
+ 			if (!_font_validate(sysf.rid)) {
++#ifdef GODOT_MODULE
++				diag_log("<invalid-font>");
++#endif
+ 				_free_rid(sysf.rid);
+ 				continue;
+ 			}
+@@ -5670,6 +5710,9 @@ RID TextServerAdvanced::_find_sys_font_for_text(const RID &p_fdef, const String
+ 			// Select matching style from collection.
+ 			int best_score = 0;
+ 			int best_match = -1;
++#ifdef GODOT_MODULE
++			String diag_best_family;
++#endif
+ 			for (int face_idx = 0; face_idx < _font_get_face_count(sysf.rid); face_idx++) {
+ 				_font_set_face_index(sysf.rid, face_idx);
+ 				if (unlikely(!_font_has_char(sysf.rid, p_text[0]))) {
+@@ -5686,16 +5729,30 @@ RID TextServerAdvanced::_find_sys_font_for_text(const RID &p_fdef, const String
+ 				if (score >= best_score) {
+ 					best_score = score;
+ 					best_match = face_idx;
++#ifdef GODOT_MODULE
++					if (diag_miss) {
++						// Style/weight queries above already initialized this face.
++						diag_best_family = _font_get_name(sysf.rid);
++					}
++#endif
+ 				}
+ 				if (best_score == 70) {
+ 					break;
+ 				}
+ 			}
+ 			if (best_match == -1) {
++#ifdef GODOT_MODULE
++				diag_log("<no-matching-face>");
++#endif
+ 				_free_rid(sysf.rid);
+ 				continue;
+ 			} else {
+ 				_font_set_face_index(sysf.rid, best_match);
++#ifdef GODOT_MODULE
++				if (diag_miss) {
++					diag_log(diag_best_family);
++				}
++#endif
+ 			}
+ 			sysf.index = best_match;
+ 
+diff --git a/modules/text_server_adv/text_server_adv.h b/modules/text_server_adv/text_server_adv.h
+index 254430037f..d93fbff12d 100644
+--- a/modules/text_server_adv/text_server_adv.h
++++ b/modules/text_server_adv/text_server_adv.h
+@@ -687,6 +687,12 @@ class TextServerAdvanced : public TextServerExtension {
+ 	};
+ 	mutable HashMap<SystemFontKey, SystemFontCache, SystemFontKeyHasher> system_fonts;
+ 	mutable HashMap<String, PackedByteArray> system_font_data;
++#ifdef GODOT_MODULE
++	// Private opt-in diagnostics; protected independently of text shaping.
++	Mutex system_font_diag_mutex;
++	uint64_t system_font_diag_entries = 0;
++	uint64_t system_font_diag_bytes = 0;
++#endif
+ 
+ 	void _update_chars(ShapedTextDataAdvanced *p_sd) const;
+ 	void _generate_runs(ShapedTextDataAdvanced *p_sd) const;
