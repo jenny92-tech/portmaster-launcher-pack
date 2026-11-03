@@ -5,7 +5,7 @@
 ## 约束
 
 - 保留原材质参数、屏幕采样、时间、实例数据和 alpha 等效果语义；使用有界低采样代替昂贵特效，禁止黑白占位。
-- 排除 Ancient 卡片普通 canvas-group mask blur 和用户 MOD；仅修改源码时不自动重建 PCK。
+- 排除 Ancient 卡片普通 canvas-group mask blur 和用户 MOD；覆盖 PCK 由构建流程生成。
 - `wiggle_compat.gdshader` 只供旧版映射，不属于官方原生配置的 27 个变体。
 
 ## 业务域清单

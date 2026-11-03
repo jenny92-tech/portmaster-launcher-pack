@@ -4,7 +4,7 @@
 
 ## 约束
 
-- 仅生成的 `ports/<port>/dist/` 或由其封装的发行包用于部署；专用布局以端口说明为准，设备不得依赖仓库 `_kit/` 目录。
+- `ports/<port>/dist/` 仅作组包暂存；部署使用根 `dist/` 下经校验的正式包或 `dist/ports/<port>/` 交付目录。确认正式产物后清理重复暂存。专用布局以端口说明为准，设备不得依赖仓库 `_kit/` 目录。
 - 平台能力与 Unity 专用逻辑分离：普通端口统一使用 `portmaster_init` 和随包内联的 `launcher_platform.sh`，不依赖定制 PortMaster；仍需已安装的 PortMaster control、UI runtime 与输入工具。
 - Godot/SDL2 与 Unity/Rudroid 的补丁组合经 `launcher_compat.sh` 先生成计划；失败使旧计划失效。只在已有游戏子进程/命令替换内调用 `launcher_compat_exec`，以平台 exec hook 交接原 PID，不在拥有清理流程的父进程调用。原生预检、游戏特性与验收准入仍由引擎层负责，不因匹配方案就开启后端。
 - `LAUNCHER_UI_RUNTIME_DIR` 可选择端口已准备的内置存储 UI 副本；未设置时沿用 Unity sidecar 的 LÖVE 查找。

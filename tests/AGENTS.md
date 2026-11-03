@@ -2,13 +2,13 @@
 
 仓库级主机测试入口，补充 Rust crate 单元测试和个别端口的本地测试。Shell 测试读取源码或构造隔离设备/发行夹具，Python 测试用 lupa 模拟 LÖVE 交互；包集成测试还会调用 `_kit/` 组装工具核对生成目录或 ZIP。
 
-## 约束
+## 验证约定
 
-- 先区分静态检查、临时夹具测试与会改写 dist/ 的打包测试；仅修改文档时不要盲目运行全部打包测试。
-- Lua 执行测试依赖 lupa，缺失时会跳过；环境测试设置 PAM_REQUIRE_LUPA=1 时要求依赖存在。
-- 构建身份测试依赖与源码匹配的 bundled 二进制，失败时不可仅更新 revision 文本绕过校验。
-- 保留用户游戏、设备和真实配置；动态测试应使用临时目录或显式替身。
-- APP 环境交互覆盖目录/权限错误详情、完整日志位置、首页保留和成功重试清除、启动重新加载，以及 Runtime 失败不误报成功。
+- 按改动范围选择静态检查、隔离夹具或组包集成测试；组包测试会生成 dist。运行时身份检查使用与源码匹配的二进制。
+- Lua 交互测试依赖 Lupa；`PAM_REQUIRE_LUPA=1` 将其设为必需依赖。动态检查使用隔离临时目录和命令替身。
+- STS2 可选集成输入通过显式变量提供，缺失依赖时注明跳过原因；合成回归独立执行。宿主 Godot 用 `STS2_TEST_GODOT`，ARM64 引擎用 `STS2_TEST_GODOT_ARM64`，RichTextLabel 变体用 `STS2_TEST_GODOT_RICHTEXT_ARM64`。
+- 字体集成使用 `STS2_TEST_SOURCE_PCK`；三字体增量/报告用 `STS2_TEST_FONT_CACHE_DELTA`、`STS2_TEST_FONT_CACHE_REPORT`，六字体用 `STS2_TEST_COMMON_FONT_CACHE_DELTA`、`STS2_TEST_COMMON_FONT_CACHE_REPORT`。输入匹配工具要求的身份。
+- Windows 资源准备使用 `STS2_TEST_WINDOWS_GAME_DIR`，完整集成另需 `STS2_TEST_LINUX_BASELINE_DIR`，默认只运行合成回归。
 
 ## 业务域清单
 
@@ -18,9 +18,9 @@
 | STS2 正式入口 | `test_sts2_official_launcher.py` | 设备与渲染门禁、前端显示交接、WSI 搜索和有界日志的主机回归 |
 | STS2 SDL 入口 | `test_sts2_trimui_v110.py` | 独立 SDL 启动模板及默认关闭诊断的契约 |
 | SFX 解包边界 | `test_sts2_windows_sfx_archive.py` | 输入拒绝、资源清单及显式 STS2_SFX_SOURCE/STS2_SFX_UNRAR 夹具的沙箱回归 |
-| STS2 吹米合成设置 | `test_sts2_trimui_composition.py` | 验证开启、关闭、缺省和非法值对私有 Weston 环境的影响 |
-| STS2 吹米渲染能力 | `test_sts2_graphics_capabilities.py` | 验证 GLES/Vulkan 依赖独立检测和 SDL 子进程环境隔离 |
-| APP 环境交互 | `test_appmanager_environment_ui.py` | 模拟环境能力、启动状态、任务、统一导航与安装游戏标题、设置等高行与小屏可达性、退出复用关于信息及取消/退出服务关闭、按键偏好保存/重载/失败回滚、显式远程开关与多尺寸二维码/地址同屏、诊断分级评分和残留直接删除确认 |
+| STS2 TrimUI 合成设置 | `test_sts2_trimui_composition.py` | 验证开启、关闭、缺省和非法值对私有 Weston 环境的影响 |
+| STS2 TrimUI 渲染能力 | `test_sts2_graphics_capabilities.py` | 验证 GLES/Vulkan 依赖独立检测和 SDL 子进程环境隔离 |
+| APP 环境交互 | `test_appmanager_environment_ui.py` | 管理界面布局、导航、任务状态、配对及错误恢复 |
 | APP 控制器数据库 | `test_appmanager_controller_database.py` | 验证新增 GUID 的 APP 基础操作覆盖、映射语义与冲突保留 |
 | 包构建身份 | `test_build_info.py` | 验证所有端口的标识注入、负载散列与封装身份 |
 | APP 原生桥接 | `test_appmanager_inprocess_bridge.sh` | 确保 Lua 只经单一 Rust 请求边界通信 |
@@ -31,6 +31,8 @@
 | APP runtime 范围 | `test_appmanager_ui_runtime_scope.sh` | 验证 LOVE-lite 产品身份与依赖隔离 |
 | Batomon 契约 | `test_batomon_launcher.sh` | 检查 Godot/PCK 入口和专用打包声明 |
 | STS2 字体图集候选 | `test_sts2_font_atlas_trial.py` | 校验字体参数、共享回退、闭集和语言语料抽取 |
+| STS2 外部测试输入 | `sts2_test_inputs.py` | 仅解析显式文件/目录变量并给出缺失原因，不猜测本地缓存 |
+| STS2 字体缓存重载 | `test_sts2_font_cache.py`、`test_sts2_common_font_cache.py` | 保留合成身份拒绝；显式私有输入可选验证三/六字体的 Linux ARM64 重载 |
 | STS2 地图画布候选 | `test_sts2_map_canvas_trial.py` | 校验画布输入身份、物理/逻辑尺寸分离、单项合并与无关资源保持 |
 | STS2 Mono 字体子集 | `test_sts2_subset_mono_font.py` | 检查CJK字宽、变体序列与非CJK保留规则 |
 | STS2 字体预算合并 | `test_sts2_merge_font_budget.py` | 验证四项闭集、报告拒绝与其他资源不变 |
@@ -69,8 +71,9 @@
 | STS2 低内存 | `test_sts2_lean_memory.py` | 独立 .NET/Cecil 夹具验证显式低内存图集按需加载及清理后重载 |
 | STS2 低清纹理接入 | `test_sts2_texture_overlay_integration.py`、`test_sts2_texture_merge.py` | 合成资源测试流式合并、Godot 加载、身份绑定及启动拒绝，不访问设备或玩家游戏 |
 | STS2 纹理传输 | `test_sts2_texture_upload.py` | 离线模拟上传和下载续传、损坏及来源变化拒绝和设备路径保护，不连接设备 |
-| STS2 私有清理 | `test_sts2_texture_cleanup.py` | 模拟清理预检、清单、进程引用和目录链接保护，不连接设备 |
-| STS2 手持构建入口 | `test_sts2_optimize_handheld.py` | 验证本机计划、输入引用和未知身份拒绝，不连接设备 |
+| STS2 资源清理 | `test_sts2_texture_cleanup.py` | 模拟清理预检、清单、进程引用和目录链接保护，不连接设备 |
+| STS2 手持构建入口 | `test_sts2_optimize_handheld.py` | 验证本机计划、显式/PATH 工具选择、输入引用和未知身份拒绝，不连接设备 |
+| STS2 Windows 输入准备 | `test_sts2_prepare_windows_game.py` | 合成 PE/依赖图验证架构与身份门禁；可选原始输入仅经显式变量开启，源文件只读、准备输出在临时目录 |
 | STS2 特效 IL 审计 | `test_sts2_vfx_material_audit.py` | 验证静态扫描识别湍流访问及干净程序集 |
 | STS2 启动预载 | `test_sts2_startup_preload.py`、`sts2_startup_preload_fixture.gd` | 隔离验证资源加载、终态、超时及退出清理，不实例化游戏根节点 |
 | STS2 原生渲染 | `test_sts2_render_native.py`、`sts2_render_native_fixture.gd` | Godot 无头合成场景验证渲染策略、精确粒子规则在父节点准备前生效及资源隔离、材质、缓存与房间生命周期 |

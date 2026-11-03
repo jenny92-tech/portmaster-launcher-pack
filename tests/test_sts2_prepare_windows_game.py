@@ -1,4 +1,4 @@
-# INPUT: synthetic managed PE and runtime dependency descriptions
+# INPUT: synthetic managed PE/dependencies and explicit optional private input directories
 # OUTPUT: ARM64-only metadata conversion and invalid-native rejection
 # POS: host-only checks; no game, device, or native assembly execution
 import copy
@@ -11,6 +11,7 @@ import struct
 import tempfile
 import unittest
 import sys
+from sts2_test_inputs import external_directory
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('sts2_windows_prepare',ROOT/'ports/sts2/src/tools/prepare_windows_game.py')
@@ -40,8 +41,9 @@ class WindowsPrepareTests(unittest.TestCase):
         with self.assertRaises(ValueError):prepare.patch_pure_il(virtual_only)
 
     def test_actual_steamworks_x64_is_pure_il_and_patch_is_deterministic(self):
-        p=ROOT/'.cache/sts2-vulkan-trial/windows-input-cfa10eacaa2a/files/Slay the Spire 2/data_sts2_windows_x86_64/Steamworks.NET.dll'
-        if not p.is_file():self.skipTest('requires private Windows game input')
+        windows=external_directory(self,'STS2_TEST_WINDOWS_GAME_DIR')
+        p=windows/'data_sts2_windows_x86_64/Steamworks.NET.dll'
+        if not p.is_file():self.skipTest(f'explicit Windows input is missing Steamworks.NET.dll: {p}')
         raw=p.read_bytes();machine,_,flags=prepare.inspect_managed(raw)
         self.assertEqual((machine,flags),(0x8664,1))
         output=prepare.patch_pure_il(raw)
@@ -49,13 +51,19 @@ class WindowsPrepareTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(output).hexdigest(),'474a2af1328c2a2b32bedf8376ed46a50958423313856659ac05bee677d8fdd3')
 
     def test_real_preparation_converts_exactly_the_reviewed_dependency(self):
-        root=ROOT/'.cache/sts2-vulkan-trial';windows=root/'windows-input-cfa10eacaa2a/files/Slay the Spire 2';data=windows/'data_sts2_windows_x86_64'
-        if not (data/'sts2.dll').is_file():self.skipTest('requires private Windows game input')
+        windows=external_directory(self,'STS2_TEST_WINDOWS_GAME_DIR')
+        baseline=external_directory(self,'STS2_TEST_LINUX_BASELINE_DIR')
+        data=windows/'data_sts2_windows_x86_64'
         profile=json.loads((ROOT/'ports/sts2/src/tools/handheld_low_v110_profile.json').read_text())
+        required=[windows/'release_info.json',data/'sts2.dll',data/'sts2.deps.json',
+                  baseline/'sts2.deps.json',baseline/'GodotSharp.dll']
+        required.extend(data/name for name in profile['windows_dependency_sha256'])
+        missing=[str(path) for path in required if not path.is_file()]
+        if missing:self.skipTest('explicit preparation inputs are missing required files: '+', '.join(missing))
         with tempfile.TemporaryDirectory() as d:
             out=Path(d)/'prepared';cmd=[sys.executable,str(ROOT/'ports/sts2/src/tools/prepare_windows_game.py'),
               '--windows-dir',str(data),'--dll-sha256',profile['windows_dll_sha256'],'--deps-sha256',profile['windows_deps_sha256'],
-              '--linux-runtime-deps',str(root/'optimization-input/sts2.deps.json'),'--linux-godotsharp',str(root/'optimization-input/GodotSharp.dll'),
+              '--linux-runtime-deps',str(baseline/'sts2.deps.json'),'--linux-godotsharp',str(baseline/'GodotSharp.dll'),
               '--release-info',str(windows/'release_info.json'),'--output-dir',str(out)]
             run=subprocess.run(cmd,capture_output=True,text=True);self.assertEqual(run.returncode,0,run.stdout+run.stderr)
             report=json.loads((out/'prepare-report.json').read_text());self.assertEqual(report['converted_dependencies'],['Steamworks.NET.dll'])

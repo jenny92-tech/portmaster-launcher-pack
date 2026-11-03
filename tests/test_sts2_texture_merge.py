@@ -12,11 +12,11 @@ import tempfile
 import unittest
 from unittest import mock
 from types import SimpleNamespace
+from sts2_test_inputs import external_file
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / 'ports/sts2/src/tools/godot_pck/merge_texture_pck.py'
 OVERLAY_TOOL = ROOT / 'ports/sts2/src/tools/godot_pck/low_texture_overlay.py'
-GODOT = Path(os.environ.get('STS2_GODOT', ROOT / '.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'))
 spec = importlib.util.spec_from_file_location('low_texture_overlay_fixture', OVERLAY_TOOL)
 pack = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pack)
@@ -204,8 +204,8 @@ class TextureMergeTests(unittest.TestCase):
             self.assertEqual(self.source.read_bytes(), original)
             alias.unlink()
 
-    @unittest.skipUnless(GODOT.is_file(), 'official Godot fixture unavailable')
     def test_godot_loads_merged_opaque_and_replacement_resources(self):
+        GODOT=external_file(self,'STS2_TEST_GODOT')
         result, _ = self.merged()
         (self.root / 'project.godot').write_text('[application]\nconfig/name="merge fixture"\n')
         script = self.root / 'verify.gd'

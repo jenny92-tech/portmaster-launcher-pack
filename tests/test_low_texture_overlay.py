@@ -10,11 +10,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from sts2_test_inputs import external_file
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / 'ports/sts2/src/tools/godot_pck/low_texture_overlay.py'
 FIXTURE = ROOT / 'tests/sts2_low_texture_fixture.gd'
-GODOT = Path(os.environ.get('STS2_GODOT', ROOT / '.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'))
 spec = importlib.util.spec_from_file_location('low_texture_overlay', TOOL)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -95,8 +95,8 @@ class LowTextureTest(unittest.TestCase):
             with base.open('rb') as fh, self.assertRaisesRegex(ValueError, 'ambiguous sibling'):
                 module.import_map(fh, entries)
 
-    @unittest.skipUnless(GODOT.is_file(), 'official Godot fixture unavailable')
     def test_native_conversion_and_atlas(self):
+        GODOT=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'project.godot').write_text('[application]\nconfig/name="fixture"\n')

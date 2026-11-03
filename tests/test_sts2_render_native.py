@@ -8,17 +8,15 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'ports/sts2/src/rendering'
-DEFAULT_GODOT = ROOT / '.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 
 
 class NativeRenderTest(unittest.TestCase):
     def test_native_scripts(self):
-        godot = os.environ.get('STS2_TEST_GODOT', str(DEFAULT_GODOT))
-        if not Path(godot).is_file():
-            self.skipTest('Set STS2_TEST_GODOT to a Godot 4 executable')
+        godot = external_file(self, 'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / 'project.godot').write_text('[application]\nconfig/name="Native fixture"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
@@ -51,7 +49,7 @@ class NativeRenderTest(unittest.TestCase):
             env['PORTKIT_PERF_OVERLAY'] = '1'
             env['SLL_QUALITY'] = 'smooth'
             env['SLL_SHADER_COMPAT'] = 'off'
-            run = subprocess.run([godot, '--headless', '--path', str(project), '--script', 'res://driver.gd', '--quit-after', '240'], env=env, capture_output=True, text=True, timeout=20)
+            run = subprocess.run([str(godot), '--headless', '--path', str(project), '--script', 'res://driver.gd', '--quit-after', '240'], env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
             self.assertIn('STS2_NATIVE_OK', run.stdout, run.stdout + run.stderr)
             self.assertNotIn('SCRIPT ERROR', run.stdout + run.stderr)

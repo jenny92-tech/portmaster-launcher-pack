@@ -7,11 +7,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT=Path(__file__).resolve().parents[1]
 TOOLS=ROOT/'ports/sts2/src/tools/godot_pck';sys.path.insert(0,str(TOOLS))
 import refine_quarter_texture as refine
-GODOT=ROOT/'.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 
 class RefinementTests(unittest.TestCase):
  def test_nominal_and_quality_gates(self):
@@ -30,7 +30,7 @@ class RefinementTests(unittest.TestCase):
    r=subprocess.run(cmd,text=True,capture_output=True,timeout=10)
    self.assertNotEqual(r.returncode,0);self.assertIn('input identity mismatch',r.stderr);self.assertFalse((p/'cache').exists())
  def test_decode_original_webp(self):
-  if not GODOT.is_file():self.skipTest('official Godot unavailable')
+  GODOT=external_file(self,'STS2_TEST_GODOT')
   with tempfile.TemporaryDirectory() as t:
    p=Path(t);(p/'project.godot').write_text('[application]\nconfig/name="Refinement test"\n')
    args=[str(GODOT),'--headless','--path',str(p),'--script',str(ROOT/'tests/sts2_quarter_texture_fixture.gd'),'--','generate-edge',str(p/'in.ctex')]

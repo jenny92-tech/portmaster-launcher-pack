@@ -2,16 +2,15 @@
 # OUTPUT: narrow transformations, invariants, unknown-input refusal and native parse checks
 # POS:    local fixtures without device or player game execution
 import importlib.util
-import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT/'ports/sts2/src/scripts/global_material_policy.py'
 spec=importlib.util.spec_from_file_location('global_policy_test',FILE); policy=importlib.util.module_from_spec(spec); spec.loader.exec_module(policy)
-GODOT = Path(os.environ.get('STS2_TEST_GODOT', ROOT/'.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'))
 NOISE = b'''shader_type canvas_item;\nfloat fbm(vec2 p) {\n float value = 0.0; float amplitude = 0.5;\n for (int i = 0; i < 4; i++) { value += amplitude * value_noise(p); p *= 2.1; amplitude *= 0.5; }\n return value;\n}\nfloat value_noise(vec2 p) { return p.x; }\nvoid fragment() { COLOR.rgb = vec3(fbm(UV)); }\n'''
 
 
@@ -68,8 +67,8 @@ class GlobalPolicyTests(unittest.TestCase):
         self.assertEqual(changes[0]['rule'],'canvas_noise_screen_warp_disabled')
         self.assertIn(b'uniform sampler2D noise_tex;',out); self.assertIn(b'COLOR = texture(screen, SCREEN_UV);',out)
         self.assertNotIn(b'texture(noise_tex',out); self.assertEqual(policy.transform_resource('x.gdshader',out),(out,[]))
-    @unittest.skipUnless(GODOT.is_file(),'Godot fixture not available')
     def test_godot_loads_generated_shader_resources(self):
+        GODOT=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp);(path/'project.godot').write_text('[application]\nconfig/name="material fixture"\n')
             for n,source in [('noise',NOISE),('blur',gaussian()),('mask',gaussian(True))]:

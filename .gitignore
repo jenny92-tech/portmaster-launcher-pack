@@ -32,6 +32,7 @@ core.[0-9]*
 *.dmp
 
 /pocs
+/gamefiles/
 /external
 /.tmp/
 /.pam-lab/

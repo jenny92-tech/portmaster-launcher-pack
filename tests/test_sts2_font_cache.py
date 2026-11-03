@@ -8,13 +8,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT=Path(__file__).resolve().parents[1]
 TOOL=ROOT/'ports/sts2/src/tools/godot_pck/strip_font_cache.py'
-SOURCE=ROOT/'.cache/sts2-vulkan-trial/windows-input-cfa10eacaa2a/files/Slay the Spire 2/SlayTheSpire2.pck'
-DELTA=ROOT/'.cache/sts2-vulkan-trial/fontcache-delta-final.pck'
-REPORT=ROOT/'.cache/sts2-vulkan-trial/fontcache-report-final.json'
-ENGINE=ROOT/'.cache/sts2-vulkan-trial/official45/godot45.mono.aarch64'
 sys.path.insert(0,str(TOOL.parent))
 import low_texture_overlay as low
 
@@ -27,8 +24,12 @@ class FontCacheTests(unittest.TestCase):
    self.assertNotEqual(run.returncode,0);self.assertIn('identity mismatch',run.stderr)
    self.assertFalse((root/'out.pck').exists())
  def test_linux_arm64_reloads_exact_three_fonts(self):
+  SOURCE=external_file(self,'STS2_TEST_SOURCE_PCK')
+  DELTA=external_file(self,'STS2_TEST_FONT_CACHE_DELTA')
+  REPORT=external_file(self,'STS2_TEST_FONT_CACHE_REPORT')
+  ENGINE=external_file(self,'STS2_TEST_GODOT_ARM64')
   docker=shutil.which('docker')
-  if not docker or not all(p.is_file() for p in (SOURCE,DELTA,REPORT,ENGINE)):self.skipTest('private font candidate or local Linux engine unavailable')
+  if not docker:self.skipTest('Docker is unavailable for the Linux ARM64 fixture')
   img=subprocess.run([docker,'image','inspect','--format','{{.Architecture}}','debian:bookworm-slim'],capture_output=True,text=True,timeout=10)
   if img.returncode or img.stdout.strip()!='arm64':self.skipTest('local Linux ARM64 image unavailable')
   report=json.loads(REPORT.read_text());source=low.read_pack(SOURCE);delta=low.read_pack(DELTA)

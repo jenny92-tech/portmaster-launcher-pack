@@ -3,6 +3,10 @@
 `ports/<name>/love/` 维护设置声明和 Shell 模板；`dist_port.sh` 组装成自包含设备入口。
 只部署生成的 `ports/<name>/dist/`，设备不需要仓库 `_kit/`。
 
+该目录是组包暂存，核验后将最终包收进根 `dist/`，未压缩交付目录归
+`dist/ports/<port>/`；同内容的暂存和成品只留一份。目录、缓存预算及收尾规则见
+[根 AGENTS](../AGENTS.md#工作目录与产物生命周期)。
+
 | 操作 | 入口 |
 |---|---|
 | 组装端口 | `_kit/dist_port.sh PORT` |

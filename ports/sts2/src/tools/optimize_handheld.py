@@ -68,9 +68,8 @@ def source_identities(profile=PROFILE):
                          HERE/'godot_pck/merge_common_font_cache.py', HERE/'godot_pck/strip_common_font_cache.py', HERE/'godot_pck/strip_common_font_cache.gd',
                          HERE/'godot_pck/merge_quarter_texture.py', HERE/'godot_pck/quarter_texture_overlay.py', HERE/'godot_pck/quarter_texture_worker.gd',
                          HERE/'godot_pck/merge_refined_quarter.py', HERE/'godot_pck/refine_quarter_texture.py', HERE/'godot_pck/refine_quarter_texture.gd', HERE/'godot_pck/refine_quarter_astc.cpp',
-                         HERE/'assemble_release_743.py', HERE/'assemble_two_language_delivery.py',
                          HERE/'godot_pck/merge_font_budget_trial.py', HERE/'godot_pck/font_budget_trial.py', HERE/'godot_pck/font_budget_trial.gd',
-                         HERE/'assemble_mono_subset_delivery.py', HERE/'godot_pck/merge_mono_subset_trial.py', HERE/'godot_pck/subset_mono_font.py',
+                         HERE/'godot_pck/merge_mono_subset_trial.py', HERE/'godot_pck/subset_mono_font.py',
                          HERE/'godot_pck/subset_mono_font.gd', HERE/'godot_pck/subset_mono_font_worker.py', HERE/'godot_pck/subset_mono_uid_fixture.gd', HERE/'godot_pck/font_fallback_trial.py',
                          HERE/'godot_pck/restore_vram_texture_worker.gd', SRC/'scripts/vram_texture_specs.json',
                          REPO/'_kit/assemble.sh', REPO/'_kit/portmaster_bootstrap.sh', REPO/'_kit/launcher_platform.sh', SRC.parent/'manifest.json'])
@@ -367,9 +366,8 @@ def main():
     b = sub.add_parser('build', help='build the supported handheld-low profile')
     for arg in ('source-pck','game-dll','game-deps','reference-dir','output-dir'):
         b.add_argument('--'+arg, required=True, type=Path)
-    local_tools = REPO/'.cache/sts2-vulkan-trial/build-tools'
-    discovered_godot = shutil.which('godot') or (local_tools/'godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot' if (local_tools/'godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot').is_file() else None)
-    discovered_dotnet = shutil.which('dotnet') or (local_tools/'dotnet/dotnet' if (local_tools/'dotnet/dotnet').is_file() else None)
+    discovered_godot = shutil.which('godot')
+    discovered_dotnet = shutil.which('dotnet')
     b.add_argument('--godot', type=Path, default=discovered_godot)
     b.add_argument('--dotnet', type=Path, default=discovered_dotnet)
     b.add_argument('--texture-cache', type=Path); b.add_argument('--nuget-cache', type=Path)

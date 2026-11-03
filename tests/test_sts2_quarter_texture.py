@@ -2,20 +2,19 @@
 # OUTPUT: checked identity, quality gate, atlas coordinates and CPU codec behavior
 # POS: headless only, no game execution or device access
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT=Path(__file__).resolve().parents[1]
 TOOLS=ROOT/'ports/sts2/src/tools/godot_pck'
 sys.path.insert(0,str(TOOLS))
 import low_texture_overlay as low
 import quarter_texture_overlay as quarter
-GODOT=ROOT/'.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 
 class QuarterTextureTests(unittest.TestCase):
  def test_classification_protects_data_and_small_images(self):
@@ -42,8 +41,7 @@ class QuarterTextureTests(unittest.TestCase):
    self.assertNotEqual(run.returncode,0);self.assertIn('input identity mismatch',run.stderr)
    self.assertFalse((p/'delta').exists());self.assertFalse((p/'cache').exists())
  def test_worker_alpha_and_logical_atlas(self):
-  godot=Path(os.environ.get('STS2_TEST_GODOT',str(GODOT)))
-  if not godot.is_file():self.skipTest('official Godot unavailable')
+  godot=external_file(self,'STS2_TEST_GODOT')
   with tempfile.TemporaryDirectory() as t:
    p=Path(t);(p/'project.godot').write_text('[application]\nconfig/name="Quarter fixture"\n')
    shutil.copy(ROOT/'tests/sts2_low_texture_fixture.gd',p/'generate.gd');shutil.copy(ROOT/'tests/sts2_quarter_texture_fixture.gd',p/'verify.gd')

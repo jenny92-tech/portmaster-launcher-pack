@@ -55,17 +55,33 @@ bump as a substitute for updating all in-tree consumers correctly.
 
 ## PortMaster Launcher Pack
 
-> 面向 ARM64 Linux 掌机的游戏启动器、Port App Manager 和共享构建/设备评估工具。
+ARM64 Linux 掌机的游戏启动器、APP Manager 和共享构建工具。普通端口由 LÖVE 设置页与 Shell 启动流程组成；APP Manager 使用 Rust/LOVE-lite。配置在 `config/` 集中维护，外部引擎由各自工程构建。
 
-> **本项目采用分形文档协议，必须遵守 [FRACTAL-DOCS.md](./FRACTAL-DOCS.md) 定义的三层文档规范；以上用户维护的版本纪律保持有效。**
+源码导航与维护规则见 [FRACTAL-DOCS.md](FRACTAL-DOCS.md)。各端口在 `ports/` 登记清单、启动源码及打包入口。
 
-### 项目定位
+### 命名与发行
 
-普通端口复用 PortMaster 的 LÖVE 设置界面与 Shell 启动流程；App Manager 通过专用 LOVE-lite 进程连接 Rust 管理核心；正式配置集中在 `config/`，发行内容由 `_kit/` 生成。
+- 品牌为 Jenny Loong。可见 SH 使用 `Je-游戏名.sh`，Wine 使用 `Je-Wine.sh`，APP Manager 保留原名；同名封面与安装清单同步。数据、资源和存档目录沿用各端口标识。
+- 暗黑破坏神 II NS 统一使用 `d2r_ns_2g` 的 2G 适配和 `Je-暗黑破坏神II_NS（2G版）.sh`，只发行一个 NS 包。内存预设与硬件验证范围分别记录。
+- 每个产品和平台保留一份当前交付。APP Manager 的 Port 与 TrimUI App 对应不同安装布局，分别封装。
+- 资源分发范围、运行依赖和已验证设备以端口 README 与许可为准；正式原生产物遵循对应工程的 Release 和构建身份检查。
 
-品牌名称为 Jenny Loong。首页可见的 `.sh` 启动文件名统一使用 `Je-游戏名.sh`，Wine 固定为 `Je-Wine.sh`；APP Manager 保留原名，排在 Je- 入口之前。此规则只改入口文件名，同名封面与安装清单引用同步；普通文件夹、内部标识、资源、存档目录及内部辅助脚本保持原命名。暗黑破坏神 II 保留 `_NS`，多个适配版本再附加版本标识，例如 `Je-暗黑破坏神II_NS（2G版）.sh`。
+### 目录与产物管理
 
-自行开发并交付到掌机的游戏和应用都应在 `ports/` 登记端口、维护启动源码与标准打包入口；独立引擎工程继续负责运行时和游戏准备，不能只修改设备 SH 而遗漏 Pack。新增适配版本保留独立端口标识与原档案路径。
+| 内容 | 位置 |
+|------|------|
+| 维护源码 | `_kit/`、`ports/`、`crates/`、`config/`、测试与技术文档 |
+| 本地资源输入 | `gamefiles/<title>/`；STS2 使用 `gamefiles/sts2/windows/` 与 `gamefiles/sts2/linux-baseline/`，不纳入源码或普通发行包 |
+| 可重建缓存 | 构建器固定的 `.cache/<tool>/`；共享管理的 `target` 软链接按其管理器规则使用 |
+| 当前实验 | `.scratch/<component>/`；既有工具的固定临时出口在任务结束时清理 |
+| 端口暂存 | `ports/<port>/dist/`，组包和核验后清理 |
+| 当前交付 | 根 `dist/`；迷你龙包归 `dist/miniloong/`，源码包归 `dist/source-release/`，未压缩交付归 `dist/ports/<port>/` |
+
+- 原始输入只读使用；清理前确认文件归属、活动任务、唯一输入及存档。可选真实输入测试通过显式参数或变量选择依赖。
+- 同一组件复用固定缓存与当前任务目录。可重建缓存软上限为每项目 10 GiB，超出时评估必要性并清理过期内容。自动清理的系统或容器临时夹具可正常使用。
+- 交付只保留一份压缩包或完整目录；完成核验后清理重复解包、设备快照、候选和逐轮采样。稳定结论维护在对应技术文档中。
+- `dist/ARTIFACTS.json` 记录交付项、大小及文件或目录校验。构建复用文档指定环境；清理限于本项目已确认的产物，不全局 prune 或清空系统回收站，统计时区分工程占用与实际磁盘释放。
+- 验证按改动范围执行；源码身份发生变化时同步重建匹配产物，设备与玩法验收独立记录。
 
 ### 业务域清单
 

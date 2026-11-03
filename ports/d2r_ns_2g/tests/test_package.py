@@ -86,6 +86,30 @@ class PackageTests(unittest.TestCase):
                 importer.extract(entry)
             self.assertFalse((root / 'must-not-execute').exists())
 
+    def test_existing_path_manifest_can_be_repackaged_without_accessing_installation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = importer.extract(self.entry(root))
+            source, output = root / 'paths.json', root / 'imported.json'
+            source.write_text(json.dumps(paths))
+            result = subprocess.run([sys.executable, str(PORT / 'src/scripts/import-entry.py'),
+                                     '--paths', str(source), str(output)], capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(launcher.load_paths(output), paths)
+            self.assertFalse(Path(paths['profile']).exists())
+            self.assertFalse((root / 'must-not-execute').exists())
+
+    def test_invalid_path_manifest_does_not_produce_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / 'paths.json', root / 'imported.json'
+            for data in ({'profile': 'relative/path'}, list(launcher.FIELDS)):
+                source.write_text(json.dumps(data))
+                result = subprocess.run([sys.executable, str(PORT / 'src/scripts/import-entry.py'),
+                                         '--paths', str(source), str(output)], capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

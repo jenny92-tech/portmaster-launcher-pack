@@ -14,7 +14,7 @@
 - 仅 TrimUI 且 device-tree 精确为 allwinner,a523 时启用一次性渲染线程分配；Rudroid 再校验在线核容量、原有亲和性与实际呈现线程。没有额外菜单，不联动内存/画质/FPS，不修改系统频率或在线核。
 - 同一设备的 Vulkan 路径另启用一次性 FMOD 混音线程分配；切回 GLES 写回关闭。保留原生音频流及 Unity Job 线程策略。
 - TrimUI/A523 的实测效果策略只将 ShaderQuality/VidShaderQuality 设为 0；经 PortKit 原子合并，保留其他偏好，解析或写入失败不启动游戏。其他设备不改这些偏好。
-- 实验性资源包卸载固定关闭，不设菜单；内存档是正式 Rudroid 策略，不冒充整个游戏的内存上限。帧率写 unity.target_fps，不写旧 frame_sync_interval_us。
+- 实验性资源包卸载固定关闭，不设菜单；内存档控制 Rudroid 策略，不表示整个游戏的内存硬上限。帧率写 unity.target_fps，不写 frame_sync_interval_us。
 
 ## 业务域清单
 

@@ -1,20 +1,18 @@
 # INPUT: isolated synthetic Godot controls and optional observer
 # OUTPUT: inert default, safe metadata, redaction and bounded UI strings
 # POS: host-only; no game, device, screenshots or input injection
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
 import uuid
+from sts2_test_inputs import external_file
 
 ROOT=Path(__file__).resolve().parents[1]
-DEFAULT=ROOT/'.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 class UiDiagnosticTests(unittest.TestCase):
     def test_control_snapshot_is_inert_and_skips_sensitive_nodes(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file():self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             project=Path(temp)
             (project/'project.godot').write_text('[application]\nconfig/name="UI diagnostic fixture"\n')
@@ -25,8 +23,7 @@ class UiDiagnosticTests(unittest.TestCase):
             self.assertIn('UI_DIAGNOSTIC_FIXTURE_OK',run.stdout)
 
     def test_isolated_gate_checks_real_user_directory_and_symlinks(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file():self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             isolated=str(Path('/tmp')/('sts2-memory-diag-'+uuid.uuid4().hex))
             linked=str(Path('/tmp')/('sts2-memory-diag-'+uuid.uuid4().hex))
@@ -45,9 +42,9 @@ class UiDiagnosticTests(unittest.TestCase):
             self.assertIn('UI_DIAG_GATE_FIXTURE_OK',run.stdout)
 
     def test_linux_process_requires_both_opt_ins(self):
+        engine=external_file(self,'STS2_TEST_GODOT_ARM64')
         docker=shutil.which('docker')
-        engine=ROOT/'.cache/sts2-vulkan-trial/official45/godot45.mono.aarch64'
-        if not docker or not engine.is_file():self.skipTest('local Docker or Linux ARM64 Godot fixture unavailable')
+        if not docker:self.skipTest('Docker is unavailable for the Linux ARM64 fixture')
         image=subprocess.run([docker,'image','inspect','--format','{{.Architecture}}','debian:bookworm-slim'],capture_output=True,text=True,timeout=10)
         if image.returncode or image.stdout.strip()!='arm64':self.skipTest('local ARM64 Debian image unavailable; no image is pulled')
         with tempfile.TemporaryDirectory() as temp:

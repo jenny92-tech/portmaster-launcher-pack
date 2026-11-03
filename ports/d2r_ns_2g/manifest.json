@@ -3,21 +3,37 @@
   "title": "Je-暗黑破坏神II_NS（2G版）",
   "engine": "NS native / NVN to Vulkan",
   "runtime": "D2R Linux ARM64 94012, C197 classic 2G profile",
-  "devices": ["RK3566 classic 2G profile; verified on 4 GB MiniLoong Pocket One"],
-  "language": ["zh-CN", "en"],
+  "devices": [
+    "RK3566 classic 2G profile; verified on 4 GB MiniLoong Pocket One"
+  ],
+  "language": [
+    "zh-CN",
+    "en"
+  ],
   "license": "CC-BY-NC-SA-4.0; D2R Linux runner retains MIT",
   "port_dir": "d2r_ns_2g",
   "portable_dir": "d2r_ns_2g",
   "script": "Je-暗黑破坏神II_NS（2G版）.sh",
   "launcher_sh": "src/launcher.sh",
   "portmaster": {
-    "items": ["Je-暗黑破坏神II_NS（2G版）.sh", "d2r_ns_2g"],
+    "items": [
+      "Je-暗黑破坏神II_NS（2G版）.sh",
+      "d2r_ns_2g"
+    ],
     "desc": "Launcher for the separate classic 2G adaptation, using an explicitly prepared D2R Linux installation. The profile name does not certify 2 GB hardware gameplay.",
     "inst": "Prepare/install the 94012 classic runtime and resources first, then import its generated entry with D2R_NS_2G_ENTRY when building. Existing rk3566-2gb saves remain in place.",
-    "genres": ["rpg", "action"],
+    "genres": [
+      "rpg",
+      "action"
+    ],
     "rtr": false,
     "availability": "paid",
-    "image": {"screenshot": "screenshot.png", "names": ["Je-暗黑破坏神II_NS（2G版）.png"]}
+    "image": {
+      "screenshot": "screenshot.png",
+      "names": [
+        "Je-暗黑破坏神II_NS（2G版）.png"
+      ]
+    }
   },
-  "notes": "Maintained C197 launch policy; explicit installation paths only. No game data, saves, identity files, runtime caches or diagnostic records are collected."
+  "notes": "The maintained NS launcher uses the classic 2G profile. Installation paths are explicit; game data and player state are excluded."
 }

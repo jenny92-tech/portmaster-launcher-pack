@@ -6,7 +6,7 @@
 
 - 目标框架为 net9.0；游戏和 Harmony 引用由 CompatReferenceDir 指定，默认 src/refs。
 - 不在编译期引用 GodotSharp，也不生成独立 deps/runtimeconfig 以免重复加载 Godot 桥接实例。
-- 版本与二进制身份不因文档或内部格式整理自动变更。
+- 版本遵守根版本纪律；二进制身份必须对应实际构建输入。
 
 ## 业务域清单
 

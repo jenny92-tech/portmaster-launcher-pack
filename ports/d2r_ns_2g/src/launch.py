@@ -13,7 +13,7 @@ FIELDS = ('runtime', 'game', 'profile', 'controllers', 'native', 'overlay', 'cac
 
 def load_paths(path):
     data = json.loads(Path(path).read_text())
-    if set(data) != set(FIELDS):
+    if not isinstance(data, dict) or set(data) != set(FIELDS):
         raise ValueError('incomplete D2R installation paths')
     for value in data.values():
         if (not isinstance(value, str) or not Path(value).is_absolute() or

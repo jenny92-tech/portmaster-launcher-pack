@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
-# INPUT:  2G 启动器源码、共享构建工具与可选 D2R_NS_2G_ENTRY 正式入口
+# INPUT:  2G 启动源码、共享构建工具和可选的入口或安装路径清单
 # OUTPUT: 独立 d2r_ns_2g 数据目录和 Je- 暗黑 2G 入口
 # POS:    把已准备安装的路径接入 Pack，不收集其游戏、存档或运行目录
 set -euo pipefail
 PORT=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 ROOT=$(cd -- "$PORT/../.." && pwd)
-STAGE=$(mktemp -d "$PORT/.dist-stage.XXXXXX")
+STAGE="$ROOT/.scratch/d2r-ns/stage"
+if [ -n "${D2R_NS_2G_ENTRY:-}" ] && [ -n "${D2R_NS_2G_PATHS:-}" ]; then
+    echo 'Specify either D2R_NS_2G_ENTRY or D2R_NS_2G_PATHS.' >&2
+    exit 2
+fi
+mkdir -p "$(dirname -- "$STAGE")"
+mkdir "$STAGE" || { echo "staging directory is in use: $STAGE" >&2; exit 1; }
+trap 'if [ -d "$STAGE" ]; then rm -rf -- "$STAGE"; fi' EXIT
 DATA="$STAGE/d2r_ns_2g"
 mkdir -p "$DATA/libexec"
 bash "$ROOT/_kit/assemble.sh" "$PORT/src/launcher.sh" "$STAGE/Je-暗黑破坏神II_NS（2G版）.sh"
@@ -13,6 +20,8 @@ cp "$PORT/src/launch.py" "$PORT/src/run-game.sh" "$DATA/libexec/"
 cp -R "$PORT/src/licenses" "$DATA/licenses"
 if [ -n "${D2R_NS_2G_ENTRY:-}" ]; then
     python3 "$PORT/src/scripts/import-entry.py" "$D2R_NS_2G_ENTRY" "$DATA/install-paths.json"
+elif [ -n "${D2R_NS_2G_PATHS:-}" ]; then
+    python3 "$PORT/src/scripts/import-entry.py" --paths "$D2R_NS_2G_PATHS" "$DATA/install-paths.json"
 fi
 cp "$PORT/LICENSE" "$PORT/README.md" "$DATA/"
 cp "$PORT/screenshot.png" "$DATA/screenshot.png"

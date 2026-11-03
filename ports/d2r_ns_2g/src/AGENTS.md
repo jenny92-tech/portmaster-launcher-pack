@@ -1,18 +1,18 @@
-# D2R NS 2G 启动源码
+# D2R NS 运行入口
 
-可见入口把 JSON 路径作为数据交给 Bash runner，保持 C197 参数和独立 rk3566-2gb 档案路径。
+可见 SH 将安装路径 JSON 交给 Python 验证，再由 Bash runner 启动已准备的 2G 安装。
 
 ## 约束
 
-- 保留来源安装的 profile 路径；不得改用其他 D2R 端口的档案。
-- 2G 是预设身份，不代表已经完成 2 GB 硬件验收；只接收已准备的匹配 Release runtime。
+- 路径清单包含完整绝对路径，作为数据传递，原 profile 位置保持不变。
+- 运行参数与预检行为由 runner 维护；外部运行时的版本和依赖须与准备流程一致。
 
 ## 业务域清单
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| 可见入口 | `launcher.sh` | 标准 SH 跳转并透传只读检查参数 |
-| 路径桥接 | `launch.py` | 校验完整绝对路径并 exec runner |
-| 游戏执行 | `run-game.sh` | 沿用 C197 的资源、输入、退出与异常日志策略 |
-| 运行授权 | `licenses/` | 保留 D2R Linux MIT 许可 |
-| 构建 | `scripts/` | 只解析外部已准备入口并生成标准 dist |
+| 启动入口 | `launcher.sh` | 选择路径清单并透传启动或预检参数 |
+| 路径验证 | `launch.py` | 验证 JSON 字段与绝对路径，交接 runner |
+| 游戏运行 | `run-game.sh` | 资源、输入、退出及异常日志策略 |
+| 运行许可 | `licenses/` | D2R Linux MIT 声明 |
+| 打包工具 | `scripts/` | 导入安装路径并生成发行内容 |

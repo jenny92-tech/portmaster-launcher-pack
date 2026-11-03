@@ -34,6 +34,10 @@ class DriverTests(unittest.TestCase):
     def test_plan_no_output_no_device(self):
         p = subprocess.run([sys.executable,str(SCRIPT),*self.args(),'--plan'],capture_output=True,text=True)
         self.assertEqual(p.returncode,0,p.stderr); self.assertIn('no output or device writes',p.stdout); self.assertFalse(self.out.exists())
+    def test_missing_path_tools_require_explicit_paths_before_output(self):
+        args=self.args();start=args.index('--godot');del args[start:start+4]
+        p = subprocess.run([sys.executable,str(SCRIPT),*args,'--plan'],env={'PATH':str(self.root/'missing-tools')},capture_output=True,text=True)
+        self.assertNotEqual(p.returncode,0); self.assertIn('Godot not found',p.stderr); self.assertFalse(self.out.exists())
     def test_reference_mismatch_fails_before_output(self):
         (self.refs/'sts2.dll').write_bytes(b'other')
         p = subprocess.run([sys.executable,str(SCRIPT),*self.args(),'--plan'],capture_output=True,text=True)

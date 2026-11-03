@@ -4,13 +4,13 @@
 import json
 import hashlib
 from unittest.mock import patch
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT=Path(__file__).resolve().parents[1]
 TOOLS=ROOT/'ports/sts2/src/tools/godot_pck'
@@ -18,7 +18,6 @@ sys.path.insert(0,str(TOOLS))
 import low_texture_overlay as low
 import restore_vram_texture_inventory as inventory
 import restore_vram_texture as restore
-DEFAULT=ROOT/'.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 
 class RestoreVramTests(unittest.TestCase):
     def test_material_dependency_classification_and_sensitive_names(self):
@@ -45,8 +44,7 @@ class RestoreVramTests(unittest.TestCase):
             with self.assertRaises(ValueError):restore.validate_quality(changed,info)
 
     def test_astc_codec_preserves_logical_size_alpha_and_atlas(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file():self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as t:
             p=Path(t);(p/'project.godot').write_text('[application]\nconfig/name="Texture restore fixture"\n')
             shutil.copy(ROOT/'tests/sts2_low_texture_fixture.gd',p/'generate.gd')
@@ -72,8 +70,7 @@ class RestoreVramTests(unittest.TestCase):
             with self.assertRaises(ValueError):restore.verify_output(out.read_bytes(),dict(original,logical=[1,1]))
 
     def test_source_bound_delta_matches_report(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file():self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as t:
             p=Path(t);(p/'project.godot').write_text('[application]\nconfig/name="Delta fixture"\n')
             shutil.copy(ROOT/'tests/sts2_low_texture_fixture.gd',p/'generate.gd')

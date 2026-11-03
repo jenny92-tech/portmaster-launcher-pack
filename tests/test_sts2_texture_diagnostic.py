@@ -1,7 +1,6 @@
 # INPUT: isolated synthetic Godot scene and optional texture diagnostic
 # OUTPUT: bounded, deduplicated texture metadata test without game code
 # POS: headless host fixture; not a GPU performance measurement
-import os
 import hashlib
 import json
 import sys
@@ -10,17 +9,15 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'ports/sts2/src/tools/godot_pck'))
 import low_texture_overlay as low
 
-DEFAULT=ROOT/'.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
-
 class TextureDiagnosticTests(unittest.TestCase):
     def test_font_cache_observation_is_native_and_non_creating(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file(): self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             project=Path(temp);(project/'project.godot').write_text('[application]\nconfig/name="Font cache fixture"\n')
             (project/'port_diagnostics').mkdir()
@@ -31,9 +28,9 @@ class TextureDiagnosticTests(unittest.TestCase):
             self.assertIn('FONT_CACHE_DIAGNOSTIC_FIXTURE_OK',run.stdout)
 
     def test_font_cache_observation_on_device_version_arm64(self):
+        engine=external_file(self,'STS2_TEST_GODOT_RICHTEXT_ARM64')
         docker=shutil.which('docker')
-        engine=ROOT/'.cache/sts2-vulkan-trial/engine-rebuild-928/richtext4096/godot-candidate-4096'
-        if not docker or not engine.is_file(): self.skipTest('matching Linux ARM64 engine unavailable')
+        if not docker: self.skipTest('Docker is unavailable for the Linux ARM64 fixture')
         check=subprocess.run([docker,'image','inspect','--format','{{.Architecture}}','debian:bookworm-slim'],capture_output=True,text=True,timeout=10)
         if check.returncode or check.stdout.strip()!='arm64': self.skipTest('local ARM64 image unavailable')
         with tempfile.TemporaryDirectory() as temp:
@@ -46,8 +43,7 @@ class TextureDiagnosticTests(unittest.TestCase):
             self.assertEqual(run.returncode,0,run.stdout+run.stderr)
             self.assertIn('FONT_CACHE_DIAGNOSTIC_FIXTURE_OK',run.stdout)
     def test_shared_texture_is_counted_once(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file(): self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             project=Path(temp)
             (project/'project.godot').write_text('[application]\nconfig/name="Texture diagnostic fixture"\n')
@@ -60,8 +56,7 @@ class TextureDiagnosticTests(unittest.TestCase):
             self.assertIn('TEXTURE_DIAGNOSTIC_FIXTURE_OK',run.stdout)
 
     def test_resource_stats_native_enums_and_missing_services(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file(): self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             project=Path(temp);(project/'project.godot').write_text('[application]\nconfig/name="Resource stats fixture"\n')
             folder=project/'port_diagnostics';folder.mkdir()
@@ -73,9 +68,9 @@ class TextureDiagnosticTests(unittest.TestCase):
             self.assertIn('RESOURCE_STATS_FIXTURE_OK',run.stdout)
 
     def test_resource_stats_on_linux_arm64_engine(self):
+        engine=external_file(self,'STS2_TEST_GODOT_ARM64')
         docker=shutil.which('docker')
-        engine=ROOT/'.cache/sts2-vulkan-trial/official45/godot45.mono.aarch64'
-        if not docker or not engine.is_file(): self.skipTest('Linux ARM64 engine unavailable')
+        if not docker: self.skipTest('Docker is unavailable for the Linux ARM64 fixture')
         check=subprocess.run([docker,'image','inspect','--format','{{.Architecture}}','debian:bookworm-slim'],capture_output=True,text=True,timeout=10)
         if check.returncode or check.stdout.strip()!='arm64': self.skipTest('local ARM64 image unavailable')
         with tempfile.TemporaryDirectory() as temp:
@@ -90,8 +85,7 @@ class TextureDiagnosticTests(unittest.TestCase):
             self.assertIn('RESOURCE_STATS_FIXTURE_OK',run.stdout)
 
     def test_cache_lookup_is_non_loading_and_does_not_pin(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file(): self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             project=Path(temp)
             (project/'project.godot').write_text('[application]\nconfig/name="Cache fixture"\n')
@@ -101,8 +95,7 @@ class TextureDiagnosticTests(unittest.TestCase):
             self.assertIn('TEXTURE_CACHE_FIXTURE_OK',run.stdout)
 
     def test_independent_diagnostic_pack_mounts(self):
-        godot=Path(os.environ.get('STS2_TEST_GODOT',str(DEFAULT)))
-        if not godot.is_file(): self.skipTest('Godot 4.5.1 unavailable')
+        godot=external_file(self,'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as temp:
             project=Path(temp)
             (project/'project.godot').write_text('[application]\nconfig/name="Texture pack fixture"\n')

@@ -18,8 +18,7 @@ App Manager 使用独立的 Rust/LOVE-lite 程序，可在 PortMaster 缺失时�
 | [vampiresurvivors114](ports/vampiresurvivors114) | 吸血鬼幸存者 1.14.111，Unity 6/PAD |
 | [sts2](ports/sts2) | 杀戮尖塔 2，C# Godot/SDL2 |
 | [batomon](ports/batomon) | Batomon Showdown Demo，Godot 直接运行入口 |
-| [d2r_ns](ports/d2r_ns) | 暗黑破坏神II：狱火重生 NS 94012，独立存档与兼容运行时 |
-| [d2r_ns_2g](ports/d2r_ns_2g) | 暗黑破坏神II NS（2G适配版），沿用已准备安装与原档案 |
+| [d2r_ns_2g](ports/d2r_ns_2g) | 暗黑破坏神II NS，统一采用 2G 适配，沿用已准备安装与原档案 |
 | [emberward](ports/emberward) | 原创余烬灯塔，Godot 4.3 与显式 PCK 导出打包 |
 | [pvz_portable_jenny](ports/pvz_portable_jenny) | 维护版植物大战僵尸年度版，不含原游戏资源 |
 | [sunkendragon](ports/sunkendragon) | 龙沉异世录原生移植实验，已暂停 |
@@ -41,7 +40,8 @@ _kit/dist_port_zip.sh appmanager      # PortMaster ZIP
 _kit/dist_trimui_app.sh recorder      # TrimUI APP ZIP
 ```
 
-只部署生成的 `ports/<port>/dist/`，不将模板或 `_kit/` 复制到设备。
+`ports/<port>/dist/` 是组包暂存；核验后保留根 `dist/` 的正式包或 `dist/ports/<port>/`
+交付目录，并清理重复暂存。部署这些已校验产物，不将模板或 `_kit/` 复制到设备。
 通常将 SH 放固件的 Ports 菜单，其余内容放端口数据目录；具体布局以该端口说明为准。
 Je-Wine 的运行器和游戏适配 ZIP 解压到 SD 卡根目录，离线运行环境 ZIP 可直接放在卡根目录识别导入：规范入口在 `roms/windows/`，运行器与共享组件在其 `.winecellar/` 下，`roms/ports/` 提供首页桥接。布局详见 [Je-Wine](ports/wine-loongos/README.md)。
 

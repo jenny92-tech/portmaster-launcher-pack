@@ -4,7 +4,6 @@
 
 ## 约束
 
-- 普通目录与档案路径不改名，SH 使用 Je- 前缀。
 - 不打包 main.pak、properties、userdata、注册信息、缓存和玩家设置。
 
 ## 业务域清单

@@ -5,7 +5,7 @@ ports/ 下的 Screen Recorder 原型应用，同时支持 TrimUI APP 与 PortMas
 ## 约束
 
 - portable/bin/record_screen.sh 由 `_kit/build_recorder_tool.sh` 从 `_kit/recorder.sh` 生成，不直接编辑。
-- bundled ffmpeg 和生成 dist/ 不是源码；文档初始化不重建、部署或启动采帧。
+- bundled FFmpeg 和 dist/ 是构建产物，分别由共享构建与端口打包流程维护。
 - 游戏运行时只采帧，停止后再编码；界面退出不会自动停止录屏。
 
 ## 业务域清单

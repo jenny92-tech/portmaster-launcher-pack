@@ -7,16 +7,14 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_GODOT = ROOT / '.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 
 
 class StartupPreloadTest(unittest.TestCase):
     def test_startup_preloader(self):
-        godot = Path(os.environ.get('STS2_TEST_GODOT', str(DEFAULT_GODOT)))
-        if not godot.is_file():
-            self.skipTest('Set STS2_TEST_GODOT to a Godot 4 executable')
+        godot = external_file(self, 'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / 'project.godot').write_text('[application]\nconfig/name="Startup preloader fixture"\n')

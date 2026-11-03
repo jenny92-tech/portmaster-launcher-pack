@@ -21,6 +21,27 @@ Mono.Cecil 0.11.5 NuGet 缓存，以及合法游戏的引用程序集。Godot �
 Windows 准备另需已验 Linux 9.0.7 runtime deps
 和 Linux GodotSharp。原始数据保持不变，输出使用新的私有目录，游戏文件和报告不提交仓库。
 
+每份已审原始输入只保留一份，规范位置从仓库根计算：
+
+```text
+gamefiles/sts2/
+├── windows/Slay the Spire 2/
+│   ├── SlayTheSpire2.pck
+│   ├── release_info.json
+│   └── data_sts2_windows_x86_64/
+│       ├── sts2.dll
+│       ├── sts2.deps.json
+│       └── <handheld_low_v110_profile.json 的 windows_dependency_sha256 全部成员>
+└── linux-baseline/
+    ├── sts2.deps.json
+    └── GodotSharp.dll
+```
+
+这组 Windows 准备输入不需要游戏 EXE、Windows 原生运行库、全套 BCL 或玩家状态。
+Linux 基线不能用 Windows 同名文件或另一版 GodotSharp 替代。目录只是存放约定，
+命令仍显式传入路径，也可指定其他私有目录；原始 PCK、程序集、依赖及基线的精确
+内容校验保持不变。转换缓存、解包工作区和重复合并包均为可再生产物，不用于保存唯一源码。
+
 Windows 导出的全部托管依赖均需检查 ILONLY、32 位要求、native entry 和 ReadyToRun。
 只转换已审的 x64 纯 IL PE Machine 标记，不能把 Windows 原生代码转换成 ARM64。
 即使 `--force-steam off`，JIT 仍可能解析 Steamworks 类型，依赖不能漏检。
@@ -46,13 +67,16 @@ Windows 输入使用独立入口：
 
 ```sh
 python3 ports/sts2/src/tools/optimize_handheld.py build-windows \
-  --windows-game-dir /PRIVATE/extracted-game \
-  --linux-runtime-deps /PRIVATE/linux-base/sts2.deps.json \
-  --linux-godotsharp /PRIVATE/linux-base/GodotSharp.dll \
+  --windows-game-dir 'gamefiles/sts2/windows/Slay the Spire 2' \
+  --linux-runtime-deps gamefiles/sts2/linux-baseline/sts2.deps.json \
+  --linux-godotsharp gamefiles/sts2/linux-baseline/GodotSharp.dll \
   --godot /PATH/TO/Godot --dotnet /PATH/TO/dotnet \
-  --nuget-cache /PRIVATE/nuget-packages --texture-cache /PRIVATE/texture-cache \
-  --output-dir /PRIVATE/new-windows-build
+  --nuget-cache /PRIVATE/nuget-packages --texture-cache .cache/sts2/textures \
+  --output-dir .scratch/sts2/windows-build
 ```
+
+Godot 与 .NET 只从显式参数或 PATH 选择，不搜索旧实验目录。输出目录必须尚不存在；
+纹理缓存可以删除后重建，不能放入原始输入、玩家状态或唯一维护源码。
 
 可加 `--plan` 只验证输入及展示步骤。`--texture-cache` 可复用经校验的转换结果；
 `--reuse-verified-texture` 与 `--reuse-texture-report` 必须配对，仍重新校验完整身份。
@@ -76,10 +100,11 @@ Spine 源码和设备扩展二进制尚未建立独立构建绑定时，默认�
 | 主包在启动前合并 | 静态资源可早于 `NGame._EnterTree` 加载，不能依赖事后覆盖；其他条目逐项校验不变 |
 | 主 PCK 留在 SD | 执行视图只放小兼容组件，大包复制到 tmpfs 会增加内存压力 |
 
-当前重建依赖 quarter/refined 纹理、字体预算及 Mono 子集组装链。字体预算和 Mono 子集
-复用 `font_fallback_trial.collect_strings`，`optimize_handheld.py` 显式绑定相应生成工具。
-具体父包、增量、覆盖集合与质量门禁由代码和报告约束。字库缩小、图集名义大小及安装包
-大小不能直接换算成 RSS 收益。
+quarter/refined 纹理、字体预算及 Mono 子集工具保留独立的显式输入接口。字体预算和
+Mono 子集复用 `font_fallback_trial.collect_strings`，`optimize_handheld.py` 绑定相应生成工具。
+父包、增量、覆盖集合与质量门禁由代码和报告约束；基础构建命令不承诺字节重现某份
+既有定制合并包，也不以旧构建快照充当原始输入。字库缩小、图集名义大小及安装包大小
+不能直接换算成 RSS 收益。
 
 字体别名、粗体合成、MSDF 范围及 fallback 顺序须用完整父包 UID 缓存和两种加载顺序
 验证。通用字体提前引用中文字体可能使英文菜单也加载中文字库；共享字体须复用规范
@@ -94,7 +119,8 @@ SDL2/GLES 与 Wayland/Vulkan 当前使用各自匹配的引擎和 Mono bridge。
 统一引擎在独立 Godot 工程研发，替换前须验证原生/托管接口、显示、输入、战斗和正常退出。
 TrimUI SDL2 必须包含实际 KMSDRM 驱动；`src/scripts/build_bundled_sdl.sh` 检查驱动及 glibc 上限。
 `src/scripts/assemble-launcher-pack.sh` 维护独立完整装配布局，不自动替换现用设备 profile。
-来源及许可见 [MANIFEST](src/scripts/MANIFEST.md)。
+来源及许可见 [MANIFEST](src/scripts/MANIFEST.md)，Godot 固定源码与补丁说明见
+[引擎输入](src/external/godot/README.md)。
 
 `deploy` / `deploy-windows` 面向显式目标和已验开发入口。先使用 `--plan`；实际操作
 需提供设备、物理目录、入口摘要、构建目录和私有传输状态目录，参数以脚本 `--help` 为准。
@@ -122,6 +148,10 @@ python3 -m unittest discover -s tests -p 'test_sts2_prepare_windows_game.py'
 python3 -m unittest discover -s tests -p 'test_sts2_subset_mono_font.py'
 ```
 
-有外部输入的集成测试须显式准备依赖。主机检查后仍需在目标设备验证菜单、中文布局、
+有外部输入的集成测试须经显式变量提供依赖，不因本机原始输入目录存在而自动运行。
+Windows 准备的真实文件测试使用 `STS2_TEST_WINDOWS_GAME_DIR` 指向 `Slay the Spire 2`
+目录，完整准备另需 `STS2_TEST_LINUX_BASELINE_DIR` 指向上述两项 Linux 基线所在目录；
+不设置时保留合成检查并跳过真实输入测试。其他可选输入见 [测试导航](../../tests/AGENTS.md)。
+主机检查后仍需在目标设备验证菜单、中文布局、
 输入、首战、首击、设置往返及保存退出。报告同一统计口径和采样条件，不将不同进程、
 随机局或 profiler 运行当作严格性能对照。逐轮进程、传输和清理记录留在私有实验目录。

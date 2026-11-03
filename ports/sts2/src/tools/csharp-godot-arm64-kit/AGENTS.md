@@ -4,15 +4,15 @@ STS2 工具树中可复用于 C# Godot 游戏的跨架构辅助工具集。检�
 
 ## 约束
 
-- 原位补丁与显式提供的元数据/原内容 MD5 绑定，不携带或默认选用旧游戏资源快照。
+- 原位补丁与显式提供的元数据及原内容、替换内容 MD5 绑定，不携带或默认选用旧游戏资源快照。
 - PE machine 修补只适用于纯 IL，不把 ReadyToRun 原生代码当作架构无关。
-- 游戏文件、FMOD 运行库及外部构建依赖保持既有许可和忽略边界；不为文档初始化执行部署或下载。
+- 游戏文件、FMOD 运行库及外部构建依赖保持既有许可和忽略边界。
 
 ## 业务域清单
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| apply_gdext_patch.py | `apply_gdext_patch.py` | 经原内容哈希校验为 FMOD 扩展加入 Linux ARM64 映射 |
+| apply_gdext_patch.py | `apply_gdext_patch.py` | 校验原内容及替换内容哈希，为 FMOD 扩展加入 Linux ARM64 映射 |
 | apply_pck_blob_patch.py | `apply_pck_blob_patch.py` | 经原内容和替换内容哈希校验执行幂等的 PCK 单文件原位补丁 |
 | clrmeta.py | `clrmeta.py` | 用最小 ECMA-335 解析器定位游戏初始化入口 |
 | patch_pe_machine.py | `patch_pe_machine.py` | 将误标为 AMD64 的纯 IL 程序集改为 ARM64 并跳过 ReadyToRun |

@@ -1,73 +1,57 @@
-# godot fork build artifact
+# Godot runtime inputs
 
-The godot 4.5 mono linuxbsd arm64 engine binary used to run the game, plus
-its matching GodotSharp.dll.
+This directory accepts externally built Godot engines and their matching managed
+bindings. Engines are build outputs; maintained changes belong in a source
+repository or the patches below, not in a disposable build directory.
 
-## Contents
+## Fixed native Wayland/Mono source
 
-| File | Size | Description |
-|---|---|---|
-| `godot.linuxbsd.template_release.arm64.mono` | 62 MB | Engine binary, renamed to `godot.mono` on deploy |
-| `GodotSharp.dll` | 5.6 MB | The C# bindings it must be paired with (from the same build) |
+The native Vulkan/Mono patch baseline is upstream
+[Godot 928ee70231821228dc7b21b34008af7d5af1322a](https://github.com/godotengine/godot/tree/928ee70231821228dc7b21b34008af7d5af1322a).
+Its local changes are preserved in the repository; apply them in this order to
+a separate checkout of that exact revision:
 
-## Source
+| Patch | Purpose |
+|---|---|
+| [godot-928-vma-memory.patch](../../tools/csharp-godot-arm64-kit/godot-928-vma-memory.patch) | Optional VMA block sizing and bounded memory statistics |
+| [godot-928-richtext-small-pool.patch](../../tools/csharp-godot-arm64-kit/godot-928-richtext-small-pool.patch) | RichTextLabel-only RID pool sizing |
+| [godot-928-system-font-diag.patch](../../tools/csharp-godot-arm64-kit/godot-928-system-font-diag.patch) | Explicitly enabled system-font cache diagnostics |
 
-- **Repo**: <https://github.com/jenny92-tech/godot>
-- **Branch**: `4.5-arm64-sdl2` (supersedes `linuxbsd-sdl2`; the SDL2
-  DisplayServer is now SDL-only — the self-managed KMS/GBM/EGL path was
-  removed, so the binary no longer links `libdrm`/`libgbm`. CI hard-fails if
-  either shows up in DT_NEEDED.)
-- **CI Workflow**: `.github/workflows/build-sdl2-arm64.yml` ("🛠 Build linuxbsd SDL2 arm64")
-- **This build**: local Docker build (2026-07-24, image `godot-sdl2-builder`,
-  glibc ≤ 2.31) from uncommitted `4.5-arm64-sdl2` working tree — first
-  SDL-only build; DT_NEEDED verified free of libgbm/libdrm/libEGL/libGLESv2
-- **Artifact**: `godot-linuxbsd-sdl2-mono-arm64`
+Check each patch before applying it. The pinned toolchain, Mono glue and assembly
+build procedure, fixtures and diagnostic boundaries are documented in
+[MEMORY-PROFILING.md](../../tools/csharp-godot-arm64-kit/MEMORY-PROFILING.md).
+This source and patch set can reconstruct the maintained engine changes without
+retaining historical build trees, logs or candidate binaries. It does not promise
+an identical old binary hash or reproduce undocumented PortMaster build inputs.
 
-## Refresh (option A: local Docker build)
+## Runtime variants and paired artifacts
 
-```bash
-docker run --rm \
-  -v <godot-repo>:/src \
-  -v <logs-dir>:/logs \
-  -v godot-dotnet:/dotnet \
-  godot-sdl2-builder:latest bash /logs/build-sdl2-mono.sh
-# build-sdl2-mono.sh mirrors the CI mono variant (scons flags, DT_NEEDED hard
-# check, .NET 8, mono glue, GodotSharp.dll). Then:
-cp <godot-repo>/bin/godot.linuxbsd.template_release.arm64.mono ./
-cp <godot-repo>/bin/GodotSharp/Api/Release/GodotSharp.dll ./
-```
+The 928 patch baseline uses native Wayland; it does not add the custom SDL2
+DisplayServer. SDL2/GLES development remains in the independent
+[Godot fork, 4.5-arm64-sdl2](https://github.com/jenny92-tech/godot/tree/4.5-arm64-sdl2).
+The two runtime variants require their own matched native/managed interfaces
+and device validation. One is not a drop-in replacement for the other.
 
-## Refresh (option B: pull a new CI build)
+The stock assembly reads these explicitly supplied files:
 
-```bash
-# trigger the workflow (manual dispatch)
-gh workflow run "🛠 Build linuxbsd SDL2 arm64" -R jenny92-tech/godot --ref 4.5-arm64-sdl2 -f variants=mono
+| File | Consumer |
+|---|---|
+| `godot.linuxbsd.template_release.arm64.mono` | Copied as `godot.mono` |
+| `GodotSharp.dll` | Copied into `data_sts2_linuxbsd_arm64/` |
 
-# wait ~20 min, then download
-gh run list -R jenny92-tech/godot --workflow "🛠 Build linuxbsd SDL2 arm64" --limit 1
-RUN=<run-id>
-gh run download $RUN -R jenny92-tech/godot --dir /tmp/godot-fresh
-cp /tmp/godot-fresh/godot-linuxbsd-sdl2-mono-arm64/__w/godot/godot/bin/godot.linuxbsd.template_release.arm64.mono ./
-cp /tmp/godot-fresh/godot-linuxbsd-sdl2-mono-arm64/__w/godot/godot/bin/GodotSharp/Api/Release/GodotSharp.dll ./
-# sanity: must print nothing
-objdump -p godot.linuxbsd.template_release.arm64.mono | grep -E "libgbm|libdrm"
-```
+Keep the engine and bindings from one compatible build together. Mixing unrelated
+P/Invoke bindings and native exports can crash at startup. The reviewed Windows
+game preparation also checks its exact Linux GodotSharp baseline; a new engine
+build does not authorize replacing that input or bypassing its hash gate.
 
-> ⚠️ **The two files must be paired**: the C# bindings' P/Invoke signatures
-> must match the native functions exposed by godot.mono. Mixing them (e.g. an
-> old godot.mono with a new GodotSharp.dll) SEGVs immediately.
+Resource conversion on the host uses **official stable Godot 4.5.1**, selected
+explicitly or from PATH. The handheld's RC/custom runtime cannot replace that
+asset-build tool. Supply tools and runtime artifacts under their own licenses.
 
-## Deploy to device
+## Verification boundary
 
-```
-godot.mono                                                # renamed from godot.linuxbsd.template_release.arm64.mono
-data_sts2_linuxbsd_arm64/GodotSharp.dll                   # used by the game
-runtimes/sdl2_fixed/godot.mono                            # source for switch_runtime.sh
-runtimes/sdl2_fixed/GodotSharp.dll                        # same
-```
-
-## Binaries are NOT distributed in this repo
-
-The engine binary + GodotSharp.dll (62 MB / 5.6 MB) are not committed to git
-(size). godot is MIT-licensed — just build your own linuxbsd arm64 mono
-binaries per the source above.
+Before using a rebuilt runtime, inspect its ELF dependencies and GLIBC symbol
+requirements, verify the managed/native API pair, then separately check display,
+controller input, text, gameplay, save and normal exit on the intended device.
+This document records the source inputs and retained changes; it does not claim
+a new build, binary audit, deployment or device acceptance.

@@ -3,19 +3,18 @@
 # POS:    tests lightweight effects without loading player game data
 import hashlib
 import importlib.util
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from sts2_test_inputs import external_file
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'ports/sts2/src/rendering'
 SPEC = importlib.util.spec_from_file_location('overlay', ROOT / 'ports/sts2/src/scripts/make-official-runtime-overlay.py')
 OVERLAY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(OVERLAY)
-GODOT = ROOT / '.cache/sts2-vulkan-trial/build-tools/godot-4.5.1-macos/Godot.app/Contents/MacOS/Godot'
 
 
 class LeanEffectsTest(unittest.TestCase):
@@ -45,9 +44,7 @@ class LeanEffectsTest(unittest.TestCase):
                 OVERLAY.rewrite_smooth_particle_scene(source + b'!', path, spec)
 
     def test_simple_flashes_and_timed_healing_root(self):
-        godot = Path(os.environ.get('STS2_TEST_GODOT', str(GODOT)))
-        if not godot.is_file():
-            self.skipTest('Set STS2_TEST_GODOT to a Godot 4 executable')
+        godot = external_file(self, 'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
             (project / 'project.godot').write_text('[application]\nconfig/name="Lean effects fixture"\n')
