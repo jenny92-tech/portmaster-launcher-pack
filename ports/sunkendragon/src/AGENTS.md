@@ -1,6 +1,6 @@
 # 龙沉异世录开发流程
 
-此目录为两种开发装配模式提供入口：完整 Android 基线，或要求玩家补充 Windows GameData 的最小核心包。scripts 消费外部 Bogodroid/转换产物并生成发行负载；设备启动和资源迁移仍分别由 love 与 patch 承担。
+此目录为两种开发装配模式提供入口：完整 Android 基线，或要求玩家补充 Windows GameData 的最小核心包。scripts 消费显式提供的历史 C++ runtime/转换产物并生成发行负载；不从 Bogodroid 知识库读取源码或构建文件。
 
 ## 约束
 

@@ -58,7 +58,7 @@ require_file "$SRC_ROOT/external/godot/GodotSharp.dll"
 require_file "$SRC_ROOT/external/fmod-gdextension/libGodotFmod.linux.template_release.arm64.so"
 require_file "$SRC_ROOT/external/spine-runtimes/libspine_godot.linux.template_release.arm64.so"
 require_file "$SRC_ROOT/refs/0Harmony.dll"
-STEAM_STUB="${STEAM_STUB:-../Bogodroid/tools/steam_mock/libsteam_api64.so}"
+STEAM_STUB="${STEAM_STUB:-$SRC_ROOT/tools/steam_mock/libsteam_api64.so}"
 require_file "$STEAM_STUB"
 green "  release dependencies present"
 

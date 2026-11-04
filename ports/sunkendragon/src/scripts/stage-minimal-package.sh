@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# INPUT:  Bogodroid ARM64 核心文件、unityloader/插件、支持文件与 _kit 打包工具
+# INPUT:  显式外部历史输入根、ARM64 核心、unityloader/插件和 _kit 打包工具
 # OUTPUT: 待玩家填充 GameData 的最小运行包与 PAYLOAD-SHA256.txt
 # POS:    龙沉异世录不包含可复用 Windows 游戏资源的最小包组装脚本
 # Build the minimal 龙沉异世录 PortMaster package.
@@ -11,10 +11,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 PORT="$ROOT/ports/sunkendragon"
-BOGODROID_ROOT="${1:-$ROOT/../Bogodroid}"
-PAYLOAD="${2:-$BOGODROID_ROOT/tools/unity_convert/work/bogodroid-gamefiles}"
-LOADER="${3:-$BOGODROID_ROOT/build-log/unityloader}"
-SUPPORT_FILES="${4:-$BOGODROID_ROOT/gamefiles/support_files}"
+LEGACY_INPUT_ROOT="${1:-}"
+if [ -z "$LEGACY_INPUT_ROOT" ]; then
+  echo "Usage: $0 LEGACY_INPUT_ROOT [PAYLOAD [LOADER [SUPPORT_FILES]]]" >&2
+  echo "Bogodroid is a knowledge base; provide the external legacy runtime and converted inputs explicitly." >&2
+  exit 64
+fi
+PAYLOAD="${2:-$LEGACY_INPUT_ROOT/tools/unity_convert/work/bogodroid-gamefiles}"
+LOADER="${3:-$LEGACY_INPUT_ROOT/build-log/unityloader}"
+SUPPORT_FILES="${4:-$LEGACY_INPUT_ROOT/gamefiles/support_files}"
 DIST="$PORT/dist"
 LOADER_DIR="$(dirname "$LOADER")"
 UNITYLOADER_PLUGINS=(

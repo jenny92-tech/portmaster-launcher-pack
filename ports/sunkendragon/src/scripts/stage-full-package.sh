@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# INPUT:  Bogodroid 完整 Android payload、unityloader/插件、Steam stub 与 _kit 打包工具
+# INPUT:  显式外部历史输入根、完整 Android payload、unityloader/插件与 _kit 打包工具
 # OUTPUT: 完整 Android 基线 dist/ 包与 PAYLOAD-SHA256.txt
 # POS:    龙沉异世录硬件验证用完整资源基线包的组装脚本
 # Build the verified full Android baseline package for 龙沉异世录.
@@ -12,12 +12,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 PORT="$ROOT/ports/sunkendragon"
-BOGODROID_ROOT="${1:-$ROOT/../Bogodroid}"
-PAYLOAD="${2:-$BOGODROID_ROOT/tools/unity_convert/work/bogodroid-gamefiles}"
-LOADER="${3:-$BOGODROID_ROOT/build-log/unityloader}"
-STEAM_STUB="${4:-$BOGODROID_ROOT/tools/steam_mock/libsteam_api64.so}"
-TICKET_STUB="${5:-$BOGODROID_ROOT/tools/steam_mock/libsdkencryptedappticket64.so}"
-SUPPORT_FILES="${6:-$BOGODROID_ROOT/gamefiles/support_files}"
+LEGACY_INPUT_ROOT="${1:-}"
+if [ -z "$LEGACY_INPUT_ROOT" ]; then
+  echo "Usage: $0 LEGACY_INPUT_ROOT [PAYLOAD [LOADER [STEAM_STUB [TICKET_STUB [SUPPORT_FILES]]]]]" >&2
+  echo "Bogodroid is a knowledge base; provide the external legacy runtime and converted inputs explicitly." >&2
+  exit 64
+fi
+PAYLOAD="${2:-$LEGACY_INPUT_ROOT/tools/unity_convert/work/bogodroid-gamefiles}"
+LOADER="${3:-$LEGACY_INPUT_ROOT/build-log/unityloader}"
+STEAM_STUB="${4:-$LEGACY_INPUT_ROOT/tools/steam_mock/libsteam_api64.so}"
+TICKET_STUB="${5:-$LEGACY_INPUT_ROOT/tools/steam_mock/libsdkencryptedappticket64.so}"
+SUPPORT_FILES="${6:-$LEGACY_INPUT_ROOT/gamefiles/support_files}"
 DIST="$PORT/dist"
 LOADER_DIR="$(dirname "$LOADER")"
 UNITYLOADER_PLUGINS=(

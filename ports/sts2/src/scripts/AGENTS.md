@@ -7,6 +7,7 @@
 - 入口名来自 manifest；UI_ONLY 只同步入口、封面与 port.json，不改游戏负载。改名时仅清理带本端口标记的旧生成 SH 和同名封面。
 - 完整、UI_ONLY 和运行时补齐打包在最终负载收集后调用共享 build_info.py，更新包构建身份和启动日志。
 - 完整构建需要玩家提供的引用程序集和指定外部运行时；不分发游戏内容或受限 FMOD 运行库。
+- Steam companion 默认从端口自己的 tools/steam_mock 产物读取，也可显式指定；不依赖 Bogodroid 知识库的旧源码路径。
 - 设备部署使用 rsync --delete，执行前必须明确目标和删除范围。
 - SDL2 构建受设备 glibc 与 KMSDRM/ALSA 驱动集合约束，二进制与版本记录由对应构建流程维护。
 
