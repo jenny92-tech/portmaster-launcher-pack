@@ -152,7 +152,12 @@ controls; sidebar footers reserve the actual height of wrapped text.
 
 ## Graphics and runtime
 
-Only Silksong and Vampire Survivors expose the OpenGL ES / Vulkan picker.
+Only Silksong and Vampire Survivors expose the OpenGL ES / System Vulkan /
+malisx2 Vulkan picker. The optional malisx2 Linux ICD has its own source/checksum
+gate and native preflight on the Loong/G52 path; missing or failed candidates
+remain disabled. Both Vulkan choices preserve the same rendering controls.
+An explicit `LAUNCHER_MALISX2_DIR` can select one shared driver package outside
+the game runtime. The driver itself is a standard Vulkan ICD, independent of Rudroid.
 All five Rudroid launchers default to OpenGL ES and 75% rendering; Vulkan remains
 a manual choice for those two titles. Existing valid saved choices still apply.
 Runtime features, title support and a bounded native probe determine availability.

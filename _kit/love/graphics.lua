@@ -17,10 +17,12 @@ function graphics.detect(allow_vulkan,preferred)
     if not model.features.sdl2 then model.features={} end
     local vulkan_environment=os.getenv("PORTKIT_VULKAN_AVAILABLE")=="1"
         and os.getenv("PORTKIT_VULKAN_PLATFORM_SUPPORTED")=="1"
+    local malisx2_environment=os.getenv("PORTKIT_MALISX2_AVAILABLE")=="1"
     function model.supports(api)
         if api=="gles" then return model.features.gles==true end
-        return api=="vulkan" and model.allow_vulkan and model.features.vulkan==true
-            and model.features["vulkan-linear"]==true and vulkan_environment
+        return (api=="vulkan" or api=="malisx2") and model.allow_vulkan and model.features.vulkan==true
+            and model.features["vulkan-linear"]==true
+            and ((api=="vulkan" and vulkan_environment) or (api=="malisx2" and malisx2_environment))
     end
     function model.default_api()
         if model.supports(model.preferred) then return model.preferred end
@@ -31,7 +33,7 @@ function graphics.detect(allow_vulkan,preferred)
     function model.resolve(state)
         local api=state.graphics_api or model.default_api()
         local result={api=api,available=model.supports(api)}
-        local scale=model.features[api.."-scale"]==true
+        local scale=model.features[(api=="malisx2" and "vulkan" or api).."-scale"]==true
         result.render_scale=scale and (state.render_scale or "config") or "100"
         result.controls={
             render_scale={disabled=not scale},

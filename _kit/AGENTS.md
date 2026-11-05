@@ -11,6 +11,8 @@
 - MiniLoong 保留系统音频与 Wayland 约定；已有效尺寸不重复旋转，仅已知 Loong 的原始 fb 回退交换宽高。硬件策略匹配完整 device-tree compatible，由已验收标题显式选用，固定核心、调频与热插拔不成为公共默认。
 - Vulkan 可用性取标题、固件、完整板型、运行库能力及有界原生探测的交集。目前仅登记 Silksong/吸血鬼幸存者的 TrimUI A523 和 Loong RK3566 RK817 路径；未知组合在原生探测前禁用，不凭 IP 或 SoC 子串推定。
 - 私有 WSI 暂存到 `runtime/vulkan-wsi`，仅在游戏进程生效，不改系统 ICD/驱动。无系统 Wayland 时，完整私有客户端包和已安装的 PortMaster Weston 均通过检查才可创建临时会话。
+- malisx2 是独立候选，只向上述 Loong/G52 两标题开放：校验 `runtime/vulkan-malisx2` 的固定 Linux Release 来源、ELF 和 SHA，再单独原生预检。缺失或失败时禁用；系统 Vulkan 成功不代表候选可用，候选可用也不等于玩法验收。ICD 与 headless surface 载体开关只在游戏子进程设置，重新选择时清除旧值。
+- `LAUNCHER_MALISX2_DIR` 可显式指向共享的绝对驱动目录；未设置时使用游戏运行目录下的 `vulkan-malisx2`。包遵循标准 Vulkan ICD 布局，不依赖 Rudroid capability，不按游戏复制或修改系统驱动。
 - 不可用后端不能选择；已存无效值在显示前归一化，启动校验仍拒绝无效选择，不暗换后端。禁用字段置灰并跳过焦点，滤波由程序处理；图形能力只在启动或选项变化时刷新。
 - 标题可显式设置 `RUDROID_WAYLAND_FORCE_RENDERER=1`，让私有 Weston 按输出尺寸合成；不继承任意 Weston 开关，不改客户渲染比例。
 - 正式会话仅在非零退出或结构化 ERROR/FATAL 时保存最多 64 KiB 上下文，并按相同条件记录退出内核日志。临时捕获使用事件驱动的有界缓冲，不做定时扫描；显式诊断才保留实时完整输出。

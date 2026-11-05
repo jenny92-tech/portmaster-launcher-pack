@@ -99,6 +99,7 @@
 | 私有 Wayland 生命周期 | `test_wayland_session.py` | 音频环境隔离、退出码、合成器故障和挂载清理的无设备回归 |
 | Unity 显示参数 | `test_unity_resolution_contract.sh` | 验证显示/渲染分离、三档内存、绝对配置路径和失败传播 |
 | Unity 设置集成 | `test_unity_launcher_settings.py` | 用隔离夹具和真实主机辅助程序验证五标题配置、精确机型准入、未知设备探测前拒绝、交接失败与原生退出所有权，不启动游戏 |
+| Vulkan 驱动选择 | `test_malisx2_switch.py` | 验证系统/candidate独立预检、三选项、来源及Linux ELF门禁、子进程ICD隔离与重新选择，不加载夹具库或连接设备 |
 | 吸血鬼幸存者契约 | `test_vampiresurvivors114_launcher.sh` | 检查 Unity 6 图形兼容、插件与存档边界 |
 | Wine 启动器 | `test_wine_loongos_launcher.py` | 验证游戏发现、封面解码/回退、说明弹层、横向导航、输入复用与独占、全屏交接、逐启动帧信号、独立会话及正常退出 |
 | Wine 分层与安装 | `test_wine_loongos_layers.py` | 验证机型/环境继承、不依赖系统 Python/PortMaster、API 共享依赖、原子安装保留存档、版本和资源补丁及独立包边界 |

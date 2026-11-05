@@ -101,7 +101,9 @@ function launcher.graphics_api(spec)
     if spec.vulkan then
         local available=spec.graphics.supports("vulkan")
         spec.disabled_values.vulkan=not available
-        spec.options[#spec.options+1]={"vulkan","Vulkan"}
+        spec.options[#spec.options+1]={"vulkan",{en="System Vulkan",zh="系统 Vulkan"}}
+        spec.disabled_values.malisx2=not spec.graphics.supports("malisx2")
+        spec.options[#spec.options+1]={"malisx2","malisx2 Vulkan"}
     end
     return field("select",spec)
 end

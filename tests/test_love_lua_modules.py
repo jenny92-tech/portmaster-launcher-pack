@@ -325,7 +325,7 @@ with tempfile.TemporaryDirectory() as source:
             l.memory_mode{env='MEMORY'}},pages={{rows={'graphics_api','render_scale','texmax','memory_mode'}}}}
         love.load();local s=k.get_state();s.render_scale='75';PORT.refresh_graphics(k)
         assert(not ROWS.texmax.disabled and s.graphics_api=='gles')
-        assert(#ROWS.graphics_api.values==2)
+        assert(#ROWS.graphics_api.values==3 and ROWS.graphics_api.values[3]=='malisx2')
         for _=1,20 do if k.debug_focus().zone=='rows' and k.debug_focus().focus_i==1 then break end;love.keypressed('up') end
         love.keypressed('right')
         assert(s.graphics_api=='vulkan' and ROWS.texmax.disabled)
@@ -1477,5 +1477,27 @@ with tempfile.TemporaryDirectory() as source:
         k.input("confirm"); k.input("cancel")
         assert(cancelled and not k.debug_password_dialog().open)
     ''')
+
+# Candidate persistence is independent of the system driver's preflight. A
+# saved unavailable candidate is normalized before display and environment save.
+for port,prefix in {"silksong":"SILK","vampiresurvivors114":"VS"}.items():
+    for candidate,expected in ((True,"malisx2"),(False,"gles")):
+        with tempfile.TemporaryDirectory() as source:
+            (Path(source)/"state.txt").write_text("ui_lang=zh\ngraphics_api=malisx2\n")
+            for _ in range(2):
+                lua=LuaRuntime(unpack_returned_tuples=True);lua.globals().SOURCE=source
+                lua.globals().FEATURES=full_features;lua.globals().CANDIDATE=candidate
+                lua.execute(mock)
+                lua.execute('''local getenv=os.getenv;os.getenv=function(k)
+                    if k=='PORTKIT_GRAPHICS_FEATURES' then return FEATURES end
+                    if k=='PORTKIT_VULKAN_AVAILABLE' or k=='PORTKIT_VULKAN_PLATFORM_SUPPORTED' then return '0' end
+                    if k=='PORTKIT_MALISX2_AVAILABLE' then return CANDIDATE and '1' or '0' end
+                    return getenv(k)
+                end''')
+                lua.execute(f"package.path={str(root/'_kit/love'/'?.lua')!r}..';'..package.path")
+                lua.execute(f"dofile({str(root/'ports'/port/'love/main.lua')!r})")
+                lua.execute("love.load(); love.keypressed('return')")
+                assert lua.globals().LAST_QUIT==42,(port,candidate)
+                assert f"{prefix}_GRAPHICS_API='{expected}'" in (Path(source)/'launch_config.env').read_text()
 
 print("love Lua module tests: PASS")

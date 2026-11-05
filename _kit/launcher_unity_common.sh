@@ -186,6 +186,7 @@ prepare_unity_graphics_options() {
     fi
   fi
   PORTKIT_VULKAN_AVAILABLE=0
+  PORTKIT_MALISX2_AVAILABLE=0
   PORTKIT_VULKAN_PLATFORM_SUPPORTED=0
   UNITY_WAYLAND_SESSION=native
   if [ "$accepted" = 1 ] && ! unity_vulkan_device_supported; then
@@ -226,13 +227,31 @@ RUDROID_VULKAN=1
     fi ;;
   esac
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan-linear,*) : ;; *) PORTKIT_VULKAN_AVAILABLE=0 ;; esac
+  # The optional ICD is a separate candidate: system-driver probe success does
+  # not authorize it. Keep this G52 path on the existing native Wayland session.
+  case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan,*)
+    if [ "$accepted" = 1 ] && [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 1 ] &&
+       [ "$UNITY_WAYLAND_SESSION" = native ] && command -v timeout >/dev/null 2>&1 &&
+       [ -s "${LAUNCHER_MALISX2_DIR:-$runtime/vulkan-malisx2}/sources.json" ] &&
+       launcher_compat_accepts unity-rudroid malisx2 &&
+       launcher_compat_plan unity-rudroid malisx2 "$runtime"; then
+      probe="$(launcher_compat_exec timeout -k 1 8 "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan 2>&1)" || probe="failed: $probe"
+      case "
+$probe
+" in *'
+RUDROID_VULKAN=1
+'*) case "$probe" in failed:*) : ;; *) PORTKIT_MALISX2_AVAILABLE=1 ;; esac ;; esac
+    fi ;;
+  esac
   UNITY_GRAPHICS_PROBED_RUNTIME="$runtime"
-  export PORTKIT_GRAPHICS_FEATURES PORTKIT_GRAPHICS_QUERY PORTKIT_VULKAN_AVAILABLE PORTKIT_VULKAN_PLATFORM_SUPPORTED
+  export PORTKIT_GRAPHICS_FEATURES PORTKIT_GRAPHICS_QUERY PORTKIT_VULKAN_AVAILABLE PORTKIT_VULKAN_PLATFORM_SUPPORTED PORTKIT_MALISX2_AVAILABLE
 }
 
 prepare_unity_vulkan_plan() {
   prepare_unity_graphics_options
-  [ "$PORTKIT_VULKAN_AVAILABLE" = 1 ] || {
+  local backend="${UNITY_VULKAN_BACKEND:-vulkan}" available="$PORTKIT_VULKAN_AVAILABLE"
+  [ "$backend" != malisx2 ] || available="$PORTKIT_MALISX2_AVAILABLE"
+  [ "$available" = 1 ] || {
     echo "$LOG_PREFIX complete Vulkan runtime/feature report is missing; choose OpenGL ES"
     return 1
   }
@@ -240,11 +259,12 @@ prepare_unity_vulkan_plan() {
     echo "$LOG_PREFIX Vulkan requires a verified native or private Wayland session"
     return 1
   }
-  launcher_compat_plan unity-rudroid vulkan "${UNITY_RUNTIME_DIR:-$GAMEDIR}"
+  launcher_compat_plan unity-rudroid "$backend" "${UNITY_RUNTIME_DIR:-$GAMEDIR}"
 }
 
 resolve_unity_graphics_api() {
   local requested="${1:-gles}"
+  UNITY_VULKAN_BACKEND=vulkan
   prepare_unity_graphics_options "${3:-0}"
   case "$requested" in
     gles) UNITY_GRAPHICS_API="${2:-gles30}" ;;
@@ -253,6 +273,14 @@ resolve_unity_graphics_api() {
         UNITY_GRAPHICS_API=vulkan
       else
         echo "$LOG_PREFIX selected Vulkan backend is disabled for this title/environment"
+        return 1
+      fi ;;
+    malisx2)
+      if [ "${3:-0}" = 1 ] && [ "$PORTKIT_MALISX2_AVAILABLE" = 1 ]; then
+        UNITY_GRAPHICS_API=vulkan
+        UNITY_VULKAN_BACKEND=malisx2
+      else
+        echo "$LOG_PREFIX selected malisx2 Vulkan backend is unavailable"
         return 1
       fi ;;
     *) echo "$LOG_PREFIX invalid graphics backend: $1"; return 1 ;;

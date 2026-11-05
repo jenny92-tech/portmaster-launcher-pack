@@ -19,8 +19,74 @@ launcher_compat_accepts() {
           launcher_platform_matches_compatible rockchip,rk3566-rk817-tablet ;;
         *) return 1 ;;
       esac ;;
+    unity-rudroid:malisx2)
+      case "${PORT_NAME:-}:${CFW_NAME:-}" in
+        silksong:Loong|vampiresurvivors114:Loong)
+          launcher_platform_matches_compatible rockchip,rk3566-rk817-tablet ;;
+        *) return 1 ;;
+      esac ;;
     *) return 1 ;;
   esac
+}
+
+# Check the optional Linux build without loading it. Android release packs use
+# Bionic and cannot serve as a Linux ICD, even though both are AArch64 ELF.
+launcher_compat_malisx2() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1" <<'PY'
+import hashlib,json,struct,sys
+from pathlib import Path
+try:
+    root=Path(sys.argv[1])
+    if not root.is_absolute() or ':' in str(root) or '\n' in str(root):
+        raise ValueError('driver directory must be an absolute single-ICD path')
+    if root.is_symlink() or not root.is_dir(): raise ValueError('driver directory must be local')
+    for name in ('mali_icd.json','sources.json','libvulkan_malisx2.so'):
+        p=root/name
+        if p.is_symlink() or not p.is_file(): raise ValueError('missing regular Linux driver file')
+    source=json.loads((root/'sources.json').read_text())
+    if (source.get('platform'),source.get('profile'),source.get('source_revision')) != (
+        'linux-aarch64','Release','d0422ed5eb5d8971f118f14d2550ce04aa1a0a5a'):
+        raise ValueError('driver source/platform/Release identity mismatch')
+    manifest=json.loads((root/'mali_icd.json').read_text())
+    if manifest.get('ICD',{}).get('library_path')!='./libvulkan_malisx2.so':
+        raise ValueError('driver manifest must select its local library')
+    data=(root/'libvulkan_malisx2.so').read_bytes()
+    if len(data)<64 or data[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<HH',data,16)!=(3,183):
+        raise ValueError('driver requires an AArch64 Linux shared library')
+    phoff=struct.unpack_from('<Q',data,32)[0]
+    ehsize,phsize,phnum=struct.unpack_from('<HHH',data,52)
+    if ehsize!=64 or phsize!=56 or not 1<=phnum<=256 or phoff+phnum*56>len(data):
+        raise ValueError('incomplete driver ELF headers')
+    programs=[struct.unpack_from('<IIQQQQQQ',data,phoff+i*56) for i in range(phnum)]
+    if any(p[2]+p[5]>len(data) or p[5]>p[6] for p in programs):
+        raise ValueError('truncated driver ELF segment')
+    if not any(p[0]==1 and p[1]&1 and p[5] for p in programs):
+        raise ValueError('driver has no executable load segment')
+    dynamic=[p for p in programs if p[0]==2]
+    if len(dynamic)!=1 or dynamic[0][5]%16: raise ValueError('invalid driver dynamic table')
+    entries=[]
+    for off in range(dynamic[0][2],dynamic[0][2]+dynamic[0][5],16):
+        key,value=struct.unpack_from('<QQ',data,off)
+        if key==0: break
+        entries.append((key,value))
+    else: raise ValueError('unterminated driver dynamic table')
+    tags=dict(entries);address=tags.get(5,0);size=tags.get(10,0)
+    loads=[p for p in programs if p[0]==1 and p[3]<=address and address+size<=p[3]+p[5]]
+    if not size or len(loads)!=1: raise ValueError('invalid driver dynamic strings')
+    start=loads[0][2]+address-loads[0][3];strings=data[start:start+size];needed=[]
+    for key,value in entries:
+        if key!=1: continue
+        end=strings.find(b'\0',value)
+        if value>=len(strings) or end<0: raise ValueError('invalid driver import name')
+        needed.append(strings[value:end])
+    if b'libc.so.6' not in needed or any(n in needed for n in (b'liblog.so',b'libc.so')):
+        raise ValueError('Android/Bionic driver is not a Linux build')
+    if hashlib.sha256(data).hexdigest()!=source.get('library_sha256'):
+        raise ValueError('driver checksum mismatch')
+except (OSError,ValueError,KeyError,TypeError,AttributeError,struct.error) as error:
+    print('malisx2: '+str(error),file=sys.stderr);sys.exit(1)
+PY
 }
 
 launcher_compat_fail() {
@@ -121,6 +187,7 @@ launcher_compat_plan() {
   LAUNCHER_COMPAT_REASON=""
   LAUNCHER_COMPAT_LIBRARY_DIR=""
   LAUNCHER_COMPAT_WSI_DIR=""
+  LAUNCHER_COMPAT_ICD_FILE=""
   LAUNCHER_COMPAT_SDL_DRIVER=""
   LAUNCHER_COMPAT_SOCKET=""
   LAUNCHER_COMPAT_ALSA=0
@@ -141,8 +208,8 @@ launcher_compat_plan() {
   }
   case "$1:$2" in
     unity-rudroid:gles) LAUNCHER_COMPAT_PROFILE=unity-system-gles ;;
-    unity-rudroid:vulkan)
-      LAUNCHER_COMPAT_PROFILE="unity-${CFW_NAME}-vulkan"
+    unity-rudroid:vulkan|unity-rudroid:malisx2)
+      LAUNCHER_COMPAT_PROFILE="unity-${CFW_NAME}-$2"
       LAUNCHER_COMPAT_WSI_DIR="$runtime/vulkan-wsi"
       local file
       for file in libVkLayer_window_system_integration.so VkLayer_window_system_integration.json; do
@@ -151,7 +218,16 @@ launcher_compat_plan() {
           return 1
         }
       done
-      LAUNCHER_COMPAT_PATCHES=private-wayland-wsi ;;
+      LAUNCHER_COMPAT_PATCHES=private-wayland-wsi
+      if [ "$2" = malisx2 ]; then
+        local driver="${LAUNCHER_MALISX2_DIR:-$runtime/vulkan-malisx2}"
+        launcher_compat_malisx2 "$driver" || {
+          launcher_compat_fail 'missing or invalid malisx2 Linux driver'
+          return 1
+        }
+        LAUNCHER_COMPAT_ICD_FILE="$driver/mali_icd.json"
+        LAUNCHER_COMPAT_PATCHES=private-wayland-wsi,malisx2
+      fi ;;
     godot-sdl2:gles) launcher_compat_godot_sdl "$bundled" || return 1 ;;
   esac
   LAUNCHER_COMPAT_READY=1
@@ -171,6 +247,13 @@ launcher_compat_describe() {
 # Arguments stay quoted positional values, never generated shell source.
 launcher_compat_exec() {
   [ "${LAUNCHER_COMPAT_READY:-0}" = 1 ] && [ "$#" -gt 0 ] || return 1
+  # Selection applies only in this disposable child. Reselecting system Vulkan
+  # must also clear an ICD override inherited from a prior launch environment.
+  unset VK_DRIVER_FILES VK_ICD_FILENAMES VK_ADD_DRIVER_FILES RUDROID_WSI_HEADLESS_SURFACE
+  if [ -n "$LAUNCHER_COMPAT_ICD_FILE" ]; then
+    export VK_DRIVER_FILES="$LAUNCHER_COMPAT_ICD_FILE" VK_ICD_FILENAMES="$LAUNCHER_COMPAT_ICD_FILE"
+    export RUDROID_WSI_HEADLESS_SURFACE=1
+  fi
   if [ -n "$LAUNCHER_COMPAT_WSI_DIR" ]; then
     export DISABLE_WSI_LAYER=1
     export VK_LAYER_PATH="$LAUNCHER_COMPAT_WSI_DIR${VK_LAYER_PATH:+:$VK_LAYER_PATH}"
