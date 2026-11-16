@@ -23,13 +23,16 @@ MOCK = next(ast.literal_eval(node.value) for node in tree.body
 @unittest.skipUnless(LuaRuntime, 'lupa unavailable')
 class Sts2LauncherUiTest(unittest.TestCase):
     def make_ui(self, source, vulkan, gles, saved, swaps=('off', 'on'),
-                initial_language=None, initial_quality=None, composition_available=None, composition=None, preferred=None):
+                initial_language=None, initial_quality=None, composition_available=None, composition=None, preferred=None,
+                saved_gpu=None):
         if saved is not None:
             state = f'ui_lang=zh\nlanguage=en_US\nquality=quality\nswap_ab={swaps[0]}\nswap_xy={swaps[1]}\n'
             if saved != '__missing__':
                 state += 'graphics_api=' + saved + '\nperf_overlay=on\ndiagnostics=on\n'
             if composition is not None:
                 state += 'weston_composition=' + composition + '\n'
+            if saved_gpu is not None:
+                state += 'gpu_particles=' + saved_gpu + '\n'
             (source / 'state.txt').write_text(state, encoding='utf-8')
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.globals().SOURCE = str(source)
@@ -84,6 +87,8 @@ class Sts2LauncherUiTest(unittest.TestCase):
                 env = (Path(tmp) / 'launch_config.env').read_text(encoding='utf-8')
                 self.assertIn(f"SLL_LANGUAGE='{expected[0]}'", env)
                 self.assertIn(f"SLL_QUALITY='{expected[1]}'", env)
+                particles = 'off' if expected[1] == 'smooth' else 'on'
+                self.assertIn(f"SLL_GPU_PARTICLES='{particles}'", env)
 
     def test_picker_skips_unavailable_backend(self):
         for vk, gl, expected in [('1', '0', 'auto'), ('1', '1', 'auto')]:
@@ -312,6 +317,104 @@ class Sts2LauncherUiTest(unittest.TestCase):
                 assert(out.value:find("SLL_SWAP_AB='off'",1,true))
                 assert(out.value:find("SLL_SWAP_XY='off'",1,true))
             ''')
+
+
+    def test_render_scale_preserves_each_choice_for_both_backends(self):
+        for api in ('gles', 'vulkan'):
+            for value, steps in (('100', 0), ('75', 1), ('50', 2)):
+                with self.subTest(api=api, value=value), tempfile.TemporaryDirectory() as tmp:
+                    source = Path(tmp)
+                    lua = self.make_ui(source, '1', '1', api)
+                    lua.globals().SCALE_STEPS = steps
+                    lua.globals().EXPECTED_SCALE = value
+                    lua.execute('''
+                        local k=require('kit')
+                        local index
+                        for i,row in ipairs(PAGES[1]) do if row.key=='render_scale' then index=i end end
+                        assert(index and k.get_state().render_scale=='100')
+                        for _=1,20 do
+                            local current=k.debug_focus().focus_i
+                            if current==index then break end
+                            k.input(current>index and 'up' or 'down')
+                        end
+                        assert(k.debug_focus().focus_i==index)
+                        for _=1,SCALE_STEPS do k.input('right') end
+                        assert(k.get_state().render_scale==EXPECTED_SCALE)
+                        local start
+                        for i,row in ipairs(PAGES[1]) do if row.action=='start' then start=i end end
+                        for _=1,20 do
+                            local current=k.debug_focus().focus_i
+                            if current==start then break end
+                            k.input(current>start and 'up' or 'down')
+                        end
+                        assert(k.debug_focus().focus_i==start)
+                        k.input('confirm')
+                    ''')
+                    self.assertEqual(lua.globals().LAST_QUIT, 42)
+                    self.assertIn(f'render_scale={value}', (source / 'state.txt').read_text())
+                    self.assertIn(f"SLL_RENDER_SCALE='{value}'", (source / 'launch_config.env').read_text())
+                    reloaded = self.make_ui(source, '1', '1', None)
+                    self.assertEqual(reloaded.eval("require('kit').get_state().render_scale"), value)
+
+    def test_effects_presets_own_particles_and_keep_render_scale_independent(self):
+        for api in ('gles', 'vulkan'):
+            for quality, steps, particles in (('smooth', 2, 'off'), ('balanced', 1, 'on'), ('quality', 0, 'on')):
+                for scale, scale_steps in (('100', 0), ('75', 1), ('50', 2)):
+                    with self.subTest(api=api, quality=quality, scale=scale), tempfile.TemporaryDirectory() as tmp:
+                        source = Path(tmp)
+                        stale_gpu = 'on' if particles == 'off' else 'off'
+                        lua = self.make_ui(source, '1', '1', api, saved_gpu=stale_gpu)
+                        lua.globals().EXPECTED_QUALITY = quality
+                        lua.globals().QUALITY_STEPS = steps
+                        lua.globals().SCALE_STEPS = scale_steps
+                        lua.globals().EXPECTED_SCALE = scale
+                        lua.execute('''
+                            local k=require('kit')
+                            for _,rows in ipairs(PAGES) do
+                                for _,row in ipairs(rows) do assert(row.key~='gpu_particles') end
+                            end
+                            local function focus(key)
+                                local index
+                                for i,row in ipairs(PAGES[1]) do if row.key==key then index=i end end
+                                assert(index)
+                                for _=1,20 do
+                                    local current=k.debug_focus().focus_i
+                                    if current==index then break end
+                                    k.input(current>index and 'up' or 'down')
+                                end
+                                assert(k.debug_focus().focus_i==index)
+                                return PAGES[1][index]
+                            end
+                            local effects=focus('quality')
+                            assert(PORT.strings[effects.label].zh=='特效等级:')
+                            assert(PORT.strings[effects.labels.smooth].zh=='精简')
+                            assert(PORT.strings[effects.labels.quality].zh=='完整')
+                            for _=1,QUALITY_STEPS do k.input('left') end
+                            assert(k.get_state().quality==EXPECTED_QUALITY)
+                            focus('render_scale')
+                            for _=1,SCALE_STEPS do k.input('right') end
+                            assert(k.get_state().render_scale==EXPECTED_SCALE)
+                            local start
+                            for i,row in ipairs(PAGES[1]) do if row.action=='start' then start=i end end
+                            for _=1,20 do
+                                local current=k.debug_focus().focus_i
+                                if current==start then break end
+                                k.input(current>start and 'up' or 'down')
+                            end
+                            assert(k.debug_focus().focus_i==start)
+                            k.input('confirm')
+                        ''')
+                        self.assertEqual(lua.globals().LAST_QUIT, 42)
+                        self.assertIn(f'quality={quality}', (source / 'state.txt').read_text())
+                        env = (source / 'launch_config.env').read_text()
+                        self.assertIn(f"SLL_GPU_PARTICLES='{particles}'", env)
+                        self.assertEqual(env.count('SLL_GPU_PARTICLES='), 1)
+                        self.assertIn(f"SLL_QUALITY='{quality}'", env)
+                        self.assertIn(f"SLL_RENDER_SCALE='{scale}'", env)
+                        self.assertIn(f"SLL_GRAPHICS_API='{api}'", env)
+                        reloaded = self.make_ui(source, '1', '1', None)
+                        self.assertEqual(reloaded.eval("require('kit').get_state().quality"), quality)
+                        self.assertEqual(reloaded.eval("require('kit').get_state().render_scale"), scale)
 
 
 if __name__ == '__main__':

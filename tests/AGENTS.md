@@ -86,7 +86,7 @@
 | STS2 Windows 输入准备 | `test_sts2_prepare_windows_game.py` | 合成 PE/依赖图验证架构与身份门禁；可选原始输入仅经显式变量开启，源文件只读、准备输出在临时目录 |
 | STS2 特效 IL 审计 | `test_sts2_vfx_material_audit.py` | 验证静态扫描识别湍流访问及干净程序集 |
 | STS2 启动预载 | `test_sts2_startup_preload.py`、`sts2_startup_preload_fixture.gd` | 隔离验证资源加载、终态、超时及退出清理，不实例化游戏根节点 |
-| STS2 原生渲染 | `test_sts2_render_native.py`、`sts2_render_native_fixture.gd` | Godot 无头合成场景验证渲染策略、精确粒子规则在父节点准备前生效及资源隔离、材质、缓存与房间生命周期 |
+| STS2 原生渲染 | `test_sts2_render_native.py`、`sts2_render_native_fixture.gd`、`sts2_render_scale_fixture.gd` | Godot 无头合成场景验证渲染比例与显示/布局/输入分离、渲染策略、精确粒子规则、材质、缓存与房间生命周期 |
 | STS2 渲染桥 | `test_sts2_render_bridge.py` | .NET 替身验证反射桥、资源所有权和战斗预热边界 |
 | STS2 原生事件与计时 | `test_sts2_native_particles.py` | 可选 .NET 夹具验证粒子策略、帧停顿/管线记录与诊断失败隔离，不执行游戏 |
 | 异常日志 | `test_launcher_logging.py` | 正常退出静默、非零状态与可恢复错误保留、显式诊断、早退及条件内核日志 |

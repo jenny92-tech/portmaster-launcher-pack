@@ -38,7 +38,7 @@ if [ "$early_model" = sun55iw3 ]; then
   fi
   early_probe="$early_base/bin/sts2_official_profile_v6.py"
   [ ! -L "$early_probe" ] && [ -f "$early_probe" ] || exit 1
-  [ "$(sha256sum "$early_probe" | cut -d ' ' -f 1)" = b9c3ca34a01ba08d8c52eaa85c39eb66e1a15d89068989dddeccecfe5794602a ] || exit 1
+  [ "$(sha256sum "$early_probe" | cut -d ' ' -f 1)" = e9933a1f72caa48e838076d0214e75c2e76da9c4fbba3f6a1119322b5071a17e ] || exit 1
   # The leased probe must be a direct child of namespace PID 1; command
   # substitution would insert a shell process and invalidate the token.
   early_caps_file="$(mktemp /tmp/sts2-caps.XXXXXXXX)" || exit 1
@@ -97,7 +97,7 @@ if [ "${SLL_UNIFIED_V110:-1}" = 1 ]; then
   if [ "$PROFILE_KIND" = 90 ]; then
     PROFILE_CHECK="$GAMEDIR/bin/sts2_official_profile_v2.py"
     [ ! -L "$PROFILE_CHECK" ] && [ -f "$PROFILE_CHECK" ] || exit 1
-    [ "$(sha256sum "$PROFILE_CHECK" | cut -d ' ' -f 1)" = 6afcaacb918d7bf76feb7ce9a8f4ef15f198147fa663df62f39738eb881c9512 ] || exit 1
+    [ "$(sha256sum "$PROFILE_CHECK" | cut -d ' ' -f 1)" = c6531c46eb3809b340c91e400db1515fd85cc56faf5e9352408f03a1e4da4283 ] || exit 1
     python3 "$PROFILE_CHECK" 90 || { echo "$LOG_PREFIX verified Vulkan profile unavailable" >&2; exit 1; }
   elif [ "$SLL_TRIMUI_ACTIVE" != 1 ]; then
     echo "$LOG_PREFIX verified display handoff unavailable" >&2; exit 1
@@ -166,6 +166,8 @@ PYLANG
   case "$SLL_WESTON_COMPOSITION:$SLL_WESTON_COMPOSITION_AVAILABLE" in off:*|on:1) ;; *) exit 1 ;; esac
   case "${SLL_LANGUAGE:-}" in zh_CN) game_language=zhs ;; en_US) game_language=eng ;; *) exit 1 ;; esac
   case "${SLL_QUALITY:-}" in smooth|balanced|quality) ;; *) exit 1 ;; esac
+  case "${SLL_GPU_PARTICLES:-}" in on|off) ;; *) exit 1 ;; esac
+  case "${SLL_RENDER_SCALE:-}" in 100|75|50) ;; *) exit 1 ;; esac
   # Only merge the selected language into existing game settings. Save files
   # and all other settings remain under the existing shared game profile.
   for settings in "$PROFILE"/SlayTheSpire2/*/*/settings.save; do
@@ -174,7 +176,7 @@ PYLANG
       echo "$LOG_PREFIX failed to update language"; launcher_platform_finish; exit 1;
     }
   done
-  export SLL_GRAPHICS_API SLL_PERF_OVERLAY SLL_DIAGNOSTICS SLL_LANGUAGE SLL_QUALITY SLL_SWAP_AB SLL_SWAP_XY
+  export SLL_GRAPHICS_API SLL_PERF_OVERLAY SLL_DIAGNOSTICS SLL_LANGUAGE SLL_QUALITY SLL_GPU_PARTICLES SLL_RENDER_SCALE SLL_SWAP_AB SLL_SWAP_XY
   if [ "$PROFILE_KIND" = 91 ]; then export SLL_WESTON_COMPOSITION; else unset SLL_WESTON_COMPOSITION; fi
   export SLL_UI_CONTROL=0 SLL_UI_DIAG=0 SLL_TEXTURE_DIAG=0 SLL_ASSET_DIAG=0 SLL_INPUT_DIAG=0 SLL_MALLOC_DIAG=0
   export SLL_HEAP_TRIM=1 SLL_BUNDLED_THEME_FONT=0 SLL_SYSTEM_FONT_DIAG=0
@@ -184,7 +186,7 @@ PYLANG
   if [ "$model" = sun55iw3 ]; then
     game_backend="$GAMEDIR/bin/sts2_trimui_backend_v6.py"
     [ ! -L "$game_backend" ] && [ -f "$game_backend" ] || exit 1
-    [ "$(sha256sum "$game_backend" | cut -d ' ' -f 1)" = 771104742cc0a813bbc9589ce02c1ba976ed2673fbf317a304a2adda8a301e65 ] || exit 1
+    [ "$(sha256sum "$game_backend" | cut -d ' ' -f 1)" = 24475527a6abdc4f8988b1287c02642b405dce4033a562b7311a0fa6e954934a ] || exit 1
     python3 "$GAMEDIR/bin/sts2_bounded_log.py" "$SLL_DIAGNOSTICS" "$GAMEDIR/launcher-bounded.log" -- \
       python3 "$game_backend" "$SLL_GRAPHICS_API"
   else

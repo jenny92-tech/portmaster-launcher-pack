@@ -1,5 +1,5 @@
 # INPUT:  实际 RenderingServer 信息、兼容资源表及游戏侧桥接调用
-# OUTPUT: 材质替换、房间预热、特效接管和资源保护接口
+# OUTPUT: 根画面缩放、材质替换、房间预热、特效接管和资源保护接口
 # POS:    共用 Vulkan/OpenGL 适配入口，以事件驱动批处理材质和当前房间预热
 extends Node
 
@@ -10,6 +10,7 @@ const ShaderAdapter = preload("res://port_compat/shader_compat.gd")
 const CombatWarmup = preload("res://port_compat/combat_warmup.gd")
 const StartupEffectPreload = preload("res://port_compat/startup_effect_preload.gd")
 const PerformanceOverlay = preload("res://addons/portkit_performance/overlay.gd")
+const RenderScale = preload("res://port_compat/render_scale.gd")
 var _shader_adapter: RefCounted
 var _warmup: Node
 var _startup_effects: Node
@@ -28,6 +29,7 @@ static func build_policy(method: String, driver: String, adapter: String, platfo
 		"maleoon_gl_energy": platform == "Android" and method == "gl_compatibility" and driver.to_lower() in ["opengl3", "gles3"] and adapter.to_lower().contains("maleoon")}
 
 func _ready() -> void:
+	add_child(RenderScale.new())
 	BundledFontTrial.install()
 	PerformanceOverlay.install(get_tree())
 	var profile = JSON.parse_string(FileAccess.get_file_as_string("res://port_compat/render-compat.json"))

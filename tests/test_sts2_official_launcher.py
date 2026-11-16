@@ -16,6 +16,47 @@ spec=importlib.util.spec_from_file_location('sts2_trimui_backend',ROOT/'sts2_tri
 backend=importlib.util.module_from_spec(spec);spec.loader.exec_module(backend)
 
 class UnifiedLauncherTests(unittest.TestCase):
+ def test_launcher_particle_choice_is_validated_before_handoff(self):
+  source=(ROOT.parents[2]/'love/launcher.sh.template').read_text()
+  start=source.index('  case "${SLL_GPU_PARTICLES:-}" in')
+  case=source[start:source.index('\n',start)]
+  for value in ('on','off','invalid',''):
+   result=subprocess.run(['bash','-c','SLL_GPU_PARTICLES="$1"\n'+case,'test',value],capture_output=True)
+   self.assertEqual(result.returncode==0,value in ('on','off'))
+  export=next(line for line in source.splitlines() if line.startswith('  export SLL_GRAPHICS_API '))
+  self.assertIn('SLL_GPU_PARTICLES',export.split())
+ def test_launcher_render_scale_is_validated_before_handoff(self):
+  source=(ROOT.parents[2]/'love/launcher.sh.template').read_text()
+  start=source.index('  case "${SLL_RENDER_SCALE:-}" in')
+  case=source[start:source.index('\n',start)]
+  for value in ('100','75','50','0','auto','75;exit 0',''):
+   result=subprocess.run(['bash','-c','SLL_RENDER_SCALE="$1"\n'+case,'test',value],capture_output=True)
+   self.assertEqual(result.returncode==0,value in ('100','75','50'))
+  export=next(line for line in source.splitlines() if line.startswith('  export SLL_GRAPHICS_API '))
+  self.assertIn('SLL_RENDER_SCALE',export.split())
+ def test_miniloong_handoff_keeps_particle_choice(self):
+  source=(ROOT.parents[2]/'love/vulkan-trial.sh.template').read_text()
+  start=source.index('  if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then\n    export SLL_LANGUAGE=')
+  end=source.index('  export SLL_FIRST_CARD_TRACE=',start)
+  script=source[start:end]+'\nprintf "%s" "$SLL_GPU_PARTICLES"\n'
+  for value in ('on','off','invalid'):
+   env=dict(os.environ,SLL_LAUNCHER_HANDOFF='1',SLL_GPU_PARTICLES=value)
+   result=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True)
+   self.assertEqual(result.returncode==0,value in ('on','off'))
+   if result.returncode==0:self.assertEqual(result.stdout,value)
+  env=dict(os.environ,SLL_LAUNCHER_HANDOFF='1');env.pop('SLL_GPU_PARTICLES',None)
+  result=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,check=True)
+  self.assertEqual(result.stdout,'on')
+ def test_miniloong_handoff_keeps_render_scale(self):
+  source=(ROOT.parents[2]/'love/vulkan-trial.sh.template').read_text()
+  start=source.index('  if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then\n    export SLL_LANGUAGE=')
+  end=source.index('  export SLL_FIRST_CARD_TRACE=',start)
+  script=source[start:end]+'\nprintf "%s" "$SLL_RENDER_SCALE"\n'
+  for value in ('100','75','50','invalid'):
+   env=dict(os.environ,SLL_LAUNCHER_HANDOFF='1',SLL_GPU_PARTICLES='off',SLL_RENDER_SCALE=value)
+   result=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True)
+   self.assertEqual(result.returncode==0,value in ('100','75','50'))
+   if result.returncode==0:self.assertEqual(result.stdout,value)
  def test_invalid_backend_rejected_without_reading_release_files(self):
   with mock.patch.object(sys,'argv',['backend','invalid']),mock.patch.object(backend,'check',side_effect=AssertionError('release files read')):
    with self.assertRaisesRegex(ValueError,'invalid graphics selection'):backend.main()

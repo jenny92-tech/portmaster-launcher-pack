@@ -424,10 +424,14 @@ VERIFY_RELEASE_PACK
   export PORTKIT_GODOT_WSI=1 DISABLE_WSI_LAYER=1
   if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then
     export SLL_LANGUAGE="${SLL_LANGUAGE:-zh_CN}" SLL_QUALITY="${SLL_QUALITY:-smooth}"
+    export SLL_GPU_PARTICLES="${SLL_GPU_PARTICLES:-on}"
+    export SLL_RENDER_SCALE="${SLL_RENDER_SCALE:-100}"
   else
-    export SLL_LANGUAGE=zh_CN SLL_QUALITY=smooth
+    export SLL_LANGUAGE=zh_CN SLL_QUALITY=smooth SLL_GPU_PARTICLES=on SLL_RENDER_SCALE=100
   fi
-  export SLL_GPU_PARTICLES=on SLL_FIRST_CARD_TRACE=1 SLL_MEMORY_MODE=low
+  case "$SLL_GPU_PARTICLES" in on|off) ;; *) exit 1 ;; esac
+  case "$SLL_RENDER_SCALE" in 100|75|50) ;; *) exit 1 ;; esac
+  export SLL_FIRST_CARD_TRACE=1 SLL_MEMORY_MODE=low
   if [ -n "$PRIVATE_ENGINE" ]; then export SLL_FIRST_CARD_TRACE=0; fi
   if [ "${SLL_LAUNCHER_HANDOFF:-0}" = 1 ]; then
     export SLL_FIRST_CARD_TRACE=0

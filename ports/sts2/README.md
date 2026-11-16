@@ -36,6 +36,19 @@ content according to the target profile.
 
 ## Settings
 
+- **Render Scale** offers native (100%), 75% and 50% on the main page.
+  It scales both axes of the root rendering target while keeping the display
+  resolution, game layout and input coordinates. At 1280×720, the reduced
+  targets are 960×540 and 640×360. Text is also scaled with the root image;
+  independent SubViewports retain their existing resolution.
+- **Effects Level** combines the particle and effects policies in one main-page
+  choice: Reduced, Balanced or Full. Saved preferences take priority; the current
+  device entry selects Reduced for first use. Reduced suppresses GPU particle
+  emitters, including game-side restarts, and simplifies other effects and menu
+  animation; CPU particles retain the low budget. Balanced and Full keep GPU
+  particles with their respective particle budgets. Device memory safeguards
+  still apply. Effects level does not change render scale; both settings apply
+  to GLES and Vulkan on the next start.
 - **Force Composition** is an on/off switch for TrimUI Vulkan, defaulting to on.
   On requests Weston composition with `RUDROID_WAYLAND_FORCE_RENDERER=1`;
   off removes that request. It is disabled for GLES and MiniLoong's current route.

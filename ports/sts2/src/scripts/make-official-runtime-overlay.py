@@ -280,6 +280,7 @@ NATIVE_RESOURCES = {
     "res://port_compat/bundled_font_trial.gd",
     "res://port_compat/combat_warmup.gd",
     "res://port_compat/render_compat.gd",
+    "res://port_compat/render_scale.gd",
     "res://port_compat/simple_effect.gd",
     "res://port_compat/startup_effect_preload.gd",
     "res://port_compat/render_compat.tscn",

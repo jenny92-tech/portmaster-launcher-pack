@@ -6,14 +6,14 @@ import ctypes,hashlib,json,os,pathlib,select,shutil,signal,subprocess,sys,tempfi
 B=pathlib.Path('/mnt/SDCARD/Data/ports/sts2-v110')
 S=B/'vulkan-support'
 P=pathlib.Path('/mnt/UDISK/sts2-vulkan-game-profile-20261030')
-MANIFEST='b1fa62e9518a807e3085a3c48b2f78ecce9e8f889459ca6e91c6c82c9b6025fa'
+MANIFEST='18ba499b8e1953aa5d645890813e2a5b71e04344af4101104d3906ec79446f73'
 ENGINE='bf9e9620201f030e587c6006f0d9d488c91312e43dddebdc96b20f0dbe07935d'
 REQUIRED={
  B/'.install-manifest.json':MANIFEST,
  B/'data_sts2_linuxbsd_arm64/sts2.dll':'543110f1286d71b7391c4a5fcc1df75212fcc3b74c763a09f4413e57acfc0b67',
  B/'data_sts2_linuxbsd_arm64/sts2_compat.dll':'df88e6ae4bbb546786f078f9d3368eb064539a7ae7893f89b6a69f4aa75f9d21',
  B/'data_sts2_linuxbsd_arm64/GodotSharp.dll':'f25b38747f64bc2fef5b5cd9097851dbc1fefb910dc0110bc61da7b37fa07594',
- B/'port_compat.pck':'ced8446fe95c212b26181fc61f27ebe2f6b4f2e8066968a72df03ed68beab3bc'}
+ B/'port_compat.pck':'6cd99a62b47bbcd1072bc4e3a732462e862d8b3a19f0c6fd8ee4df18e892604a'}
 GLES={
  B/'godot.mono':'d916065a05ef24aedcd66af08862638577fda54d172c89df1e83183e11304645',
  B/'gamedata/libs/libSDL2-2.0.so.0':'dc5e0118948e2a9e38978bb469c9db98f8083c21c928c56ab204bfd59b219166'}
@@ -165,7 +165,7 @@ def main():
  mode=sys.argv[1]
  check(REQUIRED)
  manifest=json.loads((B/'.install-manifest.json').read_text());main_pack=B/'SlayTheSpire2.pck'
- if main_pack.is_symlink() or not main_pack.is_file() or main_pack.stat().st_size!=727335372 or manifest['files']['SlayTheSpire2.pck']['sha256']!='9caf3fa8448a7729dc11fa4897b9756e30fcdeadb56acbdb1cba9acc3e7b6fad':raise ValueError('main pack not the installed release')
+ if main_pack.is_symlink() or not main_pack.is_file() or main_pack.stat().st_size!=728966504 or manifest['files']['SlayTheSpire2.pck']['sha256']!='04f6aa3ebc8689f9570db463d7491f018e6f7da732653bacf5c338c3b18e6467':raise ValueError('main pack not the installed release')
  if any(p.is_symlink() or not p.is_dir() for p in (P,P/'data',P/'data/SlayTheSpire2')):raise ValueError('shared game profile missing')
  for p in (P/'config',P/'cache'):
   p.mkdir(mode=0o700,exist_ok=True)

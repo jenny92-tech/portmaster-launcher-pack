@@ -9,6 +9,7 @@
 - 场景退出、预热失败和超时必须解除遮罩并释放自有节点；共享资源只解除引用，不显式 free。
 - 预热特效由桥交给当前房间的 CombatVfxContainer；容器无效时回收未挂载特效。
 - GPU 专项规则检查实际 rendering method、driver、adapter 和 OS，不能用型号或请求参数猜测。
+- 渲染比例仅改变根视口在 RenderingServer 中的目标与最终画布变换；保留 Window 的显示尺寸、逻辑区域、伸缩和输入映射。绘制前重新应用以兼容相机/窗口更新，退出时恢复；不改独立 SubViewport 的预算。
 
 ## 业务域清单
 
@@ -16,6 +17,7 @@
 |------|------------|------|
 | 启动场景 | `render_compat.tscn` | 供托管桥挂载的 Node 场景 |
 | 协调入口 | `render_compat.gd` | 实际后端策略、共享浮层及缓存协调 |
+| 渲染比例 | `render_scale.gd` | 按 100%/75%/50% 缩小根画面，保持显示、布局与输入坐标 |
 | 中文默认字体试验 | `bundled_font_trial.gd` | 显式开关下替换内置默认字体及其变体，保持游戏自定义主题覆盖 |
 | 启动特效预载 | `startup_effect_preload.gd` | 清单内 PackedScene 的离屏预载与有界终态，不实例化游戏根节点 |
 | 材质适配 | `shader_compat.gd` | 精确识别、实例材质副本与流畅档粒子规则 |

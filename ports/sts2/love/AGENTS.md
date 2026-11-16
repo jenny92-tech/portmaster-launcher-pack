@@ -4,7 +4,9 @@
 
 ## 约束
 
-- 常用页保留语言和画质预设；图形后端、A/B 与 X/Y 交换、显示合成、性能信息和诊断日志开关放高级页。
+- 常用页保留语言、特效等级和 100%/75%/50% 渲染比例；图形后端、A/B 与 X/Y 交换、显示合成、性能信息和诊断日志开关放高级页。
+- 渲染比例交接 `SLL_RENDER_SCALE=100|75|50`，默认 100；游戏侧缩小根画面目标，屏幕输出尺寸、布局与输入坐标不变。不能用窗口尺寸或仅影响 3D 的缩放冒充 2D 游戏渲染比例。
+- 特效等级统一管理粒子与其他特效，沿用 `quality=smooth|balanced|quality` 保存和 `SLL_QUALITY` 交接；精简派生 `SLL_GPU_PARTICLES=off`，均衡/完整派生 `on`。精简还沿用低粒子预算、菜单及复杂特效简化，CPU 粒子并非全关。没有独立粒子选项，旧 `gpu_particles` 偏好不能覆盖等级；MiniLoong 交接须保留派生值。
 - 首次打开时 `SLL_INITIAL_LANGUAGE` 仅接受 `zh_CN`、`en_US`，`SLL_INITIAL_QUALITY` 仅接受 `smooth`、`balanced`、`quality`；无效或缺失时使用原默认，有已保存设置时以已保存值为准。
 - Shell 以 `SLL_GLES_AVAILABLE=1`、`SLL_VULKAN_AVAILABLE=1` 标明可用能力，并可用 `SLL_GRAPHICS_PREFERRED` 指定 `gles` 或 `vulkan`。默认 `auto` 优先选可用的推荐后端，否则优先 GLES，再选 Vulkan；保存 `auto` 而向 Shell 输出实际后端。手选不可用后端保留偏好但禁止启动。
 - 强制合成只提供开/关，默认开；仅在实际解析为 Vulkan 且 Shell 提供 `SLL_WESTON_COMPOSITION_AVAILABLE=1` 时可调，不支持时灰显并输出 `off`，保留已保存的开关偏好。字段仅接受 `on`、`off`，其他值按共享校验采用默认 `on`；图形后端的自动选项与此独立。
@@ -16,7 +18,7 @@
 
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
-| main.lua | `main.lua` | 能力交集、语言/画质初值与启动环境输出 |
+| main.lua | `main.lua` | 能力交集、语言/特效初值与启动环境输出 |
 | 界面契约测试 | `test_main.py` | 已存偏好、后端不可用拒绝和环境交接契约 |
 | launcher.sh.template | `launcher.sh.template` | 正式 GLES/Vulkan 路由与启动校验 |
 | Vulkan 手动测试 | `vulkan-trial.sh.template` | 隔离档案的 Mono Vulkan 与纹理包试验 |

@@ -58,13 +58,16 @@ def portable_sts2(data, source):
     source = replace_once(source, '  [ -d "$GAMEDIR" ] && [ ! -L "$GAMEDIR" ] && [ -d "$PROFILE/SlayTheSpire2" ] || exit 1',
                           '  mkdir -p "$PROFILE/SlayTheSpire2" || exit 1\n  [ -d "$GAMEDIR" ] && [ ! -L "$GAMEDIR" ] && [ -d "$PROFILE/SlayTheSpire2" ] || exit 1')
     helper = data / 'launcher-runtime/bin/sts2_official_profile_v2.py'
+    # Profile pins change with verified device builds; rebind the exported
+    # caller to the exact helper it supplied before making paths portable.
+    previous_profile_sha = sha256(helper)
     text = helper.read_text()
     text = replace_once(text, "pathlib.Path('/roms/ports/sts2-vk-test')",
                         "pathlib.Path(os.environ['JE_GAME_DIR'])/'launcher-runtime'")
     text = replace_once(text, "pathlib.Path('/roms/ports/PortMaster/libs/godot_4.5.mono.squashfs')",
                         "base/'runtime/godot_4.5.mono.squashfs'")
     helper.write_text(text)
-    source = replace_once(source, '6afcaacb918d7bf76feb7ce9a8f4ef15f198147fa663df62f39738eb881c9512', sha256(helper))
+    source = replace_once(source, previous_profile_sha, sha256(helper))
     runner = data / 'launcher-runtime/handoff.sh'
     text = runner.read_text()
     text = replace_once(text, 'ORIGINAL="$SCRIPT_DIR/sts2"', 'ORIGINAL="$JE_GAME_DIR"')

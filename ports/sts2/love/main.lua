@@ -1,6 +1,6 @@
 -- INPUT:  launcher 共享 UI 模块与 Shell 提供的图形后端能力
 -- OUTPUT: launcher.define 注册的 STS2 设置页和 SLL_* 环境交接
--- POS:    STS2 的图形、语言、画质与高级设置声明
+-- POS:    STS2 的图形、语言、特效等级与高级设置声明
 local launcher = require("launcher")
 
 local initial_language = os.getenv("SLL_INITIAL_LANGUAGE")
@@ -27,7 +27,7 @@ function graphics.resolve(state)
         elseif available.vulkan then api = "vulkan" end
     end
     local usable = available[api] == true
-    return {api = api, available = usable, controls = {}, features = {
+    return {api = api, available = usable, render_scale = state.render_scale or "100", controls = {}, features = {
         button_remap = false,
         weston_composition = usable and api == "vulkan" and os.getenv("SLL_WESTON_COMPOSITION_AVAILABLE") == "1",
     }}
@@ -52,10 +52,19 @@ local port = launcher.define {
             options = {{"en_US", {en = "English", zh = "英文"}}, {"zh_CN", {en = "Chinese", zh = "中文"}}},
         },
         launcher.select {
-            key = "quality", label = {en = "Quality:", zh = "画质:"}, default = initial_quality, env = "SLL_QUALITY",
+            key = "quality", label = {en = "Effects Level:", zh = "特效等级:"}, default = initial_quality, env = "SLL_QUALITY",
             options = {
-                {"smooth", {en = "Smooth", zh = "流畅"}}, {"balanced", {en = "Balanced", zh = "均衡"}},
-                {"quality", {en = "Fidelity", zh = "画质"}},
+                {"smooth", {en = "Reduced", zh = "精简"}}, {"balanced", {en = "Balanced", zh = "均衡"}},
+                {"quality", {en = "Full", zh = "完整"}},
+            },
+        },
+        launcher.render_scale {
+            label = {en = "Render Scale:", zh = "渲染比例:"},
+            default = "100", env = "SLL_RENDER_SCALE",
+            options = {
+                {"100", {en = "Native (100%)", zh = "原生 (100%)"}},
+                {"75", "75%"},
+                {"50", "50%"},
             },
         },
         launcher.select {
@@ -85,10 +94,16 @@ local port = launcher.define {
         launcher.toggle {key = "diagnostics", label = {en = "Diagnostic Log:", zh = "诊断日志:"}, env = "SLL_DIAGNOSTICS"},
     },
     pages = {
-        {title = "title", rows = {"language", "quality", launcher.button("advanced", "page:2")}},
+        {title = "title", rows = {"language", "quality", "render_scale", launcher.button("advanced", "page:2")}},
         {title = "advanced_title", fields = {"graphics_api", "swap_ab", "swap_xy", "weston_composition", "perf_overlay", "diagnostics"}, actions = {"start", "back"}},
     },
     static_env = {{"SLL_PCK_VARIANT", "8x8"}},
+    write_env = function(out, state)
+        -- One effects preset owns both runtime policies; an old independent
+        -- particle preference must not override the selected effects level.
+        local particles = state.quality == "smooth" and "off" or "on"
+        assert(out:write("SLL_GPU_PARTICLES='" .. particles .. "'\n"))
+    end,
     legacy = {
         path = "../conf/godot/app_userdata/STS2 Linux Launcher/launch_config.env",
         state_path = "../conf/godot/app_userdata/STS2 Linux Launcher/linux_launcher_state.json",

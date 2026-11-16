@@ -15,6 +15,19 @@ SCRIPTS = ROOT / 'ports/sts2/src/rendering'
 
 
 class NativeRenderTest(unittest.TestCase):
+    def test_render_scale_keeps_window_layout_and_input_transforms(self):
+        godot = external_file(self, 'STS2_TEST_GODOT')
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / 'project.godot').write_text('[application]\nconfig/name="Render scale fixture"\n')
+            shutil.copy(SCRIPTS / 'render_scale.gd', project / 'render_scale.gd')
+            shutil.copy(ROOT / 'tests/sts2_render_scale_fixture.gd', project / 'driver.gd')
+            run = subprocess.run([str(godot), '--headless', '--path', str(project), '--script', 'res://driver.gd'],
+                                 capture_output=True, text=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn('STS2_RENDER_SCALE_OK', run.stdout)
+            self.assertNotIn('SCRIPT ERROR', run.stdout + run.stderr)
+
     def test_native_scripts(self):
         godot = external_file(self, 'STS2_TEST_GODOT')
         with tempfile.TemporaryDirectory() as tmp:
@@ -22,7 +35,7 @@ class NativeRenderTest(unittest.TestCase):
             (project / 'project.godot').write_text('[application]\nconfig/name="Native fixture"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n')
             compat = project / 'port_compat'
             compat.mkdir()
-            for name in ('render_compat.gd', 'shader_compat.gd', 'combat_warmup.gd', 'simple_effect.gd', 'startup_effect_preload.gd'):
+            for name in ('render_compat.gd', 'render_scale.gd', 'bundled_font_trial.gd', 'shader_compat.gd', 'combat_warmup.gd', 'simple_effect.gd', 'startup_effect_preload.gd'):
                 shutil.copy(SCRIPTS / name, compat / name)
             shutil.copytree(ROOT / '_kit/godot/addons/portkit_performance', project / 'addons/portkit_performance')
             (compat / 'render-compat.json').write_text('{}')
