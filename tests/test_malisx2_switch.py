@@ -84,6 +84,7 @@ launcher_platform_exec() { exec "$@"; }
 '''
         env = {k: v for k, v in os.environ.items() if k!='LAUNCHER_MALISX2_DIR'
                and not k.startswith(('PORTKIT_', 'UNITY_', 'VK_', 'RUDROID_'))}
+        env['PORTKIT_LAUNCHER_BIN_OVERRIDE']=str(ROOT/'target/debug/portkit-launcher')
         env.update(PATH=str(self.bin) + os.pathsep + env['PATH'], **values)
         return subprocess.run(['bash', '-c', setup + body, 'test', str(ROOT), str(self.runtime), *args],
                               env=env, capture_output=True, text=True, timeout=15)
@@ -170,6 +171,7 @@ printf '%s' "$LAUNCHER_COMPAT_ICD_FILE"
 
     def test_saved_candidate_resolves_to_vulkan_with_its_own_driver(self):
         result = self.shell('''UNITY_GRAPHICS_PROBED_RUNTIME="$1"
+UNITY_GRAPHICS_PROBED_ACCEPTED=1
 PORTKIT_GRAPHICS_FEATURES=sdl2,gles,vulkan,vulkan-linear
 PORTKIT_VULKAN_AVAILABLE=0; PORTKIT_MALISX2_AVAILABLE=1; PORTKIT_VULKAN_PLATFORM_SUPPORTED=1
 resolve_unity_graphics_api malisx2 gles32 1

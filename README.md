@@ -14,6 +14,7 @@ App Manager 使用独立的 Rust/LOVE-lite 程序，可在 PortMaster 缺失时�
 | [hk](ports/hk) | 空洞骑士，Rudroid/Unity |
 | [silksong](ports/silksong) | 空洞骑士：丝之歌，Rudroid/Unity 6 |
 | [heishenhua](ports/heishenhua) | 像素黑神话，Rudroid/Unity |
+| [soulknight_ns](ports/soulknight_ns) | 元气骑士 NS 1.2.0，统一入口、能力预检与屏幕比例；本地新增双后端/百分比设置，包与验收范围见端口说明 |
 | [terraria](ports/terraria) | 泰拉瑞亚，玩家 APK 资源准备与 Rudroid 启动 |
 | [vampiresurvivors114](ports/vampiresurvivors114) | 吸血鬼幸存者 1.14.111，Unity 6/PAD |
 | [sts2](ports/sts2) | 杀戮尖塔 2，C# Godot/SDL2 |

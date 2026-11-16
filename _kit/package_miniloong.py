@@ -88,24 +88,21 @@ def portable_sts2(data, source):
     return source
 
 
-def add_exec_view(source, folder, unity):
+def add_package_entry(source, folder, unity):
     source = unstamp(source)
     source = ''.join(line for line in source.splitlines(keepends=True)
                      if line.strip() != '#@BUILD-LOG')
     source = source.split('\n', 1)[1]
     prefix = '''#!/bin/bash
-# INPUT: 同目录游戏包与私有执行视图，不修改全局挂载或存档路径
+# INPUT: 同目录游戏包与固件正式启动环境
 # OUTPUT: 原设备启动流程和原退出状态
-# POS: 迷你龙发行包入口；内部安装与资源保持相对布局
+# POS: 发行包路径交接；远程调试执行视图由开发者显式准备
 if [ -z "${BASH_VERSION:-}" ] || [ "${BASH##*/}" = sh ]; then
     exec /bin/bash "$0" "$@"
 fi
 JE_PACKAGE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
 export JE_GAME_DIR="$JE_PACKAGE_DIR/FOLDER"
-if [ "${JE_EXEC_READY:-}" != "$JE_GAME_DIR" ]; then
-    export JE_EXEC_READY="$JE_GAME_DIR"
-    exec python3 "$JE_GAME_DIR/bin/package-exec-view.py" --quiet --root "$JE_GAME_DIR" -- /bin/bash "$0" "$@"
-fi
+export PORTKIT_LAUNCHER_BIN_OVERRIDE="$JE_GAME_DIR/bin/portkit-launcher"
 '''.replace('FOLDER', folder)
     if unity:
         prefix += 'export UNITY_RUNTIME_DIR="$JE_GAME_DIR/runtime"\n'
@@ -185,8 +182,8 @@ def build(prepared, key, output, rudroid_scripts):
         instructions = '解压到迷你龙 Ports 目录，保持 Je- 启动 SH 与游戏目录同级，并安装 PortMaster。此包不含玩家存档、缓存和个人设置。\n'
     (data / '安装说明.txt').write_text(instructions)
     (data / 'bin').mkdir(exist_ok=True)
-    shutil.copyfile(ROOT / '_kit/launch_exec_view.py', data / 'bin/package-exec-view.py')
-    (stage / entry).write_text(add_exec_view(source, folder, unity))
+    subprocess.run(['bash', str(ROOT / '_kit/stage_portkit_launcher.sh'), str(data)], check=True)
+    (stage / entry).write_text(add_package_entry(source, folder, unity))
     (stage / entry).chmod(0o755)
     manifest = json.loads((port / 'manifest.json').read_text())
     manifest.update(script=entry, port_dir=folder, portable_dir=folder)

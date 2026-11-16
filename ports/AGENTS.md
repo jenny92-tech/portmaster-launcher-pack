@@ -20,6 +20,7 @@
 | 像素黑神话 | `heishenhua/` | Unity IL2CPP 图形、输入和游戏辅助设置 |
 | 空洞骑士 | `hk/` | Unity 设置与视频引导/PlayerPrefs 适配 |
 | Screen Recorder | `recorder/` | 独立后台采帧控制和停止后视频合成应用 |
+| 元气骑士 NS | `soulknight_ns/` | Switch 1.2.0、Unity 2018.4 IL2CPP 原生适配；独立入口与存档，设备范围见端口 README |
 | Slay the Spire 2 | `sts2/` | 托管兼容层、PCK 构建与双后端启动 |
 | 空洞骑士：丝之歌 | `silksong/` | Unity 6/Rudroid 显示/内存设置、实测效果策略与游戏配置适配 |
 | 龙沉异世录 | `sunkendragon/` | 实验性 Unity 移植、玩家资源准备与基线包流程 |

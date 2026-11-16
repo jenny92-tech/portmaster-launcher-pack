@@ -1,7 +1,7 @@
 #!/bin/bash
 # INPUT:  launcher_platform.sh、端口/固件身份、真实显示 socket 与选定运行目录的私有库
-# OUTPUT: launcher_compat_plan()、launcher_compat_exec()、launcher_compat_describe() 的启动适配计划
-# POS:    集中匹配已支持的引擎/设备组合，仅在目标子进程应用所选补丁
+# OUTPUT: launcher_compat_probe()、launcher_compat_plan()、launcher_compat_exec()、launcher_compat_describe()
+# POS:    共享呈现路径选择与独立驱动计划，仅在目标子进程应用所选补丁
 # SPDX-License-Identifier: CC-BY-NC-SA-4.0
 # Copyright (c) 2025-2026 jenny92-tech
 
@@ -12,13 +12,13 @@ launcher_compat_accepts() {
   case "$1:$2" in
     unity-rudroid:gles|godot-sdl2:gles) return 0 ;;
     unity-rudroid:vulkan)
-      case "${PORT_NAME:-}:${CFW_NAME:-}" in
-        silksong:TrimUI|vampiresurvivors114:TrimUI)
-          launcher_platform_matches_compatible allwinner,a523 ;;
-        silksong:Loong|vampiresurvivors114:Loong)
-          launcher_platform_matches_compatible rockchip,rk3566-rk817-tablet ;;
+      # Title opt-in is separate from hardware capability. An unfamiliar board
+      # with a working existing display may run the same native preflight.
+      case "${PORT_NAME:-}" in
+        silksong|vampiresurvivors114) return 0 ;;
         *) return 1 ;;
       esac ;;
+    ns-vulkan:vulkan|ns-gles:gles) return 0 ;;
     unity-rudroid:malisx2)
       case "${PORT_NAME:-}:${CFW_NAME:-}" in
         silksong:Loong|vampiresurvivors114:Loong)
@@ -32,61 +32,9 @@ launcher_compat_accepts() {
 # Check the optional Linux build without loading it. Android release packs use
 # Bionic and cannot serve as a Linux ICD, even though both are AArch64 ELF.
 launcher_compat_malisx2() {
-  command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$1" <<'PY'
-import hashlib,json,struct,sys
-from pathlib import Path
-try:
-    root=Path(sys.argv[1])
-    if not root.is_absolute() or ':' in str(root) or '\n' in str(root):
-        raise ValueError('driver directory must be an absolute single-ICD path')
-    if root.is_symlink() or not root.is_dir(): raise ValueError('driver directory must be local')
-    for name in ('mali_icd.json','sources.json','libvulkan_malisx2.so'):
-        p=root/name
-        if p.is_symlink() or not p.is_file(): raise ValueError('missing regular Linux driver file')
-    source=json.loads((root/'sources.json').read_text())
-    if (source.get('platform'),source.get('profile'),source.get('source_revision')) != (
-        'linux-aarch64','Release','d0422ed5eb5d8971f118f14d2550ce04aa1a0a5a'):
-        raise ValueError('driver source/platform/Release identity mismatch')
-    manifest=json.loads((root/'mali_icd.json').read_text())
-    if manifest.get('ICD',{}).get('library_path')!='./libvulkan_malisx2.so':
-        raise ValueError('driver manifest must select its local library')
-    data=(root/'libvulkan_malisx2.so').read_bytes()
-    if len(data)<64 or data[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<HH',data,16)!=(3,183):
-        raise ValueError('driver requires an AArch64 Linux shared library')
-    phoff=struct.unpack_from('<Q',data,32)[0]
-    ehsize,phsize,phnum=struct.unpack_from('<HHH',data,52)
-    if ehsize!=64 or phsize!=56 or not 1<=phnum<=256 or phoff+phnum*56>len(data):
-        raise ValueError('incomplete driver ELF headers')
-    programs=[struct.unpack_from('<IIQQQQQQ',data,phoff+i*56) for i in range(phnum)]
-    if any(p[2]+p[5]>len(data) or p[5]>p[6] for p in programs):
-        raise ValueError('truncated driver ELF segment')
-    if not any(p[0]==1 and p[1]&1 and p[5] for p in programs):
-        raise ValueError('driver has no executable load segment')
-    dynamic=[p for p in programs if p[0]==2]
-    if len(dynamic)!=1 or dynamic[0][5]%16: raise ValueError('invalid driver dynamic table')
-    entries=[]
-    for off in range(dynamic[0][2],dynamic[0][2]+dynamic[0][5],16):
-        key,value=struct.unpack_from('<QQ',data,off)
-        if key==0: break
-        entries.append((key,value))
-    else: raise ValueError('unterminated driver dynamic table')
-    tags=dict(entries);address=tags.get(5,0);size=tags.get(10,0)
-    loads=[p for p in programs if p[0]==1 and p[3]<=address and address+size<=p[3]+p[5]]
-    if not size or len(loads)!=1: raise ValueError('invalid driver dynamic strings')
-    start=loads[0][2]+address-loads[0][3];strings=data[start:start+size];needed=[]
-    for key,value in entries:
-        if key!=1: continue
-        end=strings.find(b'\0',value)
-        if value>=len(strings) or end<0: raise ValueError('invalid driver import name')
-        needed.append(strings[value:end])
-    if b'libc.so.6' not in needed or any(n in needed for n in (b'liblog.so',b'libc.so')):
-        raise ValueError('Android/Bionic driver is not a Linux build')
-    if hashlib.sha256(data).hexdigest()!=source.get('library_sha256'):
-        raise ValueError('driver checksum mismatch')
-except (OSError,ValueError,KeyError,TypeError,AttributeError,struct.error) as error:
-    print('malisx2: '+str(error),file=sys.stderr);sys.exit(1)
-PY
+  local helper="${2:-${PORTKIT_LAUNCHER_BIN_OVERRIDE:-${GAMEDIR:-}/bin/portkit-launcher}}"
+  [ -x "$helper" ] || return 1
+  "$helper" driver-check --directory "$1" --source-revision d0422ed5eb5d8971f118f14d2550ce04aa1a0a5a
 }
 
 launcher_compat_fail() {
@@ -175,7 +123,7 @@ launcher_compat_godot_sdl() {
   fi
 }
 
-# Interface: STACK BACKEND RUNTIME_DIR [BUNDLED_SDL_DIR]. All outputs are owned
+# Interface: STACK BACKEND RUNTIME_DIR [BUNDLED_SDL_DIR] [PRESENTATION]. All outputs are owned
 # LAUNCHER_COMPAT_* values. A failed/new selection invalidates the old plan.
 # Keep concrete rules here; ports never assemble generic shell command strings.
 launcher_compat_plan() {
@@ -191,6 +139,7 @@ launcher_compat_plan() {
   LAUNCHER_COMPAT_SDL_DRIVER=""
   LAUNCHER_COMPAT_SOCKET=""
   LAUNCHER_COMPAT_ALSA=0
+  LAUNCHER_COMPAT_PRESENTATION="${5:-wsi}"
   local runtime="$3" bundled="${4:-}"
   case "$runtime" in /*) ;; *) launcher_compat_fail 'runtime directory must be absolute'; return 1 ;; esac
   case "$runtime:$bundled" in
@@ -207,26 +156,51 @@ launcher_compat_plan() {
     return 1
   }
   case "$1:$2" in
+    ns-gles:gles)
+      [ "$LAUNCHER_COMPAT_PRESENTATION" = native ] || { launcher_compat_fail 'GLES requires its native display route'; return 1; }
+      if launcher_compat_wayland_socket; then LAUNCHER_COMPAT_SDL_DRIVER=wayland
+      elif [ -n "${DISPLAY:-}" ]; then LAUNCHER_COMPAT_SDL_DRIVER=x11
+      else
+        # Ownership/recovery is the prerequisite. The actual GLES probe, not
+        # strings in one guessed SDL library, proves the selected driver works.
+        if launcher_platform_can_acquire_display; then
+          LAUNCHER_COMPAT_SDL_DRIVER=kmsdrm
+        else launcher_compat_fail 'no validated native GLES display ownership path'; return 1
+        fi
+      fi
+      LAUNCHER_COMPAT_PROFILE=ns-native-gles ;;
     unity-rudroid:gles) LAUNCHER_COMPAT_PROFILE=unity-system-gles ;;
-    unity-rudroid:vulkan|unity-rudroid:malisx2)
-      LAUNCHER_COMPAT_PROFILE="unity-${CFW_NAME}-$2"
-      LAUNCHER_COMPAT_WSI_DIR="$runtime/vulkan-wsi"
+    unity-rudroid:vulkan|unity-rudroid:malisx2|ns-vulkan:vulkan)
+      case "$LAUNCHER_COMPAT_PRESENTATION" in native|wsi|portable) ;; *) launcher_compat_fail 'invalid presentation route'; return 1 ;; esac
+      LAUNCHER_COMPAT_PROFILE="$1-${CFW_NAME:-generic}-$2-$LAUNCHER_COMPAT_PRESENTATION"
       local file
-      for file in libVkLayer_window_system_integration.so VkLayer_window_system_integration.json; do
-        [ -s "$LAUNCHER_COMPAT_WSI_DIR/$file" ] || {
-          launcher_compat_fail "missing private WSI file: $file"
-          return 1
-        }
-      done
-      LAUNCHER_COMPAT_PATCHES=private-wayland-wsi
+      if [ "$LAUNCHER_COMPAT_PRESENTATION" != native ]; then
+        LAUNCHER_COMPAT_WSI_DIR="$runtime/vulkan-wsi"
+        for file in libVkLayer_window_system_integration.so VkLayer_window_system_integration.json; do
+          [ -s "$LAUNCHER_COMPAT_WSI_DIR/$file" ] || {
+            launcher_compat_fail "missing private WSI file: $file"
+            return 1
+          }
+        done
+        LAUNCHER_COMPAT_PATCHES=private-wayland-wsi
+      fi
+      if [ "$LAUNCHER_COMPAT_PRESENTATION" = native ]; then
+        if launcher_compat_wayland_socket; then LAUNCHER_COMPAT_SDL_DRIVER=wayland
+        elif [ -n "${DISPLAY:-}" ]; then LAUNCHER_COMPAT_SDL_DRIVER=x11
+        else launcher_compat_fail 'native presentation has no existing display'; return 1
+        fi
+      else
+        LAUNCHER_COMPAT_SDL_DRIVER=wayland
+        if [ "$LAUNCHER_COMPAT_PRESENTATION" = wsi ]; then launcher_compat_wayland_socket || true; fi
+      fi
       if [ "$2" = malisx2 ]; then
         local driver="${LAUNCHER_MALISX2_DIR:-$runtime/vulkan-malisx2}"
-        launcher_compat_malisx2 "$driver" || {
+        launcher_compat_malisx2 "$driver" "${PORTKIT_LAUNCHER_BIN_OVERRIDE:-$runtime/bin/portkit-launcher}" || {
           launcher_compat_fail 'missing or invalid malisx2 Linux driver'
           return 1
         }
         LAUNCHER_COMPAT_ICD_FILE="$driver/mali_icd.json"
-        LAUNCHER_COMPAT_PATCHES=private-wayland-wsi,malisx2
+        LAUNCHER_COMPAT_PATCHES="${LAUNCHER_COMPAT_PATCHES:+$LAUNCHER_COMPAT_PATCHES,}malisx2"
       fi ;;
     godot-sdl2:gles) launcher_compat_godot_sdl "$bundled" || return 1 ;;
   esac
@@ -241,6 +215,149 @@ launcher_compat_describe() {
     "${LAUNCHER_COMPAT_SDL_DRIVER:-system}" "${LAUNCHER_COMPAT_LIBRARY_DIR:-system}" "${LAUNCHER_COMPAT_WSI_DIR:-system}"
 }
 
+# Engine adapters supply a trusted argv and an exact success marker. Selection
+# never infers GPU support from board names or a library filename. A private
+# compositor additionally requires an implemented frontend handoff/recovery.
+launcher_compat_find_wayland() {
+  local runtime="$1" helper image
+  LAUNCHER_COMPAT_WAYLAND_HELPER=""
+  LAUNCHER_COMPAT_WAYLAND_IMAGE=""
+  [ -s "$runtime/portable-wayland/manifest.json" ] || return 1
+  for image in "${LAUNCHER_WAYLAND_IMAGE:-}" "${controlfolder:-}/libs/weston_pkg_0.2.squashfs" "$runtime/weston_pkg_0.2.squashfs"; do
+    [ -n "$image" ] && [ -s "$image" ] || continue
+    for helper in "${LAUNCHER_WAYLAND_HELPER:-}" "${PORTKIT_LAUNCHER_BIN_OVERRIDE:-}" "${LAUNCHERDIR:-${GAMEDIR:-$runtime}}/bin/portkit-launcher" "$runtime/bin/portkit-launcher" "${GAMEDIR:-$runtime}/bin/portkit-launcher"; do
+      [ -n "$helper" ] && [ -x "$helper" ] || continue
+      if "$helper" wayland --runtime "$runtime" --weston-image "$image" --check >/dev/null 2>&1; then
+        LAUNCHER_COMPAT_WAYLAND_HELPER="$helper"
+        LAUNCHER_COMPAT_WAYLAND_IMAGE="$image"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+launcher_compat_can_lease_display() {
+  launcher_platform_can_acquire_display
+}
+
+launcher_compat_probe_marker() {
+  case "
+$1
+" in *"
+$2
+"*) return 0 ;; *) return 1 ;; esac
+}
+
+# Interface: STACK DRIVER RUNTIME SUCCESS_MARKER PROBE_ARGV...
+# Outputs a ready environment plan plus native/wsi/portable presentation. A
+# selected driver is fixed for this call; presentation fallback never swaps ICD.
+launcher_compat_probe() {
+  LAUNCHER_COMPAT_READY=0
+  LAUNCHER_COMPAT_PROBE_READY=0
+  LAUNCHER_COMPAT_PROBE_REASON=""
+  LAUNCHER_COMPAT_FALLBACK_REASON=""
+  LAUNCHER_COMPAT_PRESENTATION=""
+  LAUNCHER_COMPAT_DISPLAY_WIDTH=""
+  LAUNCHER_COMPAT_DISPLAY_HEIGHT=""
+  [ "$#" -ge 5 ] || { launcher_compat_fail 'graphics probe requires stack/driver/runtime/marker/argv'; return 1; }
+  local stack="$1" backend="$2" runtime="$3" marker="$4" route output status video="" line
+  local LAUNCHER_COMPAT_PROBING=1
+  shift 4
+  local helper="${PORTKIT_LAUNCHER_BIN_OVERRIDE:-${GAMEDIR:-}/bin/portkit-launcher}"
+  if [ -x "$helper" ]; then
+    set -- "$helper" bounded --seconds 8 -- "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    set -- timeout -k 1 8 "$@"
+  else
+    launcher_compat_fail 'a bounded engine graphics probe is required'; return 1
+  fi
+  if launcher_compat_wayland_socket; then video=wayland
+  elif [ -n "${DISPLAY:-}" ]; then video=x11
+  fi
+  for route in native wsi portable; do
+    if [ "$backend" = gles ] && [ "$route" != native ]; then continue; fi
+    if [ "$route" = native ] && [ -z "$video" ] && [ "$stack:$backend" != ns-gles:gles ]; then
+      LAUNCHER_COMPAT_PROBE_REASON='no existing native display or implemented direct presenter'
+      continue
+    fi
+    if [ "$route" = wsi ] && [ "$video" != wayland ]; then continue; fi
+    if [ "$route" = portable ]; then
+      # Reuse an existing compositor; never stop it to probe another one.
+      [ -z "$video" ] || continue
+      if ! launcher_compat_can_lease_display; then
+        LAUNCHER_COMPAT_PROBE_REASON='no supported display ownership/recovery adapter'
+        continue
+      fi
+      if ! launcher_compat_find_wayland "$runtime"; then
+        LAUNCHER_COMPAT_PROBE_REASON='private Wayland clients/compositor dependencies unavailable'
+        continue
+      fi
+    fi
+    if ! launcher_compat_plan "$stack" "$backend" "$runtime" "" "$route" >/dev/null 2>&1; then
+      LAUNCHER_COMPAT_PROBE_REASON="$LAUNCHER_COMPAT_REASON"
+      continue
+    fi
+    if [ "$route" = native ] && [ -n "$video" ]; then
+      LAUNCHER_COMPAT_SDL_DRIVER="$video"
+    elif [ "$route" != native ]; then
+      LAUNCHER_COMPAT_SDL_DRIVER=wayland
+    fi
+    if [ "$video" = wayland ] && ! launcher_compat_wayland_socket; then
+      # A disappearing compositor is not proof that DRM is free to acquire.
+      # Invalidate the plan; the next launch can discover a fresh display.
+      LAUNCHER_COMPAT_SOCKET=""
+      LAUNCHER_COMPAT_PROBE_REASON='Wayland display disappeared before graphics probe'
+      launcher_compat_fail "$LAUNCHER_COMPAT_PROBE_REASON"
+      return 1
+    fi
+    status=0
+    if [ "$route" = portable ] || [ "$LAUNCHER_COMPAT_SDL_DRIVER" = kmsdrm ]; then
+      output="$( (
+        # A settings UI can already hold the frontend lease in its parent.
+        # A nested probe must not resume the parent restart loop on exit.
+        if [ -z "${LAUNCHER_PLATFORM_RUNNERS:-}" ]; then
+          trap launcher_platform_release_display EXIT
+          launcher_platform_acquire_display || exit 1
+        fi
+        if [ "$route" = portable ]; then
+          ( launcher_compat_exec "$LAUNCHER_COMPAT_WAYLAND_HELPER" wayland --runtime "$runtime" \
+            --weston-image "$LAUNCHER_COMPAT_WAYLAND_IMAGE" \
+            --log-dir "${LAUNCHER_COMPAT_LOG_DIR:-${GAMEDIR:-$runtime}/cache/wayland}" \
+            -- "$@" )
+        else
+          ( launcher_compat_exec "$@" )
+        fi
+      ) 2>&1 )" || status=$?
+    else
+      output="$(launcher_compat_exec "$@" 2>&1)" || status=$?
+    fi
+    if [ "$status" = 0 ] && launcher_compat_probe_marker "$output" "$marker"; then
+      while IFS= read -r line; do
+        case "$line" in
+          PORTKIT_DISPLAY_WIDTH=*) LAUNCHER_COMPAT_DISPLAY_WIDTH="${line#*=}" ;;
+          PORTKIT_DISPLAY_HEIGHT=*) LAUNCHER_COMPAT_DISPLAY_HEIGHT="${line#*=}" ;;
+        esac
+      done <<EOF
+$output
+EOF
+      case "$LAUNCHER_COMPAT_DISPLAY_WIDTH:$LAUNCHER_COMPAT_DISPLAY_HEIGHT" in
+        *[!0-9:]*|:*|*:) LAUNCHER_COMPAT_DISPLAY_WIDTH=""; LAUNCHER_COMPAT_DISPLAY_HEIGHT="" ;;
+      esac
+      if [ "$LAUNCHER_COMPAT_DISPLAY_WIDTH" = 0 ] || [ "$LAUNCHER_COMPAT_DISPLAY_HEIGHT" = 0 ]; then
+        LAUNCHER_COMPAT_DISPLAY_WIDTH=""; LAUNCHER_COMPAT_DISPLAY_HEIGHT=""
+      fi
+      LAUNCHER_COMPAT_FALLBACK_REASON="$LAUNCHER_COMPAT_PROBE_REASON"
+      LAUNCHER_COMPAT_PROBE_REASON=""
+      LAUNCHER_COMPAT_PROBE_READY=1
+      printf '[compat] selected presentation=%s backend=%s\n' "$route" "$backend" >&2
+      return 0
+    fi
+    LAUNCHER_COMPAT_PROBE_REASON="$route (exit $status): ${output:0:1024}"
+  done
+  launcher_compat_fail "${LAUNCHER_COMPAT_PROBE_REASON:-no usable graphics presentation path}"
+}
+
 # Call only in the game's existing subshell/background job or a disposable
 # command substitution. Apply the plan, then replace that child through the
 # platform's exec hook: no extra supervisor, PID change or parent env leakage.
@@ -250,9 +367,13 @@ launcher_compat_exec() {
   # Selection applies only in this disposable child. Reselecting system Vulkan
   # must also clear an ICD override inherited from a prior launch environment.
   unset VK_DRIVER_FILES VK_ICD_FILENAMES VK_ADD_DRIVER_FILES RUDROID_WSI_HEADLESS_SURFACE
+  unset RUDROID_VULKAN_WSI_LIBRARY DM_WAYLAND_WSI_DIR DISABLE_WSI_LAYER
+  if [ "${LAUNCHER_COMPAT_PRESENTATION:-}" = native ]; then
+    unset VK_LAYER_PATH VK_INSTANCE_LAYERS
+  fi
   if [ -n "$LAUNCHER_COMPAT_ICD_FILE" ]; then
     export VK_DRIVER_FILES="$LAUNCHER_COMPAT_ICD_FILE" VK_ICD_FILENAMES="$LAUNCHER_COMPAT_ICD_FILE"
-    export RUDROID_WSI_HEADLESS_SURFACE=1
+    if [ -n "$LAUNCHER_COMPAT_WSI_DIR" ]; then export RUDROID_WSI_HEADLESS_SURFACE=1; fi
   fi
   if [ -n "$LAUNCHER_COMPAT_WSI_DIR" ]; then
     export DISABLE_WSI_LAYER=1
@@ -274,5 +395,11 @@ launcher_compat_exec() {
   if [ "$LAUNCHER_COMPAT_ALSA" = 1 ] && [ -z "${SDL_AUDIODRIVER:-}" ]; then
     export SDL_AUDIODRIVER=alsa
   fi
-  launcher_platform_exec "$@"
+  # Loong's legacy game-name workaround must not rename multicall utilities
+  # such as timeout. NS already retains the visible frontend shell identity.
+  if [ "${LAUNCHER_COMPAT_PROBING:-0}" = 1 ] || [ "$LAUNCHER_COMPAT_STACK" = ns-vulkan ] || [ "$LAUNCHER_COMPAT_STACK" = ns-gles ]; then
+    exec "$@"
+  else
+    launcher_platform_exec "$@"
+  fi
 }

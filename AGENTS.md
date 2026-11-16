@@ -89,6 +89,7 @@ bump as a substitute for updating all in-tree consumers correctly.
 |------|------------|------|
 | 项目说明 | `README.md` | 端口总览、构建入口、部署和授权说明 |
 | 开发指南 | `CONTRIBUTING.md` | 环境、验证、交付和公共源码维护约定 |
+| 检查规则 | `CHECKS.md` | 开发/正式入口边界、图标与 UI 规格、只读月检和发行前复核范围 |
 | 分形文档协议 | `FRACTAL-DOCS.md` | 按需导航、源码头注释、目录清单与级联维护规则 |
 | 共享启动/构建 | `_kit/` | Shell 公共模块、LÖVE UI、包组装及运行时构建工具 |
 | 设备配置 | `config/` | 平台识别、路径、环境和管理安全策略的源片段与生成契约 |

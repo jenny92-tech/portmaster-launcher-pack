@@ -251,17 +251,17 @@ run_unity_game "$GAMEDIR/config.toml"
         for port in ('silksong','vampiresurvivors114'):
             self.run_template(port,choices={'GRAPHICS_API':'vulkan','RENDER_PERCENT':'75','RENDER_FILTER':'sharp'},probe_ok=False,unavailable=True)
 
-    def test_unknown_device_rejects_vulkan_before_native_probe(self):
+    def test_unknown_device_with_existing_display_can_pass_native_probe(self):
         for port in ('silksong', 'vampiresurvivors114'):
             self.run_template(port, choices={'GRAPHICS_API':'vulkan','RENDER_PERCENT':'75'},
-                              accepted_device=False, unavailable=True)
+                              accepted_device=False)
 
     def test_unknown_device_keeps_gles_usable(self):
         for port in ('silksong', 'vampiresurvivors114'):
             self.run_template(port, choices={'GRAPHICS_API':'gles','RENDER_PERCENT':'75'},
                               accepted_device=False)
 
-    def test_vulkan_acceptance_requires_exact_title_firmware_and_board(self):
+    def test_vulkan_title_acceptance_is_independent_of_board(self):
         for port in ('silksong', 'vampiresurvivors114', 'hk', 'unknown'):
             for firmware in ('TrimUI', 'Loong', 'unknown'):
                 for board in ('allwinner,a523', 'rockchip,rk3566-rk817-tablet',
@@ -276,8 +276,7 @@ unity_vulkan_device_supported
                         result = subprocess.run(['bash', '-c', script, 'test',
                             str(ROOT/'_kit/launcher_unity_common.sh'), port, firmware, board],
                             capture_output=True, text=True, timeout=5)
-                        accepted = port in ('silksong','vampiresurvivors114') and (firmware,board) in (
-                            ('TrimUI','allwinner,a523'), ('Loong','rockchip,rk3566-rk817-tablet'))
+                        accepted = port in ('silksong','vampiresurvivors114')
                         self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
 
     def test_partial_vulkan_features_reject_unavailable_headless_selection(self):

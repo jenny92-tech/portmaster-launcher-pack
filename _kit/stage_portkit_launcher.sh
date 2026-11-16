@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # INPUT:  目标数据目录、预置 PortKit 二进制、revision 文件与 portkit_launcher_revision.py
-# OUTPUT: 目标目录内经源码身份校验的 bin/portkit-launcher
+# OUTPUT: 目标目录内经源码身份校验的 bin/portkit-launcher ；不收集开发调试入口
 # POS:    在分发前拒绝过期或错误架构的启动辅助程序
 # Copy the validated PortKit launcher helper into generated game data.
 
@@ -43,5 +43,18 @@ grep -aFq "$EXPECTED" "$RUNTIME" || {
   echo "PortKit launcher helper does not match its source revision" >&2
   exit 1
 }
+# Both binaries have a source revision. Product identity must also match:
+# a developer executable cannot be relabeled as the player helper.
+grep -aFq 'portkit-launcher ' "$RUNTIME" && ! grep -aFq 'portkit-debug-launch' "$RUNTIME" || {
+  echo "debug or unknown PortKit binary cannot enter a Release payload" >&2
+  exit 1
+}
+for debug_path in "$DEST/debug" "$DEST/libexec/native-bootstrap.sh" \
+  "$DEST/bin/portkit-debug-launch" "$DEST/bin/portkit-debug-launch.aarch64"; do
+  [ ! -e "$debug_path" ] && [ ! -L "$debug_path" ] || {
+    echo "debug launch files cannot enter Release staging: $debug_path" >&2
+    exit 1
+  }
+done
 mkdir -p "$DEST/bin"
 install -m 0755 "$RUNTIME" "$DEST/bin/portkit-launcher"

@@ -34,6 +34,9 @@
 | APP 环境交互 | `test_appmanager_environment_ui.py` | 管理界面布局、导航、任务状态、配对及错误恢复 |
 | APP 控制器数据库 | `test_appmanager_controller_database.py` | 验证新增 GUID 的 APP 基础操作覆盖、映射语义与冲突保留 |
 | 包构建身份 | `test_build_info.py` | 验证所有端口的标识注入、负载散列与封装身份 |
+| 图形呈现选择 | `test_launcher_compat.py` | 原生优先、WSI 回退、私有会话归还、精确成功标记及未知硬件探测 |
+| 开发端巡检 | `test_check_ports.py` | 临时清单、图标 CRC/尺寸、调试产品拒绝、无源文件写入及月度报告覆盖/完整性 |
+| 原生图形探测 | `test_graphics_probe.py` | 独立预检器 Release 身份与隔离 SDL/Vulkan 执行回归 |
 | APP 原生桥接 | `test_appmanager_inprocess_bridge.sh` | 确保 Lua 只经单一 Rust 请求边界通信 |
 | APP 标准 ZIP | `test_appmanager_port_zip.sh` | 检查 PortMaster ZIP 的可重现性、路径和权限 |
 | APP 便携包 | `test_appmanager_portable_package.sh` | 检查 runtime、依赖、Fluent 图集/布局/许可的完整分发和文件闭集 |

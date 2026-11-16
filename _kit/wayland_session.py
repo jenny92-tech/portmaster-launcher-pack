@@ -77,10 +77,13 @@ def client_environment(runtime, package, endpoint, inherited):
     env['LD_LIBRARY_PATH'] = ':'.join(map(str, paths)) + (
         ':' + env['LD_LIBRARY_PATH'] if env.get('LD_LIBRARY_PATH') else '')
     env.update(SDL_VIDEODRIVER='wayland', WAYLAND_DISPLAY=str(endpoint), DISABLE_WSI_LAYER='1',
+               PORTKIT_WAYLAND_SESSION_ROOT=str(endpoint.parent.parent),
                XKB_CONFIG_ROOT=str(package / 'share/xkb'),
                VK_LAYER_PATH=str(runtime / 'vulkan-wsi'),
                RUDROID_VULKAN_WSI_LIBRARY=str(runtime / 'vulkan-wsi/libVkLayer_window_system_integration.so'))
     env.pop('LIBGL_FB', None)
+    # Consumers validate this owned root against the socket, mounted package
+    # and client paths, rather than guessing /tmp when TMPDIR is customized.
     # An absolute display socket leaves the game's Pulse/XDG audio route intact.
     return env
 

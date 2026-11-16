@@ -1,0 +1,150 @@
+{
+  "id": "soulknight_ns",
+  "program": "runtime/soulknight-ns",
+  "args": [
+    "{root}/native"
+  ],
+  "working_directory": "{profile}/cache",
+  "runtime_directory": "runtime",
+  "default_presentation": "wsi",
+  "default_aspect": "4:3",
+  "aspects": [
+    "4:3",
+    "16:9"
+  ],
+  "default_video_driver": "wayland",
+  "directories": [
+    "save",
+    "identity",
+    "cache",
+    "temp",
+    "logs"
+  ],
+  "profile_candidates": [
+    "/mnt/UDISK/soulknight_ns/profile"
+  ],
+  "storage_roots": [
+    "/userdata",
+    "/mnt/UDISK"
+  ],
+  "clear_env_prefixes": [
+    "DM_",
+    "D2R_"
+  ],
+  "clear_env_keys": [
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "VK_ICD_FILENAMES",
+    "VK_LAYER_PATH",
+    "VK_INSTANCE_LAYERS"
+  ],
+  "environment": {
+    "DM_SAVE": "{profile}/save",
+    "DM_PROFILE_DIR": "{profile}/identity",
+    "DM_TEMP": "{profile}/temp",
+    "DM_ROMFS": "{root}/RomFS",
+    "DM_SHADER_ROOT": "{root}/shaders",
+    "DM_SHARED_FONT": "{root}/fonts/NotoSansCJKsc-Regular.otf",
+    "SDL_VIDEODRIVER": "{video_driver}",
+    "DM_SHADER_IDENTITY_CODE": "1",
+    "DM_SHADER_IDENTITY_CACHE": "1",
+    "DM_QUERY_RESET_RANGE": "1",
+    "DM_SOUL_LOW_RESOLUTION": "1",
+    "DM_OPMODE": "0",
+    "DM_RENDER_AREA_CLIP": "1",
+    "DM_UNIFORM_SNAPSHOT": "1",
+    "DM_UNIFORM_SHADER_BARRIER": "1",
+    "DM_SOUL_ASPECT": "{aspect}",
+    "DM_SOUL_RENDER_SCALE": "{render_scale}"
+  },
+  "presentations": {
+    "native": {},
+    "wsi": {
+      "DM_WAYLAND_WSI_DIR": "{root}/runtime/vulkan-wsi"
+    }
+  },
+  "low_memory": {
+    "below_mib": 1280,
+    "minimum_free_mib": 768,
+    "environment": {
+      "DM_LINUX_MODULE_FILE_BACKING": "1",
+      "DM_TEMP_CACHE_IDLE_FRAMES": "300",
+      "DM_LINUX_SNAPSHOT_CACHE": "{profile}/cache",
+      "DM_LINUX_SHADER_FILE_BACKING": "1",
+      "DM_LINUX_MALLOC_TRIM": "1",
+      "DM_LINUX_ALIAS_FILE_BACKING": "{profile}/cache"
+    }
+  },
+  "diagnostics": {
+    "enable_env": "SOULKNIGHT_DIAGNOSTICS",
+    "directories": [
+      "frames"
+    ],
+    "environment": {
+      "DM_FRAME_DIR": "{trace}/frames",
+      "DM_CAPTURE_FRAMES": "1",
+      "DM_LINUX_INPUT_CONTROL": "{trace}/input-control",
+      "DM_MEMORY_REPORT": "{trace}/memory.json"
+    }
+  },
+  "error_prefixes": [
+    "[ERROR]",
+    "[FATAL]",
+    "[nvn-vulkan] STOP",
+    "[nvn-vulkan] ERROR",
+    "LINUX_GUEST_SIGNAL",
+    "LINUX_MEMORY_LIMIT",
+    "[nvn-gles] STOP",
+    "ANDROID_FATAL"
+  ],
+  "probe": {
+    "program": "bin/graphics-probe",
+    "wsi_library": "runtime/vulkan-wsi/libVkLayer_window_system_integration.so",
+    "wsi_manifest": "runtime/vulkan-wsi/VkLayer_window_system_integration.json",
+    "wsi_library_env": "RUDROID_VULKAN_WSI_LIBRARY",
+    "layer": "VK_LAYER_RUDROID_wayland"
+  },
+  "default_backend": "vulkan",
+  "default_render_scale": "100",
+  "render_scales": {
+    "100": "1",
+    "75": ".75",
+    "50": ".5"
+  },
+  "backends": {
+    "vulkan": {
+      "program": "runtime/soulknight-ns",
+      "args": [
+        "{root}/native"
+      ],
+      "environment": {},
+      "presentations": [
+        "native",
+        "wsi"
+      ],
+      "video_drivers": [
+        "wayland",
+        "x11"
+      ]
+    },
+    "gles": {
+      "program": "runtime/soulknight-ns-gles",
+      "args": [
+        "{root}/native"
+      ],
+      "environment": {
+        "DM_SHADER_ROOT": "{root}/shaders-gles",
+        "DM_GLES_FILTER_UNSUPPORTED": "0",
+        "DM_GLES_COHERENT_READS": "1"
+      },
+      "presentations": [
+        "native"
+      ],
+      "video_drivers": [
+        "wayland",
+        "x11",
+        "kmsdrm"
+      ]
+    }
+  }
+}

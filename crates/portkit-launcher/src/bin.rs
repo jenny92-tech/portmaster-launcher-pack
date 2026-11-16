@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
+mod native_cli;
 
 use portkit_launcher::font::{ProvisionRequest, provision};
 use portkit_launcher::unity::{ConfigureRequest, configure};
@@ -14,8 +15,28 @@ const SOURCE_REVISION: &str = match option_env!("PORTKIT_LAUNCHER_SOURCE_REVISIO
 };
 
 fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()) {
-        Ok(()) => ExitCode::SUCCESS,
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_os = "linux")]
+    if arguments
+        .first()
+        .is_some_and(|a| matches!(a.as_str(), "session" | "wayland" | "bounded"))
+    {
+        // The foreground Shell owns us. Its death must cancel our session,
+        // including the small race before child signal supervision is ready.
+        let parent = unsafe { libc::getppid() };
+        if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) } != 0
+            || unsafe { libc::getppid() } != parent
+        {
+            eprintln!("portkit-launcher: session parent disappeared");
+            return ExitCode::FAILURE;
+        }
+    }
+    let result = match native_cli::dispatch(&arguments) {
+        Some(result) => result,
+        None => run(arguments).map(|()| 0),
+    };
+    match result {
+        Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
         Err(error) => {
             eprintln!("portkit-launcher: {error}");
             ExitCode::FAILURE

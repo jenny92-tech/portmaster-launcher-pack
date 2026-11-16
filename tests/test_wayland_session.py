@@ -46,11 +46,12 @@ class SessionTests(unittest.TestCase):
                          SDL_AUDIODRIVER='alsa', AUDIODEV='pulse', LD_LIBRARY_PATH='/game/libs',
                          LIBGL_FB='4', VK_ICD_FILENAMES='/firmware/driver.json')
         original = dict(inherited)
-        child = session.client_environment(Path('/runtime'), Path('/weston'), Path('/private/socket'), inherited)
+        child = session.client_environment(Path('/runtime'), Path('/private/session/weston'), Path('/private/session/xdg/rudroid-vulkan'), inherited)
         self.assertEqual(inherited, original)
         for key in ('XDG_RUNTIME_DIR', 'PULSE_SERVER', 'SDL_AUDIODRIVER', 'AUDIODEV', 'VK_ICD_FILENAMES'):
             self.assertEqual(child[key], inherited[key])
-        self.assertEqual(child['WAYLAND_DISPLAY'], '/private/socket')
+        self.assertEqual(child['WAYLAND_DISPLAY'], '/private/session/xdg/rudroid-vulkan')
+        self.assertEqual(child['PORTKIT_WAYLAND_SESSION_ROOT'], '/private/session')
         self.assertTrue(child['LD_LIBRARY_PATH'].startswith('/runtime/portable-wayland:'))
         self.assertTrue(child['LD_LIBRARY_PATH'].endswith(':/game/libs'))
         self.assertNotIn('LIBGL_FB', child)
@@ -91,9 +92,10 @@ class SessionTests(unittest.TestCase):
                 loader = root/'unityloader'
                 loader.write_text('#!/bin/sh\necho sdl2,gles,vulkan,vulkan-scale,vulkan-linear\n')
                 loader.chmod(0o755)
-                (root/'bin/wayland-session.py').write_text(
-                    'import sys\nif "--check" in sys.argv: sys.exit(0)\n'
+                (root/'bin/portkit-launcher').write_text(
+                    '#!/usr/bin/env python3\nimport sys\nif "--check" in sys.argv: sys.exit(0)\n'
                     'print("RUDROID_VULKAN=1")\nsys.exit(' + str(code) + ')\n')
+                (root/'bin/portkit-launcher').chmod(0o755)
                 body = r'''source "${1%/*}/launcher_compat.sh"
 source "${1%/*}/launcher_platform.sh"
 source "$1"
@@ -109,7 +111,8 @@ printf '%s|%s|%s|%s|%s|%s' "$PORTKIT_VULKAN_AVAILABLE" "$PORTKIT_VULKAN_PLATFORM
                 result = subprocess.check_output(['bash', '-c', body, 'test',
                     str(ROOT/'_kit/launcher_unity_common.sh'), str(root)], text=True)
                 expected = '1' if code == 0 else '0'
-                self.assertEqual(result, f'{expected}|{expected}|portable|/audio|kmsdrm|')
+                route='portable' if code==0 else 'native'
+                self.assertEqual(result, f'{expected}|{expected}|{route}|/audio|kmsdrm|')
 
     def lifecycle(self, failure=None, cancel=False):
         with tempfile.TemporaryDirectory(prefix='wl-lifecycle-') as temporary:

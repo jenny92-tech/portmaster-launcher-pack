@@ -1,0 +1,21 @@
+{
+  "name": "soulknight_ns",
+  "title": "Je-元气骑士_ns",
+  "engine": "Switch Unity 2018.4 IL2CPP / NVN to Vulkan or OpenGL ES",
+  "runtime": "Soul Knight NS 1.2.0 native ARM64 Linux",
+  "devices": [
+    "MiniLoong RK3566 / LoongOS 1.4.0.36: existing Wayland, genuine 4:3; finite menu/dungeon/save/exit validation",
+    "TrimUI A523 / firmware 1.0.2: private Pack Wayland/Weston, 16:9; finite lobby/dungeon/exit validation; combat file-page stalls remain"
+  ],
+  "language": [
+    "zh-CN",
+    "zh-TW",
+    "en"
+  ],
+  "license": "Launcher CC-BY-NC-SA-4.0; runtime MIT; game files excluded from public distribution",
+  "port_dir": "soulknight_ns",
+  "portable_dir": "soulknight_ns",
+  "script": "Je-元气骑士_ns.sh",
+  "launcher_sh": "src/launcher.sh",
+  "notes": "Separate from the Android Soul Knight port. Requires the player's explicitly prepared matching Switch modules, resources and shaders."
+}

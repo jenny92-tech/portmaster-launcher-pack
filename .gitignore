@@ -40,3 +40,6 @@ core.[0-9]*
 
 # Bundled runtimes are fetched, not committed (ports/*/src/scripts/fetch_runtime.sh)
 ports/*/src/runtime/*.squashfs
+
+# Generated developer-only launcher; never a Release payload.
+_kit/debug/runtime/

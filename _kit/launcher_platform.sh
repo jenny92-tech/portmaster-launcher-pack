@@ -93,7 +93,22 @@ launcher_platform_resolution() {
   local width="${DISPLAY_WIDTH:-}" height="${DISPLAY_HEIGHT:-}" size
   case "$width:$height" in
     *[!0-9:]*|:*|*:) ;;
-    *) if [ "$width" -gt 0 ] && [ "$height" -gt 0 ]; then return 0; fi ;;
+    *)
+      if [ "$width" -gt 0 ] && [ "$height" -gt 0 ]; then
+        # PortMaster's Loong probe can fall back to its generic 640x480 even
+        # though the shared Wayland output is the landscape form of the panel.
+        # Treat that exact known fallback as a hint, not a verified size.
+        if [ "${CFW_NAME:-}" = Loong ] && [ "${SDL_VIDEODRIVER:-}" = wayland ] &&
+           [ "$width:$height" = "640:480" ]; then
+          size=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null) || size=""
+          if [ "$size" = "720,960" ]; then
+            width=960
+            height=720
+          fi
+        fi
+        export DISPLAY_WIDTH="$width" DISPLAY_HEIGHT="$height"
+        return 0
+      fi ;;
   esac
   size=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null) || size=""
   case "$size" in
@@ -159,16 +174,33 @@ launcher_platform_finish() {
 
 # An explicit port request for exclusive DRM access. Compositor sessions do
 # not need this. Track only the runner stopped by this launch for restoration.
+launcher_platform_can_acquire_display() {
+  # Recovery support belongs beside its implementation below. It is not a
+  # driver whitelist: any existing display may use the ordinary native probe.
+  [ "${CFW_NAME:-}" = TrimUI ] && launcher_platform_matches_compatible allwinner,a523
+}
+
 launcher_platform_acquire_display() {
   local runner main
   launcher_platform_display && return 0
-  main=$(pidof MainUI 2>/dev/null) || return 0
+  launcher_platform_can_acquire_display || {
+    echo '[launcher] no verified frontend recovery adapter' >&2
+    return 1
+  }
+  # Hold the restart loop even while MainUI is absent. In particular, the
+  # probe may just have resumed it: returning early in that gap lets MainUI
+  # restart alongside the game and consume its DRM ownership and RAM.
   for runner in $(pidof runtrimui.sh 2>/dev/null); do
     case "$runner" in ''|*[!0-9]*) continue ;; esac
     if kill -STOP "$runner" 2>/dev/null; then
       LAUNCHER_PLATFORM_RUNNERS="${LAUNCHER_PLATFORM_RUNNERS:-} $runner"
     fi
   done
+  [ -n "${LAUNCHER_PLATFORM_RUNNERS:-}" ] || {
+    echo '[launcher] cannot hold the verified frontend restart loop' >&2
+    return 1
+  }
+  main=$(pidof MainUI 2>/dev/null) || main=
   for main in $main; do
     case "$main" in ''|*[!0-9]*) continue ;; esac
     kill -KILL "$main" 2>/dev/null || true

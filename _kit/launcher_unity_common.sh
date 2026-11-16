@@ -37,7 +37,7 @@ resolve_unity_runtime() {
     return 1
   fi
   UNITY_RUNTIME_DIR="$candidate"
-  if [ -x "$candidate/bin/portkit-launcher" ]; then
+  if [ -z "${PORTKIT_LAUNCHER_BIN_OVERRIDE:-}" ] && [ -x "$candidate/bin/portkit-launcher" ]; then
     export PORTKIT_LAUNCHER_BIN_OVERRIDE="$candidate/bin/portkit-launcher"
   fi
   if [ -x "$candidate/gptokeyb" ]; then
@@ -148,22 +148,13 @@ EOF
 # The optional client bundle stays with the executable runtime, while the
 # small session helper follows the launcher payload (Silksong may split them).
 find_unity_wayland_session() {
-  local runtime="${UNITY_RUNTIME_DIR:-$GAMEDIR}" candidate
-  UNITY_WAYLAND_IMAGE="${controlfolder:-}/libs/weston_pkg_0.2.squashfs"
-  [ -s "$runtime/portable-wayland/manifest.json" ] && [ -s "$UNITY_WAYLAND_IMAGE" ] || return 1
-  command -v python3 >/dev/null 2>&1 || return 1
-  for candidate in "${LAUNCHERDIR:-$GAMEDIR}/bin/wayland-session.py" "$runtime/bin/wayland-session.py"; do
-    [ -r "$candidate" ] || continue
-    if python3 "$candidate" --runtime "$runtime" --weston-image "$UNITY_WAYLAND_IMAGE" --check >/dev/null 2>&1; then
-      UNITY_WAYLAND_HELPER="$candidate"
-      return 0
-    fi
-  done
-  return 1
+  launcher_compat_find_wayland "${UNITY_RUNTIME_DIR:-$GAMEDIR}" || return 1
+  UNITY_WAYLAND_HELPER="$LAUNCHER_COMPAT_WAYLAND_HELPER"
+  UNITY_WAYLAND_IMAGE="$LAUNCHER_COMPAT_WAYLAND_IMAGE"
 }
 
-# Native preflight cannot detect panel corruption. Only accepted title/device
-# pairs may attempt it; new firmware/device families stay on GLES until verified.
+# Native preflight cannot detect panel corruption. Titles opt in explicitly;
+# hardware capability and private display ownership are checked independently.
 unity_vulkan_device_supported() {
   launcher_compat_accepts unity-rudroid vulkan
 }
@@ -172,8 +163,11 @@ unity_vulkan_device_supported() {
 # and a native or optional private session remain independent. Accepted pairs perform a
 # bounded disposable native preflight once; no guest or game frame is started.
 prepare_unity_graphics_options() {
-  local runtime="${UNITY_RUNTIME_DIR:-$GAMEDIR}" features wayland_socket probe accepted="${1:-0}"
-  [ "${UNITY_GRAPHICS_PROBED_RUNTIME:-}" != "$runtime" ] || return 0
+  local runtime="${UNITY_RUNTIME_DIR:-$GAMEDIR}" features wayland_socket accepted="${1:-0}" requested="${1:-0}"
+  # A UI query without title opt-in must not cache Vulkan as unavailable for
+  # a later accepted query of the same runtime.
+  [ "${UNITY_GRAPHICS_PROBED_RUNTIME:-}" != "$runtime" ] ||
+    [ "${UNITY_GRAPHICS_PROBED_ACCEPTED:-0}" != "$requested" ] || return 0
   PORTKIT_GRAPHICS_FEATURES=sdl2,gles,gles-scale,gles-sharp
   PORTKIT_GRAPHICS_QUERY=legacy
   if [ -d "$runtime/rudroid.runtime" ] && [ -x "$runtime/unityloader" ]; then
@@ -189,6 +183,8 @@ prepare_unity_graphics_options() {
   PORTKIT_MALISX2_AVAILABLE=0
   PORTKIT_VULKAN_PLATFORM_SUPPORTED=0
   UNITY_WAYLAND_SESSION=native
+  UNITY_SYSTEM_PRESENTATION=""
+  UNITY_MALISX2_PRESENTATION=""
   if [ "$accepted" = 1 ] && ! unity_vulkan_device_supported; then
     accepted=0
     echo "$LOG_PREFIX Vulkan disabled: not accepted for this title/device"
@@ -201,54 +197,42 @@ prepare_unity_graphics_options() {
     [ ! -S "$wayland_socket" ] || PORTKIT_VULKAN_PLATFORM_SUPPORTED=1
   fi
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan-linear,*) : ;; *) accepted=0 ;; esac
+  # The shared selector owns native -> WSI -> private-session order. The
+  # engine remains responsible for its compiled features and native validation.
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan,*)
-    if [ "$accepted" = 1 ] && launcher_compat_plan unity-rudroid vulkan "$runtime"; then
-      probe=""
-      if [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 1 ] && command -v timeout >/dev/null 2>&1; then
-        probe="$(launcher_compat_exec timeout -k 1 8 "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan 2>&1)" || probe="failed: $probe"
-      elif [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 0 ] && find_unity_wayland_session; then
+    if [ "$accepted" = 1 ] && launcher_compat_probe unity-rudroid vulkan "$runtime" RUDROID_VULKAN=1 \
+         "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan; then
+      PORTKIT_VULKAN_AVAILABLE=1
+      PORTKIT_VULKAN_PLATFORM_SUPPORTED=1
+      UNITY_SYSTEM_PRESENTATION="$LAUNCHER_COMPAT_PRESENTATION"
+      if [ "$LAUNCHER_COMPAT_PRESENTATION" = portable ]; then
         UNITY_WAYLAND_SESSION=portable
-        # The subshell owns this pre-UI display lease; it cannot leak SDL or
-        # Pulse settings into LÖVE. Gameplay creates a new private session.
-        probe="$( {
-          trap launcher_platform_release_display EXIT
-          launcher_platform_acquire_display
-          python3 "$UNITY_WAYLAND_HELPER" --runtime "$runtime" --weston-image "$UNITY_WAYLAND_IMAGE" \
-            --log-dir "$GAMEDIR/cache/wayland" --probe
-        } 2>&1)" || probe="failed: $probe"
+        UNITY_WAYLAND_HELPER="$LAUNCHER_COMPAT_WAYLAND_HELPER"
+        UNITY_WAYLAND_IMAGE="$LAUNCHER_COMPAT_WAYLAND_IMAGE"
       fi
-      case "
-$probe
-" in *'
-RUDROID_VULKAN=1
-'*) case "$probe" in failed:*) : ;; *) PORTKIT_VULKAN_AVAILABLE=1; PORTKIT_VULKAN_PLATFORM_SUPPORTED=1 ;; esac ;;
-        *) [ -z "$probe" ] || printf '%s Vulkan preflight failed: %.1024s\n' "$LOG_PREFIX" "$probe" ;;
-      esac
     fi ;;
   esac
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan-linear,*) : ;; *) PORTKIT_VULKAN_AVAILABLE=0 ;; esac
-  # The optional ICD is a separate candidate: system-driver probe success does
-  # not authorize it. Keep this G52 path on the existing native Wayland session.
+  # Driver candidates retain independent source checks and probes. A missing
+  # system-driver path does not select the optional ICD on the user's behalf.
   case ",$PORTKIT_GRAPHICS_FEATURES," in *,vulkan,*)
     if [ "$accepted" = 1 ] && [ "$PORTKIT_VULKAN_PLATFORM_SUPPORTED" = 1 ] &&
-       [ "$UNITY_WAYLAND_SESSION" = native ] && command -v timeout >/dev/null 2>&1 &&
+       [ "$UNITY_WAYLAND_SESSION" = native ] &&
        [ -s "${LAUNCHER_MALISX2_DIR:-$runtime/vulkan-malisx2}/sources.json" ] &&
        launcher_compat_accepts unity-rudroid malisx2 &&
-       launcher_compat_plan unity-rudroid malisx2 "$runtime"; then
-      probe="$(launcher_compat_exec timeout -k 1 8 "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan 2>&1)" || probe="failed: $probe"
-      case "
-$probe
-" in *'
-RUDROID_VULKAN=1
-'*) case "$probe" in failed:*) : ;; *) PORTKIT_MALISX2_AVAILABLE=1 ;; esac ;; esac
+       launcher_compat_probe unity-rudroid malisx2 "$runtime" RUDROID_VULKAN=1 \
+         "$runtime/unityloader" "$runtime/rudroid.runtime" --probe-vulkan; then
+      PORTKIT_MALISX2_AVAILABLE=1
+      UNITY_MALISX2_PRESENTATION="$LAUNCHER_COMPAT_PRESENTATION"
     fi ;;
   esac
   UNITY_GRAPHICS_PROBED_RUNTIME="$runtime"
+  UNITY_GRAPHICS_PROBED_ACCEPTED="$requested"
   export PORTKIT_GRAPHICS_FEATURES PORTKIT_GRAPHICS_QUERY PORTKIT_VULKAN_AVAILABLE PORTKIT_VULKAN_PLATFORM_SUPPORTED PORTKIT_MALISX2_AVAILABLE
 }
 
 prepare_unity_vulkan_plan() {
-  prepare_unity_graphics_options
+  prepare_unity_graphics_options "${UNITY_GRAPHICS_PROBED_ACCEPTED:-0}"
   local backend="${UNITY_VULKAN_BACKEND:-vulkan}" available="$PORTKIT_VULKAN_AVAILABLE"
   [ "$backend" != malisx2 ] || available="$PORTKIT_MALISX2_AVAILABLE"
   [ "$available" = 1 ] || {
@@ -259,7 +243,9 @@ prepare_unity_vulkan_plan() {
     echo "$LOG_PREFIX Vulkan requires a verified native or private Wayland session"
     return 1
   }
-  launcher_compat_plan unity-rudroid "$backend" "${UNITY_RUNTIME_DIR:-$GAMEDIR}"
+  local presentation="${UNITY_SYSTEM_PRESENTATION:-wsi}"
+  [ "$backend" != malisx2 ] || presentation="${UNITY_MALISX2_PRESENTATION:-wsi}"
+  launcher_compat_plan unity-rudroid "$backend" "${UNITY_RUNTIME_DIR:-$GAMEDIR}" "" "$presentation"
 }
 
 resolve_unity_graphics_api() {
@@ -356,8 +342,8 @@ run_unity_game() {
 
   set -- "$UNITY_RUNTIME_DIR/unityloader" "$toml"
   if [ "${UNITY_GRAPHICS_API:-}" = vulkan ] && [ "${UNITY_WAYLAND_SESSION:-}" = portable ]; then
-    launcher_platform_acquire_display
-    set -- python3 "$UNITY_WAYLAND_HELPER" --runtime "$UNITY_RUNTIME_DIR" \
+    launcher_platform_acquire_display || return 1
+    set -- "$UNITY_WAYLAND_HELPER" wayland --runtime "$UNITY_RUNTIME_DIR" \
       --weston-image "$UNITY_WAYLAND_IMAGE" --log-dir "$GAMEDIR/cache/wayland" -- "$@"
   fi
   launcher_compat_exec "$@" &

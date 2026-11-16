@@ -119,9 +119,27 @@ APP 通过进程内共享库使用；普通启动器只携带声明所需的静�
 最终负载由 `build_info.py` 计算内容散列和 UTC 日期；这是构建身份，不升级配置/API 版本。
 发行经过 dist 入口，单独 assemble 的脚本没有完整包身份。
 
+## 多机型启动与原生辅助
+
+正式菜单入口直接使用固件准备好的执行环境；不自动复制辅助程序、不调用 `exec-view`，也不增加挂载权限前提。迷你龙经 ADB/SSH 远程调试时可能缺少正式菜单的 SD 执行视图，这个调试差异不能推广为其它设备或正式入口的通用限制。
+
+需要远程调试时使用独立的 [`debug/run.sh`](debug/README.md) 与 `portkit-debug-launch`。它校验开发工具，必要时只缓存这个小工具，再创建私有执行视图并保留原 PID 交接；Release 游戏包不携带调试脚本/程序，正式 `portkit-launcher` 也没有 `exec-view` 命令。Python 只在主机组包、测试或下述旧开发工具中使用。
+
+游戏 Shell 复用 `portmaster_init`、`launcher_platform.sh` 和 `launcher_compat.sh`，保留已安装 PortMaster `control.txt`/`mod` 的状态和固件钩子。普通 Bash 编排与 `exec -a` 前台身份交接继续使用；不为移除 Bash 另建原生 SDK RPC 桥。Shell 等待原生会话并在退出后调用同一 SDK 收尾，游戏的进程组与取消由原生 helper 持有。
+
+多机型适配按职责维护，避免为每款游戏复制整套设备 SH：
+
+- PortMaster control/mod 承担固件路径、手柄、音频等既有差异；游戏只调用公共入口。
+- `launcher_platform.sh` 集中真实显示会话、尺寸和前端生命周期；独占接管的适用条件与获取/归还实现放在一起。增加固件时补最小共享适配及回归，保留已验证机型的行为。
+- `launcher_compat.sh` 按实际运行库、驱动和显示探测选择 native → WSI → 私有会话。陌生型号已有可用会话时照常预检；没有会话则须先有已验证的前端恢复适配器。缺恢复适配不等于 GPU 不支持。
+- 屏幕使用当前逻辑显示边界，标题声明可接受的比例；GPU 驱动候选各自审计、各自探测，不按型号直接指定尺寸或推定驱动可用。
+
+共享的是这些契约和实现，固件差异仍由适配层表达。Unity/Rudroid 与 NS 可复用平台和选路模块，但各自保留引擎能力检查及已验证范围。
+`session` 消费安装清单中的声明式参数，管理稳定档案锁、诊断和游戏进程组；即使 stdout 提前关闭，也等待游戏退出并转发取消。`wayland` 只在缺少现成会话且已有前端恢复适配时提供独占 Weston，系统驱动、音频环境与显式 ICD 保留。静态 musl 工具执行独立 GNU 图形预检器，不能直接加载 GNU SDL/Vulkan。预检、GNU ABI 查询和挂载期限复用 helper 的 `bounded` 进程管理；不假设固件有独立 `timeout`、BusyBox timeout 或 `getconf`，缺少 `getconf` 时查询系统 GNU loader。生命周期回归见 `crates/portkit-launcher/tests/native_sessions.rs`。
+
 ## 设备开发测试入口
 
-正式启动继续走固件首页。ADB/Python 直接运行游戏脚本时，使用
+正式启动继续走固件首页。迷你龙远程 shell 的 noexec 属于调试上下文；优先使用上述显式原生调试包装。旧 ADB/Python 调试可使用
 `launch_exec_view.py` 准备整条执行链所在的挂载视图，覆盖同卡的 LÖVE、输入工具、
 PortKit、引擎及原生库。已有执行权限时直接交接；需要时创建私有 mount namespace，
 关闭挂载传播，再仅清除指定路径所在挂载点及其嵌套运行时挂载的 `noexec`。
@@ -154,8 +172,14 @@ noexec 的开发入口需要 Linux mount namespace 与相应挂载能力。
 无系统 Python、无挂载能力的设备继续使用原正式入口，本工具不作为游戏发行前置条件。
 新增机型需验证其原有运行时/驱动与退出流程，不能以此工具的权限测试代替整机验收。
 
-Unity 的可选私有 Wayland 路径使用 `wayland_session.py`：只有完整的
+Unity 的可选私有 Wayland 路径使用 `portkit-launcher wayland`：只有完整的
 `runtime/portable-wayland` 客户端包、私有 WSI 与已安装 PortMaster Weston
 通过有界预检时，才开放已验收标题的 Vulkan 选项。会话只读挂载自己的
 Weston，保留系统 GPU 驱动和音频环境，游戏退出后清理；普通 GLES 和已有
 Wayland 系统继续原流程。新增设备仍需验证出画面、输入、音频与退出。
+
+图形呈现选择统一由 `launcher_compat_probe` 编排：已有显示会话先用系统原生 SDL/Vulkan 预检，失败才加私有 WSI；没有会话时仅通过已验证的固件接管/恢复器创建私有 Weston。引擎提供命令参数和精确成功标记，预检不运行游戏。`graphics_probe.c` 提供可复用的 surface/graphics+present queue、swapchain 扩展和逻辑显示边界检测；NS 适配器另要求 independentBlend，Unity 仍用 Rudroid 自身预检。当前 Rudroid Vulkan 实现依赖私有 WSI，选择器不会因此宣称引擎已有直接 DRM 呈现能力。已有 Wayland 也不等同于 DRM 直接扫描输出。
+
+驱动候选与呈现路径分开：系统驱动和显式 malisx2 分别审计、分别预检，不自动互换。现有会话允许陌生设备探测能力，独占显示和实际 quirks 仍由固件规则约束。输出尺寸取当前逻辑显示边界，不能把 framebuffer 的虚拟双缓冲高度当作屏幕高度。低内存文件后备和标题支持比例由对应适配器处理。
+
+私有会话通过子进程变量 `PORTKIT_WAYLAND_SESSION_ROOT` 传递实际临时根，消费者继续核对 socket、挂载和三段客户端库路径；不假定 `TMPDIR` 总为 `/tmp`。Unity 的能力缓存区分标题准入状态，未准入查询不能封死随后允许的预检；重建 Vulkan 计划保留该准入状态。预检期间显示 socket 消失会使计划失效并给出原因，不据此推定 DRM 已可独占。

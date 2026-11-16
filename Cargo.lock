@@ -1420,9 +1420,11 @@ dependencies = [
 name = "portkit-launcher"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "lzma-rust2 0.17.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tar",
  "tempfile",
  "toml_edit",

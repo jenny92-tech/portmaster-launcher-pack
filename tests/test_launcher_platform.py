@@ -115,6 +115,8 @@ launcher_platform_resolution
 printf '%s|%s' "$DISPLAY_WIDTH" "$DISPLAY_HEIGHT"
 '''
         self.assertEqual(self.shell(body, '1920', '1080', 'Loong'), '1920|1080')
+        self.assertEqual(self.shell(body, '640', '480', 'Loong'), '960|720')
+        self.assertEqual(self.shell(body, '640', '480', 'Other'), '640|480')
         self.assertEqual(self.shell(body, '', '', 'Loong'), '960|720')
         self.assertEqual(self.shell(body, '', '', 'Other'), '720|960')
         self.assertEqual(self.shell(r'''
@@ -308,6 +310,8 @@ launcher_platform_exec ./godot.mono --main-pack 'a game.pck'
     def test_frontend_cleanup_only_resumes_owned_runner(self):
         result = self.shell(r'''
 launcher_platform_display() { return 1; }
+CFW_NAME=TrimUI
+launcher_platform_matches_compatible() { [ "$1" = allwinner,a523 ]; }
 pidof() { case "$1" in MainUI) echo 101;; runtrimui.sh) echo 202;; esac; }
 kill() { printf '%s %s\n' "$1" "$2"; }
 sleep() { :; }
@@ -316,6 +320,34 @@ launcher_platform_release_display
 launcher_platform_release_display
 ''')
         self.assertEqual(result.splitlines(), ['-STOP 202', '-KILL 101', '-CONT 202'])
+
+    def test_recovery_adapter_requires_matching_firmware_and_hardware(self):
+        for firmware, board, supported in [('TrimUI', 'allwinner,a523', True),
+                                            ('unknown', 'allwinner,a523', False),
+                                            ('TrimUI', 'other-board', False)]:
+            with self.subTest(firmware=firmware, board=board):
+                result = self.shell(r'''
+CFW_NAME="$1"; BOARD="$2"
+launcher_platform_matches_compatible() { [ "$1" = "$BOARD" ]; }
+launcher_platform_display() { return 1; }
+pidof() { echo 'unexpected process lookup' >&2; return 1; }
+if launcher_platform_can_acquire_display; then echo supported
+else launcher_platform_acquire_display && exit 99; echo unsupported; fi
+''', firmware, board)
+                self.assertEqual(result, 'supported' if supported else 'unsupported')
+
+    def test_frontend_restart_gap_still_holds_runner_until_release(self):
+        result = self.shell(r'''
+CFW_NAME=TrimUI
+launcher_platform_display() { return 1; }
+launcher_platform_matches_compatible() { return 0; }
+pidof() { case "$1" in MainUI) return 1;; runtrimui.sh) echo 202;; esac; }
+kill() { printf '%s %s\n' "$1" "$2"; }
+sleep() { :; }
+launcher_platform_acquire_display || exit 99
+launcher_platform_release_display
+''')
+        self.assertEqual(result.splitlines(), ['-STOP 202', '-CONT 202'])
 
     def test_compositor_never_stops_frontend(self):
         self.assertEqual(self.shell(r'''
@@ -328,11 +360,14 @@ launcher_platform_release_display
 
     def test_all_ordinary_launchers_use_shared_platform(self):
         templates = sorted((ROOT / 'ports').glob('*/love/launcher.sh.template'))
-        templates.append(ROOT / 'ports/batomon/src/launcher.sh')
+        templates.extend(ROOT / 'ports' / port / 'src/launcher.sh'
+                         for port in ('batomon', 'emberward', 'soulknight_ns'))
         declared_ports = {manifest.parent.name for manifest in
                           (ROOT / 'ports').glob('*/manifest.json')}
         self.assertEqual({template.parent.parent.name for template in templates},
-                         declared_ports - {'appmanager', 'wine-loongos'})
+                         declared_ports - {
+                             'appmanager', 'wine-loongos', 'd2r_ns_2g', 'pvz_portable_jenny'
+                         })
         for template in templates:
             with self.subTest(template=template):
                 content = template.read_text()

@@ -5,11 +5,11 @@
 ## 约束
 
 - 端口 `dist/` 只作暂存，正式交付归根 `dist/`；布局特殊的端口按自身说明构建，核验后清理重复暂存。打包排除运行状态、缓存与玩家数据。
-- 普通端口统一使用 `portmaster_init` 和内联 `launcher_platform.sh`，设备仍需已安装的 PortMaster control、UI runtime 与输入工具。PortMaster 按官方四路径顺序发现，不新增脚本同目录优先或额外 SD 卡猜测。
+- 游戏启动统一复用 `portmaster_init`、`launcher_platform.sh` 和所属引擎模块。Shell 保留官方 control/mod 的状态与固件生命周期钩子，原生 helper 承担安装校验、进程组和私有 Weston 等复杂操作；不以移除 Bash 为目标，也不为每台设备复制整套游戏脚本。设备仍需已安装的 PortMaster control，以及相应 UI runtime 与输入工具。PortMaster 按官方四路径顺序发现，不新增脚本同目录优先或额外 SD 卡猜测。
 - `launcher_compat.sh` 为 Godot/SDL2、Unity/Rudroid 先生成补丁计划，失败使旧计划失效。`launcher_compat_exec` 只在已归属的游戏子进程或命令替换中交接原 PID；拥有退出清理的父进程不能被替换。方案匹配不绕过引擎预检、标题声明与验收准入。
 - UI 库路径局限于 UI 子进程。`LAUNCHER_UI_RUNTIME_DIR` 可选择已准备的内置 UI 副本，否则沿用 Unity sidecar 的 LÖVE 查找；Rudroid 独占游戏输入和 Select+Start 退出，gptokeyb 只服务设置 UI。
 - MiniLoong 保留系统音频与 Wayland 约定；已有效尺寸不重复旋转，仅已知 Loong 的原始 fb 回退交换宽高。硬件策略匹配完整 device-tree compatible，由已验收标题显式选用，固定核心、调频与热插拔不成为公共默认。
-- Vulkan 可用性取标题、固件、完整板型、运行库能力及有界原生探测的交集。目前仅登记 Silksong/吸血鬼幸存者的 TrimUI A523 和 Loong RK3566 RK817 路径；未知组合在原生探测前禁用，不凭 IP 或 SoC 子串推定。
+- Vulkan 可用性由标题声明、运行库能力及有界原生探测共同决定。已有显示会话按 native → WSI 探测，不以板型白名单跳过未知设备；无会话的独占显示接管必须有已验证的固件恢复适配器。通过预检不扩大玩法验收范围，不凭 IP 或 SoC 子串推定。
 - 私有 WSI 暂存到 `runtime/vulkan-wsi`，仅在游戏进程生效，不改系统 ICD/驱动。无系统 Wayland 时，完整私有客户端包和已安装的 PortMaster Weston 均通过检查才可创建临时会话。
 - malisx2 是独立候选，只向上述 Loong/G52 两标题开放：校验 `runtime/vulkan-malisx2` 的固定 Linux Release 来源、ELF 和 SHA，再单独原生预检。缺失或失败时禁用；系统 Vulkan 成功不代表候选可用，候选可用也不等于玩法验收。ICD 与 headless surface 载体开关只在游戏子进程设置，重新选择时清除旧值。
 - `LAUNCHER_MALISX2_DIR` 可显式指向共享的绝对驱动目录；未设置时使用游戏运行目录下的 `vulkan-malisx2`。包遵循标准 Vulkan ICD 布局，不依赖 Rudroid capability，不按游戏复制或修改系统驱动。
@@ -24,6 +24,7 @@
 | 名称 | 文件/子目录 | 职责 |
 |------|------------|------|
 | 工具说明 | `README.md` | 共享模块、打包与部署约定 |
+| 开发端检查 | `check_ports.py` | 只读检查清单、启动脚本、图片结构与来源、helper 身份，输出月度报告；不进入设备包 |
 | 作者角标 | `artwork/` | 游戏与工具共用的紫猫、透明角标图层和圆角遮罩母版 |
 | UI 组件 | `love/` | LÖVE 组件、声明式设置与窗口/输入配置 |
 | Godot 插件 | `godot/` | 可复制的 Godot 4 运行时性能浮层 |
@@ -42,10 +43,12 @@
 | TrimUI APP 封装 | `trimui_app.py` | 生成系统 APP 入口、图标、配置与 ZIP |
 | PortMaster 引导 | `portmaster_bootstrap.sh` | 查找 controlfolder，统一加载标准 control/mod 和手柄配置 |
 | 系统适配边界 | `launcher_platform.sh` | 探测真实显示会话、补齐尺寸、处理旧输入/进程名兼容和显式 DRM 所有权请求 |
-| 补丁组合计划 | `launcher_compat.sh` | 匹配引擎/固件/完整板型规则，选择私有 WSI 或 SDL，记录计划并仅向游戏子进程应用 |
-| 私有执行入口 | `launch_exec_view.py` | 按显式路径准备完整执行视图，以原 PID 交接；正式导出用 --quiet 仅报异常 |
+| 补丁组合计划 | `launcher_compat.sh` | 共享 native/WSI/私有会话选择、独立驱动审计与子进程环境计划 |
+| 原生图形预检 | `graphics_probe.c`、`graphics_probe.sh` | 无游戏的 SDL/Vulkan surface/queue 及实际显示边界检测，适配器补充引擎要求 |
+| 预检构建 | `build_graphics_probe.sh`、`graphics-probe-revision.txt` | 复用现有交叉工具链生成 Release 预检器，记录自身源码身份 |
+| 远程调试入口 | `debug/` | 独立开发工具及显式执行视图；Release 包不收录、正式 helper 不链接此逻辑 |
 | 通用设备层 | `portmaster_common.sh` | 音频、内存、退出清理及 LÖVE 启动 |
-| 私有 Wayland 会话 | `wayland_session.py` | 可选只读 Weston 挂载、独占会话、有界预检与原生退出后清理，保留系统驱动和音频环境 |
+| 私有 Wayland 会话 | `../crates/portkit-launcher/src/wayland_session.rs` | 原生私有 Weston 会话；旧 Python 仅保留开发参考，不进入普通设备负载 |
 | Unity 设备层 | `launcher_unity_common.sh` | 选择可执行运行目录，固定路径写入显示/渲染/内存并运行 Rudroid |
 | 封面同步 | `launcher_artwork.sh` | 通过原生辅助程序安全同步前端图片 |
 | 录屏引擎 | `recorder.sh` | DRM JPEG 抓帧、会话状态与离线 MP4 合成 |
