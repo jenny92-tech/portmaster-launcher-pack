@@ -66,12 +66,12 @@ TrimUI 将资源放在 SD 卡，档案与临时内存后备放在清单指定的
 | 2026-11-16 TrimUI 设置页 | 页面、输入、保存、UI→游戏交接；GLES 75%/16:9 为 480×270，Vulkan 50%/4:3 为 320×240，页面选 GLES 75%/4:3 为 480×360；均正常退出并回收子进程 | 使用独立档案副本，原档未改；本轮未扩展战斗或其它设备验收 |
 
 后台 MainUI 进程恢复已记录，实体主页显示/方向键恢复未获本轮确认；扬声器听感、全关卡与长期稳定性仍需分别验收。
-逐轮帧率、GPU 字节/像素与屏障证明归 [运行时说明](https://github.com/jhaizhou-ops/d2r-mobile/blob/HEAD/dm/linux/soulknight_ns/README.md)
-及 [Bogodroid 性能专题](https://github.com/jenny92-tech/Bogodroid/blob/HEAD/docs/soulknight-ns-vulkan-performance.md)，不在本端口重复维护一套性能记录。
+逐轮帧率、GPU 字节/像素与屏障证明归 [运行时说明](https://github.com/jenny92-tech/nx-linux/blob/HEAD/dm/linux/soulknight_ns/README.md)
+及 [Bogodroid 性能专题](https://github.com/jenny92-tech/Bogodroid/blob/knowledge-base/docs/soulknight-ns-vulkan-performance.md)，不在本端口重复维护一套性能记录。
 
 ## 开发与组包入口
 
-- 引擎、NS/NVN、比例补丁、文件后备与 GPU 回归归 [d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile) 的 `dm/linux/soulknight_ns`；本端口只装配资源、启动与交付。
+- 引擎、NS/NVN、比例补丁、文件后备与 GPU 回归归 [d2r-mobile](https://github.com/jenny92-tech/nx-linux) 的 `dm/linux/soulknight_ns`；本端口只装配资源、启动与交付。
 - `src/package.py` 从显式准备目录、清单和运行时工程组装私有安装；Vulkan 的便携会话依赖由 `--portable-wayland` 显式提供。`--gles-shaders` 必须是完整的 627 阶段 GLSL bank，两份后端运行时须匹配同一源码身份。
 - `src/export.py` / `src/unify.py` 保留资源散列和真实 Release 身份门禁；导出排除存档、身份、缓存、日志、个人设置与调试工具。不通过改写身份文件冒充重建。
 - 启动、桥接与组包回归在 `tests/test_export.py`、`tests/test_unify.py`，共享生命周期/显示能力回归在 `_kit` 与 `crates/portkit-launcher/tests`；统一维护检查见 [CHECKS](../../CHECKS.md)。
