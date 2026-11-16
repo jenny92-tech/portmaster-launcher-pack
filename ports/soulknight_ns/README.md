@@ -66,8 +66,7 @@ TrimUI 将资源放在 SD 卡，档案与临时内存后备放在清单指定的
 | 2026-11-16 TrimUI 设置页 | 页面、输入、保存、UI→游戏交接；GLES 75%/16:9 为 480×270，Vulkan 50%/4:3 为 320×240，页面选 GLES 75%/4:3 为 480×360；均正常退出并回收子进程 | 使用独立档案副本，原档未改；本轮未扩展战斗或其它设备验收 |
 
 后台 MainUI 进程恢复已记录，实体主页显示/方向键恢复未获本轮确认；扬声器听感、全关卡与长期稳定性仍需分别验收。
-逐轮帧率、GPU 字节/像素与屏障证明归 [运行时说明](https://github.com/jenny92-tech/nx-linux/blob/HEAD/dm/linux/soulknight_ns/README.md)
-及 [Bogodroid 性能专题](https://github.com/jenny92-tech/Bogodroid/blob/knowledge-base/docs/soulknight-ns-vulkan-performance.md)，不在本端口重复维护一套性能记录。
+性能汇总、GPU 字节/像素与屏障证明归 [运行时说明](https://github.com/jenny92-tech/nx-linux/blob/HEAD/dm/linux/soulknight_ns/README.md)，不在本端口重复维护一套性能记录。
 
 ## 开发与组包入口
 
